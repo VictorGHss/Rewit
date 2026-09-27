@@ -8,6 +8,7 @@ import java.util.UUID;
 
 /**
  * Entidade de Domínio representando a conta e identidade interna do usuário na plataforma.
+ * Mantida estritamente desacoplada de JPA, Spring ou anotações de persistência.
  */
 public class User {
 
@@ -23,19 +24,58 @@ public class User {
     private Instant updatedAt;
 
     public User(UUID id, String email, String passwordHash, AuthProvider authProvider, String providerUserId) {
-        if (email == null || email.isBlank() || !email.contains("@")) {
-            throw new BusinessException("E-mail inválido ou ausente", "INVALID_EMAIL");
-        }
         this.id = id != null ? id : UUID.randomUUID();
-        this.email = email.trim().toLowerCase();
+        this.email = normalizeEmail(email);
         this.passwordHash = passwordHash;
         this.authProvider = authProvider != null ? authProvider : AuthProvider.LOCAL;
-        this.providerUserId = providerUserId;
+        this.providerUserId = providerUserId != null && !providerUserId.isBlank() ? providerUserId.trim() : null;
         this.isActive = true;
         this.isVerified = false;
         this.deletedAt = null;
         this.createdAt = Instant.now();
         this.updatedAt = Instant.now();
+    }
+
+    private User(UUID id, String email, String passwordHash, AuthProvider authProvider,
+                 String providerUserId, boolean isActive, boolean isVerified,
+                 Instant deletedAt, Instant createdAt, Instant updatedAt) {
+        this.id = id;
+        this.email = email;
+        this.passwordHash = passwordHash;
+        this.authProvider = authProvider;
+        this.providerUserId = providerUserId;
+        this.isActive = isActive;
+        this.isVerified = isVerified;
+        this.deletedAt = deletedAt;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+    }
+
+    /**
+     * Normaliza e valida o formato básico do endereço de e-mail (lowercase e trim).
+     */
+    public static String normalizeEmail(String email) {
+        if (email == null || email.isBlank() || !email.contains("@")) {
+            throw new BusinessException("E-mail inválido ou ausente", "INVALID_EMAIL");
+        }
+        return email.trim().toLowerCase();
+    }
+
+    /**
+     * Reconstrói uma instância de User a partir da camada de persistência.
+     */
+    public static User rehydrate(UUID id, String email, String passwordHash, AuthProvider authProvider,
+                                 String providerUserId, boolean isActive, boolean isVerified,
+                                 Instant deletedAt, Instant createdAt, Instant updatedAt) {
+        if (id == null) {
+            throw new BusinessException("O identificador do usuário é obrigatório", "MISSING_USER_ID");
+        }
+        return new User(id, normalizeEmail(email), passwordHash,
+                authProvider != null ? authProvider : AuthProvider.LOCAL,
+                providerUserId != null && !providerUserId.isBlank() ? providerUserId.trim() : null,
+                isActive, isVerified, deletedAt,
+                createdAt != null ? createdAt : Instant.now(),
+                updatedAt != null ? updatedAt : Instant.now());
     }
 
     public void softDelete() {

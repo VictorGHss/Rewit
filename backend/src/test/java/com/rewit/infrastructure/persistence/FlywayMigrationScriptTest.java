@@ -147,7 +147,28 @@ class FlywayMigrationScriptTest {
     }
 
     @Test
-    @DisplayName("Todas as migrações Flyway devem existir e manter sequência ordenada (V1, V2, V3)")
+    @DisplayName("V4__identity_integrity.sql deve existir e conter unicidade case-insensitive e de provedor")
+    void shouldValidateV4MigrationScriptContents() throws Exception {
+        InputStream is = getClass().getResourceAsStream("/db/migration/V4__identity_integrity.sql");
+        assertNotNull(is, "O script de migração Flyway V4__identity_integrity.sql deve estar presente no classpath");
+
+        String sql = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+
+        // 1. Unicidade de e-mail case-insensitive
+        assertTrue(sql.contains("uq_users_email_lower"), "V4 deve conter índice único uq_users_email_lower");
+        assertTrue(sql.contains("LOWER(email)"), "V4 deve indexar LOWER(email)");
+
+        // 2. Unicidade de provedor federado
+        assertTrue(sql.contains("uq_users_provider_user_id"), "V4 deve conter índice único uq_users_provider_user_id");
+        assertTrue(sql.contains("WHERE provider_user_id IS NOT NULL"), "V4 deve ser índice parcial para identidades federadas");
+
+        // 3. Unicidade de handle case-insensitive
+        assertTrue(sql.contains("uq_profiles_handle_lower"), "V4 deve conter índice único uq_profiles_handle_lower");
+        assertTrue(sql.contains("LOWER(handle)"), "V4 deve indexar LOWER(handle)");
+    }
+
+    @Test
+    @DisplayName("Todas as migrações Flyway devem existir e manter sequência ordenada (V1, V2, V3, V4)")
     void shouldEnsureMigrationsAreOrderedAndConsecutive() {
         assertNotNull(getClass().getResourceAsStream("/db/migration/V1__initial_schema.sql"),
                 "V1 deve existir no classpath");
@@ -155,5 +176,7 @@ class FlywayMigrationScriptTest {
                 "V2 deve existir no classpath");
         assertNotNull(getClass().getResourceAsStream("/db/migration/V3__domain_integrity_refinement.sql"),
                 "V3 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V4__identity_integrity.sql"),
+                "V4 deve existir no classpath");
     }
 }

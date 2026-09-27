@@ -118,6 +118,11 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 - `reviews`: Trigger `trg_prevent_unverified_review_flag` bloqueando alteração manual de `is_verified_on_site = TRUE` sem um CheckIn VERIFIED correspondente.
 - `rateable_targets`: Constraint `chk_rateable_target_type` (`PLACE`, `PRODUCT`, `SERVICE`, `EVENT`).
 - Especializações (`places`, `products`, `services`, `events`): Triggers `trg_validate_*_specialization` impedindo associação com alvos de tipo incorreto.
+
+### `V4__identity_integrity.sql` (Integridade de Identidade e Autenticação - Step 3)
+- `users`: Substituição da constraint `uq_users_email` por índice único case-insensitive `uq_users_email_lower ON users (LOWER(email))`. O e-mail permanece reservado incondicionalmente mesmo após soft-delete (`deleted_at IS NOT NULL`) para prevenir sequestro de contas e impersonação no MVP.
+- `users`: Substituição do índice não-único `idx_users_provider` pelo índice único parcial `uq_users_provider_user_id ON users (auth_provider, provider_user_id) WHERE provider_user_id IS NOT NULL`. Permite múltiplos usuários `LOCAL` com `provider_user_id = NULL` sem colisão e assegura unicidade para identidades remotas (`GOOGLE`, `APPLE`).
+- `profiles`: Substituição da constraint `uq_profiles_handle` por índice único case-insensitive `uq_profiles_handle_lower ON profiles (LOWER(handle))`. Preserva o índice trigram GIN `idx_profiles_handle_trgm` para buscas textuais parciais.
 - `rateable_targets`: Trigger `trg_prevent_rateable_target_type_change` impedindo alteração de `target_type` de alvos já especializados.
 - CHECK constraints adicionadas: `chk_review_status`, `chk_review_visibility`, `chk_review_location_accuracy`, `chk_places_status`, `chk_products_status`, `chk_services_status`, `chk_events_status`, `chk_users_auth_provider`, `chk_business_verification_status`, `chk_business_plan_tier`, `chk_review_tags_source`.
 

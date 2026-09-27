@@ -129,19 +129,22 @@ O backend do Rewit foi projetado para evitar o acoplamento excessivo que comumen
 ### Camadas e Responsabilidades:
 1. **Domínio (`com.rewit.domain`)**:
    - É o núcleo do sistema.
-   - Contém entidades ricas em comportamento de negócio (ex: validação de nota entre 1.0 e 5.0, estados de avaliação, cálculo de média).
-   - Define interfaces de repositórios (*Ports*) e contratos de serviços.
-   - **Zero dependências** de Spring, JPA, Google ou bibliotecas web.
+   - Contém entidades ricas em comportamento de negócio (ex: invariantes de User e Profile, validação de nota entre 1.0 e 5.0, estados de avaliação, cálculo de média).
+   - **Zero dependências** de Spring, JPA, Hibernate, PostgreSQL ou bibliotecas web.
 2. **Aplicação (`com.rewit.application`)**:
+   - Define as portas de saída (*Ports*) em `com.rewit.application.port` (ex: `UserRepository`, `ProfileRepository`).
    - Orquestra os fluxos de casos de uso (ex: `CreateReviewUseCase`, `VerifyCheckInUseCase`).
-   - Coleta dados das portas de domínio e despacha eventos.
-   - Gerencia transações declarativas (`@Transactional`).
+   - Coleta dados das portas e despacha eventos.
+   - Gerencia transações declarativas na fronteira de serviço (`@Transactional`).
 3. **Apresentação (`com.rewit.presentation`)**:
    - Expõe endpoints HTTP RESTful versionados (`/api/v1/...`).
    - Valida payloads com Jakarta Bean Validation (`@Valid`, `@NotNull`, `@Min`, `@Max`).
    - Mapeia exceções de domínio para respostas de erro padronizadas [RFC 7807](https://tools.ietf.org/html/rfc7807) via `@ControllerAdvice`.
 4. **Infraestrutura (`com.rewit.infrastructure`)**:
-   - Implementa as portas de persistência com Spring Data JPA e Hibernate Spatial.
+   - Implementa as portas de persistência via adaptadores em `com.rewit.infrastructure.persistence.adapter` (`UserRepositoryAdapter`, `ProfileRepositoryAdapter`).
+   - Mapeia tabelas relacionais em entidades JPA isoladas (`UserJpaEntity`, `ProfileJpaEntity`) sem expô-las ao domínio.
+   - Consulta PostgreSQL 18 via Spring Data JPA (`UserJpaRepository`, `ProfileJpaRepository`).
+   - Detalhes completos da estratégia em [docs/architecture/persistence.md](file:///docs/architecture/persistence.md).
    - Gerencia conexões e operações de cache com Redis via `RedisTemplate`.
    - Gerencia upload e recuperação de mídias via abstração de Object Storage S3-compatible desacoplada (SeaweedFS 4.47 em desenvolvimento local, AWS S3 / Cloudflare R2 em produção).
 5. **Integrações (`com.rewit.integrations`)**:
