@@ -1,0 +1,26 @@
+name: rewit_mobile
+description: "Rede social geográfica de avaliações do mundo físico (lugares, produtos e serviços)"
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Requisições HTTP e Serialização
+  http: ^1.2.2
+
+  # Ícones e componentes Cupertino
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

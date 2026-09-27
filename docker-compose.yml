@@ -1,0 +1,170 @@
+# ==============================================================================
+# REWIT - ORQUESTRAÇÃO DE INFRAESTRUTURA LOCAL (DOCKER COMPOSE)
+# ==============================================================================
+# Serviços essenciais para execução local:
+# 1. postgres (PostgreSQL 16 + PostGIS 3.4)
+# 2. redis (Redis 7)
+# 3. minio (MinIO S3 Object Storage + Console Web)
+# 4. createbuckets (Script de automação para criação do bucket de mídias)
+# Profiles opcionais:
+# - backend: Execução da API Spring Boot conteinerizada
+# - tunnel: Execução do túnel Cloudflare para testes remotos no celular físico
+# ==============================================================================
+
+version: '3.8'
+
+networks:
+  rewit-network:
+    driver: bridge
+    name: rewit-network
+
+volumes:
+  postgres_data:
+    name: rewit_postgres_data
+  redis_data:
+    name: rewit_redis_data
+  minio_data:
+    name: rewit_minio_data
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. BANCO DE DADOS PRINCIPAL: POSTGRESQL 18 + POSTGIS 3.6
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgis/postgis:18-3.6
+    container_name: rewit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rewit_db}
+      POSTGRES_USER: ${POSTGRES_USER:-rewit_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rewit_local_password}
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rewit_user} -d ${POSTGRES_DB:-rewit_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - rewit-network
+
+  # ----------------------------------------------------------------------------
+  # 2. CACHE, SESSÕES E RATE LIMITING: REDIS
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: rewit-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - rewit-network
+
+  # ----------------------------------------------------------------------------
+  # 3. ARMAZENAMENTO DE OBJETOS: MINIO (S3 COMPATIBLE)
+  # ----------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: rewit-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-rewit_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-rewit_minio_secret}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - rewit-network
+
+  # ----------------------------------------------------------------------------
+  # 4. INICIALIZADOR DE BUCKET MINIO (EXECUTA UMA VEZ E FINALIZA)
+  # ----------------------------------------------------------------------------
+  createbuckets:
+    image: minio/mc:latest
+    container_name: rewit-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-rewit_minio_admin} ${MINIO_ROOT_PASSWORD:-rewit_minio_secret};
+      /usr/bin/mc mb --ignore-existing local/${MINIO_BUCKET_NAME:-rewit-media};
+      /usr/bin/mc anonymous set download local/${MINIO_BUCKET_NAME:-rewit-media};
+      exit 0;
+      "
+    networks:
+      - rewit-network
+
+  # ----------------------------------------------------------------------------
+  # 5. BACKEND REST API (SPRING BOOT) - PROFILE OPCIONAL
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    container_name: rewit-backend
+    restart: unless-stopped
+    profiles:
+      - backend
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-rewit_db}
+      POSTGRES_USER: ${POSTGRES_USER:-rewit_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rewit_local_password}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-rewit_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-rewit_minio_secret}
+      JWT_SECRET: ${JWT_SECRET:-super_secret_local_jwt_key_that_is_at_least_32_bytes_long_12345}
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - rewit-network
+
+  # ----------------------------------------------------------------------------
+  # 6. TÚNEL CLOUDFLARE (ACESSO VIA CELULAR FÍSICO) - PROFILE OPCIONAL
+  # ----------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: rewit-cloudflared
+    restart: unless-stopped
+    profiles:
+      - tunnel
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - rewit-network

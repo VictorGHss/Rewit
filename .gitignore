@@ -1,0 +1,143 @@
+# ==============================================================================
+# REWIT - .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# SEGREDOS E AMBIENTE LOCAL (CRÍTICO)
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+*.jks
+*.keystore
+id_rsa*
+secrets/
+
+# ------------------------------------------------------------------------------
+# SISTEMAS OPERACIONAIS
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# ------------------------------------------------------------------------------
+# IDES E EDITORES
+# ------------------------------------------------------------------------------
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+
+# ------------------------------------------------------------------------------
+# BACKEND - JAVA & MAVEN / GRADLE
+# ------------------------------------------------------------------------------
+target/
+backend/target/
+*.class
+*.war
+*.ear
+*.nar
+*.jar
+!**/mvnw
+!**/mvnw.cmd
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+.gradle/
+build/
+backend/build/
+
+# ------------------------------------------------------------------------------
+# JAVASCRIPT / TYPESCRIPT / NODE / REACT (ADMIN)
+# ------------------------------------------------------------------------------
+node_modules/
+apps/admin/node_modules/
+dist/
+apps/admin/dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.eslintcache
+
+# ------------------------------------------------------------------------------
+# MOBILE - FLUTTER & DART
+# ------------------------------------------------------------------------------
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/.packages
+apps/mobile/build/
+apps/mobile/.pub-cache/
+apps/mobile/.pub/
+apps/mobile/ios/Flutter/Generated.xcconfig
+apps/mobile/ios/Flutter/flutter_export_environment.sh
+apps/mobile/ios/Flutter/App.framework
+apps/mobile/ios/Flutter/Flutter.framework
+apps/mobile/ios/Flutter/Flutter.podspec
+apps/mobile/ios/Pods/
+apps/mobile/ios/.symlinks/
+apps/mobile/android/local.properties
+apps/mobile/android/app/build/
+apps/mobile/android/.gradle/
+
+# ------------------------------------------------------------------------------
+# SERVIÇOS PYTHON (VISION AI)
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ------------------------------------------------------------------------------
+# DOCKER & DADOS LOCAIS DE BANCO
+# ------------------------------------------------------------------------------
+data/
+docker-data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
