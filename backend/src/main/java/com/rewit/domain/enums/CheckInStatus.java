@@ -1,10 +1,10 @@
 package com.rewit.domain.enums;
 
 /**
- * Status de verificação de presença física de um check-in.
+ * Estados do ciclo de vida de verificação presencial do Check-in (ADR-005 / Seção 19).
  */
 public enum CheckInStatus {
-    VERIFIED_ON_SITE,   // Presença validada com sucesso pelo PostGIS
-    REJECTED_DISTANCE,  // Coordenadas além do raio de tolerância do local
-    LOCATION_UNAVAILABLE // Avaliação submetida sem dados de GPS
+    PENDING,    // Check-in registrado, aguardando validação de presença
+    VERIFIED,   // Presença validada com sucesso
+    REJECTED    // Verificação rejeitada (ex: fora do raio de tolerância do local)
 }

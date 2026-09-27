@@ -12,9 +12,9 @@ ingress:
       connectTimeout: 30s
       noTLSVerify: true
 
-  # Roteamento do MinIO S3 API
+  # Roteamento do Object Storage S3 API (SeaweedFS)
   - hostname: storage-dev.seu-dominio.com
-    service: http://minio:9000
+    service: http://seaweedfs:8333
 
   # Regra de fallback obrigatória
   - service: http_status:404

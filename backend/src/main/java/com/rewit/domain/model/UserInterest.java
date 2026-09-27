@@ -2,11 +2,12 @@ package com.rewit.domain.model;
 
 import com.rewit.common.exception.BusinessException;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Entidade de Domínio representando áreas de interesse cadastradas pelo usuário.
+ * Entidade de Domínio representando áreas de interesse cadastradas pelo usuário (Seção 23).
  */
 public class UserInterest {
 
@@ -14,9 +15,10 @@ public class UserInterest {
     private final UUID userId;
     private final String interestName;
     private final String categoryCode;
+    private final BigDecimal weight;
     private final Instant createdAt;
 
-    public UserInterest(UUID id, UUID userId, String interestName, String categoryCode) {
+    public UserInterest(UUID id, UUID userId, String interestName, String categoryCode, BigDecimal weight) {
         if (userId == null) {
             throw new BusinessException("O usuário é obrigatório", "MISSING_USER_ID");
         }
@@ -26,12 +28,23 @@ public class UserInterest {
         if (categoryCode == null || categoryCode.isBlank()) {
             throw new BusinessException("O código da categoria é obrigatório", "MISSING_CATEGORY_CODE");
         }
+        if (weight != null && (weight.compareTo(BigDecimal.ZERO) < 0 || weight.compareTo(BigDecimal.ONE) > 0)) {
+            throw new BusinessException("O peso da preferência deve estar entre 0.00 e 1.00", "INVALID_INTEREST_WEIGHT");
+        }
 
         this.id = id != null ? id : UUID.randomUUID();
         this.userId = userId;
         this.interestName = interestName.trim();
         this.categoryCode = categoryCode.trim().toUpperCase();
+        this.weight = weight != null ? weight : BigDecimal.ONE;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Construtor de compatibilidade com peso padrão 1.00.
+     */
+    public UserInterest(UUID id, UUID userId, String interestName, String categoryCode) {
+        this(id, userId, interestName, categoryCode, BigDecimal.ONE);
     }
 
     public UUID getId() {
@@ -48,6 +61,10 @@ public class UserInterest {
 
     public String getCategoryCode() {
         return categoryCode;
+    }
+
+    public BigDecimal getWeight() {
+        return weight;
     }
 
     public Instant getCreatedAt() {

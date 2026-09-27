@@ -17,11 +17,12 @@ public class Notification {
     private final String title;
     private final String content;
     private final String actionUrl;
+    private final String metadataJson;
     private Instant readAt;
     private final Instant createdAt;
 
     public Notification(UUID id, UUID userId, String notificationType,
-                        String title, String content, String actionUrl) {
+                        String title, String content, String actionUrl, String metadataJson) {
         if (userId == null) {
             throw new BusinessException("O destinatário da notificação é obrigatório", "MISSING_USER_ID");
         }
@@ -35,8 +36,17 @@ public class Notification {
         this.title = title.trim();
         this.content = content != null ? content.trim() : "";
         this.actionUrl = actionUrl;
+        this.metadataJson = metadataJson;
         this.readAt = null;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Construtor de compatibilidade sem payload de metadados.
+     */
+    public Notification(UUID id, UUID userId, String notificationType,
+                        String title, String content, String actionUrl) {
+        this(id, userId, notificationType, title, content, actionUrl, null);
     }
 
     public void markAsRead() {
@@ -65,6 +75,10 @@ public class Notification {
 
     public String getActionUrl() {
         return actionUrl;
+    }
+
+    public String getMetadataJson() {
+        return metadataJson;
     }
 
     public Instant getReadAt() {

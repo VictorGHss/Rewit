@@ -19,8 +19,8 @@ if (-not (Test-Path "$root\.env")) {
 try {
     docker info | Out-Null
     Write-Host "Docker daemon detectado com sucesso." -ForegroundColor Green
-    Write-Host "Iniciando containers essenciais (Postgres+PostGIS, Redis, MinIO)..." -ForegroundColor Yellow
-    docker compose up -d postgres redis minio createbuckets
+    Write-Host "Iniciando containers essenciais (Postgres+PostGIS, Redis, SeaweedFS)..." -ForegroundColor Yellow
+    docker compose up -d postgres redis seaweedfs
     Write-Host "Containers iniciados! Verificando status..." -ForegroundColor Green
     docker compose ps
 } catch {

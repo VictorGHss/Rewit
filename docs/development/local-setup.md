@@ -27,7 +27,7 @@ Copy-Item .env.example .env
 *(No Linux/macOS: `cp .env.example .env`)*.
 
 ### Passo 2: Inicialização da Infraestrutura Local
-Suba os containers essenciais (PostgreSQL + PostGIS, Redis e MinIO):
+Suba os containers essenciais (PostgreSQL + PostGIS, Redis e SeaweedFS):
 ```powershell
 docker compose up -d
 ```
@@ -68,10 +68,11 @@ flutter run
 
 | Serviço | Porta do Host | Credenciais Padrão (Ambiente Local) | Finalidade |
 | :--- | :--- | :--- | :--- |
-| **PostgreSQL + PostGIS** | `5432` | User: `rewit_user` / Senha: `rewit_local_password` / DB: `rewit_db` | Banco de Dados Primário |
-| **Redis** | `6379` | Sem senha em desenvolvimento | Cache e Filas Rápidas |
-| **MinIO API** | `9000` | Access: `rewit_minio_admin` / Secret: `rewit_minio_secret` | API S3 de Upload de Fotos |
-| **MinIO Console Web** | `9001` | Mesmo login do MinIO API | Interface Gráfica de Mídias |
+| **PostgreSQL + PostGIS** | `5432` | Definido no `.env` (Padrão: `rewit_user` / `rewit_db`) | Banco de Dados Primário |
+| **Redis** | `6379` | Sem senha em desenvolvimento | Cache e Rate Limiting |
+| **SeaweedFS S3 API** | `8333` | Configurado via `.env` (Bucket: `rewit-local`) | API S3 de Upload de Fotos e Mídias |
+| **SeaweedFS Master UI** | `9333` | N/A | Painel de Status / Topologia |
+| **SeaweedFS Filer UI** | `8888` | N/A | Navegador de Arquivos e Buckets |
 | **Backend API** | `8080` | N/A | API REST Central |
 | **Admin Web** | `5173` | N/A | Interface de Gestão React |
 

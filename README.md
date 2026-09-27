@@ -32,7 +32,7 @@ O **Rewit** transcende os catálogos estáticos de avaliação baseados em simpl
 | **Banco de Dados Primário** | PostgreSQL 18 + PostGIS 3.6 | Fonte canônica da verdade e motor de consultas geoespaciais |
 | **Migrações de Banco** | Flyway 11.x | Versionamento estrito e determinístico do schema relacional |
 | **Cache & Filas Rápidas** | Redis 7 / 8 | Cache de feeds, rate limiting e invalidação de sessões |
-| **Object Storage** | MinIO (Compatível com AWS S3) | Armazenamento de fotos de locais, produtos e avatares |
+| **Object Storage** | SeaweedFS 4.47 (Compatível com AWS S3) | Armazenamento de fotos de locais, produtos e avatares |
 | **Cliente Mobile** | Flutter (Dart) | App multiplataforma (Android e iOS) para o usuário final |
 | **Painel Administrativo** | React 18 + TypeScript + Vite | Interface web de moderação, gestão e auditoria |
 | **Túnel de Desenvolvimento** | Cloudflare Tunnel (`cloudflared`) | Acesso seguro e direto do smartphone físico ao notebook local |
@@ -107,7 +107,7 @@ Copy-Item .env.example .env
 ```
 
 ### Passo 2: Subir os Containers de Infraestrutura
-Inicie o banco PostgreSQL com PostGIS, o Redis e o MinIO:
+Inicie o banco PostgreSQL com PostGIS, o Redis e o SeaweedFS:
 ```powershell
 docker compose up -d
 ```
@@ -142,10 +142,11 @@ flutter run
 
 | Serviço | Porta Host | Endpoint / URL | Credenciais Padrão (Local) |
 | :--- | :--- | :--- | :--- |
-| **PostgreSQL + PostGIS** | `5432` | `localhost:5432` | User: `rewit_user` / Senha: `rewit_local_password` / DB: `rewit_db` |
+| **PostgreSQL + PostGIS** | `5432` | `localhost:5432` | Definido no `.env` (Padrão: `rewit_user` / `rewit_db`) |
 | **Redis** | `6379` | `localhost:6379` | Sem senha em ambiente de desenvolvimento local |
-| **MinIO API** | `9000` | `http://localhost:9000` | User: `rewit_minio_admin` / Senha: `rewit_minio_secret` |
-| **MinIO Web Console** | `9001` | `http://localhost:9001` | User: `rewit_minio_admin` / Senha: `rewit_minio_secret` |
+| **SeaweedFS S3 API** | `8333` | `http://localhost:8333` | Endpoint S3 compatível (Bucket padrão: `rewit-local`) |
+| **SeaweedFS Master UI** | `9333` | `http://localhost:9333` | Painel de status e topologia do cluster SeaweedFS |
+| **SeaweedFS Filer UI** | `8888` | `http://localhost:8888` | Navegação de diretórios e buckets do SeaweedFS |
 | **Backend REST API** | `8080` | `http://localhost:8080` | N/A |
 | **Admin Web (Vite)** | `5173` | `http://localhost:5173` | N/A |
 

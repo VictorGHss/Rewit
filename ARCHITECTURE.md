@@ -6,7 +6,7 @@
 
 O **Rewit** é construído sob uma arquitetura modular moderna orientada a serviços desacoplados e baseada nos princípios de **Clean Architecture (Hexagonal / Portas e Adaptadores)**.
 
-A plataforma suporta múltiplos clientes (aplicativo mobile multiplataforma e painel administrativo web) consumindo uma API RESTful central de alta performance construída em Java / Spring Boot, com persistência relacional e espacial no PostgreSQL/PostGIS, cache de sessão e feeds em Redis, e armazenamento de objetos em MinIO (S3-compatible).
+A plataforma suporta múltiplos clientes (aplicativo mobile multiplataforma e painel administrativo web) consumindo uma API RESTful central de alta performance construída em Java / Spring Boot, com persistência relacional e espacial no PostgreSQL/PostGIS, cache de sessão e feeds em Redis, e armazenamento de objetos S3-compatible (SeaweedFS 4.47 em ambiente local, AWS S3 / Cloudflare R2 em produção).
 
 ```mermaid
 flowchart TB
@@ -24,7 +24,7 @@ flowchart TB
         Presentation["Camada de Apresentação\n(REST Controllers / RFC 7807)"]
         Application["Camada de Aplicação\n(Services / Ports / DTOs)"]
         Domain["Camada de Domínio Puro\n(Entities / RateableTarget / Value Objects)"]
-        Infrastructure["Camada de Infraestrutura\n(JPA / PostGIS / Flyway / Redis / MinIO)"]
+        Infrastructure["Camada de Infraestrutura\n(JPA / PostGIS / Flyway / Redis / Object Storage S3)"]
         Integrations["Adaptadores de Integração (ACL)\n(Google Adapters / Push / Email)"]
 
         Presentation --> Application
@@ -36,8 +36,8 @@ flowchart TB
 
     subgraph Persistencia["Armazenamento & Cache"]
         DB[(PostgreSQL 18 + PostGIS 3.6\nFlyway Migrations - Fonte da Verdade)]
-        Cache[(Redis 7 / 8\nCache & Rate Limiting)]
-        Storage[(MinIO Object Storage\nFotos & Mídias Sanitizadas)]
+        Cache[(Redis 8\nCache & Rate Limiting)]
+        Storage[(Object Storage S3-Compatible\nSeaweedFS Local / AWS S3 Prod\nFotos & Mídias Sanitizadas)]
     end
 
     subgraph ExternalServices["Serviços Externos Isolados"]
@@ -143,7 +143,7 @@ O backend do Rewit foi projetado para evitar o acoplamento excessivo que comumen
 4. **Infraestrutura (`com.rewit.infrastructure`)**:
    - Implementa as portas de persistência com Spring Data JPA e Hibernate Spatial.
    - Gerencia conexões e operações de cache com Redis via `RedisTemplate`.
-   - Gerencia upload e recuperação de mídias no MinIO via SDK S3 oficial.
+   - Gerencia upload e recuperação de mídias via abstração de Object Storage S3-compatible desacoplada (SeaweedFS 4.47 em desenvolvimento local, AWS S3 / Cloudflare R2 em produção).
 5. **Integrações (`com.rewit.integrations`)**:
    - Camada Anti-Corrupção (ACL) para serviços externos.
    - Subpacotes isolados:
@@ -152,6 +152,14 @@ O backend do Rewit foi projetado para evitar o acoplamento excessivo que comumen
      - `integrations/google/maps`: Geração de links e cálculos auxiliares;
      - `integrations/google/reviews`: Geração de URLs para avaliação oficial;
      - `integrations/notification`: Implementações agnósticas de push e e-mail.
+
+### Invariantes Centrais de Integridade e Domínio (Step 2.1):
+- **Obrigatoriedade de Alvo na Review**: Uma `Review` não é uma postagem genérica. Ela atua como Raiz de Agregado e deve obrigatoriamente possuir pelo menos um `ReviewTarget` com nota avaliada entre 1.0 e 5.0 estrelas. O texto da experiência é opcional, mas a avaliação em estrelas é mandatória.
+- **Ciclo de Vida do CheckIn**: Todo novo `CheckIn` inicia com status `PENDING` por padrão (nunca `VERIFIED`). A transição para `VERIFIED` depende de validação real de presença física.
+- **Data de Verificação (`verified_at`)**: Permanece estritamente `null` enquanto o `CheckIn` estiver `PENDING` ou for `REJECTED`. É preenchida exclusivamente no instante real em que o check-in passa efetivamente para `VERIFIED` via transição de domínio explícita (`verify`).
+- **Fonte da Verdade para "Verified on Site"**: O status `CheckIn.status == VERIFIED` é a **única fonte da verdade**. A propriedade `Review.isVerifiedOnSite` é estritamente uma projeção/cache desnormalizado de leitura, sincronizada automaticamente e protegida contra alterações avulsas arbitrárias por validações de domínio e triggers de banco.
+- **Inseparabilidade CheckIn ↔ Review**: O `CheckIn` é indissociável da sua `Review`. As invariantes `check_in.review_id = review.id`, `check_in.user_id = review.user_id` e `check_in.place_id = review.context_place_id` são garantidas a nível de schema e triggers. Quando o `context_place_id` da `Review` for `NULL`, nenhum `CheckIn` é admitido.
+- **Coerência da Raiz RateableTarget**: O `RateableTarget` atua como raiz física relacional (ADR-009). Triggers do banco e o modelo de domínio garantem coerência bidirecional estrita entre `rateable_targets.target_type` e a respectiva tabela especializada (`places`, `products`, `services`, `events`), impedindo alvos vinculados à tabela errada ou mutação de tipo pós-vínculo.
 
 ---
 
@@ -212,7 +220,7 @@ O PostgreSQL com a extensão PostGIS é a tecnologia padrão ouro global para ba
 
 ## 6. Camada de Cache e Armazenamento
 
-### Redis 7:
+### Redis 8:
 - **Cache de Leitura**: Armazenamento de feeds calculados, listas de categorias e dados quentes de locais populares com TTL (Time-To-Live) configurado.
 - **Rate Limiting**: Proteção de endpoints sensíveis (autenticação, criação de avaliações, scanner) contra abuso e ataques DoS.
 - **Sessões e Tokens Efêmeros**: Invalidação de sessões de usuário e armazenamento temporário de desafios de verificação.
