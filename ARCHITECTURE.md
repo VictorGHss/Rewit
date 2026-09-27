@@ -144,8 +144,9 @@ O backend do Rewit foi projetado para evitar o acoplamento excessivo que comumen
    - Implementa as portas de persistência via adaptadores em `com.rewit.infrastructure.persistence.adapter` (`UserRepositoryAdapter`, `ProfileRepositoryAdapter`).
    - Mapeia tabelas relacionais em entidades JPA isoladas (`UserJpaEntity`, `ProfileJpaEntity`) sem expô-las ao domínio.
    - Consulta PostgreSQL 18 via Spring Data JPA (`UserJpaRepository`, `ProfileJpaRepository`).
-   - Detalhes completos da estratégia em [docs/architecture/persistence.md](file:///docs/architecture/persistence.md).
+   - Detalhes completos da estratégia em [docs/architecture/persistence.md](file:///docs/architecture/persistence.md) e da arquitetura de autenticação local/sessões em [docs/architecture/authentication.md](file:///docs/architecture/authentication.md).
    - Gerencia conexões e operações de cache com Redis via `RedisTemplate`.
+   - Gerencia autenticação stateless via Spring Security 7.x, tokens JWT (HS256) e sessões revogáveis persistidas em `auth_sessions`.
    - Gerencia upload e recuperação de mídias via abstração de Object Storage S3-compatible desacoplada (SeaweedFS 4.47 em desenvolvimento local, AWS S3 / Cloudflare R2 em produção).
 5. **Integrações (`com.rewit.integrations`)**:
    - Camada Anti-Corrupção (ACL) para serviços externos.

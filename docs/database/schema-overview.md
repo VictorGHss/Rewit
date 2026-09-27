@@ -165,6 +165,7 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 | `user_interests` | `chk_user_interest_weight` | CHECK | `weight >= 0.00 AND weight <= 1.00` |
 | `review_tags` | `uq_review_tag` | UNIQUE | `(review_id, tag_id)` |
 | `saved_items` | `uq_user_saved_target` | UNIQUE | `(user_id, target_id, item_type)` |
+| `auth_sessions` | `uq_auth_sessions_token_hash` | UNIQUE | `(token_hash)` |
 
 ---
 
@@ -199,3 +200,26 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 - `idx_places_city_neighborhood`: Acelera navegação geográfica em feed local.
 - `idx_review_targets_review` e `idx_review_targets_target`: Evita sequential scans em joins de reviews e alvos.
 - `idx_rateable_target_stats_rating`: Acelera ordenação e descoberta dos melhores avaliados.
+- `idx_auth_sessions_user_id`: Acelera busca e invalidação em lote de sessões por usuário.
+- `idx_auth_sessions_expires_at`: Acelera rotinas de limpeza de refresh tokens expirados.
+- `idx_auth_sessions_revoked_at`: Acelera filtragem de sessões válidas vs revogadas.
+
+---
+
+## 8. Tabela de Sessões de Autenticação (`auth_sessions` - V5)
+
+Armazena as sessões e hashes de Refresh Tokens (Step 4):
+
+| Coluna | Tipo | Modificador | Descrição |
+|---|---|---|---|
+| `id` | `UUID` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Identificador único da sessão |
+| `user_id` | `UUID` | `NOT NULL REFERENCES users(id) ON DELETE CASCADE` | Usuário proprietário |
+| `token_hash` | `VARCHAR(64)` | `NOT NULL UNIQUE` | Hash SHA-256 hexadecimal do Refresh Token |
+| `issued_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Data/hora de emissão |
+| `expires_at` | `TIMESTAMPTZ` | `NOT NULL` | Expiração da sessão |
+| `revoked_at` | `TIMESTAMPTZ` | `NULL` | Data de revogação/logout |
+| `replaced_by_session_id` | `UUID` | `NULL REFERENCES auth_sessions(id) ON DELETE SET NULL` | Sessão sucessora após rotação |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Criação do registro |
+| `last_used_at` | `TIMESTAMPTZ` | `NULL` | Último uso da sessão |
+| `user_agent` | `TEXT` | `NULL` | Cabeçalho User-Agent para telemetria |
+| `ip_address` | `INET` | `NULL` | Endereço IP do cliente no momento da emissão |

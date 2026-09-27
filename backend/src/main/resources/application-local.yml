@@ -40,6 +40,9 @@ rewit:
     bucket-name: ${OBJECT_STORAGE_BUCKET:${MINIO_BUCKET_NAME:rewit-local}}
   security:
     jwt-secret: ${JWT_SECRET:super_secret_local_jwt_key_that_is_at_least_32_bytes_long_12345}
-    jwt-expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+    jwt-issuer: ${JWT_ISSUER:rewit-api}
+    jwt-audience: ${JWT_AUDIENCE:rewit-clients}
+    access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}
+    refresh-token-ttl-seconds: ${JWT_REFRESH_TOKEN_TTL_SECONDS:2592000}
   spatial:
     default-validation-radius-meters: 50

@@ -168,7 +168,23 @@ class FlywayMigrationScriptTest {
     }
 
     @Test
-    @DisplayName("Todas as migrações Flyway devem existir e manter sequência ordenada (V1, V2, V3, V4)")
+    @DisplayName("V5__authentication_sessions.sql deve existir e conter estrutura de sessões e refresh token")
+    void shouldValidateV5MigrationScriptContents() throws Exception {
+        InputStream is = getClass().getResourceAsStream("/db/migration/V5__authentication_sessions.sql");
+        assertNotNull(is, "O script de migração Flyway V5__authentication_sessions.sql deve estar presente no classpath");
+
+        String sql = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+
+        assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS auth_sessions"), "V5 deve criar a tabela auth_sessions");
+        assertTrue(sql.contains("token_hash"), "V5 deve conter coluna token_hash");
+        assertTrue(sql.contains("uq_auth_sessions_token_hash"), "V5 deve conter constraint de unicidade para token_hash");
+        assertTrue(sql.contains("idx_auth_sessions_user_id"), "V5 deve conter índice para user_id");
+        assertTrue(sql.contains("idx_auth_sessions_expires_at"), "V5 deve conter índice para expires_at");
+        assertTrue(sql.contains("idx_auth_sessions_revoked_at"), "V5 deve conter índice para revoked_at");
+    }
+
+    @Test
+    @DisplayName("Todas as migrações Flyway devem existir e manter sequência ordenada (V1, V2, V3, V4, V5)")
     void shouldEnsureMigrationsAreOrderedAndConsecutive() {
         assertNotNull(getClass().getResourceAsStream("/db/migration/V1__initial_schema.sql"),
                 "V1 deve existir no classpath");
@@ -178,5 +194,7 @@ class FlywayMigrationScriptTest {
                 "V3 deve existir no classpath");
         assertNotNull(getClass().getResourceAsStream("/db/migration/V4__identity_integrity.sql"),
                 "V4 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V5__authentication_sessions.sql"),
+                "V5 deve existir no classpath");
     }
 }
