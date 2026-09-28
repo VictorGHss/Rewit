@@ -1,8 +1,11 @@
 package com.rewit.presentation.controller;
 
+import com.rewit.application.dto.user.UserDtos.ChangePasswordCommand;
 import com.rewit.application.dto.user.UserDtos.UpdateProfileCommand;
 import com.rewit.application.dto.user.UserDtos.UserProfileResult;
 import com.rewit.application.service.UserService;
+import com.rewit.presentation.dto.user.ChangePasswordRequest;
+import com.rewit.presentation.dto.user.ChangePasswordResponse;
 import com.rewit.presentation.dto.user.UpdateProfileRequest;
 import com.rewit.presentation.dto.user.UserProfileResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -56,6 +59,23 @@ public class MeController {
 
         UserProfileResult result = userService.updateProfile(cmd);
         return ResponseEntity.ok(toResponse(result));
+    }
+
+    @PostMapping("/password")
+    @Operation(summary = "Alterar senha da conta local e revogar sessões existentes", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<ChangePasswordResponse> changePassword(
+            Authentication authentication,
+            @Valid @RequestBody ChangePasswordRequest request
+    ) {
+        UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
+        ChangePasswordCommand cmd = new ChangePasswordCommand(
+                authenticatedUserId,
+                request.currentPassword(),
+                request.newPassword()
+        );
+
+        userService.changePassword(cmd);
+        return ResponseEntity.ok(new ChangePasswordResponse("Senha alterada com sucesso. Todas as sessões anteriores foram revogadas."));
     }
 
     private UUID extractAuthenticatedUserId(Authentication authentication) {

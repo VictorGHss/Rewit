@@ -14,7 +14,7 @@ public class User {
 
     private final UUID id;
     private final String email;
-    private final String passwordHash;
+    private String passwordHash;
     private final AuthProvider authProvider;
     private final String providerUserId;
     private boolean isActive;
@@ -131,5 +131,16 @@ public class User {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public void changePassword(String newPasswordHash) {
+        if (this.authProvider != AuthProvider.LOCAL) {
+            throw new BusinessException("Alteração de senha permitida apenas para contas locais", "LOCAL_AUTH_REQUIRED");
+        }
+        if (newPasswordHash == null || newPasswordHash.isBlank()) {
+            throw new BusinessException("O hash da nova senha é obrigatório", "INVALID_PASSWORD_HASH");
+        }
+        this.passwordHash = newPasswordHash;
+        this.updatedAt = Instant.now();
     }
 }

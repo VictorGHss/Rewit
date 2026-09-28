@@ -101,3 +101,64 @@ Retorna o DTO `UserProfileResponse` com os dados atualizados persistidos.
 - `401 Unauthorized`: Token JWT ausente, expirado ou inválido (`AUTHENTICATION_REQUIRED`, `ACCOUNT_DISABLED`).
 - `404 Not Found`: Perfil do usuário não localizado no banco (`PROFILE_NOT_FOUND`).
 - `409 Conflict`: Conflito de unicidade de handle com outro perfil existente (`HANDLE_ALREADY_EXISTS`).
+
+---
+
+## 3. Alteração de Senha da Conta Local
+
+Permite que o usuário autenticado altere a senha da sua conta local, persistindo o novo hash Argon2id e revogando todas as sessões de refresh ativas associadas à sua conta (Step 6).
+
+- **Método**: `POST`
+- **Rota**: `/api/v1/me/password`
+- **Autenticação**: Requer Bearer Token no cabeçalho `Authorization: Bearer <access-token>`
+
+### Requisição
+Payload JSON explícito:
+```json
+{
+  "currentPassword": "senha-atual-correta",
+  "newPassword": "nova-senha-forte-123"
+}
+```
+
+#### Regras e Restrições de Entrada
+- `currentPassword`: Obrigatório (não vazio/em branco). Corresponde à senha atual em texto plano.
+- `newPassword`: Obrigatório, com restrição estrita de tamanho: **mínimo de 8 caracteres** e **máximo de 128 caracteres**.
+- **Campos Proibidos**: O payload rejeita ou ignora quaisquer campos administrativos, de identidade (`userId`), hashes pré-calculados ou tokens de sessão.
+
+### Resposta de Sucesso (`200 OK`)
+```json
+{
+  "message": "Senha alterada com sucesso. Todas as sessões anteriores foram revogadas."
+}
+```
+A resposta intencionalmente **não** expõe segredos, hashes, sessões ou novos tokens.
+
+### Regras de Negócio e Ciclo de Segurança
+1. **Identidade Estrita via JWT**: O usuário alvo é identificado exclusivamente pela claim `sub` do token JWT autenticado no contexto do Spring Security.
+2. **Exclusividade de Contas `LOCAL`**: Apenas contas registradas com `AuthProvider.LOCAL` podem executar alteração de senha. Contas associadas a provedores OAuth externos (ex: Google, Apple) são rejeitadas com `400 Bad Request` (`LOCAL_AUTH_REQUIRED`).
+3. **Validação de Fronteira HTTP e Defense-in-Depth**:
+   - **Fronteira Externa (DTO)**: As entradas de senha são validadas na fronteira HTTP via Bean Validation (`@NotBlank`, `@Size(min = 8, max = 128)`). Qualquer requisição com senha ausente, em branco, com menos de 8 caracteres ou com mais de 128 caracteres é sumariamente rejeitada com `400 Bad Request` (`Erro de Validação de Dados`). O objeto `fieldErrors` do Problem Detail expõe exclusivamente o nome do campo e a mensagem instrutiva, sem nunca refletir ou vazar o valor enviado.
+   - **Invariante Interna (Application Service)**: O serviço `UserService` mantém a validação da política de tamanho de senha (8 a 128 caracteres) para proteger o núcleo contra chamadas internas diretas (jobs, testes, consumers de mensageria). Como a fronteira HTTP protege o endpoint previamente, requisições HTTP inválidas resultam sempre em `400 Bad Request`.
+4. **Validação e Hashing Argon2id**:
+   - A senha atual é validada criptograficamente contra o hash armazenado no banco (`Argon2PasswordHasher.matches`).
+   - Se incorreta, a requisição é rejeitada com `401 Unauthorized` (`INVALID_CREDENTIALS`), utilizando a mesma resposta opaca de erro de autenticação para mitigar enumeração.
+   - A nova senha é processada pelo hasher calibrado do sistema (Argon2id: 19.456 KiB de memória, 2 iterações, paralelismo 1, salt de 16 bytes, hash de 32 bytes).
+5. **Revogação Integral das Sessões de Refresh**:
+   - Após a atualização atômica do hash do usuário, todas as sessões de refresh ativas do usuário (`AuthSessionJpaEntity` com `revoked_at IS NULL`) são revogadas no PostgreSQL (`revoked_at = CURRENT_TIMESTAMP`).
+   - Qualquer tentativa posterior de utilizar um refresh token emitido anteriormente em `POST /api/v1/auth/refresh` falhará com `401 Unauthorized` (`REFRESH_TOKEN_REVOKED`).
+6. **Comportamento da Senha Antiga**:
+   - Deixa de funcionar imediatamente para quaisquer novos logins em `POST /api/v1/auth/login` (`INVALID_CREDENTIALS`).
+7. **Comportamento do Access Token Atual**:
+   - Em conformidade com a arquitetura de tokens stateless (JWT), o access token atualmente em posse do cliente permanece válido até o término de sua janela de expiração natural (15 minutos). Não há introdução de blacklist de access tokens nesta etapa.
+8. **Transacionalidade e Concorrência**:
+   - O método `UserService.changePassword` é anotado com `@Transactional`, garantindo atomicidade entre a persistência do novo hash e a revogação de sessões. Em caso de falha ou exceção, nenhuma alteração parcial é persistida.
+
+### Códigos de Erro
+- `400 Bad Request`:
+  - Parâmetros da requisição inválidos (senha ausente, em branco, menor que 8 ou maior que 128 caracteres);
+  - Tentativa de alterar senha em conta registrada com provedor externo (`LOCAL_AUTH_REQUIRED`).
+- `401 Unauthorized`:
+  - Token JWT ausente ou expirado (`AUTHENTICATION_REQUIRED`);
+  - Conta de usuário inativa ou soft-deleted (`ACCOUNT_DISABLED`);
+  - Senha atual incorreta (`INVALID_CREDENTIALS`).

@@ -22,4 +22,10 @@ public class UserDtos {
             User user,
             Profile profile
     ) {}
+
+    public record ChangePasswordCommand(
+            UUID userId,
+            String currentPassword,
+            String newPassword
+    ) {}
 }
