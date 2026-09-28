@@ -104,6 +104,24 @@ public class Profile {
         this.updatedAt = Instant.now();
     }
 
+    public void updateHandle(String newHandle) {
+        this.handle = normalizeHandle(newHandle);
+        this.updatedAt = Instant.now();
+    }
+
+    public void updateDetails(String displayName, String bio, Boolean isAnonymousDefault) {
+        if (displayName != null) {
+            this.displayName = validateDisplayName(displayName);
+        }
+        if (bio != null) {
+            this.bio = bio.isBlank() ? null : bio.trim();
+        }
+        if (isAnonymousDefault != null) {
+            this.isAnonymousDefault = isAnonymousDefault;
+        }
+        this.updatedAt = Instant.now();
+    }
+
     public void adjustReputation(int delta) {
         int newScore = this.reputationScore + delta;
         if (newScore < 0) {

@@ -68,6 +68,8 @@ public class SecurityConfig {
                         // Endpoints de autenticação protegidos
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").authenticated()
+                        // Endpoints de identidade e perfil protegidos
+                        .requestMatchers("/api/v1/me", "/api/v1/me/**").authenticated()
                         // Qualquer outro endpoint da API exige autenticação por padrão
                         .anyRequest().authenticated()
                 )

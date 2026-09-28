@@ -1,5 +1,6 @@
 package com.rewit.common.exception;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -23,6 +24,41 @@ public class GlobalExceptionHandler {
         problem.setTitle("Regra de Negócio Violada");
         problem.setType(URI.create("https://api.rewit.app/errors/" + ex.getErrorCode().toLowerCase()));
         problem.setProperty("code", ex.getErrorCode());
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        String detail = ex.getMessage() != null ? ex.getMessage() : "";
+        Throwable rootCause = ex.getRootCause();
+        if (rootCause != null && rootCause.getMessage() != null) {
+            detail += " " + rootCause.getMessage();
+        }
+        String lowerDetail = detail.toLowerCase();
+
+        if (lowerDetail.contains("uq_profiles_handle") || lowerDetail.contains("uq_profiles_handle_lower")) {
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Nome de usuário (@handle) já está em uso");
+            problem.setTitle("Regra de Negócio Violada");
+            problem.setType(URI.create("https://api.rewit.app/errors/handle_already_exists"));
+            problem.setProperty("code", "HANDLE_ALREADY_EXISTS");
+            problem.setProperty("timestamp", Instant.now());
+            return problem;
+        }
+
+        if (lowerDetail.contains("uq_users_email") || lowerDetail.contains("uq_users_email_lower")) {
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "E-mail já cadastrado na plataforma");
+            problem.setTitle("Regra de Negócio Violada");
+            problem.setType(URI.create("https://api.rewit.app/errors/email_already_exists"));
+            problem.setProperty("code", "EMAIL_ALREADY_EXISTS");
+            problem.setProperty("timestamp", Instant.now());
+            return problem;
+        }
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Conflito de integridade de dados");
+        problem.setTitle("Regra de Negócio Violada");
+        problem.setType(URI.create("https://api.rewit.app/errors/data_integrity_conflict"));
+        problem.setProperty("code", "DATA_INTEGRITY_CONFLICT");
         problem.setProperty("timestamp", Instant.now());
         return problem;
     }

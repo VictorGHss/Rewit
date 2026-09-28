@@ -11,6 +11,8 @@ Todas as rotas públicas e autenticadas devem obrigatoriamente conter o prefixo 
 /api/v1/{recurso}
 ```
 Exemplos:
+- `GET /api/v1/me`
+- `PATCH /api/v1/me/profile`
 - `GET /api/v1/places/nearby`
 - `POST /api/v1/reviews`
 - `GET /api/v1/products/scan/{barcode}`

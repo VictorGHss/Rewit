@@ -28,4 +28,55 @@ class GlobalExceptionHandlerTest {
         assertEquals("INVALID_RATING_RANGE", problem.getProperties().get("code"));
         assertNotNull(problem.getProperties().get("timestamp"));
     }
+
+    @Test
+    @DisplayName("DataIntegrityViolationException com uq_profiles_handle_lower deve gerar 409 HANDLE_ALREADY_EXISTS")
+    void shouldFormatDataIntegrityViolationForHandleProblemDetail() {
+        org.springframework.dao.DataIntegrityViolationException ex = new org.springframework.dao.DataIntegrityViolationException(
+                "could not execute statement",
+                new RuntimeException("ERROR: duplicate key value violates unique constraint \"uq_profiles_handle_lower\"")
+        );
+
+        ProblemDetail problem = handler.handleDataIntegrityViolation(ex);
+
+        assertNotNull(problem);
+        assertEquals(409, problem.getStatus());
+        assertEquals("Nome de usuário (@handle) já está em uso", problem.getDetail());
+        assertEquals("HANDLE_ALREADY_EXISTS", problem.getProperties().get("code"));
+        assertNotNull(problem.getProperties().get("timestamp"));
+    }
+
+    @Test
+    @DisplayName("DataIntegrityViolationException com uq_users_email_lower deve gerar 409 EMAIL_ALREADY_EXISTS")
+    void shouldFormatDataIntegrityViolationForEmailProblemDetail() {
+        org.springframework.dao.DataIntegrityViolationException ex = new org.springframework.dao.DataIntegrityViolationException(
+                "could not execute statement",
+                new RuntimeException("ERROR: duplicate key value violates unique constraint \"uq_users_email_lower\"")
+        );
+
+        ProblemDetail problem = handler.handleDataIntegrityViolation(ex);
+
+        assertNotNull(problem);
+        assertEquals(409, problem.getStatus());
+        assertEquals("E-mail já cadastrado na plataforma", problem.getDetail());
+        assertEquals("EMAIL_ALREADY_EXISTS", problem.getProperties().get("code"));
+        assertNotNull(problem.getProperties().get("timestamp"));
+    }
+
+    @Test
+    @DisplayName("DataIntegrityViolationException com constraint genérica deve gerar 409 DATA_INTEGRITY_CONFLICT")
+    void shouldFormatGenericDataIntegrityViolationProblemDetail() {
+        org.springframework.dao.DataIntegrityViolationException ex = new org.springframework.dao.DataIntegrityViolationException(
+                "could not execute statement",
+                new RuntimeException("ERROR: insert or update on table \"profiles\" violates foreign key constraint \"fk_other\"")
+        );
+
+        ProblemDetail problem = handler.handleDataIntegrityViolation(ex);
+
+        assertNotNull(problem);
+        assertEquals(409, problem.getStatus());
+        assertEquals("Conflito de integridade de dados", problem.getDetail());
+        assertEquals("DATA_INTEGRITY_CONFLICT", problem.getProperties().get("code"));
+        assertNotNull(problem.getProperties().get("timestamp"));
+    }
 }
