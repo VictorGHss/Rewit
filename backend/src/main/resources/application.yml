@@ -27,3 +27,11 @@ management:
     web:
       exposure:
         include: health,info,metrics
+
+rewit:
+  google:
+    places:
+      api-key: ${GOOGLE_PLACES_API_KEY:}
+      base-url: ${GOOGLE_PLACES_BASE_URL:https://places.googleapis.com}
+      connect-timeout-ms: ${GOOGLE_PLACES_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${GOOGLE_PLACES_READ_TIMEOUT_MS:5000}

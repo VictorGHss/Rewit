@@ -47,3 +47,9 @@ rewit:
     refresh-token-ttl-seconds: ${JWT_REFRESH_TOKEN_TTL_SECONDS:2592000}
   spatial:
     default-validation-radius-meters: 50
+  google:
+    places:
+      api-key: ${GOOGLE_PLACES_API_KEY:}
+      base-url: ${GOOGLE_PLACES_BASE_URL:https://places.googleapis.com}
+      connect-timeout-ms: 3000
+      read-timeout-ms: 5000
