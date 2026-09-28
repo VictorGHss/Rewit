@@ -14,7 +14,7 @@ import java.util.Objects;
  * - saltLength: 16 bytes (128 bits)
  * - hashLength: 32 bytes (256 bits)
  * - parallelism: 1 thread
- * - memory: 16384 KiB (16 MiB)
+ * - memory: 19456 KiB (19 MiB)
  * - iterations: 2 iterações
  */
 @Component
@@ -23,7 +23,7 @@ public class Argon2PasswordHasher implements PasswordHasher {
     private final PasswordEncoder delegate;
 
     public Argon2PasswordHasher() {
-        this.delegate = new Argon2PasswordEncoder(16, 32, 1, 16384, 2);
+        this.delegate = new Argon2PasswordEncoder(16, 32, 1, 19456, 2);
     }
 
     public Argon2PasswordHasher(PasswordEncoder delegate) {

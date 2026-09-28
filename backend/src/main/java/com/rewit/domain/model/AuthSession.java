@@ -96,10 +96,21 @@ public class AuthSession {
     }
 
     public void revoke() {
-        this.revokedAt = Instant.now();
+        if (this.revokedAt == null) {
+            this.revokedAt = Instant.now();
+        }
     }
 
     public void rotate(UUID newSessionId) {
+        if (this.revokedAt != null) {
+            throw new BusinessException("Sessão já revogada não pode ser rotacionada novamente", "SESSION_ALREADY_REVOKED");
+        }
+        if (newSessionId == null) {
+            throw new BusinessException("O identificador da nova sessão é obrigatório para rotação", "MISSING_NEW_SESSION_ID");
+        }
+        if (this.replacedBySessionId != null) {
+            throw new BusinessException("A sessão já foi substituída anteriormente", "SESSION_ALREADY_REPLACED");
+        }
         this.revokedAt = Instant.now();
         this.replacedBySessionId = newSessionId;
         this.lastUsedAt = Instant.now();

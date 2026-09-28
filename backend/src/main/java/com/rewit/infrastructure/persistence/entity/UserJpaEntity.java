@@ -91,9 +91,7 @@ public class UserJpaEntity {
      * Cria uma nova entidade JPA a partir do modelo de domínio User.
      */
     public static UserJpaEntity fromDomain(User user) {
-        if (user == null) {
-            return null;
-        }
+        java.util.Objects.requireNonNull(user, "User cannot be null");
         UserJpaEntity entity = new UserJpaEntity();
         entity.setId(user.getId());
         entity.setEmail(user.getEmail());

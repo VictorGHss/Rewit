@@ -86,9 +86,8 @@ public class AuthSessionJpaEntity {
     }
 
     public static AuthSessionJpaEntity fromDomain(AuthSession session, UserJpaEntity userEntity) {
-        if (session == null) {
-            return null;
-        }
+        java.util.Objects.requireNonNull(session, "AuthSession cannot be null");
+        java.util.Objects.requireNonNull(userEntity, "UserJpaEntity cannot be null");
         AuthSessionJpaEntity entity = new AuthSessionJpaEntity();
         entity.setId(session.getId());
         entity.setUser(userEntity);

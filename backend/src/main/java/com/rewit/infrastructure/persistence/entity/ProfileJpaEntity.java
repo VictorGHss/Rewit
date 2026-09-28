@@ -91,9 +91,8 @@ public class ProfileJpaEntity {
      * Cria uma nova entidade JPA a partir do modelo de domínio Profile e do vínculo com UserJpaEntity.
      */
     public static ProfileJpaEntity fromDomain(Profile profile, UserJpaEntity userEntity) {
-        if (profile == null) {
-            return null;
-        }
+        java.util.Objects.requireNonNull(profile, "Profile cannot be null");
+        java.util.Objects.requireNonNull(userEntity, "UserJpaEntity cannot be null");
         ProfileJpaEntity entity = new ProfileJpaEntity();
         entity.setId(profile.getId());
         entity.setUser(userEntity);

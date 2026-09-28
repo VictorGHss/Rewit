@@ -117,13 +117,19 @@ public class AuthService {
 
         String tokenHash = tokenService.hashRefreshToken(cmd.refreshToken());
 
-        AuthSession currentSession = authSessionRepository.findByTokenHash(tokenHash)
+        AuthSession currentSession = authSessionRepository.findByTokenHashForUpdate(tokenHash)
                 .orElseThrow(() -> new BusinessException("Refresh token inválido", HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN"));
 
         // Detecção de reúso de refresh token revogado (Token Reuse Detection)
         if (currentSession.isRevoked()) {
-            authSessionRepository.revokeAllByUserId(currentSession.getUserId());
-            throw new BusinessException("Refresh token revogado ou reutilizado. Todas as sessões foram invalidadas.", HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED");
+            boolean isRecentConcurrentRotation = currentSession.getReplacedBySessionId() != null
+                    && currentSession.getRevokedAt() != null
+                    && currentSession.getRevokedAt().isAfter(Instant.now().minusSeconds(10));
+
+            if (!isRecentConcurrentRotation) {
+                authSessionRepository.revokeAllByUserId(currentSession.getUserId());
+            }
+            throw new BusinessException("Refresh token revogado ou já reutilizado. Todas as sessões foram invalidadas.", HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED");
         }
 
         if (currentSession.isExpired()) {

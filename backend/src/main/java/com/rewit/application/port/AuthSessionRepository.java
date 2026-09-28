@@ -16,5 +16,7 @@ public interface AuthSessionRepository {
 
     Optional<AuthSession> findByTokenHash(String tokenHash);
 
+    Optional<AuthSession> findByTokenHashForUpdate(String tokenHash);
+
     void revokeAllByUserId(UUID userId);
 }

@@ -17,7 +17,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("BusinessException deve gerar ProblemDetail formatado segundo RFC 7807")
     void shouldFormatBusinessExceptionProblemDetail() {
-        BusinessException ex = new BusinessException("Nota fora do intervalo permitido", HttpStatus.UNPROCESSABLE_ENTITY, "INVALID_RATING_RANGE");
+        BusinessException ex = new BusinessException("Nota fora do intervalo permitido", HttpStatus.UNPROCESSABLE_CONTENT, "INVALID_RATING_RANGE");
 
         ProblemDetail problem = handler.handleBusinessException(ex);
 

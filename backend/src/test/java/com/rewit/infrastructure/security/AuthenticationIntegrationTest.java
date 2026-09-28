@@ -59,6 +59,9 @@ class AuthenticationIntegrationTest {
     @Autowired
     private AuthSessionRepository authSessionRepository;
 
+    @Autowired
+    private com.rewit.application.port.TokenService tokenService;
+
     @Test
     @DisplayName("Fluxo completo: Register -> Login -> Me -> Refresh -> Logout -> Rejeição de token antigo")
     void shouldExecuteFullAuthenticationLifecycle() throws Exception {
@@ -97,11 +100,14 @@ class AuthenticationIntegrationTest {
         assertTrue(savedUser.getPasswordHash().startsWith("$argon2id$"));
         assertTrue(profileRepository.existsByHandle(handle));
 
+        String initialTokenHash = tokenService.hashRefreshToken(initialRefreshToken);
+        assertTrue(authSessionRepository.findByTokenHash(initialTokenHash).isPresent(), "Sessão inicial deve existir no banco de dados");
+
         // 2. TENTAR REGISTRAR DUPLICADO (deve ser rejeitado)
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(registerRequest)))
-                .andExpect(status().isUnprocessableEntity());
+                .andExpect(status().isUnprocessableContent());
 
         // 3. LOGIN COM SENHA CORRETA
         LoginRequest loginRequest = new LoginRequest(email.toUpperCase(), password);
@@ -171,6 +177,12 @@ class AuthenticationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(logoutRequest)))
                 .andExpect(status().isNoContent());
+
+        // Validar no PostgreSQL que a sessão foi efetivamente revogada
+        String rotatedHash = tokenService.hashRefreshToken(rotatedRefreshToken);
+        Optional<com.rewit.domain.model.AuthSession> revokedSession = authSessionRepository.findByTokenHash(rotatedHash);
+        assertTrue(revokedSession.isPresent(), "A sessão deve existir no banco de dados");
+        assertTrue(revokedSession.get().isRevoked(), "A sessão deve estar marcada como revogada após logout");
 
         // 10. TENTAR REFRESH APÓS LOGOUT (deve falhar)
         mockMvc.perform(post("/api/v1/auth/refresh")

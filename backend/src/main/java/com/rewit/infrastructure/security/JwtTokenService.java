@@ -38,9 +38,7 @@ public class JwtTokenService implements TokenService {
             @Value("${rewit.security.access-token-ttl-seconds:900}") long accessTokenTtlSeconds,
             @Value("${rewit.security.refresh-token-ttl-seconds:2592000}") long refreshTokenTtlSeconds
     ) {
-        if (jwtSecret == null || jwtSecret.getBytes(StandardCharsets.UTF_8).length < 32) {
-            throw new IllegalArgumentException("JWT_SECRET deve possuir no mínimo 32 bytes (256 bits) para HMAC-SHA256");
-        }
+        JwtSecretValidator.validate(jwtSecret);
         this.secretKeyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
         this.issuer = issuer;
         this.audience = audience;
@@ -100,16 +98,31 @@ public class JwtTokenService implements TokenService {
             throw new BusinessException("Token JWT não informado", "AUTHENTICATION_REQUIRED");
         }
         try {
-            SignedJWT signedJWT = SignedJWT.parse(token);
+            com.nimbusds.jwt.JWT parsedJwt = com.nimbusds.jwt.JWTParser.parse(token);
+            if (!(parsedJwt instanceof SignedJWT signedJWT)) {
+                throw new BusinessException("Token JWT não assinado (alg=none rejeitado)", "INVALID_TOKEN");
+            }
+
+            if (!JWSAlgorithm.HS256.equals(signedJWT.getHeader().getAlgorithm())) {
+                throw new BusinessException("Algoritmo de token inválido. Apenas HS256 é aceito", "INVALID_TOKEN");
+            }
+
             JWSVerifier verifier = new MACVerifier(secretKeyBytes);
             if (!signedJWT.verify(verifier)) {
                 throw new BusinessException("Assinatura de token inválida", "INVALID_TOKEN");
             }
 
             JWTClaimsSet claims = signedJWT.getJWTClaimsSet();
+            Date now = new Date();
+
             Date expiry = claims.getExpirationTime();
-            if (expiry == null || expiry.before(new Date())) {
+            if (expiry == null || expiry.before(now)) {
                 throw new BusinessException("Token JWT expirado", "TOKEN_EXPIRED");
+            }
+
+            Date notBefore = claims.getNotBeforeTime();
+            if (notBefore != null && notBefore.after(now)) {
+                throw new BusinessException("Token JWT ainda não é válido (nbf no futuro)", "INVALID_TOKEN");
             }
 
             if (!issuer.equals(claims.getIssuer())) {

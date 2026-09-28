@@ -10,7 +10,6 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -18,7 +17,8 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integridade Relacional e Triggers no PostgreSQL (Step 2.1)")
 class DatabaseDomainIntegrityTest {
 
-    private static final String DB_URL = "jdbc:postgresql://localhost:5432/rewit_db";
+    private static final String DB_PORT = System.getenv("POSTGRES_PORT") != null ? System.getenv("POSTGRES_PORT") : "5433";
+    private static final String DB_URL = "jdbc:postgresql://localhost:" + DB_PORT + "/rewit_db";
     private static final String DB_USER = "rewit_user";
     private static final String DB_PASSWORD = "rewit_local_password";
     private static boolean databaseAvailable = false;
@@ -26,7 +26,7 @@ class DatabaseDomainIntegrityTest {
     @BeforeAll
     static void checkDatabaseAvailability() {
         try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
-            databaseAvailable = true;
+            databaseAvailable = conn != null && conn.isValid(2);
         } catch (SQLException e) {
             databaseAvailable = false;
         }

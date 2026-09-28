@@ -41,6 +41,14 @@ O Spring Boot 4.1.x oferece suporte nativo e otimizado para os recursos do Java 
 - Suporte aprimorado a tipos espaciais via Hibernate Spatial 7.x;
 - Integração nativa com Flyway 11.x para execução de scripts SQL complexos em inicialização.
 
+### Spring Data Redis 4.x e Serialização JSON Moderna
+Com o Spring Data Redis 4.x (integrado ao Spring Boot 4.1.x / Jackson 3):
+- A classe legada `GenericJackson2JsonRedisSerializer` foi depreciada e substituída por `GenericJacksonJsonRedisSerializer`.
+- A serialização JSON do cache Redis adota a nova API de builders com deserialização tipada segura (`GenericJacksonJsonRedisSerializer.builder().build()`), eliminando riscos de polymorphic default typing vulnerável.
+
+### Spring Framework 7 e HTTP Status 422
+No Spring Framework 7, a constante `HttpStatus.UNPROCESSABLE_ENTITY` foi depreciada em favor da nomenclatura oficial `HttpStatus.UNPROCESSABLE_CONTENT`, preservando o código de status HTTP 422 e a semântica RFC 9110 / RFC 7807.
+
 ### SeaweedFS 4.47 (Object Storage Local S3-Compatible)
 Para desenvolvimento local e persistência de fotos e mídias, o projeto adota o **SeaweedFS 4.47** em modo single-node (`weed mini`).
 - Endpoint S3 local: `http://localhost:8333`

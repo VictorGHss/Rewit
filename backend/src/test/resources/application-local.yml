@@ -1,0 +1,12 @@
+# Configuração do perfil local para testes automatizados
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/${POSTGRES_DB:rewit_db}}
+    username: ${POSTGRES_USER:rewit_user}
+    password: ${POSTGRES_PASSWORD:rewit_local_password}
+  jpa:
+    open-in-view: false
+
+rewit:
+  security:
+    jwt-secret: ${JWT_SECRET:test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!}

@@ -39,11 +39,13 @@ public class AuthSessionRepositoryAdapter implements AuthSessionRepository {
         return authSessionJpaRepository.findById(session.getId())
                 .map(existing -> {
                     existing.updateFromDomain(session);
-                    return authSessionJpaRepository.saveAndFlush(existing).toDomain();
+                    AuthSessionJpaEntity saved = authSessionJpaRepository.saveAndFlush(existing);
+                    return Objects.requireNonNull(saved, "Saved AuthSessionJpaEntity cannot be null").toDomain();
                 })
                 .orElseGet(() -> {
                     AuthSessionJpaEntity newEntity = AuthSessionJpaEntity.fromDomain(session, userEntity);
-                    return authSessionJpaRepository.saveAndFlush(newEntity).toDomain();
+                    AuthSessionJpaEntity saved = authSessionJpaRepository.saveAndFlush(newEntity);
+                    return Objects.requireNonNull(saved, "Saved AuthSessionJpaEntity cannot be null").toDomain();
                 });
     }
 
@@ -52,8 +54,7 @@ public class AuthSessionRepositoryAdapter implements AuthSessionRepository {
         if (id == null) {
             return Optional.empty();
         }
-        return authSessionJpaRepository.findById(id)
-                .map(AuthSessionJpaEntity::toDomain);
+        return authSessionJpaRepository.findById(id).map(AuthSessionRepositoryAdapter::toDomain);
     }
 
     @Override
@@ -61,8 +62,15 @@ public class AuthSessionRepositoryAdapter implements AuthSessionRepository {
         if (tokenHash == null || tokenHash.isBlank()) {
             return Optional.empty();
         }
-        return authSessionJpaRepository.findByTokenHash(tokenHash.trim())
-                .map(AuthSessionJpaEntity::toDomain);
+        return authSessionJpaRepository.findByTokenHash(tokenHash.trim()).map(AuthSessionRepositoryAdapter::toDomain);
+    }
+
+    @Override
+    public Optional<AuthSession> findByTokenHashForUpdate(String tokenHash) {
+        if (tokenHash == null || tokenHash.isBlank()) {
+            return Optional.empty();
+        }
+        return authSessionJpaRepository.findByTokenHashWithLock(tokenHash.trim()).map(AuthSessionRepositoryAdapter::toDomain);
     }
 
     @Override
@@ -71,5 +79,9 @@ public class AuthSessionRepositoryAdapter implements AuthSessionRepository {
         if (userId != null) {
             authSessionJpaRepository.revokeAllActiveByUserId(userId);
         }
+    }
+
+    private static AuthSession toDomain(AuthSessionJpaEntity entity) {
+        return entity != null ? entity.toDomain() : null;
     }
 }

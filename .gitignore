@@ -38,11 +38,8 @@ Thumbs.db
 *.iml
 *.iws
 *.ipr
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+.vscode/
+*.code-workspace
 *.sublime-project
 *.sublime-workspace
 .project

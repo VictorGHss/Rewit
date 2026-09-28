@@ -23,19 +23,25 @@ Utilizamos o algoritmo **Argon2id** (versão 1.3), o vencedor da Password Hashin
 A implementação utilizada é a oficial do Spring Security:
 `org.springframework.security.crypto.argon2.Argon2PasswordEncoder`, suportada pela biblioteca `org.bouncycastle:bcprov-jdk18on`.
 
-### 2.2 Parâmetros Configurados
-Considerando as restrições de hardware do ambiente de desenvolvimento (máquinas com aproximadamente 4 GB de RAM) sem comprometer a segurança, os seguintes parâmetros foram configurados:
+### 2.2 Parâmetros Finais Configurados
+Revisados no Step 4.1 para atender rigorosamente à recomendação da OWASP sem comprometer o tempo de autenticação interativa:
 - **Salt Length**: 16 bytes (128 bits criptograficamente seguros via `SecureRandom`).
 - **Hash Length**: 32 bytes (256 bits).
-- **Parallelism (Threads)**: 1 thread.
-- **Memory Cost**: 16.384 KiB (16 MiB de memória por derivação).
-- **Iterations (Time Cost)**: 2 iterações.
+- **Parallelism (Threads)**: 1 thread (`p=1`).
+- **Memory Cost**: 19.456 KiB (19 MiB de memória por derivação, `m=19456`).
+- **Iterations (Time Cost)**: 2 iterações (`t=2`).
 
-### 2.3 Política e Boas Práticas
-- Nenhuma senha em texto puro é armazenada em banco de dados ou persistida em logs.
-- Senhas são validadas na entrada: mínimo de 8 caracteres e máximo de 128 caracteres.
-- A comparação de senhas utiliza estritamente `PasswordEncoder.matches(...)`, que executa comparação em tempo constante para evitar ataques de temporização (timing attacks).
-- O hash gerado contém a assinatura formal do Argon2id (ex: `$argon2id$v=19$m=16384,t=2,p=1$...`), permitindo atualização transparente de parâmetros no futuro.
+### 2.3 Benchmark Observado (Ambiente Local Real)
+Executado via teste automatizado de benchmark no ambiente local real de desenvolvimento (Intel Core i5-10400, 24 GB de RAM, 2 TB de armazenamento, GT 1030):
+- **Tempo médio de hashing**: ~32 a 51 ms.
+- **Tempo médio de verificação (`matches`)**: ~31 a 51 ms.
+- **Consumo aproximado de memória por derivação**: ~21 a 40 MB.
+- **Conclusão**: O tempo médio na faixa de ~30 a 50 ms situa-se no limiar ideal para autenticação interativa humana (imperceptível para o usuário final, mas ordens de magnitude superior ao hashing ingênuo para inviabilizar ataques de força bruta offline em hardware com 24 GB de RAM).
+
+### 2.4 Política de Reconfiguração de Custo
+Caso o hardware de produção aumente de capacidade ou as diretrizes da OWASP recomendem aumento:
+- Os parâmetros podem ser elevados de forma transparente.
+- O formato do hash do Argon2id inclui sua assinatura de parâmetros (ex: `$argon2id$v=19$m=19456,t=2,p=1$...`), permitindo compatibilidade retroativa e re-hashing durante o login de usuários com parâmetros antigos.
 
 ---
 
@@ -43,7 +49,13 @@ Considerando as restrições de hardware do ambiente de desenvolvimento (máquin
 
 ### 3.1 Características do Token
 - **Tipo**: JWT (RFC 7519) assinado digitalmente com HMAC-SHA256 (`HS256`).
-- **Segredo Simétrico**: Configurado exclusivamente via variável de ambiente `JWT_SECRET` (mínimo de 256 bits de entropia). Nunca commitado em código nem exposto em logs.
+- **Segredo Simétrico**: Configurado exclusivamente via variável de ambiente `JWT_SECRET`. Nunca commitado em código nem exposto em logs ou exceptions.
+- **Validação Estrita de Inicialização (`JwtSecretValidator`)**:
+  - Rejeita valores nulos, vazios ou em branco.
+  - Exige comprimento mínimo de 32 bytes (256 bits) de entropia real para segurança do HS256.
+  - Rejeita compulsoriamente placeholders óbvios (ex: `change-me`, `changeme`, `password`, `secret`, `default`, `123456`, etc.).
+  - Rejeita valores de baixa entropia (repetição trivial de caracteres).
+  - Proíbe segredos de fallback hardcoded na aplicação.
 - **Validade Curta (TTL)**: 15 minutos (900 segundos) por padrão, configurável via `JWT_ACCESS_TOKEN_TTL_SECONDS`.
 
 ### 3.2 Claims Emitidas
@@ -52,25 +64,30 @@ Para manter o token compacto e evitar vazamento de dados, o JWT contém apenas c
 - `sub` (Subject): Identificador canônico único do usuário (`User.id` em formato UUID).
 - `aud` (Audience): Lista de audiências autorizadas (ex: `rewit-clients`).
 - `iat` (Issued At): Timestamp UTC de emissão.
-- `exp` (Expiration Time): Timestamp UTC de expiração.
+- `exp` (Expiration Time): Timestamp UTC de expiração (15 minutos).
 - `jti` (JWT ID): Identificador único aleatório do token (UUID v4) para auditoria.
 
 > **Importante**: O JWT **não** contém e-mail completo, dados sensíveis, senhas, papéis excessivos ou tokens de refresh.
 
-### 3.3 Validação no Spring Security
-O backend atua como um **OAuth2 Resource Server** utilizando `spring-boot-starter-oauth2-resource-server` com `NimbusJwtDecoder`:
-- A validação exige assinatura HMAC-SHA256 válida com o segredo do ambiente.
-- São validados compulsoriamente: assinatura, issuer (`iss`), audience (`aud`) e expiração (`exp`).
-- Tokens expirados, corrompidos ou com audiência/emissor divergentes são rejeitados com `401 Unauthorized` estruturado no formato RFC 7807 (`ProblemDetail`).
+### 3.3 Validação e Hardening de Algoritmo
+O validador aceita estritamente o algoritmo configurado (`HS256`):
+- Rejeição expressa de tokens não assinados (`alg=none` / `PlainJWT`).
+- Rejeição de algoritmos diferentes (ex: `HS384`, `RS256`, `ES256`), prevenindo ataques de confusão/downgrade de algoritmo.
+- Rejeição de tokens com assinatura inválida ou adulterada.
+- Validação temporal rigorosa: rejeita tokens expirados (`exp`) e tokens com data de ativação no futuro (`nbf`).
+- Tolerância de relógio (clock skew): mantida em nível padrão de infraestrutura (máximo 60s) para absorver desvios transitórios de NTP.
 
 ---
 
 ## 4. Refresh Token e Gerenciamento de Sessões
 
-### 4.1 Estrutura e Armazenamento
-- O Refresh Token é uma sequência criptograficamente aleatória de 256 bits (32 bytes), codificada em Base64 URL-safe (43 caracteres).
+### 4.1 Estrutura e Armazenamento (SHA-256 vs Argon2)
+- O Refresh Token é uma sequência criptograficamente aleatória de 256 bits (32 bytes), codificada em Base64 URL-safe (43 caracteres) via `SecureRandom`.
 - **Nenhum refresh token puro é salvo no banco de dados**. O banco armazena exclusivamente o **hash criptográfico SHA-256** do token (`64 caracteres hexadecimais`).
-- Caso a base de dados seja comprometida, os atacantes não conseguem utilizar os hashes para renovar sessões.
+- **Por que SHA-256 e não Argon2 para o Refresh Token?**
+  - O Argon2id é uma função deliberadamente lenta (*memory-hard* e *time-hard*) concebida para mitigar ataques de força bruta contra senhas humanas (que possuem entropia limitada).
+  - O Refresh Token possui **256 bits de entropia puramente criptográfica**, tornando matematicamente impossível qualquer ataque de dicionário ou inversão por força bruta.
+  - O uso de SHA-256 provê hashing determinístico e ultra-rápido, essencial para validação de sessões de alta performance sob concorrência sem esgotar CPU/memória da aplicação.
 
 ### 4.2 Tabela `auth_sessions` (Migration V5)
 ```sql
@@ -92,22 +109,22 @@ CREATE TABLE auth_sessions (
 - **Índices estratégicos**: `user_id`, `expires_at`, `revoked_at` e índice único em `token_hash`.
 - **TTL do Refresh Token**: 30 dias (2.592.000 segundos) por padrão (`JWT_REFRESH_TOKEN_TTL_SECONDS`).
 
-### 4.3 Rotação de Refresh Token (Rotation)
-A cada requisição a `POST /api/v1/auth/refresh`:
-1. Calcula-se o hash SHA-256 do token recebido.
-2. Localiza-se a sessão correspondente no banco.
-3. Valida-se:
-   - Se a sessão não está expirada (`expires_at > now`).
-   - Se a sessão não está revogada (`revoked_at IS NULL`).
-   - Se o usuário proprietário da sessão ainda está ativo (`deleted_at IS NULL`).
-4. **Revogação da sessão atual**: `revoked_at` é marcado com o timestamp atual.
-5. **Geração da nova sessão**: É gerado um novo refresh token e inserida uma nova sessão vinculada com `replaced_by_session_id`.
-6. Um novo par de Access Token e Refresh Token é devolvido ao cliente.
+### 4.3 Rotação Atômica e Proteção Contra Concorrência (Row-Level Locking)
+Para fechar completamente a janela de corrida (*race condition*) na rotação do refresh token, o fluxo utiliza **bloqueio pessimista de linha no PostgreSQL** (`SELECT FOR UPDATE` / `LockModeType.PESSIMISTIC_WRITE`):
+1. **Localização e Bloqueio Exclusivo**: O registro da sessão é localizado com `SELECT ... WHERE token_hash = ? FOR UPDATE`.
+2. **Serialização no Banco**: Se duas requisições simultâneas apresentarem o mesmo token `X`, a primeira requisição adquire o lock da linha e a segunda é bloqueada no nível do PostgreSQL.
+3. **Validação**: Valida-se expiração, revogação prévia e integridade do usuário proprietário.
+4. **Criação da Nova Sessão**: É gerada a nova sessão derivada com novo token e persistida no banco.
+5. **Revogação da Sessão Antiga**: `currentSession.rotate(newSessionId)` marca `revoked_at` com o timestamp atual e vincula `replaced_by_session_id` de forma imutável (não sobrescrevível).
+6. **Commit da Transação Vencedora**: Libera o lock no banco.
+7. **Desbloqueio da Segunda Requisição**: Sob isolamento `READ COMMITTED`, o PostgreSQL reavalia a linha recém-comitada. A segunda requisição recebe a sessão com `revoked_at` preenchido e falha imediatamente com `REFRESH_TOKEN_REVOKED` (401 Unauthorized), garantindo que apenas UMA nova sessão seja gerada.
 
 ### 4.4 Detecção de Reutilização de Token (Token Reuse Detection)
-Se um refresh token já revogado (`revoked_at IS NOT NULL`) for apresentado ao endpoint de refresh:
-- A operação é sumariamente rejeitada com erro `REFRESH_TOKEN_REVOKED` (`401 Unauthorized`).
-- **Mitigação de Roubo de Sessão**: Todas as sessões ativas do usuário são imediatamente revogadas (`revokeAllByUserId`). Isso impede que um atacante continue navegando com tokens obtidos de forma ilegítima.
+Se um refresh token já revogado for apresentado:
+- Caso o token tenha sido substituído há menos de 10 segundos (janela transitória de concorrência em clientes legítimos), a requisição concorrente duplicada é apenas rejeitada sem invalidar a nova sessão recém-emitida.
+- Caso o token seja reutilizado fora da janela transitória (tentativa de replay de token antigo), a aplicação assume potencial roubo de credencial:
+  - Rejeita com `REFRESH_TOKEN_REVOKED` (`401 Unauthorized`).
+  - Executa mitigação imediata invalidando compulsoriamente **todas as sessões ativas do usuário** (`revokeAllByUserId`).
 
 ---
 

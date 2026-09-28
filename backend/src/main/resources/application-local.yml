@@ -16,6 +16,7 @@ spring:
     validate-on-migrate: true
 
   jpa:
+    open-in-view: false
     database-platform: org.hibernate.spatial.dialect.postgis.PostgisPG95Dialect
     hibernate:
       ddl-auto: validate
@@ -39,7 +40,7 @@ rewit:
     secret-key: ${OBJECT_STORAGE_SECRET_KEY:${MINIO_ROOT_PASSWORD:rewit_local_secret}}
     bucket-name: ${OBJECT_STORAGE_BUCKET:${MINIO_BUCKET_NAME:rewit-local}}
   security:
-    jwt-secret: ${JWT_SECRET:super_secret_local_jwt_key_that_is_at_least_32_bytes_long_12345}
+    jwt-secret: ${JWT_SECRET:}
     jwt-issuer: ${JWT_ISSUER:rewit-api}
     jwt-audience: ${JWT_AUDIENCE:rewit-clients}
     access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}

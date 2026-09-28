@@ -198,7 +198,7 @@ class LocalAuthenticationUnitTest {
         User user = new User(userId, "user@rewit.com", "hash", AuthProvider.LOCAL, null);
         Profile profile = new Profile(UUID.randomUUID(), userId, "user", "User", null, null);
 
-        when(authSessionRepository.findByTokenHash(oldHash)).thenReturn(Optional.of(oldSession));
+        when(authSessionRepository.findByTokenHashForUpdate(oldHash)).thenReturn(Optional.of(oldSession));
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(profileRepository.findByUserId(userId)).thenReturn(Optional.of(profile));
         when(authSessionRepository.save(any(AuthSession.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -224,7 +224,7 @@ class LocalAuthenticationUnitTest {
                 UUID.randomUUID(), userId, tokenHash, Instant.now().minusSeconds(7200),
                 Instant.now().minusSeconds(3600), null, null, Instant.now().minusSeconds(7200), null, null, null
         );
-        when(authSessionRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(expiredSession));
+        when(authSessionRepository.findByTokenHashForUpdate(tokenHash)).thenReturn(Optional.of(expiredSession));
 
         BusinessException exExp = assertThrows(BusinessException.class, () ->
                 authService.refresh(new RefreshCommand(rawToken, "agent", "127.0.0.1")));
@@ -235,7 +235,7 @@ class LocalAuthenticationUnitTest {
                 UUID.randomUUID(), userId, tokenHash, Instant.now().minusSeconds(7200),
                 Instant.now().plusSeconds(3600), Instant.now().minusSeconds(100), null, Instant.now().minusSeconds(7200), null, null, null
         );
-        when(authSessionRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(revokedSession));
+        when(authSessionRepository.findByTokenHashForUpdate(tokenHash)).thenReturn(Optional.of(revokedSession));
 
         BusinessException exRev = assertThrows(BusinessException.class, () ->
                 authService.refresh(new RefreshCommand(rawToken, "agent", "127.0.0.1")));

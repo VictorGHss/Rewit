@@ -43,11 +43,13 @@ public class ProfileRepositoryAdapter implements ProfileRepository {
                 .map(existingEntity -> {
                     existingEntity.setUser(userEntity);
                     existingEntity.updateFromDomain(profile);
-                    return profileJpaRepository.saveAndFlush(existingEntity).toDomain();
+                    ProfileJpaEntity saved = profileJpaRepository.saveAndFlush(existingEntity);
+                    return Objects.requireNonNull(saved, "Saved ProfileJpaEntity cannot be null").toDomain();
                 })
                 .orElseGet(() -> {
                     ProfileJpaEntity newEntity = ProfileJpaEntity.fromDomain(profile, userEntity);
-                    return profileJpaRepository.saveAndFlush(newEntity).toDomain();
+                    ProfileJpaEntity saved = profileJpaRepository.saveAndFlush(newEntity);
+                    return Objects.requireNonNull(saved, "Saved ProfileJpaEntity cannot be null").toDomain();
                 });
     }
 
@@ -56,8 +58,7 @@ public class ProfileRepositoryAdapter implements ProfileRepository {
         if (id == null) {
             return Optional.empty();
         }
-        return profileJpaRepository.findById(id)
-                .map(ProfileJpaEntity::toDomain);
+        return profileJpaRepository.findById(id).map(ProfileRepositoryAdapter::toDomain);
     }
 
     @Override
@@ -65,8 +66,7 @@ public class ProfileRepositoryAdapter implements ProfileRepository {
         if (userId == null) {
             return Optional.empty();
         }
-        return profileJpaRepository.findByUserId(userId)
-                .map(ProfileJpaEntity::toDomain);
+        return profileJpaRepository.findByUserId(userId).map(ProfileRepositoryAdapter::toDomain);
     }
 
     @Override
@@ -75,8 +75,7 @@ public class ProfileRepositoryAdapter implements ProfileRepository {
             return Optional.empty();
         }
         String normalizedHandle = Profile.normalizeHandle(handle);
-        return profileJpaRepository.findByHandleIgnoreCase(normalizedHandle)
-                .map(ProfileJpaEntity::toDomain);
+        return profileJpaRepository.findByHandleIgnoreCase(normalizedHandle).map(ProfileRepositoryAdapter::toDomain);
     }
 
     @Override
@@ -94,5 +93,9 @@ public class ProfileRepositoryAdapter implements ProfileRepository {
             return false;
         }
         return profileJpaRepository.existsByUserId(userId);
+    }
+
+    private static Profile toDomain(ProfileJpaEntity entity) {
+        return entity != null ? entity.toDomain() : null;
     }
 }

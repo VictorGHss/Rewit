@@ -30,11 +30,13 @@ public class UserRepositoryAdapter implements UserRepository {
         return userJpaRepository.findById(user.getId())
                 .map(existingEntity -> {
                     existingEntity.updateFromDomain(user);
-                    return userJpaRepository.saveAndFlush(existingEntity).toDomain();
+                    UserJpaEntity saved = userJpaRepository.saveAndFlush(existingEntity);
+                    return Objects.requireNonNull(saved, "Saved UserJpaEntity cannot be null").toDomain();
                 })
                 .orElseGet(() -> {
                     UserJpaEntity newEntity = UserJpaEntity.fromDomain(user);
-                    return userJpaRepository.saveAndFlush(newEntity).toDomain();
+                    UserJpaEntity saved = userJpaRepository.saveAndFlush(newEntity);
+                    return Objects.requireNonNull(saved, "Saved UserJpaEntity cannot be null").toDomain();
                 });
     }
 
@@ -43,8 +45,7 @@ public class UserRepositoryAdapter implements UserRepository {
         if (id == null) {
             return Optional.empty();
         }
-        return userJpaRepository.findActiveById(id)
-                .map(UserJpaEntity::toDomain);
+        return userJpaRepository.findActiveById(id).map(UserRepositoryAdapter::toDomain);
     }
 
     @Override
@@ -53,8 +54,7 @@ public class UserRepositoryAdapter implements UserRepository {
             return Optional.empty();
         }
         String normalizedEmail = email.trim().toLowerCase();
-        return userJpaRepository.findActiveByEmail(normalizedEmail)
-                .map(UserJpaEntity::toDomain);
+        return userJpaRepository.findActiveByEmail(normalizedEmail).map(UserRepositoryAdapter::toDomain);
     }
 
     @Override
@@ -72,6 +72,10 @@ public class UserRepositoryAdapter implements UserRepository {
             return Optional.empty();
         }
         return userJpaRepository.findActiveByAuthProviderAndProviderUserId(authProvider, providerUserId.trim())
-                .map(UserJpaEntity::toDomain);
+                .map(UserRepositoryAdapter::toDomain);
+    }
+
+    private static User toDomain(UserJpaEntity entity) {
+        return entity != null ? entity.toDomain() : null;
     }
 }

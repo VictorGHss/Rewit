@@ -17,7 +17,7 @@ public class BusinessException extends RuntimeException {
     }
 
     public BusinessException(String message, String errorCode) {
-        this(message, HttpStatus.UNPROCESSABLE_ENTITY, errorCode);
+        this(message, HttpStatus.UNPROCESSABLE_CONTENT, errorCode);
     }
 
     public HttpStatus getStatus() {
