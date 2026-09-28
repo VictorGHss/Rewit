@@ -20,4 +20,11 @@ public interface PlaceRepository {
     boolean existsBySlug(String slug);
 
     List<Place> findNearby(double latitude, double longitude, double radiusMeters);
+
+    List<com.rewit.application.dto.catalog.CatalogDtos.NearbyPlaceResult> findNearbyWithDistance(
+            double latitude,
+            double longitude,
+            double radiusMeters,
+            int limit
+    );
 }

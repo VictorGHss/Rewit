@@ -42,10 +42,10 @@ public class Review {
     private CheckIn checkIn;
 
     /**
-     * Construtor de criação de nova publicação de avaliação.
+     * Construtor de criação de nova publicação de avaliação com visibilidade explícita.
      */
     public Review(UUID id, UUID userId, UUID contextPlaceId, String experienceText,
-                  boolean isAnonymous,
+                  boolean isAnonymous, String visibility,
                   Double userLatitude, Double userLongitude, Double locationAccuracyMeters) {
         if (userId == null) {
             throw new BusinessException("O autor da avaliação é obrigatório", "MISSING_USER_ID");
@@ -70,9 +70,18 @@ public class Review {
         this.userLongitude = userLongitude;
         this.locationAccuracyMeters = locationAccuracyMeters;
         this.status = ReviewStatus.ACTIVE;
-        this.visibility = "PUBLIC";
+        this.visibility = normalizeAndValidateVisibility(visibility);
         this.createdAt = Instant.now();
         this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Construtor de criação com visibilidade default PUBLIC.
+     */
+    public Review(UUID id, UUID userId, UUID contextPlaceId, String experienceText,
+                  boolean isAnonymous,
+                  Double userLatitude, Double userLongitude, Double locationAccuracyMeters) {
+        this(id, userId, contextPlaceId, experienceText, isAnonymous, "PUBLIC", userLatitude, userLongitude, locationAccuracyMeters);
     }
 
     /**
@@ -87,7 +96,45 @@ public class Review {
     }
 
     /**
+     * Construtor completo para reconstituição fidedigna da camada de persistência.
+     */
+    public Review(UUID id, UUID userId, UUID contextPlaceId, String experienceText,
+                  boolean isAnonymous, boolean isVerifiedOnSite,
+                  ReviewStatus status, String visibility,
+                  Double userLatitude, Double userLongitude, Double locationAccuracyMeters,
+                  Instant createdAt, Instant updatedAt) {
+        if (userId == null) {
+            throw new BusinessException("O autor da avaliação é obrigatório", "MISSING_USER_ID");
+        }
+        this.id = id != null ? id : UUID.randomUUID();
+        this.userId = userId;
+        this.contextPlaceId = contextPlaceId;
+        this.experienceText = experienceText;
+        this.isAnonymous = isAnonymous;
+        this.isVerifiedOnSite = isVerifiedOnSite;
+        this.status = status != null ? status : ReviewStatus.ACTIVE;
+        this.visibility = normalizeAndValidateVisibility(visibility);
+        this.userLatitude = userLatitude;
+        this.userLongitude = userLongitude;
+        this.locationAccuracyMeters = locationAccuracyMeters;
+        this.createdAt = createdAt != null ? createdAt : Instant.now();
+        this.updatedAt = updatedAt != null ? updatedAt : Instant.now();
+    }
+
+    private static String normalizeAndValidateVisibility(String visibility) {
+        if (visibility == null || visibility.isBlank()) {
+            return "PUBLIC";
+        }
+        String normalized = visibility.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!"PUBLIC".equals(normalized) && !"PRIVATE".equals(normalized) && !"FOLLOWERS".equals(normalized)) {
+            throw new BusinessException("Nível de visibilidade inválido", "INVALID_VISIBILITY");
+        }
+        return normalized;
+    }
+
+    /**
      * Adiciona um alvo avaliado com nota ao agregado.
+     * Invariante multi-target: o mesmo RateableTarget não pode ser avaliado mais de uma vez na mesma Review.
      */
     public void addTarget(ReviewTarget target) {
         if (target == null) {
@@ -96,8 +143,22 @@ public class Review {
         if (!this.id.equals(target.getReviewId())) {
             throw new BusinessException("O alvo avaliado não pertence a esta Review", "INCONSISTENT_REVIEW_TARGET");
         }
+        boolean duplicate = this.targets.stream()
+                .anyMatch(t -> t.getTargetId().equals(target.getTargetId()));
+        if (duplicate) {
+            throw new BusinessException("O mesmo alvo não pode ser avaliado mais de uma vez na mesma publicação", "DUPLICATE_REVIEW_TARGET");
+        }
         this.targets.add(target);
         this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Adiciona alvos durante a reconstituição a partir do repositório sem modificar timestamps.
+     */
+    public void addRehydratedTarget(ReviewTarget target) {
+        if (target != null && this.id.equals(target.getReviewId())) {
+            this.targets.add(target);
+        }
     }
 
     /**

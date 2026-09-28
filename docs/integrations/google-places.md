@@ -92,12 +92,48 @@ A documentação oficial do Google Places API (New) exige explicitamente o cabe�
 * O Rewit **nunca** substitui seu identificador primário interno (`Place.id`, UUID) pelo Google Place ID.
 * O Place ID **nunca** é utilizado como chave estrangeira relacional interna.
 
-### Volatilidade e Ciclo de Vida:
-* Conforme documentado pela Google, Place IDs podem expirar, mudar ou sofrer fusão (*merge*) ao longo do tempo (por exemplo, quando estabelecimentos fecham, mudam de endereço ou são reclassificados).
+### Persistência de Vínculo de Identidade (`PlaceExternalReference` - Steps 9.2 e 9.2.1):
 * A representação de vínculo com provedores externos no domínio do Rewit pertence exclusivamente à entidade:
   ```
-  PlaceExternalReference (place_id: UUID, provider: "GOOGLE", external_id: "ChIJ...")
+  PlaceExternalReference (id: UUID, placeId: UUID, provider: "GOOGLE", externalId: "ChIJ...", metadataJson: null)
   ```
+* **Ausência de Limite de Comprimento (Migration V6 - TEXT):**
+  A documentação oficial da Google estabelece que Place IDs variam em comprimento e não possuem um teto máximo definido. O schema do Rewit adota o tipo `TEXT` no PostgreSQL (`V6__external_reference_unbounded_id.sql`) para a coluna `external_id`, eliminando restrições artificiais de 255 caracteres tanto no banco quanto no JPA.
+* **Identidade Externa Exata vs. Deduplicação Semântica:**
+  - A combinação `(provider, external_id)` define uma **identidade externa exata**.
+  - A constraint única física `CONSTRAINT uq_place_ext_ref UNIQUE (provider, external_id)` garante que um mesmo identificador de provedor nunca seja duplicado para múltiplos `Place` internos.
+  - **Não há Deduplicação Semântica:** A Google pode atribuir múltiplos Place IDs distintos ao mesmo estabelecimento físico ao longo do tempo (ex: `externalId=X` e `externalId=Y`). O Rewit não realiza deduplicação semântica por similaridade de nome, endereço ou coordenadas nem consultas adicionais. A correspondência é puramente determinística por chave externa.
+* **Garantia de Concorrência Multithread (ACID):**
+  Sob tentativas simultâneas de vinculação para o mesmo `place_id`, a constraint física do PostgreSQL atua como barreira definitiva de integridade. Apenas uma transação obtém êxito na inserção, e conflitos concorrentes são recuperados transparentemente na camada de aplicação.
+* **Zero-Store e Governança de Metadados:**
+  O campo `metadata_json` permanece `null` no MVP para integração Google. É estritamente vedado utilizá-lo como cache de payloads da Google (nomes, fotos, avaliações ou endereços). O conteúdo perene do catálogo do Rewit (`places`) é gerado pela comunidade com `origin = "USER"`.
+* **Idempotência e Concorrência de Adoção (Step 9.3):**
+  Implementado no serviço de catálogo (`CatalogService`) através de transação atômica gerenciada programaticamente com `TransactionOperations`. O fluxo garante:
+  - Recuperação direta e idempotente caso a referência externa `(provider, external_id)` já tenha sido adotada previamente.
+  - Concorrência real ACID: em tentativas simultâneas onde duas transações tentam cadastrar a mesma referência, uma comita com sucesso e a transação concorrente que sofre `DataIntegrityViolationException` da constraint `uq_place_ext_ref` é finalizada com rollback limpo, recuperando o `Place` comitado sem gerar erro HTTP 500 nem entidades órfãs.
+  - Slug determinístico e seguro (`Locale.ROOT`) gerado com resolução de colisão sequencial (`-2`, `-3`), sem incluir dados da Google no slug.
+
+### 5.1 Adoção de Place no Catálogo Rewit (Step 9.3)
+1. **Definição de Adoção:**
+   Adoção é o ato de registrar um novo local no catálogo soberano do Rewit (`places`), associando-o opcionalmente a um ponteiro de identidade externa (`PlaceExternalReference`), ou reaproveitar de forma idempotente um local já cadastrado com o mesmo identificador externo.
+2. **Place como Catálogo Próprio do Rewit (`origin = "USER"`):**
+   O `Place` pertence ao catálogo colaborativo da comunidade do Rewit. Todos os locais criados via adoção recebem `origin = "USER"` e `status = "ACTIVE"`.
+3. **Ponteiro de Identidade Externa (`PlaceExternalReference`):**
+   A entidade `PlaceExternalReference` atua como mero ponteiro relacional `(provider, externalId)` apontando para o `place_id` interno do Rewit.
+4. **Ausência Absoluta de Busca Google Durante a Adoção:**
+   O processo de adoção **NÃO** consulta o Google Places (`getPlaceDetails`), **NÃO** executa chamadas de rede externas e **NÃO** copia nome, endereço, coordenadas ou tipos retornados pela Google. Todos os dados do local (`name`, `address`, `latitude`, `longitude`, etc.) provêm exclusivamente do payload submetido pelo usuário/cliente ao catálogo do Rewit.
+5. **Idempotência Sequencial e Concorrente:**
+   - **Sequencial:** Se `PlaceExternalReference(provider, externalId)` já existir, a transação retorna imediatamente o `Place` associado existente sem criar novo registro, sem mutação de dados e sem atualizar slug.
+   - **Concorrente:** Em cenários de corrida entre requisições simultâneas com a mesma referência externa, a transação derrotada sofre rollback limpo após a violação da constraint física de unicidade e recupera a tupla comitada pela vencedora em nova transação/sessão, convergindo deterministicamente para o mesmo `Place`.
+6. **Separação entre Identidade Externa e Deduplicação Semântica:**
+   A adoção trata a tupla `(provider, externalId)` como identidade exata. O sistema não tenta unificar identificadores externos distintos com base em proximidade geográfica ou similaridade de texto.
+7. **Zero-Store de Conteúdo Google:**
+   Apenas o `externalId` (Google Place ID opaco) e o `provider` são persistidos. Nenhum JSON bruto, payload de resposta, metadado ou cache Google é armazenado no PostgreSQL, Redis ou SeaweedFS.
+
+### Volatilidade e Ciclo de Vida do Place ID:
+* Conforme documentado pela Google, Place IDs podem expirar, mudar ou sofrer fusão (*merge*) ao longo do tempo (por exemplo, quando estabelecimentos fecham, mudam de endereço ou são reclassificados).
+* O Rewit armazena o Place ID exclusivamente como ponteiro de identidade externa.
+* A Google recomenda refrescar Place IDs armazenados há mais de 12 meses; rotinas de ciclo de vida e refresh serão tratadas em governança futura de catálogo.
 
 ---
 
@@ -208,4 +244,15 @@ GET /api/v1/places/discovery/{provider}/{externalId}
    * O detalhamento dos requisitos e plano de ação pré-produção está formalizado em [`docs/legal/terms-and-privacy-requirements.md`](../legal/terms-and-privacy-requirements.md).
 3. **Política de Armazenamento Zero-Store:**
    * Conforme as [Políticas da Places API](https://developers.google.com/maps/documentation/places/web-service/policies), é proibido armazenar em cache ou espelhar dados da Google além de um período transitório operacional.
-   * O STEP 8 adota **Zero-Store absoluto**: nenhum dado textual, categoria ou coordenada do Google é persistido em banco de dados ou armazenado em cache no Redis/SeaweedFS. O `place_id` é o único dado mantido como identificador externo de vínculo relacional no modelo do Rewit.
+   * O STEP 8 e STEP 9 adotam **Zero-Store absoluto**: nenhum dado textual, categoria, foto, avaliação ou coordenada do Google é copiado ou armazenado em cache no banco de dados. O `place_id` é o único dado mantido como identificador externo de vínculo relacional no modelo do Rewit (`PlaceExternalReference`).
+
+---
+
+## 9. Fluxo de Adoção no Catálogo Rewit (Step 9.4)
+
+A vinculação entre candidatos descobertos e o catálogo persistente ocorre através do endpoint `POST /api/v1/places/adopt`:
+* **Soberania dos Dados**: Os dados persistidos no `Place` (`name`, `address`, coordenadas, etc.) pertencem exclusivamente ao catálogo soberano Rewit, enviados pelo usuário autenticado.
+* **Ausência de Chamada ao Google no POST**: O fluxo de adoção não consome a API do Google (nenhuma chamada a `PlaceDiscoveryPort` ou `getPlaceDetails`).
+* **Identidade Externa**: O `place_id` é persistido exclusivamente na tabela `place_external_references` com `provider = GOOGLE`.
+* **Idempotência**: Requisições repetidas para a mesma referência externa retornam o registro existente (`200 OK`) sem mutação dos dados originais.
+* Mais detalhes em [`docs/api/catalog.md`](../api/catalog.md).

@@ -184,8 +184,138 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 
 ---
 
+### 2.6 Adoção de Local no Catálogo (POST /api/v1/places/adopt)
+* **Método**: `POST`
+* **Rota**: `/api/v1/places/adopt`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Permite que usuários autenticados adotem/cadastrem um local no catálogo soberano Rewit, vinculando opcionalmente uma referência externa (ex: Google Place ID).
+* **Zero-Store**: Não realiza chamadas à Google Places API (ex: `PlaceDiscoveryPort`, `getPlaceDetails`, etc.) nem copia conteúdo de terceiros. Apenas persiste os dados fornecidos pelo cliente como soberanos do Rewit.
+* **Segurança e Identidade**:
+  * A identidade do criador (`reportedByUserId`) é extraída exclusivamente do contexto de segurança JWT validado.
+  * Campos como `userId`, `ownerId`, `createdBy`, `origin`, `status`, `metadataJson` ou payloads Google brutos não são aceitos e são ignorados/rejeitados pelo backend.
+  * O local é sempre cadastrado com `origin = USER` e `status = ACTIVE`.
+
+#### Requisição
+```json
+{
+  "name": "Padaria Central",
+  "slug": null,
+  "address": "Rua Exemplo, 123",
+  "latitude": -25.0,
+  "longitude": -50.0,
+  "validationRadiusMeters": 100.0,
+  "externalReference": {
+    "provider": "GOOGLE",
+    "externalId": "ChIJd8BlQ2BZwokRAFUEcm_qrcA"
+  }
+}
+```
+
+#### Respostas
+* **`201 Created`**: Para nova criação física de local.
+  * Header `Location: /api/v1/places/{id}`
+  * Body: `PlaceResponse` representando a entidade persistida.
+* **`200 OK`**: Para adoção idempotente de referência externa já existente (`provider`, `externalId`).
+  * Sem header `Location`.
+  * Retorna o local previamente existente de forma imutável (não altera nome, endereço, coordenadas, slug ou status).
+
+```json
+{
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "name": "Padaria Central",
+  "slug": "padaria-central",
+  "category": "OUTROS",
+  "description": null,
+  "addressText": "Rua Exemplo, 123",
+  "streetNumber": null,
+  "neighborhood": null,
+  "city": null,
+  "state": null,
+  "country": null,
+  "latitude": -25.0,
+  "longitude": -50.0,
+  "validationRadiusMeters": 100.0,
+  "origin": "USER",
+  "isVerified": false,
+  "status": "ACTIVE"
+}
+```
+
+---
+
+### 2.7 Consulta de Local por Referência Externa (GET /api/v1/places/external/{provider}/{externalId})
+* **Método**: `GET`
+* **Rota**: `/api/v1/places/external/{provider}/{externalId}`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Localiza o `Place` Rewit soberano associado a uma identidade externa previamente adotada.
+* **Tratamento de `externalId`**: Tratado estritamente como **token opaco** (sem lowercase, uppercase, trim interno ou alteração semântica).
+* **Respostas**:
+  * **`200 OK`**: Retorna o `PlaceResponse` associado.
+  * **`404 Not Found`**: Caso a referência externa não exista no catálogo, retorna Problem Details RFC 7807 com código de erro `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`.
+
+---
+
+### 2.8 Descoberta de Locais Próximos por Proximidade Geográfica (GET /api/v1/places/nearby)
+* **Método**: `GET`
+* **Rota**: `/api/v1/places/nearby`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`), seguindo o padrão unificado de leitura do catálogo.
+* **Propósito**: Permite descobrir estabelecimentos físicos cadastrados no catálogo Rewit por proximidade geoespacial utilizando PostGIS.
+* **Zero-Store**: Consulta estritamente os dados persistidos no PostgreSQL do Rewit. Não realiza nenhuma chamada a APIs externas (Google Places, etc.).
+* **Privacidade e Segurança**: As coordenadas fornecidas pelo cliente atuam exclusivamente como ponto de consulta transitório em memória. O backend não persiste localização do usuário, não mantém histórico de consultas e não registra coordenadas em logs de aplicação.
+
+#### Query Parameters
+| Parâmetro | Tipo | Obrigatório | Faixa Permitida | Default | Descrição |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `latitude` | `Double` | Sim | `[-90.0, 90.0]` | - | Latitude central WGS 84 (graus decimais). Rejeita `null`, `NaN` e `Infinity`. |
+| `longitude` | `Double` | Sim | `[-180.0, 180.0]` | - | Longitude central WGS 84 (graus decimais). Rejeita `null`, `NaN` e `Infinity`. |
+| `radiusMeters` | `Double` | Sim | `(0, 50000.0]` | - | Raio de busca esférico em metros (mínimo > 0, teto máximo de 50 km). |
+| `limit` | `Integer` | Não | `[1, 100]` | `20` | Quantidade máxima de resultados a retornar. |
+
+#### Implementação Geoespacial PostGIS
+* **Índice GiST**: Utiliza o índice espacial nativo `idx_places_coordinates ON places USING GIST (coordinates)`.
+* **Filtragem e Distância**: A consulta executa `ST_DWithin` com coordenadas em `GEOGRAPHY(Point, 4326)` e calcula a distância exata em metros via `ST_Distance`.
+* **Ordenação Determinística**: Os resultados são ordenados por proximidade crescente (`ORDER BY ST_Distance(...) ASC, p.id ASC`). Havendo empate na distância, o identificador do local (`id`) assegura ordenação determinística e estável.
+* **Locais Ativos e Sem Coordenadas**: Somente locais com `status = 'ACTIVE'` e coordenadas geográficas válidas participam da busca. Locais inativos ou sem coordenadas são filtrados diretamente no banco de dados.
+
+#### Resposta de Sucesso (`200 OK`)
+Mesmo quando nenhum local for encontrado dentro do raio solicitado, a API retorna `200 OK` com `items = []`.
+
+```json
+{
+  "items": [
+    {
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "name": "Padaria Central",
+      "slug": "padaria-central",
+      "category": "OUTROS",
+      "description": null,
+      "addressText": "Rua Exemplo, 123",
+      "streetNumber": "123",
+      "neighborhood": "Centro",
+      "city": "Curitiba",
+      "state": "PR",
+      "country": "BR",
+      "latitude": -25.4297,
+      "longitude": -49.2719,
+      "validationRadiusMeters": 50,
+      "origin": "USER",
+      "isVerified": false,
+      "status": "ACTIVE",
+      "distanceMeters": 143.72
+    }
+  ],
+  "limit": 20
+}
+```
+
+---
+
 ## 3. Códigos de Erro Esperados
-* `400 Bad Request`: Payload malformado, valores de coordenadas fora do intervalo WGS 84, identificador inválido (`Erro de Validação de Dados`).
-* `401 Unauthorized`: Ausência de token JWT ou token expirado (`AUTHENTICATION_REQUIRED`).
-* `404 Not Found`: Local ou produto não localizado (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`).
+* `400 Bad Request`:
+  * Payload malformado, valores de coordenadas fora do intervalo WGS 84, identificador inválido (`Erro de Validação de Dados`).
+  * Coordenadas inválidas para busca nearby (`INVALID_NEARBY_COORDINATES`).
+  * Raio inválido para busca nearby (`INVALID_NEARBY_RADIUS`).
+  * Limite inválido para busca nearby (`INVALID_NEARBY_LIMIT`).
+* `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
+* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`).
 * `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`).

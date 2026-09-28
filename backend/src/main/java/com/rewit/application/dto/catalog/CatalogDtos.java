@@ -10,6 +10,21 @@ public final class CatalogDtos {
     private CatalogDtos() {
     }
 
+    public record ExternalReferenceInput(
+            String provider,
+            String externalId
+    ) {}
+
+    public record PlaceAdoptionResult(
+            com.rewit.domain.model.Place place,
+            boolean newlyCreated
+    ) {}
+
+    public record NearbyPlaceResult(
+            com.rewit.domain.model.Place place,
+            double distanceMeters
+    ) {}
+
     public record CreatePlaceCommand(
             String name,
             String slug,
@@ -25,8 +40,31 @@ public final class CatalogDtos {
             double longitude,
             Integer validationRadiusMeters,
             String origin,
-            UUID claimedByBusinessId
-    ) {}
+            UUID claimedByBusinessId,
+            ExternalReferenceInput externalReference
+    ) {
+        public CreatePlaceCommand(
+                String name,
+                String slug,
+                String category,
+                String description,
+                String addressText,
+                String streetNumber,
+                String neighborhood,
+                String city,
+                String state,
+                String country,
+                double latitude,
+                double longitude,
+                Integer validationRadiusMeters,
+                String origin,
+                UUID claimedByBusinessId
+        ) {
+            this(name, slug, category, description, addressText, streetNumber, neighborhood,
+                    city, state, country, latitude, longitude, validationRadiusMeters, origin,
+                    claimedByBusinessId, null);
+        }
+    }
 
     public record CreateProductCommand(
             String name,

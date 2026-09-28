@@ -4,6 +4,7 @@ import com.rewit.domain.enums.TargetType;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -18,6 +19,44 @@ public final class ReviewDto {
             TargetType targetType,
             BigDecimal rating,
             String specificComment
+    ) {}
+
+    public record CreateReviewTargetCommand(
+            UUID rateableTargetId,
+            BigDecimal rating,
+            String specificComment
+    ) {}
+
+    public record CreateReviewCommand(
+            UUID authorUserId,
+            UUID contextPlaceId,
+            String experienceText,
+            boolean isAnonymous,
+            String visibility,
+            List<CreateReviewTargetCommand> targets
+    ) {}
+
+    public record ReviewTargetView(
+            UUID id,
+            UUID reviewId,
+            UUID targetId,
+            BigDecimal rating,
+            String specificComment,
+            Instant createdAt
+    ) {}
+
+    public record ReviewDetailView(
+            UUID id,
+            UUID userId,
+            UUID contextPlaceId,
+            String experienceText,
+            boolean isAnonymous,
+            boolean isVerifiedOnSite,
+            String status,
+            String visibility,
+            Instant createdAt,
+            Instant updatedAt,
+            List<ReviewTargetView> targets
     ) {}
 
     public record ReviewView(

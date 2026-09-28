@@ -22,15 +22,36 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import com.rewit.application.port.PlaceExternalReferenceRepository;
+import com.rewit.application.port.PlaceRepository;
+import com.rewit.application.port.RateableTargetRepository;
+import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceExternalReference;
+import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.AdoptPlaceRequest.ExternalReferenceRequest;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 @SpringBootTest
 @ActiveProfiles("local")
-@DisplayName("Testes de Integração da API REST de Catálogo /api/v1/places e /api/v1/products (Step 7)")
+@DisplayName("Testes de Integração da API REST de Catálogo /api/v1/places e /api/v1/products (Step 7 e Step 9.4)")
 class CatalogControllerIntegrationTest {
 
     @Autowired
     private WebApplicationContext webApplicationContext;
+
+    @Autowired
+    private PlaceRepository placeRepository;
+
+    @Autowired
+    private PlaceExternalReferenceRepository referenceRepository;
+
+    @Autowired
+    private RateableTargetRepository rateableTargetRepository;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -516,5 +537,563 @@ class CatalogControllerIntegrationTest {
 
         JsonNode errorNode = objectMapper.readTree(res.getResponse().getContentAsString());
         assertEquals("PRODUCT_NOT_FOUND", errorNode.get("code").asText());
+    }
+
+    @Test
+    @DisplayName("16. Caso A: POST /api/v1/places/adopt com JWT cria Place, retorna 201 Created e Location")
+    void shouldAdoptNewPlaceAndReturn201WithLocation() throws Exception {
+        TestUser user = registerUser("adopt_a");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String extId = "ChIJ_ADOPT_A_" + suffix;
+
+        AdoptPlaceRequest req = new AdoptPlaceRequest(
+                "Restaurante Caso A " + suffix,
+                "restaurante-caso-a-" + suffix,
+                "RESTAURANTE",
+                "Comida caseira",
+                "Rua das Palmeiras, 200",
+                "200",
+                "Batel",
+                "Curitiba",
+                "PR",
+                "BR",
+                -25.4350,
+                -49.2750,
+                50,
+                new ExternalReferenceRequest("GOOGLE", extId)
+        );
+
+        MvcResult result = mockMvc.perform(post("/api/v1/places/adopt")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String location = result.getResponse().getHeader("Location");
+        assertNotNull(location, "Location header deve existir na criação 201");
+        assertTrue(location.startsWith("/api/v1/places/"));
+
+        JsonNode node = objectMapper.readTree(result.getResponse().getContentAsString());
+        UUID createdId = UUID.fromString(node.get("id").asText());
+        assertEquals("restaurante-caso-a-" + suffix, node.get("slug").asText());
+        assertEquals("USER", node.get("origin").asText());
+        assertEquals("ACTIVE", node.get("status").asText());
+
+        // Valida persistência real no PostgreSQL
+        assertTrue(placeRepository.findById(createdId).isPresent());
+        assertTrue(referenceRepository.findByProviderAndExternalId("GOOGLE", extId).isPresent());
+        assertTrue(rateableTargetRepository.findById(createdId).isPresent());
+    }
+
+    @Test
+    @DisplayName("17. Caso B: POST /api/v1/places/adopt idempotente com mesma referência retorna 200 OK sem duplicar")
+    void shouldReturn200OkOnIdempotentAdoptionWithoutDuplication() throws Exception {
+        TestUser user = registerUser("adopt_b");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String extId = "ChIJ_ADOPT_B_" + suffix;
+
+        AdoptPlaceRequest firstReq = new AdoptPlaceRequest(
+                "Padaria Original " + suffix,
+                "padaria-original-" + suffix,
+                "PADARIA",
+                "Desc original",
+                "Rua 1",
+                "10",
+                "Centro",
+                "Curitiba",
+                "PR",
+                "BR",
+                -25.43,
+                -49.27,
+                50,
+                new ExternalReferenceRequest("GOOGLE", extId)
+        );
+
+        MvcResult firstRes = mockMvc.perform(post("/api/v1/places/adopt")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(firstReq)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        JsonNode firstNode = objectMapper.readTree(firstRes.getResponse().getContentAsString());
+        String originalId = firstNode.get("id").asText();
+
+        // Segunda requisição com dados diferentes mas mesmo externalId
+        AdoptPlaceRequest secondReq = new AdoptPlaceRequest(
+                "Outro Nome Alterado",
+                "outro-slug",
+                "OUTRO",
+                "Outra desc",
+                "Outro end",
+                "999",
+                "Outro bairro",
+                "São Paulo",
+                "SP",
+                "BR",
+                -23.55,
+                -46.63,
+                100,
+                new ExternalReferenceRequest("GOOGLE", extId)
+        );
+
+        MvcResult secondRes = mockMvc.perform(post("/api/v1/places/adopt")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(secondReq)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        assertNull(secondRes.getResponse().getHeader("Location"), "Adoção idempotente 200 não deve conter Location de novo recurso");
+
+        JsonNode secondNode = objectMapper.readTree(secondRes.getResponse().getContentAsString());
+        assertEquals(originalId, secondNode.get("id").asText(), "Deve retornar exatamente o mesmo Place.id");
+        assertEquals("Padaria Original " + suffix, secondNode.get("name").asText(), "Nome original não deve ser alterado");
+        assertEquals("padaria-original-" + suffix, secondNode.get("slug").asText(), "Slug original não deve ser alterado");
+        assertEquals("Curitiba", secondNode.get("city").asText(), "Cidade original não deve ser alterada");
+    }
+
+    @Test
+    @DisplayName("18. Caso C: POST /api/v1/places/adopt com dados Google extras não persiste conteúdo externo")
+    void shouldNotPersistExtraGoogleData() throws Exception {
+        TestUser user = registerUser("adopt_c");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String extId = "ChIJ_ADOPT_C_" + suffix;
+
+        Map<String, Object> payloadWithGoogleData = Map.ofEntries(
+                Map.entry("name", "Lugar Zero-Store " + suffix),
+                Map.entry("addressText", "Rua das Flores"),
+                Map.entry("city", "Curitiba"),
+                Map.entry("state", "PR"),
+                Map.entry("latitude", -25.43),
+                Map.entry("longitude", -49.27),
+                Map.entry("externalReference", Map.of(
+                        "provider", "GOOGLE",
+                        "externalId", extId
+                )),
+                Map.entry("displayName", "Google Display Name"),
+                Map.entry("formattedAddress", "Google Formatted Address"),
+                Map.entry("rating", 4.9),
+                Map.entry("reviews", "raw reviews"),
+                Map.entry("metadataJson", "{\"google\": true}")
+        );
+
+        MvcResult result = mockMvc.perform(post("/api/v1/places/adopt")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(payloadWithGoogleData)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        JsonNode node = objectMapper.readTree(result.getResponse().getContentAsString());
+        UUID placeId = UUID.fromString(node.get("id").asText());
+
+        // Valida no banco que metadata_json da referência externa permanece estritamente null
+        Optional<PlaceExternalReference> ref = referenceRepository.findByProviderAndExternalId("GOOGLE", extId);
+        assertTrue(ref.isPresent());
+        assertNull(ref.get().getMetadataJson(), "Zero-store: metadata_json deve ser null");
+        assertEquals(placeId, ref.get().getPlaceId());
+    }
+
+    @Test
+    @DisplayName("19. Caso D: POST /api/v1/places/adopt sem JWT retorna 401 Unauthorized")
+    void shouldReturn401WhenAdoptingWithoutJwt() throws Exception {
+        AdoptPlaceRequest req = new AdoptPlaceRequest(
+                "Sem Auth",
+                "sem-auth",
+                "GERAL",
+                "Desc",
+                "End",
+                "1",
+                "Bairro",
+                "Curitiba",
+                "PR",
+                "BR",
+                -25.0,
+                -49.0,
+                50,
+                null
+        );
+
+        mockMvc.perform(post("/api/v1/places/adopt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("20. Caso E: GET /api/v1/places/external/{provider}/{externalId} retorna 200 OK com dados do local")
+    void shouldGetPlaceByExternalReferenceSuccessfully() throws Exception {
+        TestUser user = registerUser("adopt_e");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String extId = "ChIJ_ADOPT_E_" + suffix;
+
+        AdoptPlaceRequest req = new AdoptPlaceRequest(
+                "Lugar Caso E " + suffix,
+                "lugar-caso-e-" + suffix,
+                "BAR",
+                "Desc E",
+                "Rua XV",
+                "10",
+                "Centro",
+                "Curitiba",
+                "PR",
+                "BR",
+                -25.43,
+                -49.27,
+                50,
+                new ExternalReferenceRequest("GOOGLE", extId)
+        );
+
+        MvcResult createRes = mockMvc.perform(post("/api/v1/places/adopt")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        JsonNode createdNode = objectMapper.readTree(createRes.getResponse().getContentAsString());
+        String expectedId = createdNode.get("id").asText();
+
+        // Consulta pelo endpoint de referência externa
+        MvcResult getRes = mockMvc.perform(get("/api/v1/places/external/{provider}/{externalId}", "GOOGLE", extId)
+                        .header("Authorization", "Bearer " + user.accessToken()))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode getNode = objectMapper.readTree(getRes.getResponse().getContentAsString());
+        assertEquals(expectedId, getNode.get("id").asText());
+        assertEquals("Lugar Caso E " + suffix, getNode.get("name").asText());
+        assertEquals("lugar-caso-e-" + suffix, getNode.get("slug").asText());
+    }
+
+    @Test
+    @DisplayName("21. Caso F: GET /api/v1/places/external/{provider}/{externalId} com referência inexistente retorna 404")
+    void shouldReturn404WhenExternalReferenceNotFound() throws Exception {
+        TestUser user = registerUser("adopt_f");
+
+        MvcResult res = mockMvc.perform(get("/api/v1/places/external/{provider}/{externalId}", "GOOGLE", "ChIJ_NONEXISTENT_404")
+                        .header("Authorization", "Bearer " + user.accessToken()))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        JsonNode errorNode = objectMapper.readTree(res.getResponse().getContentAsString());
+        assertEquals("PLACE_EXTERNAL_REFERENCE_NOT_FOUND", errorNode.get("code").asText());
+    }
+
+    @Test
+    @DisplayName("22. Caso G: Duas requisições HTTP concorrentes com mesma referência externa convergem para mesmo Place.id sem 500 nem órfãos")
+    void shouldHandleConcurrentHttpAdoptionsSafely() throws Exception {
+        TestUser user1 = registerUser("adopt_g1");
+        TestUser user2 = registerUser("adopt_g2");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String sharedExtId = "ChIJ_CONCURRENT_HTTP_" + suffix;
+
+        int numberOfThreads = 2;
+        ExecutorService executor = Executors.newFixedThreadPool(numberOfThreads);
+        CountDownLatch startSignal = new CountDownLatch(1);
+        CountDownLatch doneSignal = new CountDownLatch(numberOfThreads);
+
+        AtomicReference<String> placeIdThread1 = new AtomicReference<>();
+        AtomicReference<String> placeIdThread2 = new AtomicReference<>();
+        AtomicReference<Integer> statusThread1 = new AtomicReference<>();
+        AtomicReference<Integer> statusThread2 = new AtomicReference<>();
+        AtomicReference<Exception> errorThread1 = new AtomicReference<>();
+        AtomicReference<Exception> errorThread2 = new AtomicReference<>();
+
+        Callable<Void> task1 = () -> {
+            startSignal.await();
+            try {
+                AdoptPlaceRequest req = new AdoptPlaceRequest(
+                        "Lugar HTTP Concorrente 1 " + suffix,
+                        null,
+                        "BAR",
+                        "Desc 1",
+                        "End 1",
+                        "1",
+                        "Bairro",
+                        "Curitiba",
+                        "PR",
+                        "BR",
+                        -25.43,
+                        -49.27,
+                        50,
+                        new ExternalReferenceRequest("GOOGLE", sharedExtId)
+                );
+                MvcResult res = mockMvc.perform(post("/api/v1/places/adopt")
+                                .header("Authorization", "Bearer " + user1.accessToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(req)))
+                        .andReturn();
+
+                statusThread1.set(res.getResponse().getStatus());
+                JsonNode node = objectMapper.readTree(res.getResponse().getContentAsString());
+                if (node.has("id")) {
+                    placeIdThread1.set(node.get("id").asText());
+                }
+            } catch (Exception e) {
+                errorThread1.set(e);
+            } finally {
+                doneSignal.countDown();
+            }
+            return null;
+        };
+
+        Callable<Void> task2 = () -> {
+            startSignal.await();
+            try {
+                AdoptPlaceRequest req = new AdoptPlaceRequest(
+                        "Lugar HTTP Concorrente 2 " + suffix,
+                        null,
+                        "BAR",
+                        "Desc 2",
+                        "End 2",
+                        "2",
+                        "Bairro",
+                        "Curitiba",
+                        "PR",
+                        "BR",
+                        -25.43,
+                        -49.27,
+                        50,
+                        new ExternalReferenceRequest("GOOGLE", sharedExtId)
+                );
+                MvcResult res = mockMvc.perform(post("/api/v1/places/adopt")
+                                .header("Authorization", "Bearer " + user2.accessToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(req)))
+                        .andReturn();
+
+                statusThread2.set(res.getResponse().getStatus());
+                JsonNode node = objectMapper.readTree(res.getResponse().getContentAsString());
+                if (node.has("id")) {
+                    placeIdThread2.set(node.get("id").asText());
+                }
+            } catch (Exception e) {
+                errorThread2.set(e);
+            } finally {
+                doneSignal.countDown();
+            }
+            return null;
+        };
+
+        executor.submit(task1);
+        executor.submit(task2);
+
+        // Dispara simultaneamente
+        startSignal.countDown();
+
+        boolean finished = doneSignal.await(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertTrue(finished, "As requisições HTTP concorrentes devem concluir em até 10 segundos");
+        assertNull(errorThread1.get());
+        assertNull(errorThread2.get());
+
+        // Ambas as threads devem receber sucesso (201 ou 200), NENHUM 500
+        assertTrue(statusThread1.get() == 201 || statusThread1.get() == 200, "Thread 1 deve ter status 201 ou 200, teve: " + statusThread1.get());
+        assertTrue(statusThread2.get() == 201 || statusThread2.get() == 200, "Thread 2 deve ter status 201 ou 200, teve: " + statusThread2.get());
+
+        assertNotNull(placeIdThread1.get());
+        assertNotNull(placeIdThread2.get());
+
+        // Ambas devem convergir para o mesmo Place.id!
+        assertEquals(placeIdThread1.get(), placeIdThread2.get(), "Ambas as requisições HTTP concorrentes devem convergir para o mesmo Place.id");
+
+        UUID finalPlaceId = UUID.fromString(placeIdThread1.get());
+
+        // Valida no banco: exatamente 1 referência externa, 1 Place e 1 RateableTarget
+        Optional<PlaceExternalReference> ref = referenceRepository.findByProviderAndExternalId("GOOGLE", sharedExtId);
+        assertTrue(ref.isPresent());
+        assertEquals(finalPlaceId, ref.get().getPlaceId());
+
+        assertTrue(placeRepository.findById(finalPlaceId).isPresent());
+        assertTrue(rateableTargetRepository.findById(finalPlaceId).isPresent());
+    }
+
+    // =========================================================================
+    // STEP 9.5: TESTES DE INTEGRAÇÃO HTTP REAL: GET /api/v1/places/nearby
+    // =========================================================================
+
+    @Test
+    @DisplayName("23. GET /api/v1/places/nearby: Sem autenticação JWT retorna 401 Unauthorized")
+    void shouldReturn401WhenNearbyWithoutAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/places/nearby")
+                        .param("latitude", "-25.4297")
+                        .param("longitude", "-49.2719")
+                        .param("radiusMeters", "1000.0"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("24. GET /api/v1/places/nearby: Parâmetros inválidos retornam 400 Bad Request")
+    void shouldReturn400WhenNearbyParametersAreInvalid() throws Exception {
+        TestUser user = registerUser("nearby_invalid");
+
+        // Latitude inválida (> 90)
+        mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", "95.0")
+                        .param("longitude", "-49.2719")
+                        .param("radiusMeters", "1000.0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_NEARBY_COORDINATES"));
+
+        // Longitude inválida (< -180)
+        mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", "-25.4297")
+                        .param("longitude", "-185.0")
+                        .param("radiusMeters", "1000.0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_NEARBY_COORDINATES"));
+
+        // Raio inválido (zero)
+        mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", "-25.4297")
+                        .param("longitude", "-49.2719")
+                        .param("radiusMeters", "0.0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_NEARBY_RADIUS"));
+
+        // Raio inválido (> 50.000m)
+        mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", "-25.4297")
+                        .param("longitude", "-49.2719")
+                        .param("radiusMeters", "55000.0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_NEARBY_RADIUS"));
+
+        // Limit inválido (zero)
+        mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", "-25.4297")
+                        .param("longitude", "-49.2719")
+                        .param("radiusMeters", "1000.0")
+                        .param("limit", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_NEARBY_LIMIT"));
+
+        // Limit inválido (> 100)
+        mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", "-25.4297")
+                        .param("longitude", "-49.2719")
+                        .param("radiusMeters", "1000.0")
+                        .param("limit", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_NEARBY_LIMIT"));
+    }
+
+    @Test
+    @DisplayName("25. GET /api/v1/places/nearby: Lista vazia retorna 200 OK com items=[]")
+    void shouldReturn200OkWithEmptyListWhenNoPlacesNearby() throws Exception {
+        TestUser user = registerUser("nearby_empty");
+
+        // Coordenadas no meio do oceano onde não há nenhum local cadastrado
+        mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", "-10.0")
+                        .param("longitude", "-20.0")
+                        .param("radiusMeters", "500.0")
+                        .param("limit", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.limit").value(10));
+    }
+
+    @Test
+    @DisplayName("26. GET /api/v1/places/nearby: Requisição válida retorna 200 OK com itens ordenados, distância e limite respeitado")
+    void shouldReturn200OkWithOrderedNearbyPlacesAndDistance() throws Exception {
+        TestUser user = registerUser("nearby_valid");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+
+        // Centro: Porto Alegre (-30.0346, -51.2177)
+        double centerLat = -30.0346;
+        double centerLon = -51.2177;
+
+        // Local A: ~200m
+        Place placeA = placeRepository.save(new Place(
+                null, "Café POA A " + suffix, "cafe-poa-a-" + suffix, "CAFE", "Perto",
+                "Rua dos Andradas, 100", "Porto Alegre", "RS", "BR", -30.0335, -51.2185, 50, "USER", false, null, "ACTIVE"
+        ));
+
+        // Local B: ~1500m
+        Place placeB = placeRepository.save(new Place(
+                null, "Restaurante POA B " + suffix, "restaurante-poa-b-" + suffix, "RESTAURANTE", "Médio",
+                "Av Ipiranga, 500", "Porto Alegre", "RS", "BR", -30.0450, -51.2050, 50, "USER", false, null, "ACTIVE"
+        ));
+
+        // Local C: ~3000m
+        Place placeC = placeRepository.save(new Place(
+                null, "Bar POA C " + suffix, "bar-poa-c-" + suffix, "BAR", "Mais distante",
+                "Av Assis Brasil, 1000", "Porto Alegre", "RS", "BR", -30.0100, -51.1900, 50, "USER", false, null, "ACTIVE"
+        ));
+
+        // Consulta raio 2000m com limit 20 -> Deve retornar Place A e Place B (ordenados A antes de B), e NÃO Place C
+        MvcResult result = mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", String.valueOf(centerLat))
+                        .param("longitude", String.valueOf(centerLon))
+                        .param("radiusMeters", "2000.0")
+                        .param("limit", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.limit").value(20))
+                .andExpect(jsonPath("$.items").isArray())
+                .andReturn();
+
+        JsonNode root = objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode items = root.get("items");
+
+        // Verifica que Place A e Place B aparecem, e Place C não aparece
+        boolean foundA = false;
+        boolean foundB = false;
+        boolean foundC = false;
+        double distA = 0;
+        double distB = 0;
+
+        for (JsonNode item : items) {
+            String itemId = item.get("id").asText();
+            if (itemId.equals(placeA.getId().toString())) {
+                foundA = true;
+                distA = item.get("distanceMeters").asDouble();
+            }
+            if (itemId.equals(placeB.getId().toString())) {
+                foundB = true;
+                distB = item.get("distanceMeters").asDouble();
+            }
+            if (itemId.equals(placeC.getId().toString())) {
+                foundC = true;
+            }
+        }
+
+        assertTrue(foundA, "Place A deve estar nos resultados de 2000m");
+        assertTrue(foundB, "Place B deve estar nos resultados de 2000m");
+        assertFalse(foundC, "Place C está fora do raio de 2000m e não deve estar nos resultados");
+
+        // Validação da ordenação por proximidade crescente: A mais próximo que B
+        assertTrue(distA < distB, "Place A (mais próximo) deve ter distância menor que Place B: " + distA + " vs " + distB);
+
+        // Consulta com limit 1 -> Não deve ultrapassar o limite solicitado
+        MvcResult resultLimit1 = mockMvc.perform(get("/api/v1/places/nearby")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .param("latitude", String.valueOf(centerLat))
+                        .param("longitude", String.valueOf(centerLon))
+                        .param("radiusMeters", "5000.0")
+                        .param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.limit").value(1))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andReturn();
+
+        JsonNode limit1Node = objectMapper.readTree(resultLimit1.getResponse().getContentAsString());
+        assertEquals(1, limit1Node.get("limit").asInt(), "O campo limit retornado deve ser 1");
+        assertEquals(1, limit1Node.get("items").size(), "A lista de itens com limit=1 deve conter exatamente 1 elemento");
+        assertTrue(limit1Node.get("items").get(0).hasNonNull("distanceMeters"), "O item retornado deve conter distanceMeters");
+        assertTrue(limit1Node.get("items").get(0).get("distanceMeters").asDouble() <= 5000.0, "A distância deve respeitar o raio de 5000m");
     }
 }

@@ -3,6 +3,7 @@ package com.rewit.domain.model;
 import com.rewit.common.exception.BusinessException;
 
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -31,7 +32,7 @@ public class PlaceExternalReference {
 
         this.id = id != null ? id : UUID.randomUUID();
         this.placeId = placeId;
-        this.provider = provider.trim().toUpperCase();
+        this.provider = provider.trim().toUpperCase(Locale.ROOT);
         this.externalId = externalId.trim();
         this.metadataJson = metadataJson;
         this.createdAt = Instant.now();

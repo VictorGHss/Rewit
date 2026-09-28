@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.adapter;
 
+import com.rewit.application.dto.catalog.CatalogDtos;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
@@ -7,6 +8,7 @@ import com.rewit.infrastructure.persistence.entity.PlaceJpaEntity;
 import com.rewit.infrastructure.persistence.entity.RateableTargetJpaEntity;
 import com.rewit.infrastructure.persistence.repository.PlaceJpaRepository;
 import com.rewit.infrastructure.persistence.repository.RateableTargetJpaRepository;
+import jakarta.persistence.Tuple;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -92,6 +94,71 @@ public class PlaceRepositoryAdapter implements PlaceRepository {
         return placeJpaRepository.findNearby(latitude, longitude, radiusMeters).stream()
                 .map(PlaceRepositoryAdapter::toDomain)
                 .toList();
+    }
+
+    @Override
+    public List<CatalogDtos.NearbyPlaceResult> findNearbyWithDistance(double latitude, double longitude, double radiusMeters, int limit) {
+        if (radiusMeters <= 0 || limit <= 0) {
+            return List.of();
+        }
+
+        List<Tuple> tuples = placeJpaRepository.findNearbyWithDistance(latitude, longitude, radiusMeters, limit);
+        return tuples.stream()
+                .map(PlaceRepositoryAdapter::toNearbyResult)
+                .toList();
+    }
+
+    private static CatalogDtos.NearbyPlaceResult toNearbyResult(Tuple tuple) {
+        Object idObj = tuple.get("id");
+        UUID id = idObj instanceof UUID u ? u : UUID.fromString(idObj.toString());
+
+        String name = tuple.get("name", String.class);
+        String slug = tuple.get("slug", String.class);
+        String category = tuple.get("category", String.class);
+        String description = tuple.get("description", String.class);
+        String addressText = tuple.get("address_text", String.class);
+        String streetNumber = tuple.get("street_number", String.class);
+        String neighborhood = tuple.get("neighborhood", String.class);
+        String city = tuple.get("city", String.class);
+        String state = tuple.get("state", String.class);
+        String country = tuple.get("country", String.class);
+
+        double latitude = ((Number) tuple.get("latitude")).doubleValue();
+        double longitude = ((Number) tuple.get("longitude")).doubleValue();
+        int validationRadiusMeters = ((Number) tuple.get("validation_radius_meters")).intValue();
+        String origin = tuple.get("origin", String.class);
+        boolean isVerified = Boolean.TRUE.equals(tuple.get("is_verified", Boolean.class));
+
+        Object claimedObj = tuple.get("claimed_by_business_id");
+        UUID claimedByBusinessId = claimedObj != null
+                ? (claimedObj instanceof UUID u ? u : UUID.fromString(claimedObj.toString()))
+                : null;
+
+        String status = tuple.get("status", String.class);
+        double distanceMeters = ((Number) tuple.get("distance_meters")).doubleValue();
+
+        Place place = new Place(
+                id,
+                name,
+                slug,
+                category,
+                description,
+                addressText,
+                streetNumber,
+                neighborhood,
+                city,
+                state,
+                country,
+                latitude,
+                longitude,
+                validationRadiusMeters,
+                origin,
+                isVerified,
+                claimedByBusinessId,
+                status
+        );
+
+        return new CatalogDtos.NearbyPlaceResult(place, distanceMeters);
     }
 
     private static Place toDomain(PlaceJpaEntity entity) {
