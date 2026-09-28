@@ -4,15 +4,20 @@ import com.rewit.application.dto.ReviewDto.CreateReviewCommand;
 import com.rewit.application.dto.ReviewDto.CreateReviewTargetCommand;
 import com.rewit.application.dto.ReviewDto.ReviewDetailView;
 import com.rewit.application.dto.ReviewDto.ReviewTargetView;
+import com.rewit.application.dto.ReviewDto.PublicAuthorView;
+import com.rewit.application.dto.ReviewDto.ReviewPublicView;
 import com.rewit.application.port.PlaceRepository;
+import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.RateableTargetRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewTarget;
 import com.rewit.domain.model.User;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,17 +42,29 @@ public class ReviewService {
     private final UserRepository userRepository;
     private final RateableTargetRepository rateableTargetRepository;
     private final PlaceRepository placeRepository;
+    private final ProfileRepository profileRepository;
+
+    @Autowired
+    public ReviewService(ReviewRepository reviewRepository,
+                         ReviewTargetRepository reviewTargetRepository,
+                         UserRepository userRepository,
+                         RateableTargetRepository rateableTargetRepository,
+                         PlaceRepository placeRepository,
+                         ProfileRepository profileRepository) {
+        this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
+        this.rateableTargetRepository = Objects.requireNonNull(rateableTargetRepository, "rateableTargetRepository must not be null");
+        this.placeRepository = Objects.requireNonNull(placeRepository, "placeRepository must not be null");
+        this.profileRepository = profileRepository;
+    }
 
     public ReviewService(ReviewRepository reviewRepository,
                          ReviewTargetRepository reviewTargetRepository,
                          UserRepository userRepository,
                          RateableTargetRepository rateableTargetRepository,
                          PlaceRepository placeRepository) {
-        this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
-        this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository must not be null");
-        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
-        this.rateableTargetRepository = Objects.requireNonNull(rateableTargetRepository, "rateableTargetRepository must not be null");
-        this.placeRepository = Objects.requireNonNull(placeRepository, "placeRepository must not be null");
+        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, null);
     }
 
     /**
@@ -197,5 +214,82 @@ public class ReviewService {
                 review.getUpdatedAt(),
                 targetViews
         );
+    }
+
+    @Transactional
+    public ReviewPublicView createReviewAndGetPublicView(CreateReviewCommand cmd) {
+        ReviewDetailView detail = createReview(cmd);
+        PublicAuthorView authorView = resolvePublicAuthor(detail.userId(), detail.isAnonymous());
+        return new ReviewPublicView(
+                detail.id(),
+                authorView,
+                detail.contextPlaceId(),
+                detail.experienceText(),
+                detail.isAnonymous(),
+                detail.visibility(),
+                detail.status(),
+                detail.createdAt(),
+                detail.updatedAt(),
+                detail.targets()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public ReviewPublicView getReviewPublicView(UUID reviewId, UUID requesterUserId) {
+        if (reviewId == null) {
+            throw new BusinessException("Identificador de avaliação obrigatório", HttpStatus.BAD_REQUEST, "MISSING_REVIEW_ID");
+        }
+
+        Review review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND"));
+
+        // Validação de visibilidade
+        String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";
+        if ("PRIVATE".equalsIgnoreCase(visibility)) {
+            if (requesterUserId == null || !requesterUserId.equals(review.getUserId())) {
+                throw new BusinessException("Acesso negado a esta avaliação privada", HttpStatus.FORBIDDEN, "FORBIDDEN");
+            }
+        } else if ("FOLLOWERS".equalsIgnoreCase(visibility)) {
+            if (requesterUserId == null || !requesterUserId.equals(review.getUserId())) {
+                throw new BusinessException("Esta avaliação é visível apenas para seguidores", HttpStatus.FORBIDDEN, "FORBIDDEN");
+            }
+        }
+
+        PublicAuthorView authorView = resolvePublicAuthor(review.getUserId(), review.isAnonymous());
+
+        List<ReviewTargetView> targetViews = review.getTargets() != null
+                ? review.getTargets().stream()
+                .map(t -> new ReviewTargetView(t.getId(), t.getReviewId(), t.getTargetId(), t.getRating(), t.getSpecificComment(), t.getCreatedAt()))
+                .toList()
+                : List.of();
+
+        return new ReviewPublicView(
+                review.getId(),
+                authorView,
+                review.getContextPlaceId(),
+                review.getExperienceText(),
+                review.isAnonymous(),
+                review.getVisibility(),
+                review.getStatus() != null ? review.getStatus().name() : "ACTIVE",
+                review.getCreatedAt(),
+                review.getUpdatedAt(),
+                targetViews
+        );
+    }
+
+    private PublicAuthorView resolvePublicAuthor(UUID userId, boolean isAnonymous) {
+        if (isAnonymous) {
+            return PublicAuthorView.anonymous();
+        }
+
+        if (profileRepository != null && userId != null) {
+            Optional<Profile> profileOpt = profileRepository.findByUserId(userId);
+            if (profileOpt.isPresent()) {
+                Profile profile = profileOpt.get();
+                return new PublicAuthorView(userId, profile.getHandle(), profile.getDisplayName(), profile.getAvatarUrl(), false);
+            }
+        }
+
+        return new PublicAuthorView(userId, null, null, null, false);
     }
 }

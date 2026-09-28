@@ -59,6 +59,31 @@ public final class ReviewDto {
             List<ReviewTargetView> targets
     ) {}
 
+    public record PublicAuthorView(
+            UUID id,
+            String handle,
+            String displayName,
+            String avatarUrl,
+            boolean isAnonymous
+    ) {
+        public static PublicAuthorView anonymous() {
+            return new PublicAuthorView(null, null, "Anônimo", null, true);
+        }
+    }
+
+    public record ReviewPublicView(
+            UUID id,
+            PublicAuthorView author,
+            UUID contextPlaceId,
+            String experienceText,
+            boolean isAnonymous,
+            String visibility,
+            String status,
+            Instant createdAt,
+            Instant updatedAt,
+            List<ReviewTargetView> targets
+    ) {}
+
     public record ReviewView(
             UUID id,
             UUID userId,

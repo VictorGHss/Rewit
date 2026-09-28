@@ -1034,17 +1034,19 @@ class CatalogControllerIntegrationTest {
                 "Av Assis Brasil, 1000", "Porto Alegre", "RS", "BR", -30.0100, -51.1900, 50, "USER", false, null, "ACTIVE"
         ));
 
-        // Consulta raio 2000m com limit 20 -> Deve retornar Place A e Place B (ordenados A antes de B), e NÃO Place C
+        // Consulta raio 2000m com limit 100 (máximo da API) para garantir que Place A e Place B
+        // apareçam mesmo quando outras runs acumularam Places no banco compartilhado sem limpeza
         MvcResult result = mockMvc.perform(get("/api/v1/places/nearby")
                         .header("Authorization", "Bearer " + user.accessToken())
                         .param("latitude", String.valueOf(centerLat))
                         .param("longitude", String.valueOf(centerLon))
                         .param("radiusMeters", "2000.0")
-                        .param("limit", "20"))
+                        .param("limit", "100"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.limit").value(20))
+                .andExpect(jsonPath("$.limit").value(100))
                 .andExpect(jsonPath("$.items").isArray())
                 .andReturn();
+
 
         JsonNode root = objectMapper.readTree(result.getResponse().getContentAsString());
         JsonNode items = root.get("items");
