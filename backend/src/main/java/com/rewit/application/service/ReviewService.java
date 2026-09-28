@@ -59,6 +59,7 @@ public class ReviewService {
     private final ProfileRepository profileRepository;
     private final CheckInRepository checkInRepository;
     private final RateableTargetStatsRepository rateableTargetStatsRepository;
+    private final com.rewit.application.port.UserFollowRepository userFollowRepository;
 
     @Autowired
     public ReviewService(ReviewRepository reviewRepository,
@@ -68,7 +69,8 @@ public class ReviewService {
                          PlaceRepository placeRepository,
                          ProfileRepository profileRepository,
                          CheckInRepository checkInRepository,
-                         RateableTargetStatsRepository rateableTargetStatsRepository) {
+                         RateableTargetStatsRepository rateableTargetStatsRepository,
+                         com.rewit.application.port.UserFollowRepository userFollowRepository) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
         this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
@@ -77,6 +79,18 @@ public class ReviewService {
         this.profileRepository = profileRepository;
         this.checkInRepository = checkInRepository;
         this.rateableTargetStatsRepository = rateableTargetStatsRepository;
+        this.userFollowRepository = userFollowRepository;
+    }
+
+    public ReviewService(ReviewRepository reviewRepository,
+                         ReviewTargetRepository reviewTargetRepository,
+                         UserRepository userRepository,
+                         RateableTargetRepository rateableTargetRepository,
+                         PlaceRepository placeRepository,
+                         ProfileRepository profileRepository,
+                         CheckInRepository checkInRepository,
+                         RateableTargetStatsRepository rateableTargetStatsRepository) {
+        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, profileRepository, checkInRepository, rateableTargetStatsRepository, null);
     }
 
     public ReviewService(ReviewRepository reviewRepository,
@@ -84,7 +98,7 @@ public class ReviewService {
                          UserRepository userRepository,
                          RateableTargetRepository rateableTargetRepository,
                          PlaceRepository placeRepository) {
-        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, null, null, null);
+        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, null, null, null, null);
     }
 
     /**
@@ -323,7 +337,9 @@ public class ReviewService {
                 throw new BusinessException("Acesso negado a esta avaliação privada", HttpStatus.FORBIDDEN, "FORBIDDEN");
             }
         } else if ("FOLLOWERS".equalsIgnoreCase(visibility)) {
-            if (requesterUserId == null || !requesterUserId.equals(review.getUserId())) {
+            boolean isAuthor = requesterUserId != null && requesterUserId.equals(review.getUserId());
+            boolean isFollower = requesterUserId != null && userFollowRepository != null && userFollowRepository.isFollowing(requesterUserId, review.getUserId());
+            if (!isAuthor && !isFollower) {
                 throw new BusinessException("Esta avaliação é visível apenas para seguidores", HttpStatus.FORBIDDEN, "FORBIDDEN");
             }
         }

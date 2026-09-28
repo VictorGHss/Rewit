@@ -30,7 +30,19 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
         SELECT r, rt FROM ReviewJpaEntity r
         JOIN ReviewTargetJpaEntity rt ON rt.reviewId = r.id AND rt.targetId = :targetId
         WHERE r.status = 'ACTIVE'
-          AND (r.visibility = 'PUBLIC' OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId))
+          AND (
+            r.visibility = 'PUBLIC'
+            OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId)
+            OR (
+              :requesterUserId IS NOT NULL
+              AND r.visibility = 'FOLLOWERS'
+              AND EXISTS (
+                SELECT 1 FROM UserFollowJpaEntity uf
+                WHERE uf.followerUserId = :requesterUserId
+                  AND uf.followedUserId = r.userId
+              )
+            )
+          )
           AND (:verifiedOnly = FALSE OR r.isVerifiedOnSite = TRUE)
         ORDER BY r.createdAt DESC, r.id ASC
     """,
@@ -38,7 +50,19 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
         SELECT COUNT(DISTINCT r.id) FROM ReviewJpaEntity r
         JOIN ReviewTargetJpaEntity rt ON rt.reviewId = r.id AND rt.targetId = :targetId
         WHERE r.status = 'ACTIVE'
-          AND (r.visibility = 'PUBLIC' OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId))
+          AND (
+            r.visibility = 'PUBLIC'
+            OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId)
+            OR (
+              :requesterUserId IS NOT NULL
+              AND r.visibility = 'FOLLOWERS'
+              AND EXISTS (
+                SELECT 1 FROM UserFollowJpaEntity uf
+                WHERE uf.followerUserId = :requesterUserId
+                  AND uf.followedUserId = r.userId
+              )
+            )
+          )
           AND (:verifiedOnly = FALSE OR r.isVerifiedOnSite = TRUE)
     """)
     Page<Object[]> findReviewsByTargetNewest(
@@ -52,7 +76,19 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
         SELECT r, rt FROM ReviewJpaEntity r
         JOIN ReviewTargetJpaEntity rt ON rt.reviewId = r.id AND rt.targetId = :targetId
         WHERE r.status = 'ACTIVE'
-          AND (r.visibility = 'PUBLIC' OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId))
+          AND (
+            r.visibility = 'PUBLIC'
+            OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId)
+            OR (
+              :requesterUserId IS NOT NULL
+              AND r.visibility = 'FOLLOWERS'
+              AND EXISTS (
+                SELECT 1 FROM UserFollowJpaEntity uf
+                WHERE uf.followerUserId = :requesterUserId
+                  AND uf.followedUserId = r.userId
+              )
+            )
+          )
           AND (:verifiedOnly = FALSE OR r.isVerifiedOnSite = TRUE)
         ORDER BY rt.rating DESC, r.createdAt DESC, r.id ASC
     """,
@@ -60,7 +96,19 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
         SELECT COUNT(DISTINCT r.id) FROM ReviewJpaEntity r
         JOIN ReviewTargetJpaEntity rt ON rt.reviewId = r.id AND rt.targetId = :targetId
         WHERE r.status = 'ACTIVE'
-          AND (r.visibility = 'PUBLIC' OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId))
+          AND (
+            r.visibility = 'PUBLIC'
+            OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId)
+            OR (
+              :requesterUserId IS NOT NULL
+              AND r.visibility = 'FOLLOWERS'
+              AND EXISTS (
+                SELECT 1 FROM UserFollowJpaEntity uf
+                WHERE uf.followerUserId = :requesterUserId
+                  AND uf.followedUserId = r.userId
+              )
+            )
+          )
           AND (:verifiedOnly = FALSE OR r.isVerifiedOnSite = TRUE)
     """)
     Page<Object[]> findReviewsByTargetRatingDesc(
@@ -74,7 +122,19 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
         SELECT r, rt FROM ReviewJpaEntity r
         JOIN ReviewTargetJpaEntity rt ON rt.reviewId = r.id AND rt.targetId = :targetId
         WHERE r.status = 'ACTIVE'
-          AND (r.visibility = 'PUBLIC' OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId))
+          AND (
+            r.visibility = 'PUBLIC'
+            OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId)
+            OR (
+              :requesterUserId IS NOT NULL
+              AND r.visibility = 'FOLLOWERS'
+              AND EXISTS (
+                SELECT 1 FROM UserFollowJpaEntity uf
+                WHERE uf.followerUserId = :requesterUserId
+                  AND uf.followedUserId = r.userId
+              )
+            )
+          )
           AND (:verifiedOnly = FALSE OR r.isVerifiedOnSite = TRUE)
         ORDER BY rt.rating ASC, r.createdAt DESC, r.id ASC
     """,
@@ -82,7 +142,19 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
         SELECT COUNT(DISTINCT r.id) FROM ReviewJpaEntity r
         JOIN ReviewTargetJpaEntity rt ON rt.reviewId = r.id AND rt.targetId = :targetId
         WHERE r.status = 'ACTIVE'
-          AND (r.visibility = 'PUBLIC' OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId))
+          AND (
+            r.visibility = 'PUBLIC'
+            OR (:requesterUserId IS NOT NULL AND r.userId = :requesterUserId)
+            OR (
+              :requesterUserId IS NOT NULL
+              AND r.visibility = 'FOLLOWERS'
+              AND EXISTS (
+                SELECT 1 FROM UserFollowJpaEntity uf
+                WHERE uf.followerUserId = :requesterUserId
+                  AND uf.followedUserId = r.userId
+              )
+            )
+          )
           AND (:verifiedOnly = FALSE OR r.isVerifiedOnSite = TRUE)
     """)
     Page<Object[]> findReviewsByTargetRatingAsc(

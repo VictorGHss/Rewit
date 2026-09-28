@@ -179,6 +179,15 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 #### Resposta (`200 OK`)
 Retorna a representação pública da avaliação com alvos, notas, comentários, identificação do autor e o status `isVerifiedOnSite` (sem expor coordenadas do usuário).
 
+#### Políticas de Visibilidade e Autorização (Step 15.0):
+* **`PUBLIC`**: Visível para qualquer usuário autenticado.
+* **`PRIVATE`**: Visível exclusivamente para o autor da avaliação. Terceiros (mesmo seguidores) recebem `403 Forbidden` (`FORBIDDEN`).
+* **`FOLLOWERS`**: O acesso a publicações com visibilidade `FOLLOWERS` depende do relacionamento persistido entre requester e autor da Review (`user_follows`):
+  * **Seguidor ativo**: Consegue visualizar a publicação (`200 OK`).
+  * **Autor**: Sempre consegue visualizar sua própria publicação (`200 OK`).
+  * **Não-seguidor**: Recebe `403 Forbidden` (`FORBIDDEN`).
+  * **Anonimização**: Se `isAnonymous = true`, a identidade do autor permanece anônima (`id = null`, `handle = null`, `displayName = "Anônimo"`), mesmo que o requester seja um seguidor ativo.
+
 ```json
 {
   "id": "e4b1a8d0-6f2c-4e1b-9a3d-5c7e8f9a0b1c",
@@ -260,8 +269,10 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
 
 #### Regras de Visibilidade e Anonimização:
 * Reviews com `status` diferente de `ACTIVE` (`UNDER_REVIEW` e `REMOVED`) são rigorosamente omitidas da listagem pública.
-* Apenas avaliações `PUBLIC` (ou de autoria do próprio requester autenticado) são retornadas.
-* Quando `isAnonymous: true`, a identidade pública do autor é mascarada (`displayName: "Anônimo"` e campos `id`, `handle`, `avatarUrl` nulos). Coordenadas brutas nunca são expostas.
+* Avaliações com visibilidade `PUBLIC` são acessíveis publicamente.
+* Avaliações com visibilidade `FOLLOWERS` (Step 15.0) dependem do relacionamento de seguidor persistido (`user_follows`): são exibidas exclusivamente para o próprio autor e para usuários autenticados que seguem o autor ativamente. Usuários não seguidores não têm acesso (403 no endpoint individual e omitidas na listagem por target).
+* Avaliações com visibilidade `PRIVATE` permanecem restritas ao autor, mesmo que haja relação de seguidor.
+* Quando `isAnonymous: true`, a identidade pública do autor é mascarada (`displayName: "Anônimo"` e campos `id`, `handle`, `avatarUrl` nulos). Coordenadas brutas nunca são expostas, mesmo para seguidores.
 * O array `targets` de cada item da listagem reflete especificamente o alvo consultado.
 
 #### Performance e Complexidade de Consultas:
@@ -379,6 +390,6 @@ Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
 |---|---|---|
 | `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas, página negativa (`page < 0`), tamanho inválido (`size <= 0` ou `size > 50`) ou ordenação não suportada | `validation-error` / `INVALID_PAGE` / `INVALID_SIZE` / `PAGE_SIZE_EXCEEDED` / `INVALID_SORT` |
 | `401 Unauthorized` | Requisição sem token JWT válido no header `Authorization` | N/A (Spring Security filter) |
-| `403 Forbidden` | Tentativa de consultar Review com `visibility=PRIVATE` ou `visibility=FOLLOWERS` por usuário que não seja o autor | `FORBIDDEN` |
+| `403 Forbidden` | Tentativa de consultar Review com `visibility=PRIVATE` por usuário que não seja o autor, ou com `visibility=FOLLOWERS` por usuário que não seja seguidor ativo do autor nem o próprio autor | `FORBIDDEN` |
 | `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente ou alvo inexistente na consulta de stats ou reviews | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
 | `422 Unprocessable Entity` | Violação de regra de negócio do domínio: alvo duplicado no mesmo Review ou nota com mais de 1 casa decimal | `DUPLICATE_REVIEW_TARGET` / `INVALID_RATING_PRECISION` |

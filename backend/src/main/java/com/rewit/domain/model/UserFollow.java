@@ -16,6 +16,10 @@ public class UserFollow {
     private final Instant createdAt;
 
     public UserFollow(UUID id, UUID followerUserId, UUID followedUserId) {
+        this(id, followerUserId, followedUserId, Instant.now());
+    }
+
+    public UserFollow(UUID id, UUID followerUserId, UUID followedUserId, Instant createdAt) {
         if (followerUserId == null || followedUserId == null) {
             throw new BusinessException("Os identificadores de seguidor e seguido são obrigatórios", "MISSING_FOLLOW_IDS");
         }
@@ -26,7 +30,7 @@ public class UserFollow {
         this.id = id != null ? id : UUID.randomUUID();
         this.followerUserId = followerUserId;
         this.followedUserId = followedUserId;
-        this.createdAt = Instant.now();
+        this.createdAt = createdAt != null ? createdAt : Instant.now();
     }
 
     public UUID getId() {

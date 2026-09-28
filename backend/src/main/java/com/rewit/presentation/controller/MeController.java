@@ -10,9 +10,12 @@ import com.rewit.presentation.dto.user.UpdateProfileRequest;
 import com.rewit.presentation.dto.user.UserProfileResponse;
 import com.rewit.application.dto.ReviewDto.ReviewPublicView;
 import com.rewit.application.dto.common.PageResult;
+import com.rewit.application.dto.social.FollowUserSummaryView;
 import com.rewit.application.service.ReviewService;
+import com.rewit.application.service.UserFollowService;
 import com.rewit.presentation.dto.common.PagedResponse;
 import com.rewit.presentation.dto.review.ReviewPresentationDtos.ReviewResponse;
+import com.rewit.presentation.dto.social.FollowUserSummaryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -36,10 +39,16 @@ public class MeController {
 
     private final UserService userService;
     private final ReviewService reviewService;
+    private final UserFollowService userFollowService;
 
-    public MeController(UserService userService, ReviewService reviewService) {
+    public MeController(
+            UserService userService,
+            ReviewService reviewService,
+            UserFollowService userFollowService
+    ) {
         this.userService = Objects.requireNonNull(userService, "userService must not be null");
         this.reviewService = Objects.requireNonNull(reviewService, "reviewService must not be null");
+        this.userFollowService = Objects.requireNonNull(userFollowService, "userFollowService must not be null");
     }
 
     @GetMapping
@@ -72,6 +81,30 @@ public class MeController {
                 pageResult.totalPages(),
                 pageResult.isLast()
         ));
+    }
+
+    @GetMapping("/following")
+    @Operation(summary = "Listar usuários que o usuário autenticado segue", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<PagedResponse<FollowUserSummaryResponse>> getMyFollowing(
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "10") int size,
+            Authentication authentication
+    ) {
+        UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
+        PageResult<FollowUserSummaryView> pageResult = userFollowService.getFollowing(authenticatedUserId, page, size);
+        return ResponseEntity.ok(UserFollowController.toPagedResponse(pageResult));
+    }
+
+    @GetMapping("/followers")
+    @Operation(summary = "Listar seguidores do usuário autenticado", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<PagedResponse<FollowUserSummaryResponse>> getMyFollowers(
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "10") int size,
+            Authentication authentication
+    ) {
+        UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
+        PageResult<FollowUserSummaryView> pageResult = userFollowService.getFollowers(authenticatedUserId, page, size);
+        return ResponseEntity.ok(UserFollowController.toPagedResponse(pageResult));
     }
 
     @PatchMapping("/profile")
