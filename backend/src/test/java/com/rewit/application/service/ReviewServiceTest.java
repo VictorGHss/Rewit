@@ -3,13 +3,16 @@ package com.rewit.application.service;
 import com.rewit.application.dto.ReviewDto.CreateReviewCommand;
 import com.rewit.application.dto.ReviewDto.CreateReviewTargetCommand;
 import com.rewit.application.dto.ReviewDto.ReviewDetailView;
+import com.rewit.application.dto.ReviewDto.TargetStatsView;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.RateableTargetRepository;
+import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.model.RateableTargetStats;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.User;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +51,9 @@ class ReviewServiceTest {
 
     @Mock
     private PlaceRepository placeRepository;
+
+    @Mock
+    private RateableTargetStatsRepository rateableTargetStatsRepository;
 
     @InjectMocks
     private ReviewService reviewService;
@@ -322,5 +328,80 @@ class ReviewServiceTest {
         assertEquals("DUPLICATE_REVIEW_TARGET", ex.getErrorCode());
 
         verifyNoInteractions(reviewRepository, reviewTargetRepository);
+    }
+
+    @Test
+    @DisplayName("11. Atualização de estatísticas em ordem determinística (alfabética de UUID) para prevenção de deadlocks")
+    void shouldRecalculateStatsInDeterministicOrderWhenReviewCreated() {
+        when(userRepository.findById(authorUserId)).thenReturn(Optional.of(activeUser));
+
+        UUID uuidA = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        UUID uuidB = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
+        when(rateableTargetRepository.existsById(uuidA)).thenReturn(true);
+        when(rateableTargetRepository.existsById(uuidB)).thenReturn(true);
+        when(reviewRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(reviewTargetRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // Enviando na ordem invertida [uuidB, uuidA]
+        CreateReviewCommand cmd = new CreateReviewCommand(
+                authorUserId,
+                null,
+                "Multi-target determinístico",
+                false,
+                "PUBLIC",
+                List.of(
+                        new CreateReviewTargetCommand(uuidB, new BigDecimal("4.0"), "Target B"),
+                        new CreateReviewTargetCommand(uuidA, new BigDecimal("5.0"), "Target A")
+                )
+        );
+
+        reviewService.createReview(cmd);
+
+        // Deve chamar recalculateAndSave rigorosamente na ordem determinística [uuidA, uuidB]
+        org.mockito.InOrder inOrder = inOrder(rateableTargetStatsRepository);
+        inOrder.verify(rateableTargetStatsRepository).recalculateAndSave(uuidA);
+        inOrder.verify(rateableTargetStatsRepository).recalculateAndSave(uuidB);
+    }
+
+    @Test
+    @DisplayName("12. Consulta de estatísticas quando o alvo possui estatísticas calculadas")
+    void shouldReturnTargetStatsWhenFound() {
+        UUID targetId = UUID.randomUUID();
+        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        RateableTargetStats stats = new RateableTargetStats(targetId, new BigDecimal("4.50"), 12);
+        when(rateableTargetStatsRepository.findByTargetId(targetId)).thenReturn(Optional.of(stats));
+
+        TargetStatsView view = reviewService.getTargetStats(targetId);
+
+        assertEquals(targetId, view.targetId());
+        assertEquals(new BigDecimal("4.50"), view.averageRating());
+        assertEquals(12, view.reviewsCount());
+        assertNotNull(view.lastCalculatedAt());
+    }
+
+    @Test
+    @DisplayName("13. Consulta de estatísticas quando o alvo existe mas ainda não possui avaliações (default 0.00 / 0)")
+    void shouldReturnDefaultStatsWhenTargetExistsWithoutStats() {
+        UUID targetId = UUID.randomUUID();
+        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetStatsRepository.findByTargetId(targetId)).thenReturn(Optional.empty());
+
+        TargetStatsView view = reviewService.getTargetStats(targetId);
+
+        assertEquals(targetId, view.targetId());
+        assertEquals(new BigDecimal("0.00"), view.averageRating());
+        assertEquals(0, view.reviewsCount());
+        assertNull(view.lastCalculatedAt());
+    }
+
+    @Test
+    @DisplayName("14. Consulta de estatísticas rejeitada quando o alvo não existe em rateable_targets")
+    void shouldThrowWhenTargetNotFoundOnGetTargetStats() {
+        UUID missingId = UUID.randomUUID();
+        when(rateableTargetRepository.existsById(missingId)).thenReturn(false);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> reviewService.getTargetStats(missingId));
+        assertEquals("RATEABLE_TARGET_NOT_FOUND", ex.getErrorCode());
     }
 }

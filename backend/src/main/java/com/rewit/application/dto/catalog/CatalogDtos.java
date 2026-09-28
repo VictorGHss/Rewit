@@ -86,4 +86,10 @@ public final class CatalogDtos {
             UUID placeId,
             UUID reportedByUserId
     ) {}
+
+    public record SpatialValidationResult(
+            double distanceMeters,
+            boolean isWithinRadius,
+            int validationRadiusMeters
+    ) {}
 }

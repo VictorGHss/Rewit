@@ -1,6 +1,6 @@
 # API REST de Avaliações Multi-Alvo (docs/api/reviews.md)
 
-Este documento especifica os contratos da API RESTful inicial para publicação e consulta de avaliações multi-alvo (**Reviews**) do ecossistema **Rewit** (Step 11.0).
+Este documento especifica os contratos da API RESTful para publicação e consulta de avaliações multi-alvo (**Reviews**) do ecossistema **Rewit**, incorporando a verificação de presença física e emissão de check-in espacial (**Step 12.0**).
 
 ---
 
@@ -11,13 +11,14 @@ A camada REST de Reviews segue rigorosamente a arquitetura hexagonal do projeto:
 ```text
 ReviewController (presentation)
   -> ReviewService (application)
-      -> Ports (ReviewRepository, ReviewTargetRepository, RateableTargetRepository, PlaceRepository, ProfileRepository)
-          -> Adapters (ReviewRepositoryAdapter, etc.)
+      -> Ports (ReviewRepository, CheckInRepository, ReviewTargetRepository, RateableTargetRepository, PlaceRepository, ProfileRepository)
+          -> Adapters (ReviewRepositoryAdapter, CheckInRepositoryAdapter, etc.)
 ```
 
 ### 1.1 Autenticação e Prevenção de Spoofing (IDOR)
 * O autor da avaliação (`user_id`) é extraído **exclusivamente do contexto de autenticação JWT** (`authentication.getName()`).
 * Não é aceito `userId` no payload de requisição; tentativas de suplantar identidade são impedidas na fronteira do controller.
+* O `user_id` do `CheckIn` é sempre idêntico ao `user_id` da `Review`.
 
 ### 1.2 Anonimização (`isAnonymous`)
 * O vínculo relacional interno com a conta do usuário (`reviews.user_id`) é **sempre preservado** no banco de dados para integridade, auditoria e moderação.
@@ -31,32 +32,89 @@ ReviewController (presentation)
 * **`PRIVATE`**: Apenas o autor autenticado pode consultar o Review. Consultas por terceiros retornam `403 Forbidden`.
 * **`FOLLOWERS`**: Como o subsistema de seguidores não está implementado neste step, consultas de terceiros retornam `403 Forbidden` com a mensagem `"Esta avaliação é visível apenas para seguidores"`. Apenas o próprio autor tem acesso garantido.
 
+### 1.4 Privacidade e Minimização de Coordenadas (LGPD / ADR-005)
+* **Localização Sob Demanda**: O usuário fornece suas coordenadas geográficas **explicitamente** no payload de criação. O backend nunca rastreia nem armazena trilhas contínuas de GPS.
+* **Privacidade de Coordenadas**: As coordenadas precisas do usuário (`userLatitude`, `userLongitude`, `locationAccuracyMeters`) são dados sensíveis. Elas **NUNCA são expostas publicamente** na `ReviewResponse`. Apenas o fato verificado (`isVerifiedOnSite: true` ou `false`) é retornado pela API.
+
 ---
 
-## 2. Endpoints da API REST (`/api/v1/reviews`)
+## 2. Regras de Negócio e Verificação de Presença Física (Check-in)
+
+### 2.1 Avaliação Mínima para Check-in
+* Conforme a **Regra 18 do `PROJECT_RULES.md`**, `PRODUCT_VISION.md` e `ADR-005`, para que a presença seja verificada e o check-in computado, o usuário deve atribuir no mínimo a nota por estrelas ao local ou serviço (através de pelo menos um `ReviewTarget` com `rating` entre 1.0 e 5.0), sendo o texto livre (`experienceText`) opcional.
+* Não existe limiar de nota de corte arbitrário (ex: nota >= 3.0 ou 4.0). Qualquer avaliação válida com notas no intervalo permitido (1.0 a 5.0) é elegível para verificação presencial.
+
+### 2.2 Quando o CheckIn é Criado
+Um registro de `CheckIn` é criado e avaliado **exclusivamente** quando:
+1. `contextPlaceId` estiver preenchido (não nulo);
+2. Coordenadas (`userLatitude` e `userLongitude`) forem explicitamente enviadas pelo cliente.
+
+### 2.3 Presença Verificada vs. Não Verificada
+A validação espacial é executada no banco através do **PostgreSQL/PostGIS**, utilizando a função nativa `ST_DWithin` com o `validation_radius_meters` configurado para aquele estabelecimento específico e `ST_Distance` para cálculo métrico da distância até o centróide:
+
+* **Presença Verificada (`isWithinRadius == true`)**:
+  * `CheckIn.status`: `VERIFIED`
+  * `CheckIn.verificationMethod`: `GPS`
+  * `CheckIn.verifiedAt`: timestamp atual (`Instant.now()`)
+  * `CheckIn.distanceToCentroidMeters`: distância real calculada em metros pelo PostGIS
+  * `Review.isVerifiedOnSite`: `true`
+* **Tentativa Não Verificada / Fora do Raio (`isWithinRadius == false`)**:
+  * `CheckIn.status`: `REJECTED`
+  * `CheckIn.verificationMethod`: `GPS`
+  * `CheckIn.verifiedAt`: `null` (CheckIn rejeitado não possui data de verificação)
+  * `CheckIn.distanceToCentroidMeters`: distância calculada excedente
+  * `Review.isVerifiedOnSite`: `false`
+* **Sem Coordenadas ou Sem `contextPlaceId`**:
+  * A `Review` é criada normalmente.
+  * Nenhum `CheckIn` é gerado.
+  * `Review.isVerifiedOnSite`: `false`.
+
+### 2.4 Fonte da Verdade de `isVerifiedOnSite`
+* `CheckIn(status = VERIFIED)` é a **única fonte da verdade** para a presença confirmada no local.
+* `Review.isVerifiedOnSite` é estritamente uma **projeção/cache de leitura**, sincronizada via agregado de domínio (`attachCheckIn`) e no banco de dados via triggers relacionais (`trg_sync_check_in_to_review_verified` e `trg_prevent_unverified_review_flag`).
+* O cliente **não pode forjar** `isVerifiedOnSite`. O campo não é aceito no payload de entrada e qualquer valor malicioso é ignorado.
+
+### 2.5 Agregação e Métricas de Alvos Avaliáveis (Step 13.0 / ADR-009)
+* Na mesma transação `@Transactional` de publicação da Review, todos os alvos avaliados (`ReviewTargets`) têm suas estatísticas recalculadas e persistidas atomicamente em `rateable_target_stats`.
+* **Serialização e Prevenção de Lost Update**: O sistema assegura a linha de estatística e adquire lock pessimista (`SELECT FOR UPDATE`) antes do recálculo agregado via SQL nativo (`ROUND(AVG(rating), 2)` e `COUNT(id)`).
+* **Prevenção de Deadlocks**: Em publicações multi-alvo, a lista de `target_id`s é rigorosamente ordenada de forma determinística (ordem alfabética de UUID) antes de adquirir os locks.
+* **Isolamento de Status**: Apenas publicações com `status = 'ACTIVE'` participam do cálculo. Reviews `UNDER_REVIEW` (denunciadas) ou `REMOVED` (excluídas) não distorcem as médias.
+* **Avaliações Anônimas**: Publicações com `isAnonymous: true` computam normalmente para a média e contagem do alvo (o anonimato protege a identidade pública do autor, sem invalidar sua avaliação).
+* **Peso Unitário**: Avaliações com ou sem presença física verificada possuem peso unitário idêntico (1).
+
+---
+
+## 3. Endpoints da API REST (`/api/v1/reviews` e `/api/v1/targets`)
 
 Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`), exigem Bearer Token JWT e seguem o padrão RFC 7807 (`ProblemDetail`) em caso de erro.
 
-### 2.1 Criar Publicação de Avaliação Multi-Alvo
+### 3.1 Criar Publicação de Avaliação Multi-Alvo (com Check-in opcional)
 * **Método**: `POST`
 * **Rota**: `/api/v1/reviews`
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
 
-#### Regras de Validação:
-* Pelo menos um alvo avaliado (`targets`) obrigatório.
-* Não é permitido avaliar o mesmo alvo mais de uma vez no mesmo Review.
-* Cada nota (`rating`) deve ser entre `1.0` e `5.0`, com no máximo 1 casa decimal.
-* Caso `contextPlaceId` seja fornecido, o local deve existir no catálogo (caso contrário, retorna `404 Not Found`).
-* Todos os alvos referenciados em `targets` devem existir no catálogo (`rateable_targets`).
-* O status inicial é sempre `ACTIVE`.
+#### Campos da Requisição (`CreateReviewRequest`):
+| Campo | Tipo | Obrigatório | Descrição / Validação |
+|---|---|---|---|
+| `contextPlaceId` | UUID | Não | ID do local físico de contexto da avaliação |
+| `experienceText` | String | Não | Texto geral da experiência |
+| `isAnonymous` | Boolean | Não | Publicar anonimamente (default: `false`) |
+| `visibility` | String | Não | Visibilidade (`PUBLIC`, `PRIVATE`, `FOLLOWERS` - default: `PUBLIC`) |
+| `userLatitude` | Double | Não | Latitude do usuário sob demanda (-90.0 a 90.0) |
+| `userLongitude` | Double | Não | Longitude do usuário sob demanda (-180.0 a 180.0) |
+| `locationAccuracyMeters` | Double | Não | Precisão reportada do GPS em metros (>= 0.0) |
+| `targets` | Array | Sim | Pelo menos um alvo avaliado com nota |
 
-#### Requisição
+#### Exemplo de Requisição (com Localização para Check-in):
 ```json
 {
   "contextPlaceId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
   "experienceText": "Excelente experiência no jantar de sexta-feira!",
   "isAnonymous": false,
   "visibility": "PUBLIC",
+  "userLatitude": -25.4384,
+  "userLongitude": -49.2849,
+  "locationAccuracyMeters": 8.5,
   "targets": [
     {
       "rateableTargetId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
@@ -72,7 +130,7 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 }
 ```
 
-#### Resposta (`201 Created`)
+#### Resposta (`201 Created` - Presença Confirmada)
 * **Headers**: `Location: /api/v1/reviews/{id}`
 ```json
 {
@@ -87,6 +145,7 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
   "contextPlaceId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
   "experienceText": "Excelente experiência no jantar de sexta-feira!",
   "isAnonymous": false,
+  "isVerifiedOnSite": true,
   "visibility": "PUBLIC",
   "status": "ACTIVE",
   "createdAt": "2026-09-28T15:10:00Z",
@@ -112,39 +171,39 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 
 ---
 
-### 2.2 Consultar Publicação de Avaliação por ID
+### 3.2 Consultar Publicação de Avaliação por ID
 * **Método**: `GET`
 * **Rota**: `/api/v1/reviews/{id}`
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
 
 #### Resposta (`200 OK`)
-Retorna a representação pública da avaliação com alvos, notas, comentários e identificação do autor (compatível com a regra de anonimização e visibilidade).
+Retorna a representação pública da avaliação com alvos, notas, comentários, identificação do autor e o status `isVerifiedOnSite` (sem expor coordenadas do usuário).
 
-Exemplo de resposta quando `isAnonymous: true`:
 ```json
 {
   "id": "e4b1a8d0-6f2c-4e1b-9a3d-5c7e8f9a0b1c",
   "author": {
-    "id": null,
-    "handle": null,
-    "displayName": "Anônimo",
-    "avatarUrl": null,
-    "isAnonymous": true
+    "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+    "handle": "@maria_silva",
+    "displayName": "Maria Silva",
+    "avatarUrl": "https://cdn.rewit.app/avatars/maria.webp",
+    "isAnonymous": false
   },
-  "contextPlaceId": null,
-  "experienceText": "Avaliação anônima sincera.",
-  "isAnonymous": true,
+  "contextPlaceId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
+  "experienceText": "Excelente experiência no jantar de sexta-feira!",
+  "isAnonymous": false,
+  "isVerifiedOnSite": true,
   "visibility": "PUBLIC",
   "status": "ACTIVE",
-  "createdAt": "2026-09-28T15:15:00Z",
-  "updatedAt": "2026-09-28T15:15:00Z",
+  "createdAt": "2026-09-28T15:10:00Z",
+  "updatedAt": "2026-09-28T15:10:00Z",
   "targets": [
     {
       "id": "3b2c1d0e-4f5a-6b7c-8d9e-0f1a2b3c4d5e",
       "targetId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
-      "rating": 4.0,
-      "specificComment": "Bom café espresso.",
-      "createdAt": "2026-09-28T15:15:00Z"
+      "rating": 5.0,
+      "specificComment": "Atendimento e ambiente impecáveis.",
+      "createdAt": "2026-09-28T15:10:00Z"
     }
   ]
 }
@@ -152,15 +211,42 @@ Exemplo de resposta quando `isAnonymous: true`:
 
 ---
 
-## 3. Tratamento de Erros e Códigos HTTP
+### 3.3 Consultar Estatísticas de um Alvo Avaliável (Step 13.0)
+* **Método**: `GET`
+* **Rota**: `/api/v1/targets/{id}/stats`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+
+#### Resposta (`200 OK` - Com Avaliações Existentes)
+```json
+{
+  "targetId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
+  "averageRating": 4.50,
+  "reviewsCount": 12,
+  "lastCalculatedAt": "2026-09-28T18:00:00Z"
+}
+```
+
+#### Resposta (`200 OK` - Alvo Existente Sem Nenhuma Avaliação)
+Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu avaliações legítimas:
+```json
+{
+  "targetId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
+  "averageRating": 0.00,
+  "reviewsCount": 0,
+  "lastCalculatedAt": null
+}
+```
+
+---
+
+## 4. Tratamento de Erros e Códigos HTTP
 
 Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
 
 | Código HTTP | Cenário | Código da Aplicação |
 |---|---|---|
-| `400 Bad Request` | Payload sintaticamente malformado, rating fora do intervalo (1.0 - 5.0) via Bean Validation ou lista de alvos vazia | `validation-error` |
+| `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas (latitude fora de [-90, 90] ou longitude fora de [-180, 180]), rating fora do intervalo (1.0 - 5.0) ou lista de alvos vazia | `validation-error` |
 | `401 Unauthorized` | Requisição sem token JWT válido no header `Authorization` | N/A (Spring Security filter) |
 | `403 Forbidden` | Tentativa de consultar Review com `visibility=PRIVATE` ou `visibility=FOLLOWERS` por usuário que não seja o autor | `FORBIDDEN` |
-| `404 Not Found` | Review inexistente (`id` não encontrado) ou `contextPlaceId` inexistente | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` |
+| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente ou alvo inexistente na consulta de stats | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
 | `422 Unprocessable Entity` | Violação de regra de negócio do domínio: alvo duplicado no mesmo Review ou nota com mais de 1 casa decimal | `DUPLICATE_REVIEW_TARGET` / `INVALID_RATING_PRECISION` |
-

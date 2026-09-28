@@ -108,6 +108,20 @@ public class PlaceRepositoryAdapter implements PlaceRepository {
                 .toList();
     }
 
+    @Override
+    public Optional<CatalogDtos.SpatialValidationResult> validateProximity(UUID placeId, double latitude, double longitude) {
+        if (placeId == null) {
+            return Optional.empty();
+        }
+        return placeJpaRepository.validateProximity(placeId, latitude, longitude)
+                .map(tuple -> {
+                    double distanceMeters = ((Number) tuple.get("distance_meters")).doubleValue();
+                    boolean isWithinRadius = Boolean.TRUE.equals(tuple.get("is_within_radius", Boolean.class));
+                    int validationRadiusMeters = ((Number) tuple.get("validation_radius_meters")).intValue();
+                    return new CatalogDtos.SpatialValidationResult(distanceMeters, isWithinRadius, validationRadiusMeters);
+                });
+    }
+
     private static CatalogDtos.NearbyPlaceResult toNearbyResult(Tuple tuple) {
         Object idObj = tuple.get("id");
         UUID id = idObj instanceof UUID u ? u : UUID.fromString(idObj.toString());

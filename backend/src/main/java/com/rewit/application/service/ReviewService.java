@@ -6,9 +6,11 @@ import com.rewit.application.dto.ReviewDto.ReviewDetailView;
 import com.rewit.application.dto.ReviewDto.ReviewTargetView;
 import com.rewit.application.dto.ReviewDto.PublicAuthorView;
 import com.rewit.application.dto.ReviewDto.ReviewPublicView;
+import com.rewit.application.dto.ReviewDto.TargetStatsView;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.RateableTargetRepository;
+import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
 import com.rewit.application.port.UserRepository;
@@ -23,12 +25,21 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+
+import com.rewit.application.dto.catalog.CatalogDtos;
+import com.rewit.application.port.CheckInRepository;
+import com.rewit.domain.enums.CheckInStatus;
+import com.rewit.domain.enums.VerificationMethod;
+import com.rewit.domain.model.CheckIn;
 
 /**
  * Serviço de aplicação para orquestração de publicações de avaliação multi-alvo (Reviews).
@@ -43,6 +54,8 @@ public class ReviewService {
     private final RateableTargetRepository rateableTargetRepository;
     private final PlaceRepository placeRepository;
     private final ProfileRepository profileRepository;
+    private final CheckInRepository checkInRepository;
+    private final RateableTargetStatsRepository rateableTargetStatsRepository;
 
     @Autowired
     public ReviewService(ReviewRepository reviewRepository,
@@ -50,13 +63,17 @@ public class ReviewService {
                          UserRepository userRepository,
                          RateableTargetRepository rateableTargetRepository,
                          PlaceRepository placeRepository,
-                         ProfileRepository profileRepository) {
+                         ProfileRepository profileRepository,
+                         CheckInRepository checkInRepository,
+                         RateableTargetStatsRepository rateableTargetStatsRepository) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
         this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.rateableTargetRepository = Objects.requireNonNull(rateableTargetRepository, "rateableTargetRepository must not be null");
         this.placeRepository = Objects.requireNonNull(placeRepository, "placeRepository must not be null");
         this.profileRepository = profileRepository;
+        this.checkInRepository = checkInRepository;
+        this.rateableTargetStatsRepository = rateableTargetStatsRepository;
     }
 
     public ReviewService(ReviewRepository reviewRepository,
@@ -64,7 +81,7 @@ public class ReviewService {
                          UserRepository userRepository,
                          RateableTargetRepository rateableTargetRepository,
                          PlaceRepository placeRepository) {
-        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, null);
+        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, null, null, null);
     }
 
     /**
@@ -133,9 +150,9 @@ public class ReviewService {
                 cmd.experienceText(),
                 cmd.isAnonymous(),
                 cmd.visibility(),
-                null,
-                null,
-                null
+                cmd.userLatitude(),
+                cmd.userLongitude(),
+                cmd.locationAccuracyMeters()
         );
 
         for (CreateReviewTargetCommand targetCmd : cmd.targets()) {
@@ -154,6 +171,58 @@ public class ReviewService {
         // 5. Persistência atômica
         Review savedReview = reviewRepository.save(review);
         List<ReviewTarget> savedTargets = reviewTargetRepository.saveAll(review.getTargets());
+
+        // 6. Avaliação de presença física e registro de CheckIn (Step 12.0)
+        if (checkInRepository != null && cmd.contextPlaceId() != null && cmd.userLatitude() != null && cmd.userLongitude() != null) {
+            CatalogDtos.SpatialValidationResult spatialResult = placeRepository
+                    .validateProximity(cmd.contextPlaceId(), cmd.userLatitude(), cmd.userLongitude())
+                    .orElseThrow(() -> new BusinessException("Local de contexto não encontrado para validação espacial", HttpStatus.NOT_FOUND, "PLACE_NOT_FOUND"));
+
+            CheckIn checkIn;
+            if (spatialResult.isWithinRadius()) {
+                checkIn = new CheckIn(
+                        UUID.randomUUID(),
+                        savedReview.getId(),
+                        author.getId(),
+                        cmd.contextPlaceId(),
+                        cmd.userLatitude(),
+                        cmd.userLongitude(),
+                        spatialResult.distanceMeters(),
+                        CheckInStatus.VERIFIED,
+                        VerificationMethod.GPS,
+                        Instant.now()
+                );
+            } else {
+                checkIn = new CheckIn(
+                        UUID.randomUUID(),
+                        savedReview.getId(),
+                        author.getId(),
+                        cmd.contextPlaceId(),
+                        cmd.userLatitude(),
+                        cmd.userLongitude(),
+                        spatialResult.distanceMeters(),
+                        CheckInStatus.REJECTED,
+                        VerificationMethod.GPS,
+                        null
+                );
+            }
+
+            CheckIn savedCheckIn = checkInRepository.save(checkIn);
+            savedReview.attachCheckIn(savedCheckIn);
+        }
+
+        // 7. Atualização determinística e consistente de estatísticas por alvo (Step 13.0)
+        if (rateableTargetStatsRepository != null) {
+            List<UUID> targetIdsToUpdate = savedTargets.stream()
+                    .map((ReviewTarget target) -> target.getTargetId())
+                    .distinct()
+                    .sorted(Comparator.comparing((UUID id) -> id.toString()))
+                    .toList();
+
+            for (UUID targetId : targetIdsToUpdate) {
+                rateableTargetStatsRepository.recalculateAndSave(targetId);
+            }
+        }
 
         return toDetailView(savedReview, savedTargets);
     }
@@ -226,6 +295,7 @@ public class ReviewService {
                 detail.contextPlaceId(),
                 detail.experienceText(),
                 detail.isAnonymous(),
+                detail.isVerifiedOnSite(),
                 detail.visibility(),
                 detail.status(),
                 detail.createdAt(),
@@ -269,6 +339,7 @@ public class ReviewService {
                 review.getContextPlaceId(),
                 review.getExperienceText(),
                 review.isAnonymous(),
+                review.isVerifiedOnSite(),
                 review.getVisibility(),
                 review.getStatus() != null ? review.getStatus().name() : "ACTIVE",
                 review.getCreatedAt(),
@@ -291,5 +362,34 @@ public class ReviewService {
         }
 
         return new PublicAuthorView(userId, null, null, null, false);
+    }
+
+    @Transactional(readOnly = true)
+    public TargetStatsView getTargetStats(UUID targetId) {
+        if (targetId == null) {
+            throw new BusinessException("O identificador do alvo avaliável é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_TARGET_ID");
+        }
+
+        if (!rateableTargetRepository.existsById(targetId)) {
+            throw new BusinessException("Alvo avaliável não encontrado", HttpStatus.NOT_FOUND, "RATEABLE_TARGET_NOT_FOUND");
+        }
+
+        if (rateableTargetStatsRepository == null) {
+            return new TargetStatsView(targetId, BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP), 0, null);
+        }
+
+        return rateableTargetStatsRepository.findByTargetId(targetId)
+                .map(stats -> new TargetStatsView(
+                        stats.getTargetId(),
+                        stats.getAverageRating(),
+                        stats.getReviewsCount(),
+                        stats.getLastCalculatedAt()
+                ))
+                .orElseGet(() -> new TargetStatsView(
+                        targetId,
+                        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                        0,
+                        null
+                ));
     }
 }

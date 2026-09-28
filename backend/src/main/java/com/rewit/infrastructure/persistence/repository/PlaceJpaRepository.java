@@ -65,4 +65,18 @@ public interface PlaceJpaRepository extends JpaRepository<PlaceJpaEntity, UUID> 
             @Param("radiusMeters") double radiusMeters,
             @Param("limit") int limit
     );
+
+    @Query(value = """
+        SELECT
+            p.validation_radius_meters AS validation_radius_meters,
+            ST_Distance(p.coordinates, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography) AS distance_meters,
+            ST_DWithin(p.coordinates, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography, p.validation_radius_meters) AS is_within_radius
+        FROM places p
+        WHERE p.id = :placeId
+    """, nativeQuery = true)
+    Optional<jakarta.persistence.Tuple> validateProximity(
+            @Param("placeId") UUID placeId,
+            @Param("latitude") double latitude,
+            @Param("longitude") double longitude
+    );
 }

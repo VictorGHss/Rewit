@@ -33,8 +33,22 @@ public final class ReviewDto {
             String experienceText,
             boolean isAnonymous,
             String visibility,
+            Double userLatitude,
+            Double userLongitude,
+            Double locationAccuracyMeters,
             List<CreateReviewTargetCommand> targets
-    ) {}
+    ) {
+        public CreateReviewCommand(
+                UUID authorUserId,
+                UUID contextPlaceId,
+                String experienceText,
+                boolean isAnonymous,
+                String visibility,
+                List<CreateReviewTargetCommand> targets
+        ) {
+            this(authorUserId, contextPlaceId, experienceText, isAnonymous, visibility, null, null, null, targets);
+        }
+    }
 
     public record ReviewTargetView(
             UUID id,
@@ -77,6 +91,7 @@ public final class ReviewDto {
             UUID contextPlaceId,
             String experienceText,
             boolean isAnonymous,
+            boolean isVerifiedOnSite,
             String visibility,
             String status,
             Instant createdAt,
@@ -92,5 +107,12 @@ public final class ReviewDto {
             boolean isAnonymous,
             boolean isVerifiedOnSite,
             Instant createdAt
+    ) {}
+
+    public record TargetStatsView(
+            UUID targetId,
+            BigDecimal averageRating,
+            int reviewsCount,
+            Instant lastCalculatedAt
     ) {}
 }

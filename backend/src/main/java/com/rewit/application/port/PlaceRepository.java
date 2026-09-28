@@ -27,4 +27,10 @@ public interface PlaceRepository {
             double radiusMeters,
             int limit
     );
+
+    Optional<com.rewit.application.dto.catalog.CatalogDtos.SpatialValidationResult> validateProximity(
+            UUID placeId,
+            double latitude,
+            double longitude
+    );
 }

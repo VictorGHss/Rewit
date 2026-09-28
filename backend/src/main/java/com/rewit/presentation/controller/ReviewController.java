@@ -69,6 +69,9 @@ public class ReviewController {
                 request.experienceText(),
                 request.isAnonymous(),
                 request.visibility(),
+                request.userLatitude(),
+                request.userLongitude(),
+                request.locationAccuracyMeters(),
                 targetCommands
         );
 
@@ -111,6 +114,7 @@ public class ReviewController {
                 view.contextPlaceId(),
                 view.experienceText(),
                 view.isAnonymous(),
+                view.isVerifiedOnSite(),
                 view.visibility(),
                 view.status(),
                 view.createdAt(),

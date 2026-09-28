@@ -34,6 +34,13 @@ public class RateableTargetStats {
         this.lastCalculatedAt = Instant.now();
     }
 
+    public RateableTargetStats(UUID targetId, BigDecimal averageRating, int reviewsCount, Instant lastCalculatedAt) {
+        this(targetId, averageRating, reviewsCount);
+        if (lastCalculatedAt != null) {
+            this.lastCalculatedAt = lastCalculatedAt;
+        }
+    }
+
     public void updateStats(BigDecimal newAverageRating, int newReviewsCount) {
         if (newAverageRating != null && (newAverageRating.compareTo(BigDecimal.ZERO) < 0 || newAverageRating.compareTo(BigDecimal.valueOf(5.0)) > 0)) {
             throw new BusinessException("A nota média agregada deve estar entre 0.00 e 5.00", "INVALID_AVERAGE_RATING");

@@ -36,9 +36,30 @@ public final class ReviewPresentationDtos {
             boolean isAnonymous,
             String visibility,
 
+            @DecimalMin(value = "-90.0", message = "Latitude mínima é -90.0")
+            @DecimalMax(value = "90.0", message = "Latitude máxima é 90.0")
+            Double userLatitude,
+
+            @DecimalMin(value = "-180.0", message = "Longitude mínima é -180.0")
+            @DecimalMax(value = "180.0", message = "Longitude máxima é 180.0")
+            Double userLongitude,
+
+            @DecimalMin(value = "0.0", message = "A precisão da localização não pode ser negativa")
+            Double locationAccuracyMeters,
+
             @NotEmpty(message = "A publicação deve conter pelo menos um alvo avaliado")
             List<@Valid CreateReviewTargetRequest> targets
-    ) {}
+    ) {
+        public CreateReviewRequest(
+                UUID contextPlaceId,
+                String experienceText,
+                boolean isAnonymous,
+                String visibility,
+                List<@Valid CreateReviewTargetRequest> targets
+        ) {
+            this(contextPlaceId, experienceText, isAnonymous, visibility, null, null, null, targets);
+        }
+    }
 
     public record ReviewAuthorResponse(
             UUID id,
@@ -70,6 +91,7 @@ public final class ReviewPresentationDtos {
             UUID contextPlaceId,
             String experienceText,
             boolean isAnonymous,
+            boolean isVerifiedOnSite,
             String visibility,
             String status,
             Instant createdAt,
