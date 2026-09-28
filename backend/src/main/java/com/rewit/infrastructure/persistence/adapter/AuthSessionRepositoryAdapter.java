@@ -82,6 +82,7 @@ public class AuthSessionRepositoryAdapter implements AuthSessionRepository {
     }
 
     private static AuthSession toDomain(AuthSessionJpaEntity entity) {
-        return entity != null ? entity.toDomain() : null;
+        Objects.requireNonNull(entity, "AuthSessionJpaEntity must not be null");
+        return entity.toDomain();
     }
 }

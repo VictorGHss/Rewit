@@ -4,8 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.argon2.Argon2PasswordEncoder;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -32,8 +31,8 @@ class Argon2BenchmarkTest {
         }
 
         int runs = 5;
-        List<Long> hashTimes = new ArrayList<>();
-        List<Long> matchTimes = new ArrayList<>();
+        long[] hashTimes = new long[runs];
+        long[] matchTimes = new long[runs];
 
         System.gc();
         Runtime runtime = Runtime.getRuntime();
@@ -43,12 +42,12 @@ class Argon2BenchmarkTest {
             long startHash = System.nanoTime();
             String hash = encoder.encode(testPassword);
             long endHash = System.nanoTime();
-            hashTimes.add((endHash - startHash) / 1_000_000);
+            hashTimes[i] = (endHash - startHash) / 1_000_000;
 
             long startMatch = System.nanoTime();
             boolean matches = encoder.matches(testPassword, hash);
             long endMatch = System.nanoTime();
-            matchTimes.add((endMatch - startMatch) / 1_000_000);
+            matchTimes[i] = (endMatch - startMatch) / 1_000_000;
 
             assertTrue(matches, "A senha gerada deve ser verificada com sucesso");
             assertNotNull(hash);
@@ -58,18 +57,14 @@ class Argon2BenchmarkTest {
         long approxMemDeltaBytes = Math.max(0, memAfter - memBefore);
 
         long totalHashTime = 0L;
-        for (Long t : hashTimes) {
-            if (t != null) {
-                totalHashTime += t;
-            }
+        for (long t : hashTimes) {
+            totalHashTime += t;
         }
         double avgHashTimeMs = runs > 0 ? (double) totalHashTime / runs : 0.0;
 
         long totalMatchTime = 0L;
-        for (Long t : matchTimes) {
-            if (t != null) {
-                totalMatchTime += t;
-            }
+        for (long t : matchTimes) {
+            totalMatchTime += t;
         }
         double avgMatchTimeMs = runs > 0 ? (double) totalMatchTime / runs : 0.0;
 
@@ -78,8 +73,8 @@ class Argon2BenchmarkTest {
                 memoryKiB, iterations, parallelism, saltLength, hashLength);
         System.out.printf("Avg Hashing Time: %.2f ms%n", avgHashTimeMs);
         System.out.printf("Avg Verification (Match) Time: %.2f ms%n", avgMatchTimeMs);
-        System.out.printf("Sample Hashing Times (ms): %s%n", hashTimes);
-        System.out.printf("Sample Match Times (ms): %s%n", matchTimes);
+        System.out.printf("Sample Hashing Times (ms): %s%n", Arrays.toString(hashTimes));
+        System.out.printf("Sample Match Times (ms): %s%n", Arrays.toString(matchTimes));
         System.out.printf("Approx Memory Delta: %.2f MB%n", approxMemDeltaBytes / (1024.0 * 1024.0));
         System.out.printf("=================================%n");
 

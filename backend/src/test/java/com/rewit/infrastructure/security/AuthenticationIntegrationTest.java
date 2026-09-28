@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.port.AuthSessionRepository;
 import com.rewit.application.port.ProfileRepository;
+import com.rewit.application.port.TokenService;
 import com.rewit.application.port.UserRepository;
+import com.rewit.domain.model.AuthSession;
 import com.rewit.domain.model.User;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.LogoutRequest;
@@ -60,7 +62,7 @@ class AuthenticationIntegrationTest {
     private AuthSessionRepository authSessionRepository;
 
     @Autowired
-    private com.rewit.application.port.TokenService tokenService;
+    private TokenService tokenService;
 
     @Test
     @DisplayName("Fluxo completo: Register -> Login -> Me -> Refresh -> Logout -> Rejeição de token antigo")
@@ -180,7 +182,7 @@ class AuthenticationIntegrationTest {
 
         // Validar no PostgreSQL que a sessão foi efetivamente revogada
         String rotatedHash = tokenService.hashRefreshToken(rotatedRefreshToken);
-        Optional<com.rewit.domain.model.AuthSession> revokedSession = authSessionRepository.findByTokenHash(rotatedHash);
+        Optional<AuthSession> revokedSession = authSessionRepository.findByTokenHash(rotatedHash);
         assertTrue(revokedSession.isPresent(), "A sessão deve existir no banco de dados");
         assertTrue(revokedSession.get().isRevoked(), "A sessão deve estar marcada como revogada após logout");
 

@@ -76,6 +76,7 @@ public class UserRepositoryAdapter implements UserRepository {
     }
 
     private static User toDomain(UserJpaEntity entity) {
-        return entity != null ? entity.toDomain() : null;
+        Objects.requireNonNull(entity, "UserJpaEntity must not be null");
+        return entity.toDomain();
     }
 }

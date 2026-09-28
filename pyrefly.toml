@@ -1,0 +1,8 @@
+project-includes = [
+    "services/vision/**/*.py",
+]
+python-interpreter-find-command = [
+    "python",
+    "-c",
+    "import sys, pathlib; v = pathlib.Path('services/vision/.venv'); print(v / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python'))",
+]

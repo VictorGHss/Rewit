@@ -96,6 +96,7 @@ public class ProfileRepositoryAdapter implements ProfileRepository {
     }
 
     private static Profile toDomain(ProfileJpaEntity entity) {
-        return entity != null ? entity.toDomain() : null;
+        Objects.requireNonNull(entity, "ProfileJpaEntity must not be null");
+        return entity.toDomain();
     }
 }
