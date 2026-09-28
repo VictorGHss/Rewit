@@ -55,6 +55,33 @@ public class GlobalExceptionHandler {
             return problem;
         }
 
+        if (lowerDetail.contains("uq_places_slug")) {
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Slug do local já está em uso");
+            problem.setTitle("Regra de Negócio Violada");
+            problem.setType(URI.create("https://api.rewit.app/errors/place_slug_already_exists"));
+            problem.setProperty("code", "PLACE_SLUG_ALREADY_EXISTS");
+            problem.setProperty("timestamp", Instant.now());
+            return problem;
+        }
+
+        if (lowerDetail.contains("uq_product_identifier")) {
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Identificador de produto (código de barras) já cadastrado");
+            problem.setTitle("Regra de Negócio Violada");
+            problem.setType(URI.create("https://api.rewit.app/errors/identifier_already_exists"));
+            problem.setProperty("code", "IDENTIFIER_ALREADY_EXISTS");
+            problem.setProperty("timestamp", Instant.now());
+            return problem;
+        }
+
+        if (lowerDetail.contains("uq_product_place")) {
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Este produto já está associado a este local");
+            problem.setTitle("Regra de Negócio Violada");
+            problem.setType(URI.create("https://api.rewit.app/errors/product_presence_already_exists"));
+            problem.setProperty("code", "PRODUCT_PRESENCE_ALREADY_EXISTS");
+            problem.setProperty("timestamp", Instant.now());
+            return problem;
+        }
+
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Conflito de integridade de dados");
         problem.setTitle("Regra de Negócio Violada");
         problem.setType(URI.create("https://api.rewit.app/errors/data_integrity_conflict"));
