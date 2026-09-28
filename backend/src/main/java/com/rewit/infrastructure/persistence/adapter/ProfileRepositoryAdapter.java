@@ -70,6 +70,17 @@ public class ProfileRepositoryAdapter implements ProfileRepository {
     }
 
     @Override
+    public java.util.List<Profile> findByUserIdIn(java.util.Collection<UUID> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return java.util.List.of();
+        }
+        return profileJpaRepository.findByUserIdIn(userIds).stream()
+                .map(ProfileRepositoryAdapter::toDomain)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    @Override
     public Optional<Profile> findByHandle(String handle) {
         if (handle == null || handle.isBlank()) {
             return Optional.empty();

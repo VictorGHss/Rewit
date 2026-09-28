@@ -17,6 +17,8 @@ public interface ProfileRepository {
 
     Optional<Profile> findByUserId(UUID userId);
 
+    java.util.List<Profile> findByUserIdIn(java.util.Collection<UUID> userIds);
+
     Optional<Profile> findByHandle(String handle);
 
     boolean existsByHandle(String handle);

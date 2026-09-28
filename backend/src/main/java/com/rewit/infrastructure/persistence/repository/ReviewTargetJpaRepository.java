@@ -15,5 +15,7 @@ public interface ReviewTargetJpaRepository extends JpaRepository<ReviewTargetJpa
 
     List<ReviewTargetJpaEntity> findByReviewId(UUID reviewId);
 
+    List<ReviewTargetJpaEntity> findByReviewIdIn(java.util.Collection<UUID> reviewIds);
+
     boolean existsByReviewIdAndTargetId(UUID reviewId, UUID targetId);
 }

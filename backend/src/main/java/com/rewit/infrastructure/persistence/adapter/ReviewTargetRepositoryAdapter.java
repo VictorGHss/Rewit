@@ -69,6 +69,17 @@ public class ReviewTargetRepositoryAdapter implements ReviewTargetRepository {
     }
 
     @Override
+    public List<ReviewTarget> findByReviewIdIn(java.util.Collection<UUID> reviewIds) {
+        if (reviewIds == null || reviewIds.isEmpty()) {
+            return List.of();
+        }
+        return reviewTargetJpaRepository.findByReviewIdIn(reviewIds).stream()
+                .map(ReviewTargetRepositoryAdapter::toDomain)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    @Override
     public boolean existsByReviewIdAndTargetId(UUID reviewId, UUID targetId) {
         if (reviewId == null || targetId == null) {
             return false;

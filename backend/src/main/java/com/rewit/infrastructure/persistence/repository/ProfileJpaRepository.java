@@ -18,6 +18,9 @@ public interface ProfileJpaRepository extends JpaRepository<ProfileJpaEntity, UU
     @Query("SELECT p FROM ProfileJpaEntity p WHERE p.user.id = :userId")
     Optional<ProfileJpaEntity> findByUserId(@Param("userId") UUID userId);
 
+    @Query("SELECT p FROM ProfileJpaEntity p WHERE p.user.id IN :userIds")
+    java.util.List<ProfileJpaEntity> findByUserIdIn(@Param("userIds") java.util.Collection<UUID> userIds);
+
     @Query("SELECT p FROM ProfileJpaEntity p WHERE LOWER(p.handle) = LOWER(:handle)")
     Optional<ProfileJpaEntity> findByHandleIgnoreCase(@Param("handle") String handle);
 

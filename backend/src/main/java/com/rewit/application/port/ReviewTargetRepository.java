@@ -19,5 +19,7 @@ public interface ReviewTargetRepository {
 
     List<ReviewTarget> findByReviewId(UUID reviewId);
 
+    List<ReviewTarget> findByReviewIdIn(java.util.Collection<UUID> reviewIds);
+
     boolean existsByReviewIdAndTargetId(UUID reviewId, UUID targetId);
 }

@@ -237,6 +237,138 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
 }
 ```
 
+> **Atenção sobre `reviewsCount` vs. Reviews Visíveis**: O cálculo de `RateableTargetStats` (Step 13.0) agrega todas as avaliações com status `ACTIVE`. Consequentemente, `RateableTargetStats.reviewsCount` pode ser maior que o total de elementos retornado pela listagem pública (`GET /api/v1/targets/{id}/reviews`). Isso ocorre porque avaliações com visibilidade `PRIVATE` ou `FOLLOWERS` participam das métricas consolidadas do alvo, mas são estritamente ocultadas de terceiros nas listagens públicas.
+
+---
+
+### 3.4 Listar Avaliações de um RateableTarget (Step 14.0)
+* **Método**: `GET`
+* **Rota**: `/api/v1/targets/{id}/reviews`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+
+#### Parâmetros de Consulta (Query Params):
+| Parâmetro | Tipo | Padrão | Validação / Descrição |
+|---|---|---|---|
+| `page` | Integer | `0` | Índice da página (>= 0) |
+| `size` | Integer | `10` | Tamanho da página (> 0 e <= 50) |
+| `sort` | String | `newest` | Ordenação permitida: `newest`, `rating_desc`, `rating_asc` |
+| `verifiedOnly` | Boolean | `false` | Se `true`, retorna apenas avaliações com `isVerifiedOnSite = true` |
+
+#### Regras de Ordenação e Multi-Alvo:
+* Nas ordenações `rating_desc` e `rating_asc`, o critério de nota é **exclusivamente a nota contida em `review_targets` para o alvo `{id}` consultado**, garantindo ordenação correta mesmo quando uma mesma Review avalia múltiplos alvos com notas distintas.
+* Desempate determinístico e estável entre páginas: `r.createdAt DESC, r.id ASC`.
+
+#### Regras de Visibilidade e Anonimização:
+* Reviews com `status` diferente de `ACTIVE` (`UNDER_REVIEW` e `REMOVED`) são rigorosamente omitidas da listagem pública.
+* Apenas avaliações `PUBLIC` (ou de autoria do próprio requester autenticado) são retornadas.
+* Quando `isAnonymous: true`, a identidade pública do autor é mascarada (`displayName: "Anônimo"` e campos `id`, `handle`, `avatarUrl` nulos). Coordenadas brutas nunca são expostas.
+* O array `targets` de cada item da listagem reflete especificamente o alvo consultado.
+
+#### Performance e Complexidade de Consultas:
+* **Complexidade O(1) em relação ao `size` da página**: A busca do conteúdo e contagem é realizada em paginação nativa pelo banco via índice composto `idx_review_targets_target_rating`, e os perfis de autor são carregados em lote via query `IN (...)`. O número de queries SQL executadas por requisição paginada é constante (4 queries: verificação de existência, contagem total distinta, slice paginado e batch de perfis), garantindo ausência total de consultas N+1.
+
+#### Exemplo de Resposta (`200 OK` - Envelope Paginado):
+```json
+{
+  "content": [
+    {
+      "id": "e4b1a8d0-6f2c-4e1b-9a3d-5c7e8f9a0b1c",
+      "author": {
+        "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+        "handle": "maria_silva",
+        "displayName": "Maria Silva",
+        "avatarUrl": "https://cdn.rewit.app/avatars/maria.webp",
+        "isAnonymous": false
+      },
+      "contextPlaceId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
+      "experienceText": "Excelente experiência no jantar de sexta-feira!",
+      "isAnonymous": false,
+      "isVerifiedOnSite": true,
+      "visibility": "PUBLIC",
+      "status": "ACTIVE",
+      "createdAt": "2026-09-28T15:10:00Z",
+      "updatedAt": "2026-09-28T15:10:00Z",
+      "targets": [
+        {
+          "id": "3b2c1d0e-4f5a-6b7c-8d9e-0f1a2b3c4d5e",
+          "targetId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
+          "rating": 5.0,
+          "specificComment": "Atendimento e ambiente impecáveis.",
+          "createdAt": "2026-09-28T15:10:00Z"
+        }
+      ]
+    }
+  ],
+  "pageNumber": 0,
+  "pageSize": 10,
+  "totalElements": 1,
+  "totalPages": 1,
+  "isLast": true
+}
+```
+
+---
+
+### 3.5 Listar Avaliações do Usuário Autenticado (Step 14.0)
+* **Método**: `GET`
+* **Rota**: `/api/v1/me/reviews`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+
+#### Parâmetros de Consulta (Query Params):
+| Parâmetro | Tipo | Padrão | Validação / Descrição |
+|---|---|---|---|
+| `page` | Integer | `0` | Índice da página (>= 0) |
+| `size` | Integer | `10` | Tamanho da página (> 0 e <= 50) |
+
+#### Regras de Segurança e Isolamento:
+* O usuário é identificado **exclusivamente a partir do token JWT autenticado**, impossibilitando IDOR ou spoofing.
+* Retorna o histórico de avaliações do próprio autor, permitindo visualizar suas publicações `PUBLIC` e `PRIVATE`.
+* Ordenação determinística padrão por publicações mais recentes primeiro (`createdAt DESC, id ASC`).
+* Inclui todos os alvos avaliados em cada publicação.
+
+#### Performance e Complexidade de Consultas:
+* **Complexidade O(1) em relação ao `size` da página**: A busca do histórico do usuário utiliza o índice `idx_reviews_user_created_at`, e os alvos de todas as avaliações da página são recuperados em lote via query `IN (...)`. O número de queries SQL é constante (4 queries: contagem do usuário, slice da página, batch de alvos e perfil do próprio autor), eliminando o problema de N+1.
+
+#### Exemplo de Resposta (`200 OK`):
+```json
+{
+  "content": [
+    {
+      "id": "e4b1a8d0-6f2c-4e1b-9a3d-5c7e8f9a0b1c",
+      "author": {
+        "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+        "handle": "meu_usuario",
+        "displayName": "Meu Nome",
+        "avatarUrl": null,
+        "isAnonymous": false
+      },
+      "contextPlaceId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
+      "experienceText": "Minha avaliação pessoal",
+      "isAnonymous": false,
+      "isVerifiedOnSite": false,
+      "visibility": "PRIVATE",
+      "status": "ACTIVE",
+      "createdAt": "2026-09-28T16:00:00Z",
+      "updatedAt": "2026-09-28T16:00:00Z",
+      "targets": [
+        {
+          "id": "3b2c1d0e-4f5a-6b7c-8d9e-0f1a2b3c4d5e",
+          "targetId": "c9b2f6b3-5b87-43cf-bc82-d27a4d5e8654",
+          "rating": 4.0,
+          "specificComment": "Gostei bastante.",
+          "createdAt": "2026-09-28T16:00:00Z"
+        }
+      ]
+    }
+  ],
+  "pageNumber": 0,
+  "pageSize": 10,
+  "totalElements": 1,
+  "totalPages": 1,
+  "isLast": true
+}
+```
+
 ---
 
 ## 4. Tratamento de Erros e Códigos HTTP
@@ -245,8 +377,8 @@ Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
 
 | Código HTTP | Cenário | Código da Aplicação |
 |---|---|---|
-| `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas (latitude fora de [-90, 90] ou longitude fora de [-180, 180]), rating fora do intervalo (1.0 - 5.0) ou lista de alvos vazia | `validation-error` |
+| `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas, página negativa (`page < 0`), tamanho inválido (`size <= 0` ou `size > 50`) ou ordenação não suportada | `validation-error` / `INVALID_PAGE` / `INVALID_SIZE` / `PAGE_SIZE_EXCEEDED` / `INVALID_SORT` |
 | `401 Unauthorized` | Requisição sem token JWT válido no header `Authorization` | N/A (Spring Security filter) |
 | `403 Forbidden` | Tentativa de consultar Review com `visibility=PRIVATE` ou `visibility=FOLLOWERS` por usuário que não seja o autor | `FORBIDDEN` |
-| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente ou alvo inexistente na consulta de stats | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
+| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente ou alvo inexistente na consulta de stats ou reviews | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
 | `422 Unprocessable Entity` | Violação de regra de negócio do domínio: alvo duplicado no mesmo Review ou nota com mais de 1 casa decimal | `DUPLICATE_REVIEW_TARGET` / `INVALID_RATING_PRECISION` |

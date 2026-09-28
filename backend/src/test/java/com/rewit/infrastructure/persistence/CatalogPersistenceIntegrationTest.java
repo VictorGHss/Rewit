@@ -234,7 +234,7 @@ class CatalogPersistenceIntegrationTest {
                 "Caso C: Distância calculada pelo PostGIS para Place A deve ser de aprox 300m, obtido: " + resultA.distanceMeters());
 
         // Caso D: Ordenação crescente por distância (A, depois B em raio de 5000m)
-        List<NearbyPlaceResult> results5km = placeRepository.findNearbyWithDistance(centerLat, centerLon, 5000.0, 20);
+        List<NearbyPlaceResult> results5km = placeRepository.findNearbyWithDistance(centerLat, centerLon, 5000.0, 100);
         int idxA = -1;
         int idxB = -1;
         for (int i = 0; i < results5km.size(); i++) {

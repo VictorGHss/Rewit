@@ -30,12 +30,15 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.rewit.application.dto.catalog.CatalogDtos;
+import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.CheckInRepository;
 import com.rewit.domain.enums.CheckInStatus;
 import com.rewit.domain.enums.VerificationMethod;
@@ -391,5 +394,181 @@ public class ReviewService {
                         0,
                         null
                 ));
+    }
+
+    @Transactional(readOnly = true)
+    public PageResult<ReviewPublicView> findReviewsByTarget(
+            UUID targetId,
+            int page,
+            int size,
+            String sort,
+            boolean verifiedOnly,
+            UUID requesterUserId
+    ) {
+        if (targetId == null) {
+            throw new BusinessException("O identificador do alvo avaliável é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_TARGET_ID");
+        }
+        if (page < 0) {
+            throw new BusinessException("O número da página não pode ser negativo", HttpStatus.BAD_REQUEST, "INVALID_PAGE");
+        }
+        if (size <= 0) {
+            throw new BusinessException("O tamanho da página deve ser maior que zero", HttpStatus.BAD_REQUEST, "INVALID_SIZE");
+        }
+        if (size > 50) {
+            throw new BusinessException("O tamanho da página não pode ser superior a 50", HttpStatus.BAD_REQUEST, "PAGE_SIZE_EXCEEDED");
+        }
+
+        String normalizedSort = (sort != null && !sort.isBlank()) ? sort.trim().toLowerCase(java.util.Locale.ROOT) : "newest";
+        if (!"newest".equals(normalizedSort) && !"rating_desc".equals(normalizedSort) && !"rating_asc".equals(normalizedSort)) {
+            throw new BusinessException("Ordenação inválida: " + sort, HttpStatus.BAD_REQUEST, "INVALID_SORT");
+        }
+
+        if (!rateableTargetRepository.existsById(targetId)) {
+            throw new BusinessException("Alvo avaliável não encontrado", HttpStatus.NOT_FOUND, "RATEABLE_TARGET_NOT_FOUND");
+        }
+
+        PageResult<ReviewRepository.ReviewWithTarget> pageResult = reviewRepository.findByTarget(
+                targetId, requesterUserId, verifiedOnly, normalizedSort, page, size
+        );
+
+        if (pageResult.content().isEmpty()) {
+            return PageResult.of(List.of(), page, size, pageResult.totalElements());
+        }
+
+        // Resolução em lote de autores para evitar N+1
+        Set<UUID> nonAnonymousAuthorIds = pageResult.content().stream()
+                .filter(item -> !item.review().isAnonymous())
+                .map(item -> item.review().getUserId())
+                .collect(Collectors.toSet());
+
+        Map<UUID, Profile> profilesByUserId = (profileRepository != null && !nonAnonymousAuthorIds.isEmpty())
+                ? profileRepository.findByUserIdIn(nonAnonymousAuthorIds).stream()
+                .collect(Collectors.toMap(p -> p.getUserId(), p -> p, (a, b) -> a))
+                : Map.of();
+
+        List<ReviewPublicView> publicViews = pageResult.content().stream()
+                .map(item -> {
+                    Review review = item.review();
+                    ReviewTarget target = item.target();
+
+                    PublicAuthorView authorView;
+                    if (review.isAnonymous()) {
+                        authorView = PublicAuthorView.anonymous();
+                    } else {
+                        Profile profile = profilesByUserId.get(review.getUserId());
+                        if (profile != null) {
+                            authorView = new PublicAuthorView(review.getUserId(), profile.getHandle(), profile.getDisplayName(), profile.getAvatarUrl(), false);
+                        } else {
+                            authorView = new PublicAuthorView(review.getUserId(), null, null, null, false);
+                        }
+                    }
+
+                    List<ReviewTargetView> targetViews = (target != null)
+                            ? List.of(new ReviewTargetView(target.getId(), target.getReviewId(), target.getTargetId(), target.getRating(), target.getSpecificComment(), target.getCreatedAt()))
+                            : List.of();
+
+                    return new ReviewPublicView(
+                            review.getId(),
+                            authorView,
+                            review.getContextPlaceId(),
+                            review.getExperienceText(),
+                            review.isAnonymous(),
+                            review.isVerifiedOnSite(),
+                            review.getVisibility(),
+                            review.getStatus() != null ? review.getStatus().name() : "ACTIVE",
+                            review.getCreatedAt(),
+                            review.getUpdatedAt(),
+                            targetViews
+                    );
+                })
+                .toList();
+
+        return new PageResult<>(
+                publicViews,
+                pageResult.pageNumber(),
+                pageResult.pageSize(),
+                pageResult.totalElements(),
+                pageResult.totalPages(),
+                pageResult.isLast()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public PageResult<ReviewPublicView> findMyReviews(
+            UUID authenticatedUserId,
+            int page,
+            int size
+    ) {
+        if (authenticatedUserId == null) {
+            throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+        }
+        if (page < 0) {
+            throw new BusinessException("O número da página não pode ser negativo", HttpStatus.BAD_REQUEST, "INVALID_PAGE");
+        }
+        if (size <= 0) {
+            throw new BusinessException("O tamanho da página deve ser maior que zero", HttpStatus.BAD_REQUEST, "INVALID_SIZE");
+        }
+        if (size > 50) {
+            throw new BusinessException("O tamanho da página não pode ser superior a 50", HttpStatus.BAD_REQUEST, "PAGE_SIZE_EXCEEDED");
+        }
+
+        PageResult<Review> pageResult = reviewRepository.findByUserIdPaged(authenticatedUserId, page, size);
+
+        if (pageResult.content().isEmpty()) {
+            return PageResult.of(List.of(), page, size, pageResult.totalElements());
+        }
+
+        List<UUID> reviewIds = pageResult.content().stream().map(r -> r.getId()).toList();
+
+        Map<UUID, List<ReviewTarget>> targetsByReviewId = (reviewTargetRepository != null && !reviewIds.isEmpty())
+                ? reviewTargetRepository.findByReviewIdIn(reviewIds).stream()
+                .collect(Collectors.groupingBy(rt -> rt.getReviewId()))
+                : Map.of();
+
+        Optional<Profile> profileOpt = (profileRepository != null)
+                ? profileRepository.findByUserId(authenticatedUserId)
+                : Optional.empty();
+
+        List<ReviewPublicView> publicViews = pageResult.content().stream()
+                .map(review -> {
+                    PublicAuthorView authorView;
+                    if (review.isAnonymous()) {
+                        authorView = PublicAuthorView.anonymous();
+                    } else if (profileOpt.isPresent()) {
+                        Profile profile = profileOpt.get();
+                        authorView = new PublicAuthorView(authenticatedUserId, profile.getHandle(), profile.getDisplayName(), profile.getAvatarUrl(), false);
+                    } else {
+                        authorView = new PublicAuthorView(authenticatedUserId, null, null, null, false);
+                    }
+
+                    List<ReviewTarget> targets = targetsByReviewId.getOrDefault(review.getId(), List.of());
+                    List<ReviewTargetView> targetViews = targets.stream()
+                            .map(t -> new ReviewTargetView(t.getId(), t.getReviewId(), t.getTargetId(), t.getRating(), t.getSpecificComment(), t.getCreatedAt()))
+                            .toList();
+
+                    return new ReviewPublicView(
+                            review.getId(),
+                            authorView,
+                            review.getContextPlaceId(),
+                            review.getExperienceText(),
+                            review.isAnonymous(),
+                            review.isVerifiedOnSite(),
+                            review.getVisibility(),
+                            review.getStatus() != null ? review.getStatus().name() : "ACTIVE",
+                            review.getCreatedAt(),
+                            review.getUpdatedAt(),
+                            targetViews
+                    );
+                })
+                .toList();
+
+        return new PageResult<>(
+                publicViews,
+                pageResult.pageNumber(),
+                pageResult.pageSize(),
+                pageResult.totalElements(),
+                pageResult.totalPages(),
+                pageResult.isLast()
+        );
     }
 }

@@ -8,6 +8,11 @@ import com.rewit.presentation.dto.user.ChangePasswordRequest;
 import com.rewit.presentation.dto.user.ChangePasswordResponse;
 import com.rewit.presentation.dto.user.UpdateProfileRequest;
 import com.rewit.presentation.dto.user.UserProfileResponse;
+import com.rewit.application.dto.ReviewDto.ReviewPublicView;
+import com.rewit.application.dto.common.PageResult;
+import com.rewit.application.service.ReviewService;
+import com.rewit.presentation.dto.common.PagedResponse;
+import com.rewit.presentation.dto.review.ReviewPresentationDtos.ReviewResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -16,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -29,9 +35,11 @@ import java.util.UUID;
 public class MeController {
 
     private final UserService userService;
+    private final ReviewService reviewService;
 
-    public MeController(UserService userService) {
+    public MeController(UserService userService, ReviewService reviewService) {
         this.userService = Objects.requireNonNull(userService, "userService must not be null");
+        this.reviewService = Objects.requireNonNull(reviewService, "reviewService must not be null");
     }
 
     @GetMapping
@@ -40,6 +48,30 @@ public class MeController {
         UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
         UserProfileResult result = userService.getMe(authenticatedUserId);
         return ResponseEntity.ok(toResponse(result));
+    }
+
+    @GetMapping("/reviews")
+    @Operation(summary = "Listar publicações de avaliação do usuário autenticado", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<PagedResponse<ReviewResponse>> getMyReviews(
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "10") int size,
+            Authentication authentication
+    ) {
+        UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
+        PageResult<ReviewPublicView> pageResult = reviewService.findMyReviews(authenticatedUserId, page, size);
+
+        List<ReviewResponse> content = pageResult.content().stream()
+                .map(ReviewController::toResponse)
+                .toList();
+
+        return ResponseEntity.ok(new PagedResponse<>(
+                content,
+                pageResult.pageNumber(),
+                pageResult.pageSize(),
+                pageResult.totalElements(),
+                pageResult.totalPages(),
+                pageResult.isLast()
+        ));
     }
 
     @PatchMapping("/profile")

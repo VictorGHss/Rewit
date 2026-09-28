@@ -1,6 +1,8 @@
 package com.rewit.application.port;
 
+import com.rewit.application.dto.common.PageResult;
 import com.rewit.domain.model.Review;
+import com.rewit.domain.model.ReviewTarget;
 
 import java.util.List;
 import java.util.Optional;
@@ -11,13 +13,26 @@ import java.util.UUID;
  */
 public interface ReviewRepository {
 
+    record ReviewWithTarget(Review review, ReviewTarget target) {}
+
     Review save(Review review);
 
     Optional<Review> findById(UUID id);
 
     List<Review> findByUserId(UUID userId);
 
+    PageResult<Review> findByUserIdPaged(UUID userId, int page, int size);
+
     List<Review> findByContextPlaceId(UUID contextPlaceId);
+
+    PageResult<ReviewWithTarget> findByTarget(
+            UUID targetId,
+            UUID requesterUserId,
+            boolean verifiedOnly,
+            String sort,
+            int page,
+            int size
+    );
 
     boolean existsById(UUID id);
 }

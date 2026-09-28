@@ -94,7 +94,7 @@ public class ReviewController {
         return ResponseEntity.ok(toResponse(reviewView));
     }
 
-    private static ReviewResponse toResponse(ReviewPublicView view) {
+    public static ReviewResponse toResponse(ReviewPublicView view) {
         if (view == null) {
             return null;
         }

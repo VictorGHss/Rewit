@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.adapter;
 
+import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewTarget;
@@ -93,6 +94,59 @@ public class ReviewRepositoryAdapter implements ReviewRepository {
                     return entity.toDomain(targets);
                 })
                 .toList();
+    }
+
+    @Override
+    public PageResult<Review> findByUserIdPaged(UUID userId, int page, int size) {
+        if (userId == null) {
+            return PageResult.of(List.of(), page, size, 0);
+        }
+        org.springframework.data.domain.PageRequest pageRequest = org.springframework.data.domain.PageRequest.of(
+                page, size, org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Order.desc("createdAt"), org.springframework.data.domain.Sort.Order.asc("id"))
+        );
+        org.springframework.data.domain.Page<ReviewJpaEntity> entityPage = reviewJpaRepository.findByUserId(userId, pageRequest);
+
+        List<Review> reviews = entityPage.getContent().stream()
+                .map(entity -> entity.toDomain())
+                .toList();
+
+        return PageResult.of(reviews, page, size, entityPage.getTotalElements());
+    }
+
+    @Override
+    public PageResult<ReviewWithTarget> findByTarget(
+            UUID targetId,
+            UUID requesterUserId,
+            boolean verifiedOnly,
+            String sort,
+            int page,
+            int size
+    ) {
+        if (targetId == null) {
+            return PageResult.of(List.of(), page, size, 0);
+        }
+
+        org.springframework.data.domain.PageRequest pageRequest = org.springframework.data.domain.PageRequest.of(page, size);
+        String normalizedSort = (sort != null && !sort.isBlank()) ? sort.trim().toLowerCase(java.util.Locale.ROOT) : "newest";
+
+        org.springframework.data.domain.Page<Object[]> resultPage;
+        switch (normalizedSort) {
+            case "rating_desc" -> resultPage = reviewJpaRepository.findReviewsByTargetRatingDesc(targetId, requesterUserId, verifiedOnly, pageRequest);
+            case "rating_asc" -> resultPage = reviewJpaRepository.findReviewsByTargetRatingAsc(targetId, requesterUserId, verifiedOnly, pageRequest);
+            default -> resultPage = reviewJpaRepository.findReviewsByTargetNewest(targetId, requesterUserId, verifiedOnly, pageRequest);
+        }
+
+        List<ReviewWithTarget> items = resultPage.getContent().stream()
+                .map(row -> {
+                    ReviewJpaEntity reviewEntity = (ReviewJpaEntity) row[0];
+                    ReviewTargetJpaEntity targetEntity = (ReviewTargetJpaEntity) row[1];
+                    Review review = reviewEntity.toDomain();
+                    ReviewTarget target = targetEntity.toDomain();
+                    return new ReviewWithTarget(review, target);
+                })
+                .toList();
+
+        return PageResult.of(items, page, size, resultPage.getTotalElements());
     }
 
     @Override
