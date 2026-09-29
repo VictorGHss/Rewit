@@ -11,8 +11,10 @@ import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.RateableTargetRepository;
 import com.rewit.application.port.RateableTargetStatsRepository;
+import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
+import com.rewit.application.port.UserFollowRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.Profile;
@@ -59,7 +61,8 @@ public class ReviewService {
     private final ProfileRepository profileRepository;
     private final CheckInRepository checkInRepository;
     private final RateableTargetStatsRepository rateableTargetStatsRepository;
-    private final com.rewit.application.port.UserFollowRepository userFollowRepository;
+    private final UserFollowRepository userFollowRepository;
+    private final ReviewReactionRepository reviewReactionRepository;
 
     @Autowired
     public ReviewService(ReviewRepository reviewRepository,
@@ -70,7 +73,8 @@ public class ReviewService {
                          ProfileRepository profileRepository,
                          CheckInRepository checkInRepository,
                          RateableTargetStatsRepository rateableTargetStatsRepository,
-                         com.rewit.application.port.UserFollowRepository userFollowRepository) {
+                         UserFollowRepository userFollowRepository,
+                         ReviewReactionRepository reviewReactionRepository) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
         this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
@@ -80,6 +84,19 @@ public class ReviewService {
         this.checkInRepository = checkInRepository;
         this.rateableTargetStatsRepository = rateableTargetStatsRepository;
         this.userFollowRepository = userFollowRepository;
+        this.reviewReactionRepository = reviewReactionRepository;
+    }
+
+    public ReviewService(ReviewRepository reviewRepository,
+                         ReviewTargetRepository reviewTargetRepository,
+                         UserRepository userRepository,
+                         RateableTargetRepository rateableTargetRepository,
+                         PlaceRepository placeRepository,
+                         ProfileRepository profileRepository,
+                         CheckInRepository checkInRepository,
+                         RateableTargetStatsRepository rateableTargetStatsRepository,
+                         UserFollowRepository userFollowRepository) {
+        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, profileRepository, checkInRepository, rateableTargetStatsRepository, userFollowRepository, null);
     }
 
     public ReviewService(ReviewRepository reviewRepository,
@@ -90,7 +107,7 @@ public class ReviewService {
                          ProfileRepository profileRepository,
                          CheckInRepository checkInRepository,
                          RateableTargetStatsRepository rateableTargetStatsRepository) {
-        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, profileRepository, checkInRepository, rateableTargetStatsRepository, null);
+        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, profileRepository, checkInRepository, rateableTargetStatsRepository, null, null);
     }
 
     public ReviewService(ReviewRepository reviewRepository,
@@ -98,7 +115,7 @@ public class ReviewService {
                          UserRepository userRepository,
                          RateableTargetRepository rateableTargetRepository,
                          PlaceRepository placeRepository) {
-        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, null, null, null, null);
+        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, null, null, null, null, null);
     }
 
     /**
@@ -352,6 +369,9 @@ public class ReviewService {
                 .toList()
                 : List.of();
 
+        long helpfulCount = reviewReactionRepository != null ? reviewReactionRepository.countHelpful(review.getId()) : 0L;
+        boolean isHelpfulByMe = requesterUserId != null && reviewReactionRepository != null && reviewReactionRepository.isHelpful(review.getId(), requesterUserId);
+
         return new ReviewPublicView(
                 review.getId(),
                 authorView,
@@ -363,7 +383,9 @@ public class ReviewService {
                 review.getStatus() != null ? review.getStatus().name() : "ACTIVE",
                 review.getCreatedAt(),
                 review.getUpdatedAt(),
-                targetViews
+                targetViews,
+                helpfulCount,
+                isHelpfulByMe
         );
     }
 
@@ -462,6 +484,19 @@ public class ReviewService {
                 .collect(Collectors.toMap(p -> p.getUserId(), p -> p, (a, b) -> a))
                 : Map.of();
 
+        // Resolução em lote de contagens e votos de Helpful para evitar N+1
+        List<UUID> reviewIds = pageResult.content().stream()
+                .map(item -> item.review().getId())
+                .toList();
+
+        Map<UUID, Long> helpfulCounts = (reviewReactionRepository != null && !reviewIds.isEmpty())
+                ? reviewReactionRepository.countHelpfulByReviewIds(reviewIds)
+                : Map.of();
+
+        Set<UUID> helpfulByMeSet = (reviewReactionRepository != null && requesterUserId != null && !reviewIds.isEmpty())
+                ? reviewReactionRepository.findHelpfulReviewIdsByUser(reviewIds, requesterUserId)
+                : Set.of();
+
         List<ReviewPublicView> publicViews = pageResult.content().stream()
                 .map(item -> {
                     Review review = item.review();
@@ -483,6 +518,9 @@ public class ReviewService {
                             ? List.of(new ReviewTargetView(target.getId(), target.getReviewId(), target.getTargetId(), target.getRating(), target.getSpecificComment(), target.getCreatedAt()))
                             : List.of();
 
+                    long helpfulCount = helpfulCounts.getOrDefault(review.getId(), 0L);
+                    boolean isHelpfulByMe = helpfulByMeSet.contains(review.getId());
+
                     return new ReviewPublicView(
                             review.getId(),
                             authorView,
@@ -494,7 +532,9 @@ public class ReviewService {
                             review.getStatus() != null ? review.getStatus().name() : "ACTIVE",
                             review.getCreatedAt(),
                             review.getUpdatedAt(),
-                            targetViews
+                            targetViews,
+                            helpfulCount,
+                            isHelpfulByMe
                     );
                 })
                 .toList();
@@ -545,6 +585,14 @@ public class ReviewService {
                 ? profileRepository.findByUserId(authenticatedUserId)
                 : Optional.empty();
 
+        Map<UUID, Long> helpfulCounts = (reviewReactionRepository != null && !reviewIds.isEmpty())
+                ? reviewReactionRepository.countHelpfulByReviewIds(reviewIds)
+                : Map.of();
+
+        Set<UUID> helpfulByMeSet = (reviewReactionRepository != null && !reviewIds.isEmpty())
+                ? reviewReactionRepository.findHelpfulReviewIdsByUser(reviewIds, authenticatedUserId)
+                : Set.of();
+
         List<ReviewPublicView> publicViews = pageResult.content().stream()
                 .map(review -> {
                     PublicAuthorView authorView;
@@ -562,6 +610,9 @@ public class ReviewService {
                             .map(t -> new ReviewTargetView(t.getId(), t.getReviewId(), t.getTargetId(), t.getRating(), t.getSpecificComment(), t.getCreatedAt()))
                             .toList();
 
+                    long helpfulCount = helpfulCounts.getOrDefault(review.getId(), 0L);
+                    boolean isHelpfulByMe = helpfulByMeSet.contains(review.getId());
+
                     return new ReviewPublicView(
                             review.getId(),
                             authorView,
@@ -573,7 +624,9 @@ public class ReviewService {
                             review.getStatus() != null ? review.getStatus().name() : "ACTIVE",
                             review.getCreatedAt(),
                             review.getUpdatedAt(),
-                            targetViews
+                            targetViews,
+                            helpfulCount,
+                            isHelpfulByMe
                     );
                 })
                 .toList();

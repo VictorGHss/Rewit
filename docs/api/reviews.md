@@ -204,6 +204,8 @@ Retorna a representação pública da avaliação com alvos, notas, comentários
   "isVerifiedOnSite": true,
   "visibility": "PUBLIC",
   "status": "ACTIVE",
+  "helpfulCount": 12,
+  "isHelpfulByMe": true,
   "createdAt": "2026-09-28T15:10:00Z",
   "updatedAt": "2026-09-28T15:10:00Z",
   "targets": [
@@ -297,6 +299,8 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
       "isVerifiedOnSite": true,
       "visibility": "PUBLIC",
       "status": "ACTIVE",
+      "helpfulCount": 3,
+      "isHelpfulByMe": true,
       "createdAt": "2026-09-28T15:10:00Z",
       "updatedAt": "2026-09-28T15:10:00Z",
       "targets": [
@@ -359,6 +363,8 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
       "isVerifiedOnSite": false,
       "visibility": "PRIVATE",
       "status": "ACTIVE",
+      "helpfulCount": 0,
+      "isHelpfulByMe": false,
       "createdAt": "2026-09-28T16:00:00Z",
       "updatedAt": "2026-09-28T16:00:00Z",
       "targets": [
@@ -382,14 +388,72 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
 
 ---
 
+### 3.6 Marcar Avaliação como Útil (Helpful) (Step 16.0)
+* **Método**: `POST`
+* **Rota**: `/api/v1/reviews/{id}/helpful`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+
+Permite a um usuário autenticado expressar que a publicação de avaliação foi útil.
+
+#### Regras e Invariantes:
+1. **Identidade via JWT**: O usuário votante é derivado exclusivamente do token JWT. Nenhum `userId` é aceito no corpo ou parâmetro da requisição.
+2. **Proibição de Auto-Voto (`Self-Helpful`)**: O autor da avaliação não pode marcar sua própria publicação como útil. Violações retornam `400 Bad Request` com código `SELF_HELPFUL_FORBIDDEN`.
+3. **Visibilidade e Autorização**:
+   * **`PUBLIC`**: Qualquer usuário autenticado (exceto o próprio autor) pode votar.
+   * **`FOLLOWERS`**: Apenas seguidores ativos do autor podem votar (`403 Forbidden` se não seguir).
+   * **`PRIVATE`**: Bloqueada para terceiros (`403 Forbidden`).
+4. **Status da Avaliação**: Apenas avaliações com status `ACTIVE` aceitam votos. Avaliações `UNDER_REVIEW` ou `REMOVED` retornam `404 Not Found`.
+5. **Idempotência**: Requisições repetidas para o mesmo par `(review_id, user_id, reaction_type)` são idempotentes; não disparam erros nem duplicam registros, retornando o estado consistente com status `200 OK`.
+6. **Concorrência Segura**: A proteção contra concorrência ocorre no nível do banco via instrução atômica `ON CONFLICT (review_id, user_id, reaction_type) DO NOTHING`.
+7. **Anonimização**: Reviews com `isAnonymous: true` podem receber votos normalmente; a identidade do autor e de quem votou não é exposta na API.
+
+#### Exemplo de Resposta (`200 OK`):
+```json
+{
+  "helpful": true,
+  "helpfulCount": 1
+}
+```
+
+---
+
+### 3.7 Remover Marcação de Útil (Helpful) (Step 16.0)
+* **Método**: `DELETE`
+* **Rota**: `/api/v1/reviews/{id}/helpful`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+
+Remove a marcação de Helpful anteriormente registrada pelo usuário autenticado.
+
+#### Regras:
+1. **Idempotência**: Se o usuário já não possuía voto ou chama a remoção múltiplas vezes, a operação retorna `200 OK` com `helpful: false` e o total atualizado, sem erros.
+2. **Avaliação Inexistente/Inativa**: Retorna `404 Not Found`.
+
+#### Exemplo de Resposta (`200 OK`):
+```json
+{
+  "helpful": false,
+  "helpfulCount": 0
+}
+```
+
+---
+
+### 3.8 Carregamento Otimizado em Lote (Batch Loading) de Helpful
+Nas consultas de listagem (`GET /api/v1/targets/{id}/reviews` e `GET /api/v1/me/reviews`):
+* O total de votos úteis (`helpfulCount`) de todas as avaliações da página é carregado através de **uma única consulta SQL agregada** agrupada por `review_id` com filtro estrito `reaction_type = 'HELPFUL'`.
+* O estado do voto do usuário requisitante (`isHelpfulByMe`) é carregado através de **uma única consulta SQL** filtrando `user_id = :requesterUserId AND review_id IN (...)`.
+* **Zero N+1**: O número de queries para metadados de Helpful permanece rigorosamente fixo e constante (O(1)) independente do tamanho da página (`pageSize`).
+
+---
+
 ## 4. Tratamento de Erros e Códigos HTTP
 
 Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
 
 | Código HTTP | Cenário | Código da Aplicação |
 |---|---|---|
-| `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas, página negativa (`page < 0`), tamanho inválido (`size <= 0` ou `size > 50`) ou ordenação não suportada | `validation-error` / `INVALID_PAGE` / `INVALID_SIZE` / `PAGE_SIZE_EXCEEDED` / `INVALID_SORT` |
+| `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas, página negativa (`page < 0`), tamanho inválido (`size <= 0` ou `size > 50`), ordenação não suportada ou tentativa de autor marcar a própria review como útil | `validation-error` / `INVALID_PAGE` / `INVALID_SIZE` / `PAGE_SIZE_EXCEEDED` / `INVALID_SORT` / `SELF_HELPFUL_FORBIDDEN` |
 | `401 Unauthorized` | Requisição sem token JWT válido no header `Authorization` | N/A (Spring Security filter) |
-| `403 Forbidden` | Tentativa de consultar Review com `visibility=PRIVATE` por usuário que não seja o autor, ou com `visibility=FOLLOWERS` por usuário que não seja seguidor ativo do autor nem o próprio autor | `FORBIDDEN` |
-| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente ou alvo inexistente na consulta de stats ou reviews | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
+| `403 Forbidden` | Tentativa de consultar ou interagir com Review `PRIVATE` de terceiro, ou Review `FOLLOWERS` por usuário que não seja seguidor ativo do autor | `FORBIDDEN` |
+| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente, alvo inexistente na consulta de stats/reviews ou Review inativa (`UNDER_REVIEW` / `REMOVED`) | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
 | `422 Unprocessable Entity` | Violação de regra de negócio do domínio: alvo duplicado no mesmo Review ou nota com mais de 1 casa decimal | `DUPLICATE_REVIEW_TARGET` / `INVALID_RATING_PRECISION` |

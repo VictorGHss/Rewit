@@ -96,8 +96,26 @@ public final class ReviewDto {
             String status,
             Instant createdAt,
             Instant updatedAt,
-            List<ReviewTargetView> targets
-    ) {}
+            List<ReviewTargetView> targets,
+            long helpfulCount,
+            boolean isHelpfulByMe
+    ) {
+        public ReviewPublicView(
+                UUID id,
+                PublicAuthorView author,
+                UUID contextPlaceId,
+                String experienceText,
+                boolean isAnonymous,
+                boolean isVerifiedOnSite,
+                String visibility,
+                String status,
+                Instant createdAt,
+                Instant updatedAt,
+                List<ReviewTargetView> targets
+        ) {
+            this(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite, visibility, status, createdAt, updatedAt, targets, 0L, false);
+        }
+    }
 
     public record ReviewView(
             UUID id,
