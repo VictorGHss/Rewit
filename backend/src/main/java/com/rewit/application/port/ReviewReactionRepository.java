@@ -42,4 +42,9 @@ public interface ReviewReactionRepository {
      * Retorna o conjunto de IDs de avaliações marcadas como Helpful pelo usuário especificado dentre as informadas (prevenção de N+1).
      */
     Set<UUID> findHelpfulReviewIdsByUser(Collection<UUID> reviewIds, UUID userId);
+
+    /**
+     * Retorna a quantidade total de votos de Helpful recebidos por todas as avaliações ativas do usuário.
+     */
+    long countHelpfulVotesReceivedByUserId(UUID userId);
 }

@@ -183,4 +183,8 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             @Param("requesterUserId") UUID requesterUserId,
             Pageable pageable
     );
+
+    long countByUserIdAndStatus(UUID userId, String status);
+
+    long countByUserIdAndStatusAndIsVerifiedOnSiteTrue(UUID userId, String status);
 }

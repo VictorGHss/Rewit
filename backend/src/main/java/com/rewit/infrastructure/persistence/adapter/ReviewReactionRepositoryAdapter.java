@@ -97,4 +97,13 @@ public class ReviewReactionRepositoryAdapter implements ReviewReactionRepository
         List<UUID> ids = reviewReactionJpaRepository.findHelpfulReviewIdsByUser(reviewIds, userId);
         return new HashSet<>(ids);
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countHelpfulVotesReceivedByUserId(UUID userId) {
+        if (userId == null) {
+            return 0L;
+        }
+        return reviewReactionJpaRepository.countHelpfulVotesReceivedByUserId(userId);
+    }
 }

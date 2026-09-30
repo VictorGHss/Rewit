@@ -37,4 +37,8 @@ public interface ReviewRepository {
     boolean existsById(UUID id);
 
     PageResult<Review> findFeedByFollowing(UUID requesterUserId, int page, int size);
+
+    long countActiveByUserId(UUID userId);
+
+    long countActiveVerifiedByUserId(UUID userId);
 }

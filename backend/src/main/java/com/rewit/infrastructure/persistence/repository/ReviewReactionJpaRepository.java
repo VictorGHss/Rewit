@@ -57,4 +57,14 @@ public interface ReviewReactionJpaRepository extends JpaRepository<ReviewReactio
             @Param("reviewIds") Collection<UUID> reviewIds,
             @Param("userId") UUID userId
     );
+
+    @Query("""
+        SELECT COUNT(rr)
+        FROM ReviewReactionJpaEntity rr
+        JOIN ReviewJpaEntity r ON r.id = rr.reviewId
+        WHERE r.userId = :userId
+          AND r.status = 'ACTIVE'
+          AND rr.reactionType = 'HELPFUL'
+    """)
+    long countHelpfulVotesReceivedByUserId(@Param("userId") UUID userId);
 }

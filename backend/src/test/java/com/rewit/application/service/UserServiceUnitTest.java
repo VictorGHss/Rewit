@@ -39,6 +39,15 @@ class UserServiceUnitTest {
     @Mock
     private com.rewit.application.port.AuthSessionRepository authSessionRepository;
 
+    @Mock
+    private com.rewit.application.port.ReviewRepository reviewRepository;
+
+    @Mock
+    private com.rewit.application.port.UserFollowRepository userFollowRepository;
+
+    @Mock
+    private com.rewit.application.port.ReviewReactionRepository reviewReactionRepository;
+
     private UserService userService;
 
     private final UUID userId = UUID.randomUUID();
@@ -47,7 +56,15 @@ class UserServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        userService = new UserService(userRepository, profileRepository, passwordHasher, authSessionRepository);
+        userService = new UserService(
+                userRepository,
+                profileRepository,
+                passwordHasher,
+                authSessionRepository,
+                reviewRepository,
+                userFollowRepository,
+                reviewReactionRepository
+        );
 
         testUser = new User(userId, "usuario@rewit.com", "hashSeguro", AuthProvider.LOCAL, null);
         testProfile = new Profile(UUID.randomUUID(), userId, "usuario_atual", "Nome Atual", "Bio antiga", null);

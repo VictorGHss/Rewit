@@ -1,12 +1,11 @@
 package com.rewit.application.service;
 
 import com.rewit.application.dto.user.UserDtos.ChangePasswordCommand;
+import com.rewit.application.dto.user.UserDtos.PublicUserProfileView;
 import com.rewit.application.dto.user.UserDtos.UpdateProfileCommand;
 import com.rewit.application.dto.user.UserDtos.UserProfileResult;
-import com.rewit.application.port.AuthSessionRepository;
-import com.rewit.application.port.PasswordHasher;
-import com.rewit.application.port.ProfileRepository;
-import com.rewit.application.port.UserRepository;
+import com.rewit.application.dto.user.UserDtos.UserStatsView;
+import com.rewit.application.port.*;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.Profile;
@@ -29,17 +28,26 @@ public class UserService {
     private final ProfileRepository profileRepository;
     private final PasswordHasher passwordHasher;
     private final AuthSessionRepository authSessionRepository;
+    private final ReviewRepository reviewRepository;
+    private final UserFollowRepository userFollowRepository;
+    private final ReviewReactionRepository reviewReactionRepository;
 
     public UserService(
             UserRepository userRepository,
             ProfileRepository profileRepository,
             PasswordHasher passwordHasher,
-            AuthSessionRepository authSessionRepository
+            AuthSessionRepository authSessionRepository,
+            ReviewRepository reviewRepository,
+            UserFollowRepository userFollowRepository,
+            ReviewReactionRepository reviewReactionRepository
     ) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.profileRepository = Objects.requireNonNull(profileRepository, "profileRepository must not be null");
         this.passwordHasher = Objects.requireNonNull(passwordHasher, "passwordHasher must not be null");
         this.authSessionRepository = Objects.requireNonNull(authSessionRepository, "authSessionRepository must not be null");
+        this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.userFollowRepository = Objects.requireNonNull(userFollowRepository, "userFollowRepository must not be null");
+        this.reviewReactionRepository = Objects.requireNonNull(reviewReactionRepository, "reviewReactionRepository must not be null");
     }
 
     @Transactional(readOnly = true)
@@ -57,6 +65,52 @@ public class UserService {
                 .orElseThrow(() -> new BusinessException("Perfil do usuário não encontrado", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
 
         return new UserProfileResult(user, profile);
+    }
+
+    @Transactional(readOnly = true)
+    public PublicUserProfileView getPublicProfile(UUID targetUserId, UUID requesterUserId) {
+        if (targetUserId == null) {
+            throw new BusinessException("Identificador de usuário obrigatório", HttpStatus.BAD_REQUEST, "MISSING_USER_ID");
+        }
+
+        User user = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
+
+        if (!user.isActive() || user.isDeleted()) {
+            throw new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND");
+        }
+
+        Profile profile = profileRepository.findByUserId(targetUserId)
+                .orElseThrow(() -> new BusinessException("Perfil do usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
+
+        long totalReviews = reviewRepository.countActiveByUserId(targetUserId);
+        long verifiedReviewsCount = reviewRepository.countActiveVerifiedByUserId(targetUserId);
+        long followersCount = userFollowRepository.countFollowers(targetUserId);
+        long followingCount = userFollowRepository.countFollowing(targetUserId);
+        long helpfulVotesReceived = reviewReactionRepository.countHelpfulVotesReceivedByUserId(targetUserId);
+
+        boolean isFollowing = false;
+        if (requesterUserId != null && !requesterUserId.equals(targetUserId)) {
+            isFollowing = userFollowRepository.isFollowing(requesterUserId, targetUserId);
+        }
+
+        UserStatsView stats = new UserStatsView(
+                totalReviews,
+                verifiedReviewsCount,
+                followersCount,
+                followingCount,
+                helpfulVotesReceived
+        );
+
+        return new PublicUserProfileView(
+                user.getId(),
+                profile.getHandle(),
+                profile.getDisplayName(),
+                profile.getBio(),
+                profile.getAvatarUrl(),
+                stats,
+                isFollowing
+        );
     }
 
     @Transactional

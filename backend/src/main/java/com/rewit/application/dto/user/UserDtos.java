@@ -28,4 +28,22 @@ public class UserDtos {
             String currentPassword,
             String newPassword
     ) {}
+
+    public record UserStatsView(
+            long totalReviews,
+            long verifiedReviewsCount,
+            long followersCount,
+            long followingCount,
+            long helpfulVotesReceived
+    ) {}
+
+    public record PublicUserProfileView(
+            UUID id,
+            String handle,
+            String displayName,
+            String bio,
+            String avatarUrl,
+            UserStatsView stats,
+            boolean isFollowing
+    ) {}
 }

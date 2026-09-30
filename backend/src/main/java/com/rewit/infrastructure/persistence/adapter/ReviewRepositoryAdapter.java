@@ -178,6 +178,24 @@ public class ReviewRepositoryAdapter implements ReviewRepository {
         return PageResult.of(reviews, page, size, entityPage.getTotalElements());
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public long countActiveByUserId(UUID userId) {
+        if (userId == null) {
+            return 0L;
+        }
+        return reviewJpaRepository.countByUserIdAndStatus(userId, "ACTIVE");
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countActiveVerifiedByUserId(UUID userId) {
+        if (userId == null) {
+            return 0L;
+        }
+        return reviewJpaRepository.countByUserIdAndStatusAndIsVerifiedOnSiteTrue(userId, "ACTIVE");
+    }
+
     private static ReviewTarget toDomain(ReviewTargetJpaEntity entity) {
         return entity != null ? entity.toDomain() : null;
     }
