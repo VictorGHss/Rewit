@@ -87,6 +87,7 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
     }
 
     @Override
+    @SuppressWarnings({"deprecation", "nullness"})
     @Transactional(readOnly = true)
     public PageResult<UserFollow> findFollowing(UUID followerUserId, int page, int size) {
         if (followerUserId == null || page < 0 || size <= 0) {
@@ -96,7 +97,9 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
         PageRequest pageRequest = PageRequest.of(
                 page,
                 size,
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.asc("id"))
+                Sort.sort(UserFollowJpaEntity.class)
+                        .by((UserFollowJpaEntity entity) -> entity.getCreatedAt()).descending()
+                        .and(Sort.sort(UserFollowJpaEntity.class).by((UserFollowJpaEntity entity) -> entity.getId()).ascending())
         );
         Page<UserFollowJpaEntity> entityPage = userFollowJpaRepository.findByFollowerUserId(followerUserId, pageRequest);
 
@@ -115,6 +118,7 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
     }
 
     @Override
+    @SuppressWarnings({"deprecation", "nullness"})
     @Transactional(readOnly = true)
     public PageResult<UserFollow> findFollowers(UUID followedUserId, int page, int size) {
         if (followedUserId == null || page < 0 || size <= 0) {
@@ -124,7 +128,9 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
         PageRequest pageRequest = PageRequest.of(
                 page,
                 size,
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.asc("id"))
+                Sort.sort(UserFollowJpaEntity.class)
+                        .by((UserFollowJpaEntity entity) -> entity.getCreatedAt()).descending()
+                        .and(Sort.sort(UserFollowJpaEntity.class).by((UserFollowJpaEntity entity) -> entity.getId()).ascending())
         );
         Page<UserFollowJpaEntity> entityPage = userFollowJpaRepository.findByFollowedUserId(followedUserId, pageRequest);
 

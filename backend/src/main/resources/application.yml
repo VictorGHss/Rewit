@@ -8,12 +8,13 @@ spring:
       enabled: true
   jpa:
     open-in-view: false
+  web:
+    error:
+      include-message: always
+      include-binding-errors: always
 
 server:
   port: ${SERVER_PORT:8080}
-  error:
-    include-message: always
-    include-binding-errors: always
 
 springdoc:
   api-docs:

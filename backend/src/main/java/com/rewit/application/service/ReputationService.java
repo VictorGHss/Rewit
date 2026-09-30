@@ -1,18 +1,18 @@
 package com.rewit.application.service;
 
+import java.util.Objects;
+import java.util.UUID;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rewit.application.dto.reputation.ReputationDtos;
 import com.rewit.application.port.ReputationRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.User;
 import com.rewit.domain.model.UserReputation;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.Objects;
-import java.util.UUID;
 
 /**
  * Serviço de aplicação para o subsistema de Reputação V1 (Step 23.0 / Step 23.1).
@@ -36,7 +36,6 @@ public class ReputationService {
     private final ReputationRepository reputationRepository;
     private final ReputationCalculator calculator;
 
-    @Autowired
     public ReputationService(
             UserRepository userRepository,
             ReputationRepository reputationRepository,

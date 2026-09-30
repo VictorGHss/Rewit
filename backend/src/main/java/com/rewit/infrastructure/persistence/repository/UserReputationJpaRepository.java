@@ -7,7 +7,6 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -17,7 +16,6 @@ import java.util.UUID;
  * Repositório Spring Data JPA para snapshots de reputação (user_reputation) - Step 23.0 / Step 23.1.
  * Oferece suporte a lock pessimista para serialização de recálculos concorrentes e inserção idempotente.
  */
-@Repository
 public interface UserReputationJpaRepository extends JpaRepository<UserReputationJpaEntity, UUID> {
 
     /**

@@ -27,7 +27,7 @@ import java.util.List;
  * Controlador REST para consulta de estatísticas agregadas e avaliações de alvos avaliáveis (Steps 13.0 e 14.0).
  */
 @RestController
-@RequestMapping("/api/v1/targets")
+@RequestMapping("/api/v1/targets/{id}")
 public class TargetStatsController {
 
     private final ReviewService reviewService;
@@ -36,7 +36,7 @@ public class TargetStatsController {
         this.reviewService = Objects.requireNonNull(reviewService, "reviewService must not be null");
     }
 
-    @GetMapping("/{id}/stats")
+    @GetMapping("/stats")
     public ResponseEntity<TargetStatsResponse> getTargetStats(@PathVariable UUID id) {
         TargetStatsView view = reviewService.getTargetStats(id);
         return ResponseEntity.ok(new TargetStatsResponse(
@@ -47,7 +47,7 @@ public class TargetStatsController {
         ));
     }
 
-    @GetMapping("/{id}/reviews")
+    @GetMapping("/reviews")
     @Operation(summary = "Listar publicações de avaliação paginadas de um RateableTarget", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<PagedResponse<ReviewResponse>> getTargetReviews(
             @PathVariable("id") UUID id,

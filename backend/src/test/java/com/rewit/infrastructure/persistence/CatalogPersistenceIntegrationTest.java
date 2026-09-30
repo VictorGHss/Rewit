@@ -153,9 +153,10 @@ class CatalogPersistenceIntegrationTest {
                 "Rua 2", "Curitiba", "PR", "BR", -25.5, -49.3, 50, "USER", false, null, "ACTIVE"
         );
 
-        assertThrows(Exception.class, () -> {
+        Exception duplicateSlugEx = assertThrows(Exception.class, () -> {
             placeJpaRepository.saveAndFlush(PlaceJpaEntity.fromDomain(placeB));
         });
+        assertNotNull(duplicateSlugEx);
     }
 
     @Test
@@ -318,11 +319,13 @@ class CatalogPersistenceIntegrationTest {
 
         // Tentar duplicar o mesmo EAN (mesmo tipo e valor) deve falhar por constraint uq_product_identifier
         ProductIdentifier dup = new ProductIdentifier(null, savedProd.getId(), "EAN", barcode);
-        assertThrows(Exception.class, () -> productIdentifierRepository.save(dup));
+        Exception dupIdentifierEx = assertThrows(Exception.class, () -> productIdentifierRepository.save(dup));
+        assertNotNull(dupIdentifierEx);
 
         // Tentar salvar identificador com productId inexistente deve falhar por FK constraint
         ProductIdentifier orphan = new ProductIdentifier(null, UUID.randomUUID(), "EAN", "999" + suffix);
-        assertThrows(Exception.class, () -> productIdentifierRepository.save(orphan));
+        Exception orphanIdentifierEx = assertThrows(Exception.class, () -> productIdentifierRepository.save(orphan));
+        assertNotNull(orphanIdentifierEx);
     }
 
     @Test
@@ -359,23 +362,26 @@ class CatalogPersistenceIntegrationTest {
         assertEquals(savedPresence.getId(), found.get().getId());
 
         // 3. Tentar inserir duplicidade com o mesmo par (product_id, place_id) deve falhar por constraint uq_product_place
-        assertThrows(Exception.class, () -> {
+        Exception duplicatePairEx = assertThrows(Exception.class, () -> {
             // Chamada direta forçando inserção de nova entidade
             productPresenceRepository.save(new ProductPresence(
                     UUID.randomUUID(), savedProduct.getId(), savedPlace.getId(), null, VerificationStatus.APPROVED, "AVAILABLE"
             ));
         });
+        assertNotNull(duplicatePairEx);
 
         // 4. FK inexistente deve falhar
-        assertThrows(Exception.class, () -> {
+        Exception orphanProductEx = assertThrows(Exception.class, () -> {
             productPresenceRepository.save(new ProductPresence(
                     null, UUID.randomUUID(), savedPlace.getId(), null, null, null
             ));
         });
-        assertThrows(Exception.class, () -> {
+        assertNotNull(orphanProductEx);
+        Exception orphanPlaceEx = assertThrows(Exception.class, () -> {
             productPresenceRepository.save(new ProductPresence(
                     null, savedProduct.getId(), UUID.randomUUID(), null, null, null
             ));
         });
+        assertNotNull(orphanPlaceEx);
     }
 }

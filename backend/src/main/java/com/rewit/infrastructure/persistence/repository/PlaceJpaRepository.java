@@ -1,19 +1,18 @@
 package com.rewit.infrastructure.persistence.repository;
 
-import com.rewit.infrastructure.persistence.entity.PlaceJpaEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import com.rewit.infrastructure.persistence.entity.PlaceJpaEntity;
+
 /**
  * Repositório Spring Data JPA para a entidade de locais físicos (places).
  */
-@Repository
 public interface PlaceJpaRepository extends JpaRepository<PlaceJpaEntity, UUID> {
 
     Optional<PlaceJpaEntity> findBySlug(String slug);

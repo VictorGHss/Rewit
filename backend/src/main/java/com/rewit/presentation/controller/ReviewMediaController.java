@@ -27,6 +27,7 @@ import java.util.UUID;
  * Controlador REST para upload, recuperação, listagem e exclusão de mídias de avaliações (Step 21.0).
  */
 @RestController
+@RequestMapping("/api/v1/reviews/{reviewId}/media")
 @Tag(name = "Review Media", description = "Endpoints para gerenciamento de imagens anexadas a avaliações")
 public class ReviewMediaController {
 
@@ -36,7 +37,7 @@ public class ReviewMediaController {
         this.reviewMediaService = Objects.requireNonNull(reviewMediaService, "ReviewMediaService must not be null");
     }
 
-    @PostMapping(value = "/api/v1/reviews/{reviewId}/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Realizar upload de anexo de imagem sanitizada para uma avaliação", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<ReviewMediaResponse> uploadMedia(
             @PathVariable("reviewId") UUID reviewId,
@@ -75,7 +76,7 @@ public class ReviewMediaController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ReviewMediaResponse.fromView(view));
     }
 
-    @GetMapping("/api/v1/reviews/{reviewId}/media")
+    @GetMapping
     @Operation(summary = "Listar mídias ativas de uma avaliação", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<List<ReviewMediaResponse>> getMediaByReviewId(
             @PathVariable("reviewId") UUID reviewId,
@@ -91,7 +92,7 @@ public class ReviewMediaController {
         return ResponseEntity.ok(responses);
     }
 
-    @GetMapping("/api/v1/reviews/{reviewId}/media/{mediaId}")
+    @GetMapping("/{mediaId}")
     @Operation(summary = "Baixar ou visualizar imagem sanitizada da avaliação", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<byte[]> downloadMedia(
             @PathVariable("reviewId") UUID reviewId,
@@ -108,7 +109,7 @@ public class ReviewMediaController {
                 .body(result.bytes());
     }
 
-    @DeleteMapping("/api/v1/reviews/{reviewId}/media/{mediaId}")
+    @DeleteMapping("/{mediaId}")
     @Operation(summary = "Excluir mídia de avaliação (autor da avaliação apenas)", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<Void> deleteMedia(
             @PathVariable("reviewId") UUID reviewId,

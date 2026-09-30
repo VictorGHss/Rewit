@@ -1,5 +1,13 @@
 package com.rewit.infrastructure.persistence.adapter;
 
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.rewit.application.dto.catalog.CatalogDtos;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.domain.enums.TargetType;
@@ -8,14 +16,8 @@ import com.rewit.infrastructure.persistence.entity.PlaceJpaEntity;
 import com.rewit.infrastructure.persistence.entity.RateableTargetJpaEntity;
 import com.rewit.infrastructure.persistence.repository.PlaceJpaRepository;
 import com.rewit.infrastructure.persistence.repository.RateableTargetJpaRepository;
-import jakarta.persistence.Tuple;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
+import jakarta.persistence.Tuple;
 
 /**
  * Adaptador de persistência para a entidade Place.
@@ -124,6 +126,9 @@ public class PlaceRepositoryAdapter implements PlaceRepository {
 
     private static CatalogDtos.NearbyPlaceResult toNearbyResult(Tuple tuple) {
         Object idObj = tuple.get("id");
+        if (idObj == null) {
+            throw new IllegalArgumentException("Nearby place result is missing id");
+        }
         UUID id = idObj instanceof UUID u ? u : UUID.fromString(idObj.toString());
 
         String name = tuple.get("name", String.class);

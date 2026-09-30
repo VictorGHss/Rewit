@@ -7,7 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -16,7 +15,6 @@ import java.util.UUID;
 /**
  * Repositório Spring Data JPA para conexões sociais entre usuários (user_follows).
  */
-@Repository
 public interface UserFollowJpaRepository extends JpaRepository<UserFollowJpaEntity, UUID> {
 
     boolean existsByFollowerUserIdAndFollowedUserId(UUID followerUserId, UUID followedUserId);

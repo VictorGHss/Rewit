@@ -92,4 +92,13 @@ public final class CatalogDtos {
             boolean isWithinRadius,
             int validationRadiusMeters
     ) {}
+
+    public record CatalogSearchResult(
+            java.util.UUID id,
+            String name,
+            String slug,
+            String category,
+            String targetType,
+            String status
+    ) {}
 }

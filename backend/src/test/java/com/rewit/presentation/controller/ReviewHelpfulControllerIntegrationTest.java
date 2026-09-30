@@ -79,6 +79,7 @@ class ReviewHelpfulControllerIntegrationTest {
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @SuppressWarnings("unused")
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
@@ -132,7 +133,7 @@ class ReviewHelpfulControllerIntegrationTest {
         return placeRepository.save(place);
     }
 
-    private RateableTarget createTarget(Place place) {
+    private RateableTarget createTarget() {
         RateableTarget target = new RateableTarget(UUID.randomUUID(), TargetType.PLACE);
         return rateableTargetRepository.save(target);
     }
@@ -205,7 +206,7 @@ class ReviewHelpfulControllerIntegrationTest {
     void shouldReturn400OnSelfHelpful() throws Exception {
         TestUser author = registerUser("authorSelf");
         Place place = createPlace();
-        RateableTarget target = createTarget(place);
+        RateableTarget target = createTarget();
         Review review = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE);
 
         mockMvc.perform(post("/api/v1/reviews/{id}/helpful", review.getId())
@@ -220,7 +221,7 @@ class ReviewHelpfulControllerIntegrationTest {
         TestUser author = registerUser("authorFol");
         TestUser nonFollower = registerUser("nonFollower");
         Place place = createPlace();
-        RateableTarget target = createTarget(place);
+        RateableTarget target = createTarget();
         Review review = createReview(author.userId(), place, target, "FOLLOWERS", ReviewStatus.ACTIVE);
 
         mockMvc.perform(post("/api/v1/reviews/{id}/helpful", review.getId())
@@ -235,7 +236,7 @@ class ReviewHelpfulControllerIntegrationTest {
         TestUser author = registerUser("authorFol2");
         TestUser follower = registerUser("follower");
         Place place = createPlace();
-        RateableTarget target = createTarget(place);
+        RateableTarget target = createTarget();
         Review review = createReview(author.userId(), place, target, "FOLLOWERS", ReviewStatus.ACTIVE);
 
         // Seguir o autor
@@ -254,7 +255,7 @@ class ReviewHelpfulControllerIntegrationTest {
         TestUser author = registerUser("authorPriv");
         TestUser other = registerUser("otherUser");
         Place place = createPlace();
-        RateableTarget target = createTarget(place);
+        RateableTarget target = createTarget();
         Review review = createReview(author.userId(), place, target, "PRIVATE", ReviewStatus.ACTIVE);
 
         mockMvc.perform(post("/api/v1/reviews/{id}/helpful", review.getId())
@@ -269,7 +270,7 @@ class ReviewHelpfulControllerIntegrationTest {
         TestUser author = registerUser("authorInact");
         TestUser voter = registerUser("voterInact");
         Place place = createPlace();
-        RateableTarget target = createTarget(place);
+        RateableTarget target = createTarget();
 
         Review reviewUnder = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.UNDER_REVIEW);
         Review reviewRem = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.REMOVED);
@@ -291,7 +292,7 @@ class ReviewHelpfulControllerIntegrationTest {
         TestUser author = registerUser("authorIdem");
         TestUser voter = registerUser("voterIdem");
         Place place = createPlace();
-        RateableTarget target = createTarget(place);
+        RateableTarget target = createTarget();
         Review review = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE);
 
         // Primeiro POST -> helpful: true, helpfulCount: 1
@@ -330,7 +331,7 @@ class ReviewHelpfulControllerIntegrationTest {
         TestUser voter1 = registerUser("voterGet1");
         TestUser voter2 = registerUser("voterGet2");
         Place place = createPlace();
-        RateableTarget target = createTarget(place);
+        RateableTarget target = createTarget();
         Review review = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE);
 
         // Voter 1 vota
@@ -368,7 +369,7 @@ class ReviewHelpfulControllerIntegrationTest {
         TestUser author = registerUser("authorList");
         TestUser requester = registerUser("requesterList");
         Place place = createPlace();
-        RateableTarget target = createTarget(place);
+        RateableTarget target = createTarget();
 
         Review reviewA = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE);
         Review reviewB = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE);

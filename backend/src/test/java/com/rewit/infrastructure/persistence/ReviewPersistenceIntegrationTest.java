@@ -195,9 +195,10 @@ class ReviewPersistenceIntegrationTest {
                 null
         );
 
-        assertThrows(DataIntegrityViolationException.class, () ->
+        DataIntegrityViolationException duplicateEx = assertThrows(DataIntegrityViolationException.class, () ->
                 reviewTargetJpaRepository.saveAndFlush(duplicate)
         );
+        assertNotNull(duplicateEx);
     }
 
     @Test
@@ -258,9 +259,10 @@ class ReviewPersistenceIntegrationTest {
                 null
         );
 
-        assertThrows(DataIntegrityViolationException.class, () ->
+        DataIntegrityViolationException invalidRatingEx = assertThrows(DataIntegrityViolationException.class, () ->
                 reviewTargetJpaRepository.saveAndFlush(invalidRatingEntity)
         );
+        assertNotNull(invalidRatingEx);
     }
 
     @Test
@@ -330,7 +332,8 @@ class ReviewPersistenceIntegrationTest {
         );
 
         // Operação inteira deve falhar
-        assertThrows(BusinessException.class, () -> reviewService.createReview(cmd));
+        BusinessException rollbackEx = assertThrows(BusinessException.class, () -> reviewService.createReview(cmd));
+        assertNotNull(rollbackEx);
 
         // Provar diretamente no PostgreSQL que NADA foi persistido
         long finalReviewsCount = reviewJpaRepository.count();
@@ -351,7 +354,7 @@ class ReviewPersistenceIntegrationTest {
 
         TransactionTemplate template = new TransactionTemplate(transactionManager);
 
-        assertThrows(RuntimeException.class, () ->
+        RuntimeException txEx = assertThrows(RuntimeException.class, () ->
                 template.execute(status -> {
                     // 1. Salva Review com sucesso
                     Review review = new Review(UUID.randomUUID(), user.getId(), null, "Teste rollback", false, null, null, null);
@@ -365,6 +368,7 @@ class ReviewPersistenceIntegrationTest {
                     throw new RuntimeException("Simulação de falha catastrófica no meio da transação");
                 })
         );
+        assertNotNull(txEx);
 
         // Provar que nem a Review nem o ReviewTarget permaneceram no banco PostgreSQL
         long finalReviewsCount = reviewJpaRepository.count();

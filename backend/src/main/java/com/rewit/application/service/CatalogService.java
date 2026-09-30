@@ -1,5 +1,23 @@
 package com.rewit.application.service;
 
+import java.text.Normalizer;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import com.rewit.application.dto.catalog.CatalogDtos.AddProductIdentifierCommand;
 import com.rewit.application.dto.catalog.CatalogDtos.AssociateProductPresenceCommand;
 import com.rewit.application.dto.catalog.CatalogDtos.CreatePlaceCommand;
@@ -18,23 +36,6 @@ import com.rewit.domain.model.PlaceExternalReference;
 import com.rewit.domain.model.Product;
 import com.rewit.domain.model.ProductIdentifier;
 import com.rewit.domain.model.ProductPresence;
-import org.hibernate.exception.ConstraintViolationException;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionOperations;
-import org.springframework.transaction.support.TransactionTemplate;
-
-import java.text.Normalizer;
-import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Serviço de aplicação para operações fundamentais de catálogo (Lugares, Produtos, Identificadores e Presenças).
@@ -269,6 +270,9 @@ public class CatalogService {
     }
 
     private Place executePersistPlace(CreatePlaceCommand cmd, String slug, String provider, String externalId) {
+        Integer validationRadiusValue = cmd.validationRadiusMeters();
+        int validationRadiusMeters = validationRadiusValue != null ? validationRadiusValue : 50;
+
         Place place = new Place(
                 null,
                 cmd.name(),
@@ -283,7 +287,7 @@ public class CatalogService {
                 cmd.country(),
                 cmd.latitude(),
                 cmd.longitude(),
-                cmd.validationRadiusMeters() != null ? cmd.validationRadiusMeters() : 50,
+                validationRadiusMeters,
                 "USER",
                 false,
                 cmd.claimedByBusinessId(),

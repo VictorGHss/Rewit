@@ -1,8 +1,14 @@
 package com.rewit.presentation.dto.catalog;
 
-import jakarta.validation.constraints.*;
-
 import java.util.UUID;
+
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 /**
  * DTOs de apresentação (Requests e Responses) para a API de catálogo (Step 7).
@@ -201,4 +207,24 @@ public final class CatalogPresentationDtos {
             String verificationStatus,
             String status
     ) {}
+
+    public record SearchResultResponse(
+            UUID id,
+            String name,
+            String slug,
+            String category,
+            String targetType,
+            String status
+    ) {
+        public static SearchResultResponse fromDomain(com.rewit.application.dto.catalog.CatalogDtos.CatalogSearchResult result) {
+            return new SearchResultResponse(
+                    result.id(),
+                    result.name(),
+                    result.slug(),
+                    result.category(),
+                    result.targetType(),
+                    result.status()
+            );
+        }
+    }
 }

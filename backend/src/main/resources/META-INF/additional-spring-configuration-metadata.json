@@ -1,0 +1,74 @@
+{
+  "properties": [
+    {
+      "name": "rewit.google.places.api-key",
+      "type": "java.lang.String",
+      "description": "Google Places API key used for external place lookup and enrichment."
+    },
+    {
+      "name": "rewit.google.places.base-url",
+      "type": "java.lang.String",
+      "description": "Google Places API base URL."
+    },
+    {
+      "name": "rewit.google.places.connect-timeout-ms",
+      "type": "java.lang.Integer",
+      "description": "Connection timeout in milliseconds for Google Places API requests."
+    },
+    {
+      "name": "rewit.google.places.read-timeout-ms",
+      "type": "java.lang.Integer",
+      "description": "Read timeout in milliseconds for Google Places API requests."
+    },
+    {
+      "name": "rewit.minio.endpoint",
+      "type": "java.lang.String",
+      "description": "MinIO endpoint used for media storage operations."
+    },
+    {
+      "name": "rewit.minio.access-key",
+      "type": "java.lang.String",
+      "description": "MinIO access key used by the application."
+    },
+    {
+      "name": "rewit.minio.secret-key",
+      "type": "java.lang.String",
+      "description": "MinIO secret key used by the application."
+    },
+    {
+      "name": "rewit.minio.bucket-name",
+      "type": "java.lang.String",
+      "description": "Default MinIO bucket used for application storage."
+    },
+    {
+      "name": "rewit.security.jwt-secret",
+      "type": "java.lang.String",
+      "description": "JWT signing secret used for bearer token validation."
+    },
+    {
+      "name": "rewit.security.jwt-issuer",
+      "type": "java.lang.String",
+      "description": "Expected JWT issuer claim."
+    },
+    {
+      "name": "rewit.security.jwt-audience",
+      "type": "java.lang.String",
+      "description": "Expected JWT audience claim."
+    },
+    {
+      "name": "rewit.security.access-token-ttl-seconds",
+      "type": "java.lang.Long",
+      "description": "Access token TTL in seconds."
+    },
+    {
+      "name": "rewit.security.refresh-token-ttl-seconds",
+      "type": "java.lang.Long",
+      "description": "Refresh token TTL in seconds."
+    },
+    {
+      "name": "rewit.spatial.default-validation-radius-meters",
+      "type": "java.lang.Integer",
+      "description": "Default spatial validation radius used for catalog proximity checks."
+    }
+  ]
+}

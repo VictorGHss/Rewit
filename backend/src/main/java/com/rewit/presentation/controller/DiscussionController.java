@@ -26,6 +26,7 @@ import java.util.UUID;
  * O autor é derivado estritamente do token JWT autenticado para prevenção total de IDOR e spoofing.
  */
 @RestController
+@RequestMapping("/api/v1")
 @Tag(name = "Discussões de Avaliações", description = "Endpoints para comentários e respostas em avaliações")
 public class DiscussionController {
 
@@ -35,7 +36,7 @@ public class DiscussionController {
         this.discussionService = Objects.requireNonNull(discussionService, "DiscussionService must not be null");
     }
 
-    @PostMapping("/api/v1/reviews/{reviewId}/discussions")
+    @PostMapping("/reviews/{reviewId}/discussions")
     @Operation(summary = "Adicionar comentário ou resposta a uma avaliação", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<DiscussionResponse> createDiscussion(
             @PathVariable("reviewId") UUID reviewId,
@@ -55,7 +56,7 @@ public class DiscussionController {
         return ResponseEntity.status(HttpStatus.CREATED).body(DiscussionResponse.fromView(view));
     }
 
-    @GetMapping("/api/v1/reviews/{reviewId}/discussions")
+    @GetMapping("/reviews/{reviewId}/discussions")
     @Operation(summary = "Listar comentários de uma avaliação de forma cronológica", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<PagedResponse<DiscussionResponse>> getDiscussions(
             @PathVariable("reviewId") UUID reviewId,
@@ -79,7 +80,7 @@ public class DiscussionController {
         ));
     }
 
-    @DeleteMapping("/api/v1/discussions/{discussionId}")
+    @DeleteMapping("/discussions/{discussionId}")
     @Operation(summary = "Remover comentário de avaliação (soft delete)", security = @SecurityRequirement(name = "bearerAuth"))
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public ResponseEntity<Void> deleteDiscussion(

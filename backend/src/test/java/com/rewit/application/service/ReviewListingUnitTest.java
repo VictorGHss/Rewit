@@ -64,6 +64,7 @@ class ReviewListingUnitTest {
     private UUID requesterUserId;
     private UUID authorUserId;
 
+    @SuppressWarnings("unused")
     @BeforeEach
     void setUp() {
         reviewService = new ReviewService(

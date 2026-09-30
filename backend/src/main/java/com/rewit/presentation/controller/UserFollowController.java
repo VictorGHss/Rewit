@@ -19,7 +19,7 @@ import java.util.UUID;
  * Controlador REST para o subsistema social de conexões entre usuários e seguidores (Step 15.0).
  */
 @RestController
-@RequestMapping("/api/v1/users")
+@RequestMapping("/api/v1/users/{id}")
 public class UserFollowController {
 
     private final UserFollowService userFollowService;
@@ -28,7 +28,7 @@ public class UserFollowController {
         this.userFollowService = userFollowService;
     }
 
-    @PostMapping("/{id}/follow")
+    @PostMapping("/follow")
     public ResponseEntity<FollowStatusResponse> followUser(
             @PathVariable UUID id,
             Authentication authentication
@@ -38,7 +38,7 @@ public class UserFollowController {
         return ResponseEntity.ok(new FollowStatusResponse(true));
     }
 
-    @DeleteMapping("/{id}/follow")
+    @DeleteMapping("/follow")
     public ResponseEntity<FollowStatusResponse> unfollowUser(
             @PathVariable UUID id,
             Authentication authentication
@@ -48,7 +48,7 @@ public class UserFollowController {
         return ResponseEntity.ok(new FollowStatusResponse(false));
     }
 
-    @GetMapping("/{id}/follow")
+    @GetMapping("/follow")
     public ResponseEntity<FollowStatusResponse> getFollowStatus(
             @PathVariable UUID id,
             Authentication authentication
@@ -65,7 +65,7 @@ public class UserFollowController {
         return UUID.fromString(authentication.getName());
     }
 
-    @GetMapping("/{id}/following")
+    @GetMapping("/following")
     public ResponseEntity<PagedResponse<FollowUserSummaryResponse>> getFollowing(
             @PathVariable UUID id,
             @RequestParam(defaultValue = "0") int page,
@@ -75,7 +75,7 @@ public class UserFollowController {
         return ResponseEntity.ok(toPagedResponse(pageResult));
     }
 
-    @GetMapping("/{id}/followers")
+    @GetMapping("/followers")
     public ResponseEntity<PagedResponse<FollowUserSummaryResponse>> getFollowers(
             @PathVariable UUID id,
             @RequestParam(defaultValue = "0") int page,
