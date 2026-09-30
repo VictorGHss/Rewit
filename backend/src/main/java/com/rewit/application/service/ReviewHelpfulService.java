@@ -23,18 +23,30 @@ public class ReviewHelpfulService {
     private final ReviewRepository reviewRepository;
     private final UserFollowRepository userFollowRepository;
     private final NotificationService notificationService;
+    private final ReputationService reputationService;
 
     @org.springframework.beans.factory.annotation.Autowired
     public ReviewHelpfulService(
             ReviewReactionRepository reviewReactionRepository,
             ReviewRepository reviewRepository,
             UserFollowRepository userFollowRepository,
-            NotificationService notificationService
+            NotificationService notificationService,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) ReputationService reputationService
     ) {
         this.reviewReactionRepository = Objects.requireNonNull(reviewReactionRepository, "reviewReactionRepository must not be null");
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
         this.userFollowRepository = userFollowRepository;
         this.notificationService = notificationService;
+        this.reputationService = reputationService;
+    }
+
+    public ReviewHelpfulService(
+            ReviewReactionRepository reviewReactionRepository,
+            ReviewRepository reviewRepository,
+            UserFollowRepository userFollowRepository,
+            NotificationService notificationService
+    ) {
+        this(reviewReactionRepository, reviewRepository, userFollowRepository, notificationService, null);
     }
 
     public ReviewHelpfulService(
@@ -42,7 +54,7 @@ public class ReviewHelpfulService {
             ReviewRepository reviewRepository,
             UserFollowRepository userFollowRepository
     ) {
-        this(reviewReactionRepository, reviewRepository, userFollowRepository, null);
+        this(reviewReactionRepository, reviewRepository, userFollowRepository, null, null);
     }
 
     public record HelpfulResult(boolean helpful, long helpfulCount) {}
@@ -57,6 +69,9 @@ public class ReviewHelpfulService {
         if (added && notificationService != null) {
             notificationService.notifyReviewHelpful(review.getId(), review.getUserId());
         }
+        if (reputationService != null) {
+            reputationService.recalculateAndSave(review.getUserId());
+        }
         long count = reviewReactionRepository.countHelpful(review.getId());
         return new HelpfulResult(true, count);
     }
@@ -68,6 +83,9 @@ public class ReviewHelpfulService {
     public HelpfulResult removeHelpful(UUID reviewId, UUID requesterUserId) {
         Review review = validateAndGetReview(reviewId, requesterUserId);
         reviewReactionRepository.removeHelpful(review.getId(), requesterUserId);
+        if (reputationService != null) {
+            reputationService.recalculateAndSave(review.getUserId());
+        }
         long count = reviewReactionRepository.countHelpful(review.getId());
         return new HelpfulResult(false, count);
     }

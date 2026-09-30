@@ -32,6 +32,22 @@ public class ReportService {
     private final ReviewRepository reviewRepository;
     private final UserFollowRepository userFollowRepository;
     private final ReportRateLimiter reportRateLimiter;
+    private final ReputationService reputationService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReportService(
+            ReportRepository reportRepository,
+            ReviewRepository reviewRepository,
+            UserFollowRepository userFollowRepository,
+            ReportRateLimiter reportRateLimiter,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) ReputationService reputationService
+    ) {
+        this.reportRepository = Objects.requireNonNull(reportRepository, "ReportRepository must not be null");
+        this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
+        this.userFollowRepository = Objects.requireNonNull(userFollowRepository, "UserFollowRepository must not be null");
+        this.reportRateLimiter = Objects.requireNonNull(reportRateLimiter, "ReportRateLimiter must not be null");
+        this.reputationService = reputationService;
+    }
 
     public ReportService(
             ReportRepository reportRepository,
@@ -39,10 +55,7 @@ public class ReportService {
             UserFollowRepository userFollowRepository,
             ReportRateLimiter reportRateLimiter
     ) {
-        this.reportRepository = Objects.requireNonNull(reportRepository, "ReportRepository must not be null");
-        this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
-        this.userFollowRepository = Objects.requireNonNull(userFollowRepository, "UserFollowRepository must not be null");
-        this.reportRateLimiter = Objects.requireNonNull(reportRateLimiter, "ReportRateLimiter must not be null");
+        this(reportRepository, reviewRepository, userFollowRepository, reportRateLimiter, null);
     }
 
     public record CreateReportResult(Report report, boolean newlyCreated) {}
@@ -109,6 +122,9 @@ public class ReportService {
         if (pendingCount >= REPORT_THRESHOLD_FOR_UNDER_REVIEW && review.getStatus() == ReviewStatus.ACTIVE) {
             review.markUnderReview();
             reviewRepository.save(review);
+            if (reputationService != null) {
+                reputationService.recalculateAndSave(review.getUserId());
+            }
         }
 
         return new CreateReportResult(savedReport, true);

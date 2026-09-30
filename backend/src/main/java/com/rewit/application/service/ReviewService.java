@@ -63,6 +63,7 @@ public class ReviewService {
     private final RateableTargetStatsRepository rateableTargetStatsRepository;
     private final UserFollowRepository userFollowRepository;
     private final ReviewReactionRepository reviewReactionRepository;
+    private final ReputationService reputationService;
 
     @Autowired
     public ReviewService(ReviewRepository reviewRepository,
@@ -74,7 +75,8 @@ public class ReviewService {
                          CheckInRepository checkInRepository,
                          RateableTargetStatsRepository rateableTargetStatsRepository,
                          UserFollowRepository userFollowRepository,
-                         ReviewReactionRepository reviewReactionRepository) {
+                         ReviewReactionRepository reviewReactionRepository,
+                         @Autowired(required = false) ReputationService reputationService) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
         this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
@@ -85,6 +87,20 @@ public class ReviewService {
         this.rateableTargetStatsRepository = rateableTargetStatsRepository;
         this.userFollowRepository = userFollowRepository;
         this.reviewReactionRepository = reviewReactionRepository;
+        this.reputationService = reputationService;
+    }
+
+    public ReviewService(ReviewRepository reviewRepository,
+                         ReviewTargetRepository reviewTargetRepository,
+                         UserRepository userRepository,
+                         RateableTargetRepository rateableTargetRepository,
+                         PlaceRepository placeRepository,
+                         ProfileRepository profileRepository,
+                         CheckInRepository checkInRepository,
+                         RateableTargetStatsRepository rateableTargetStatsRepository,
+                         UserFollowRepository userFollowRepository,
+                         ReviewReactionRepository reviewReactionRepository) {
+        this(reviewRepository, reviewTargetRepository, userRepository, rateableTargetRepository, placeRepository, profileRepository, checkInRepository, rateableTargetStatsRepository, userFollowRepository, reviewReactionRepository, null);
     }
 
     public ReviewService(ReviewRepository reviewRepository,
@@ -256,6 +272,11 @@ public class ReviewService {
             for (UUID targetId : targetIdsToUpdate) {
                 rateableTargetStatsRepository.recalculateAndSave(targetId);
             }
+        }
+
+        // 8. Atualização determinística e consistente de reputação do autor (Step 23.1)
+        if (reputationService != null) {
+            reputationService.recalculateAndSave(author.getId());
         }
 
         return toDetailView(savedReview, savedTargets);

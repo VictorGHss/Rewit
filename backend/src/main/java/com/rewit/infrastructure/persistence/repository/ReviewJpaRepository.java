@@ -193,4 +193,50 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
     long countByUserIdAndStatus(UUID userId, String status);
 
     long countByUserIdAndStatusAndIsVerifiedOnSiteTrue(UUID userId, String status);
+
+    // ------------------------------------------------------------------
+    // Queries de Reputação V1 (Step 23.0)
+    // Reviews anônimas excluídas conforme ADR-008, Seção 3.
+    // ------------------------------------------------------------------
+
+    /**
+     * Conta reviews ACTIVE não-anônimas do usuário.
+     * Sinal: activeReviews na reputação V1.
+     */
+    @Query("""
+        SELECT COUNT(r)
+        FROM ReviewJpaEntity r
+        WHERE r.userId = :userId
+          AND r.status = 'ACTIVE'
+          AND r.isAnonymous = FALSE
+    """)
+    long countActiveNonAnonByUserId(@Param("userId") UUID userId);
+
+    /**
+     * Conta reviews ACTIVE, verificadas e não-anônimas do usuário.
+     * Sinal: verifiedReviews na reputação V1.
+     */
+    @Query("""
+        SELECT COUNT(r)
+        FROM ReviewJpaEntity r
+        WHERE r.userId = :userId
+          AND r.status = 'ACTIVE'
+          AND r.isAnonymous = FALSE
+          AND r.isVerifiedOnSite = TRUE
+    """)
+    long countActiveNonAnonVerifiedByUserId(@Param("userId") UUID userId);
+
+    /**
+     * Conta targets DISTINTOS avaliados em reviews ACTIVE e não-anônimas do usuário.
+     * Sinal: distinctTargetsReviewed na reputação V1.
+     */
+    @Query("""
+        SELECT COUNT(DISTINCT rt.targetId)
+        FROM ReviewTargetJpaEntity rt
+        JOIN ReviewJpaEntity r ON r.id = rt.reviewId
+        WHERE r.userId = :userId
+          AND r.status = 'ACTIVE'
+          AND r.isAnonymous = FALSE
+    """)
+    long countDistinctTargetsByUserIdActiveNonAnon(@Param("userId") UUID userId);
 }

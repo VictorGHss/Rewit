@@ -67,4 +67,24 @@ public interface ReviewReactionJpaRepository extends JpaRepository<ReviewReactio
           AND rr.reactionType = 'HELPFUL'
     """)
     long countHelpfulVotesReceivedByUserId(@Param("userId") UUID userId);
+
+    // ------------------------------------------------------------------
+    // Query de Reputação V1 (Step 23.0)
+    // Helpful excluindo reviews anônimas, conforme ADR-008, Seção 3.
+    // ------------------------------------------------------------------
+
+    /**
+     * Conta votos Helpful recebidos em reviews ACTIVE e não-anônimas do usuário.
+     * Sinal: helpfulVotesReceived na reputação V1.
+     */
+    @Query("""
+        SELECT COUNT(rr)
+        FROM ReviewReactionJpaEntity rr
+        JOIN ReviewJpaEntity r ON r.id = rr.reviewId
+        WHERE r.userId = :userId
+          AND r.status = 'ACTIVE'
+          AND r.isAnonymous = FALSE
+          AND rr.reactionType = 'HELPFUL'
+    """)
+    long countHelpfulVotesReceivedByUserIdNonAnon(@Param("userId") UUID userId);
 }
