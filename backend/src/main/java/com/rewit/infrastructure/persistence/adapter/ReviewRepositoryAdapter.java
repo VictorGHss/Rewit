@@ -157,6 +157,27 @@ public class ReviewRepositoryAdapter implements ReviewRepository {
         return reviewJpaRepository.existsById(id);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Review> findFeedByFollowing(UUID requesterUserId, int page, int size) {
+        if (requesterUserId == null) {
+            return PageResult.of(List.of(), page, size, 0);
+        }
+        org.springframework.data.domain.PageRequest pageRequest = org.springframework.data.domain.PageRequest.of(
+                page, size, org.springframework.data.domain.Sort.by(
+                        org.springframework.data.domain.Sort.Order.desc("createdAt"),
+                        org.springframework.data.domain.Sort.Order.asc("id")
+                )
+        );
+        org.springframework.data.domain.Page<ReviewJpaEntity> entityPage = reviewJpaRepository.findFeedByFollowing(requesterUserId, pageRequest);
+
+        List<Review> reviews = entityPage.getContent().stream()
+                .map(entity -> entity.toDomain())
+                .toList();
+
+        return PageResult.of(reviews, page, size, entityPage.getTotalElements());
+    }
+
     private static ReviewTarget toDomain(ReviewTargetJpaEntity entity) {
         return entity != null ? entity.toDomain() : null;
     }

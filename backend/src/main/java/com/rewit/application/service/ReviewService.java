@@ -640,4 +640,108 @@ public class ReviewService {
                 pageResult.isLast()
         );
     }
+
+    @Transactional(readOnly = true)
+    public PageResult<ReviewPublicView> findFeed(
+            UUID requesterUserId,
+            int page,
+            int size,
+            String sort
+    ) {
+        if (requesterUserId == null) {
+            throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+        }
+        if (page < 0) {
+            throw new BusinessException("O número da página não pode ser negativo", HttpStatus.BAD_REQUEST, "INVALID_PAGE");
+        }
+        if (size <= 0) {
+            throw new BusinessException("O tamanho da página deve ser maior que zero", HttpStatus.BAD_REQUEST, "INVALID_SIZE");
+        }
+        if (size > 50) {
+            throw new BusinessException("O tamanho da página não pode ser superior a 50", HttpStatus.BAD_REQUEST, "PAGE_SIZE_EXCEEDED");
+        }
+        if (sort != null && !sort.isBlank() && !"newest".equalsIgnoreCase(sort.trim())) {
+            throw new BusinessException("Ordenação inválida: " + sort, HttpStatus.BAD_REQUEST, "INVALID_SORT");
+        }
+
+        PageResult<Review> pageResult = reviewRepository.findFeedByFollowing(requesterUserId, page, size);
+
+        if (pageResult.content().isEmpty()) {
+            return PageResult.of(List.of(), page, size, pageResult.totalElements());
+        }
+
+        List<UUID> reviewIds = pageResult.content().stream().map(r -> r.getId()).toList();
+
+        Map<UUID, List<ReviewTarget>> targetsByReviewId = (reviewTargetRepository != null && !reviewIds.isEmpty())
+                ? reviewTargetRepository.findByReviewIdIn(reviewIds).stream()
+                .collect(Collectors.groupingBy(t -> t.getReviewId()))
+                : Map.of();
+
+        Set<UUID> nonAnonymousAuthorIds = pageResult.content().stream()
+                .filter(r -> !r.isAnonymous())
+                .map(r -> r.getUserId())
+                .collect(Collectors.toSet());
+
+        Map<UUID, Profile> profilesByUserId = (profileRepository != null && !nonAnonymousAuthorIds.isEmpty())
+                ? profileRepository.findByUserIdIn(nonAnonymousAuthorIds).stream()
+                .collect(Collectors.toMap(p -> p.getUserId(), p -> p, (p1, p2) -> p1))
+                : Map.of();
+
+        Map<UUID, Long> helpfulCounts = (reviewReactionRepository != null && !reviewIds.isEmpty())
+                ? reviewReactionRepository.countHelpfulByReviewIds(reviewIds)
+                : Map.of();
+
+        Set<UUID> helpfulByMeSet = (reviewReactionRepository != null && !reviewIds.isEmpty())
+                ? reviewReactionRepository.findHelpfulReviewIdsByUser(reviewIds, requesterUserId)
+                : Set.of();
+
+        List<ReviewPublicView> publicViews = pageResult.content().stream()
+                .map(review -> {
+                    PublicAuthorView authorView;
+                    if (review.isAnonymous()) {
+                        authorView = PublicAuthorView.anonymous();
+                    } else {
+                        Profile profile = profilesByUserId.get(review.getUserId());
+                        if (profile != null) {
+                            authorView = new PublicAuthorView(review.getUserId(), profile.getHandle(), profile.getDisplayName(), profile.getAvatarUrl(), false);
+                        } else {
+                            authorView = new PublicAuthorView(review.getUserId(), null, null, null, false);
+                        }
+                    }
+
+                    List<ReviewTarget> targets = targetsByReviewId.getOrDefault(review.getId(), List.of());
+                    List<ReviewTargetView> targetViews = targets.stream()
+                            .map(t -> new ReviewTargetView(t.getId(), t.getReviewId(), t.getTargetId(), t.getRating(), t.getSpecificComment(), t.getCreatedAt()))
+                            .toList();
+
+                    long helpfulCount = helpfulCounts.getOrDefault(review.getId(), 0L);
+                    boolean isHelpfulByMe = helpfulByMeSet.contains(review.getId());
+
+                    return new ReviewPublicView(
+                            review.getId(),
+                            authorView,
+                            review.getContextPlaceId(),
+                            review.getExperienceText(),
+                            review.isAnonymous(),
+                            review.isVerifiedOnSite(),
+                            review.getVisibility(),
+                            review.getStatus() != null ? review.getStatus().name() : "ACTIVE",
+                            review.getCreatedAt(),
+                            review.getUpdatedAt(),
+                            targetViews,
+                            helpfulCount,
+                            isHelpfulByMe
+                    );
+                })
+                .toList();
+
+        return new PageResult<>(
+                publicViews,
+                pageResult.pageNumber(),
+                pageResult.pageSize(),
+                pageResult.totalElements(),
+                pageResult.totalPages(),
+                pageResult.isLast()
+        );
+    }
 }

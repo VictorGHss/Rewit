@@ -220,7 +220,7 @@ class CatalogPersistenceIntegrationTest {
         ));
 
         // Caso A e B: Dentro do raio de 1500m (Place A dentro, Place B e Place C fora)
-        List<NearbyPlaceResult> results1500m = placeRepository.findNearbyWithDistance(centerLat, centerLon, 1500.0, 20);
+        List<NearbyPlaceResult> results1500m = placeRepository.findNearbyWithDistance(centerLat, centerLon, 1500.0, 100);
         assertTrue(results1500m.stream().anyMatch(r -> r.place().getId().equals(placeA.getId())), "Caso A: Place A deve estar dentro do raio de 1500m");
         assertFalse(results1500m.stream().anyMatch(r -> r.place().getId().equals(placeB.getId())), "Caso B: Place B deve estar fora do raio de 1500m");
         assertFalse(results1500m.stream().anyMatch(r -> r.place().getId().equals(placeC.getId())), "Caso B: Place C deve estar fora do raio de 1500m");

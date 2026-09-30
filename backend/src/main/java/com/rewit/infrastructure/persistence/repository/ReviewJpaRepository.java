@@ -163,4 +163,24 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             @Param("verifiedOnly") boolean verifiedOnly,
             Pageable pageable
     );
+
+    @Query(value = """
+        SELECT r FROM ReviewJpaEntity r
+        JOIN UserFollowJpaEntity uf ON uf.followedUserId = r.userId
+        WHERE uf.followerUserId = :requesterUserId
+          AND r.status = 'ACTIVE'
+          AND r.visibility IN ('PUBLIC', 'FOLLOWERS')
+        ORDER BY r.createdAt DESC, r.id ASC
+    """,
+    countQuery = """
+        SELECT COUNT(DISTINCT r.id) FROM ReviewJpaEntity r
+        JOIN UserFollowJpaEntity uf ON uf.followedUserId = r.userId
+        WHERE uf.followerUserId = :requesterUserId
+          AND r.status = 'ACTIVE'
+          AND r.visibility IN ('PUBLIC', 'FOLLOWERS')
+    """)
+    Page<ReviewJpaEntity> findFeedByFollowing(
+            @Param("requesterUserId") UUID requesterUserId,
+            Pageable pageable
+    );
 }
