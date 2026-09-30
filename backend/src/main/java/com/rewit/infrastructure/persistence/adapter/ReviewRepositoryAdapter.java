@@ -65,6 +65,17 @@ public class ReviewRepositoryAdapter implements ReviewRepository {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<Review> findByIdIn(java.util.Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return reviewJpaRepository.findByIdIn(ids).stream()
+                .map(entity -> entity.toDomain())
+                .toList();
+    }
+
+    @Override
     public Optional<Review> findByIdForUpdate(UUID id) {
         if (id == null) {
             return Optional.empty();

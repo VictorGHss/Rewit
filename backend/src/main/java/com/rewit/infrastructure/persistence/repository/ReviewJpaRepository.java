@@ -22,6 +22,8 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
     @Query("SELECT r FROM ReviewJpaEntity r WHERE r.id = :id")
     Optional<ReviewJpaEntity> findByIdForUpdate(@Param("id") UUID id);
 
+    List<ReviewJpaEntity> findByIdIn(java.util.Collection<UUID> ids);
+
     List<ReviewJpaEntity> findByUserId(UUID userId);
 
     Page<ReviewJpaEntity> findByUserId(UUID userId, Pageable pageable);

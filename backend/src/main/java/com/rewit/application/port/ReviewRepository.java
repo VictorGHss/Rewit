@@ -19,6 +19,8 @@ public interface ReviewRepository {
 
     Optional<Review> findById(UUID id);
 
+    List<Review> findByIdIn(java.util.Collection<UUID> ids);
+
     Optional<Review> findByIdForUpdate(UUID id);
 
     List<Review> findByUserId(UUID userId);
