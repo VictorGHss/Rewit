@@ -2,10 +2,13 @@ package com.rewit.infrastructure.persistence.adapter;
 
 import com.rewit.application.port.FeedCandidateRepository;
 import com.rewit.domain.feed.FeedCandidate;
+import com.rewit.infrastructure.persistence.entity.ReviewJpaEntity;
 import com.rewit.infrastructure.persistence.entity.ReviewTargetJpaEntity;
 import com.rewit.infrastructure.persistence.repository.ReviewJpaRepository;
 import com.rewit.infrastructure.persistence.repository.ReviewReactionJpaRepository;
 import com.rewit.infrastructure.persistence.repository.ReviewTargetJpaRepository;
+import org.springframework.data.core.PropertyPath;
+import org.springframework.data.core.TypedPropertyPath;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
@@ -105,12 +108,18 @@ public class FeedCandidateRepositoryAdapter implements FeedCandidateRepository {
 
         // ----------------------------------------------------------------
         // Query 1 — reviews elegíveis da rede social direta
+        // Ordenação type-safe via TypedPropertyPath (Spring Data 4.1):
+        //   createdAt DESC, id ASC
+        // Substitui Sort.TypedSort (deprecated desde 4.1) sem alterar semântica.
         // ----------------------------------------------------------------
-        PageRequest pageRequest = PageRequest.of(
-                0,
-                effectiveLimit,
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.asc("id"))
+        TypedPropertyPath<ReviewJpaEntity, Instant> createdAtPath = PropertyPath.of((ReviewJpaEntity review) -> review.getCreatedAt());
+        TypedPropertyPath<ReviewJpaEntity, UUID> idPath = PropertyPath.of((ReviewJpaEntity review) -> review.getId());
+
+        Sort sort = Sort.by(
+                Sort.Order.desc(createdAtPath),
+                Sort.Order.asc(idPath)
         );
+        PageRequest pageRequest = PageRequest.of(0, effectiveLimit, sort);
         List<Object[]> rows = reviewJpaRepository.findFeedV2Candidates(requesterId, pageRequest);
 
         if (rows.isEmpty()) {

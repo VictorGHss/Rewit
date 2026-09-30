@@ -17,7 +17,7 @@ public final class FeedV2Ranker {
     public static final int HELPFUL_CAP = 20;
 
     private static final Comparator<RankedFeedCandidate> ORDER = Comparator
-            .comparing(RankedFeedCandidate::score)
+            .comparing((RankedFeedCandidate ranked) -> ranked.score())
             .reversed()
             .thenComparing(ranked -> ranked.candidate().createdAt(), Comparator.reverseOrder())
             .thenComparing(ranked -> ranked.candidate().reviewId());

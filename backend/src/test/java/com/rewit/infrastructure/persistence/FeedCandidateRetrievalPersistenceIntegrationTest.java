@@ -135,7 +135,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
 
-        List<UUID> ids = candidates.stream().map(FeedCandidate::reviewId).toList();
+        List<UUID> ids = candidates.stream().map(c -> c.reviewId()).toList();
         assertTrue(ids.contains(review.getId()), "Review PUBLIC de autor seguido deve aparecer");
     }
 
@@ -157,7 +157,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
 
-        List<UUID> ids = candidates.stream().map(FeedCandidate::reviewId).toList();
+        List<UUID> ids = candidates.stream().map(c -> c.reviewId()).toList();
         assertTrue(ids.contains(review.getId()), "Review FOLLOWERS de autor seguido deve aparecer");
     }
 
@@ -179,7 +179,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
 
-        List<UUID> ids = candidates.stream().map(FeedCandidate::reviewId).toList();
+        List<UUID> ids = candidates.stream().map(c -> c.reviewId()).toList();
         assertFalse(ids.contains(review.getId()), "Review PRIVATE nunca deve aparecer no feed");
     }
 
@@ -204,7 +204,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
 
-        List<UUID> ids = candidates.stream().map(FeedCandidate::reviewId).toList();
+        List<UUID> ids = candidates.stream().map(c -> c.reviewId()).toList();
         assertTrue(ids.contains(active.getId()),       "Review ACTIVE deve aparecer");
         assertFalse(ids.contains(underReview.getId()), "Review UNDER_REVIEW não deve aparecer");
         assertFalse(ids.contains(removed.getId()),     "Review REMOVED não deve aparecer");
@@ -232,7 +232,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
 
-        List<UUID> ids = candidates.stream().map(FeedCandidate::reviewId).toList();
+        List<UUID> ids = candidates.stream().map(c -> c.reviewId()).toList();
         assertTrue(ids.contains(revFollowed.getId()),     "Review de autor seguido deve aparecer");
         assertFalse(ids.contains(revNotFollowed.getId()), "Review de autor não seguido não deve aparecer");
     }
@@ -269,7 +269,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
 
-        List<UUID> ids = candidates.stream().map(FeedCandidate::reviewId).toList();
+        List<UUID> ids = candidates.stream().map(c -> c.reviewId()).toList();
         assertFalse(ids.contains(own.getId()),
                 "Reviews do próprio requester não devem aparecer nos candidatos");
     }
@@ -295,7 +295,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
 
-        List<UUID> ids = candidates.stream().map(FeedCandidate::reviewId).toList();
+        List<UUID> ids = candidates.stream().map(c -> c.reviewId()).toList();
         assertFalse(ids.contains(publicFromNonFollowed.getId()),
                 "Review PUBLIC de não-seguido não deve entrar no feed V2 (somente grafo social direto)");
     }
@@ -321,10 +321,10 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
 
         List<UUID> first  = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW)
-                .stream().map(FeedCandidate::reviewId).toList();
+                .stream().map(c -> c.reviewId()).toList();
         List<UUID> second = feedCandidateRepository.retrieveCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW)
-                .stream().map(FeedCandidate::reviewId).toList();
+                .stream().map(c -> c.reviewId()).toList();
 
         assertEquals(first, second, "Duas chamadas consecutivas devem produzir a mesma ordem");
     }
@@ -355,7 +355,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
 
         // Filtrar só as reviews deste teste
         List<UUID> filtered = candidates.stream()
-                .map(FeedCandidate::reviewId)
+                .map(c -> c.reviewId())
                 .filter(id -> id.equals(older.getId()) || id.equals(middle.getId()) || id.equals(newest.getId()))
                 .toList();
 
@@ -483,7 +483,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
                 .toList();
 
         assertFalse(fromAuthor.isEmpty(), "Deve haver candidatos do autor seguido");
-        assertTrue(fromAuthor.stream().allMatch(FeedCandidate::isDirectFollow),
+        assertTrue(fromAuthor.stream().allMatch(c -> c.isDirectFollow()),
                 "Todos os candidatos do grafo social direto devem ter isDirectFollow=true");
     }
 
