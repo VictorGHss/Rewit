@@ -1,15 +1,17 @@
 package com.rewit.infrastructure.persistence.repository;
 
 import com.rewit.infrastructure.persistence.entity.ReviewJpaEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -17,6 +19,10 @@ import java.util.UUID;
  */
 @Repository
 public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM ReviewJpaEntity r WHERE r.id = :id")
+    Optional<ReviewJpaEntity> findByIdForUpdate(@Param("id") UUID id);
 
     List<ReviewJpaEntity> findByUserId(UUID userId);
 

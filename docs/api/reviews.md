@@ -36,6 +36,16 @@ ReviewController (presentation)
 * **Localização Sob Demanda**: O usuário fornece suas coordenadas geográficas **explicitamente** no payload de criação. O backend nunca rastreia nem armazena trilhas contínuas de GPS.
 * **Privacidade de Coordenadas**: As coordenadas precisas do usuário (`userLatitude`, `userLongitude`, `locationAccuracyMeters`) são dados sensíveis. Elas **NUNCA são expostas publicamente** na `ReviewResponse`. Apenas o fato verificado (`isVerifiedOnSite: true` ou `false`) é retornado pela API.
 
+### 1.5 Ciclo de Vida, Status e Moderação Preventiva (Step 19.0)
+* Toda avaliação é criada com status inicial **`ACTIVE`**.
+* Através do subsistema de denúncias comunitárias (**Reports**), uma avaliação `ACTIVE` que atingir o limiar determinístico de **3 denúncias pendentes de usuários distintos** transiciona atomicamente para **`UNDER_REVIEW`** (quarentena preventiva).
+* Uma avaliação em `UNDER_REVIEW`:
+  * É imediatamente removida da listagem pública por local e target;
+  * É imediatamente removida da timeline do Feed Social;
+  * Deixa de aceitar votos de utilidade (**Helpful**);
+  * Não aceita novas denúncias (retornando `404 REVIEW_NOT_FOUND`);
+  * Permanece visível apenas na visão do próprio autor em `GET /api/v1/me/reviews`.
+
 ---
 
 ## 2. Regras de Negócio e Verificação de Presença Física (Check-in)

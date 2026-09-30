@@ -351,8 +351,8 @@ class ReviewFeedPersistenceIntegrationTest {
         Instant sameTime = Instant.now().minusSeconds(50);
         UUID u1 = UUID.randomUUID();
         UUID u2 = UUID.randomUUID();
-        UUID idLow = (u1.compareTo(u2) < 0) ? u1 : u2;
-        UUID idHigh = (u1.compareTo(u2) < 0) ? u2 : u1;
+        UUID idLow = (u1.toString().compareTo(u2.toString()) < 0) ? u1 : u2;
+        UUID idHigh = (u1.toString().compareTo(u2.toString()) < 0) ? u2 : u1;
 
         // Cria reviews com idLow e idHigh, salvando primeiro idHigh
         Review rHigh = new Review(idHigh, author.getId(), place.getId(), "High", false, false, ReviewStatus.ACTIVE, "PUBLIC", -23.5505, -46.6333, 10.0, sameTime, sameTime);

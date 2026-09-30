@@ -65,6 +65,21 @@ public class ReviewRepositoryAdapter implements ReviewRepository {
     }
 
     @Override
+    public Optional<Review> findByIdForUpdate(UUID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return reviewJpaRepository.findByIdForUpdate(id)
+                .map(entity -> {
+                    List<ReviewTarget> targets = reviewTargetJpaRepository.findByReviewId(id).stream()
+                            .map(ReviewRepositoryAdapter::toDomain)
+                            .filter(Objects::nonNull)
+                            .toList();
+                    return entity.toDomain(targets);
+                });
+    }
+
+    @Override
     public List<Review> findByUserId(UUID userId) {
         if (userId == null) {
             return List.of();

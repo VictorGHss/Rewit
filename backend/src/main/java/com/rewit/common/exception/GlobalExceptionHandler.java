@@ -105,6 +105,16 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ProblemDetail handleHttpMessageNotReadable(org.springframework.http.converter.HttpMessageNotReadableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Corpo da requisição inválido ou mal formatado");
+        problem.setTitle("Requisição Inválida");
+        problem.setType(URI.create("https://api.rewit.app/errors/malformed-request"));
+        problem.setProperty("code", "MALFORMED_REQUEST");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneralException(Exception ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "Ocorreu um erro interno inesperado no servidor.");

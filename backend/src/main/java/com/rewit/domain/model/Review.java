@@ -248,6 +248,14 @@ public class Review {
         return visibility;
     }
 
+    public void markUnderReview() {
+        if (this.status != ReviewStatus.ACTIVE) {
+            throw new BusinessException("Apenas avaliações ativas podem ser colocadas sob moderação", "INVALID_REVIEW_STATUS_TRANSITION");
+        }
+        this.status = ReviewStatus.UNDER_REVIEW;
+        this.updatedAt = Instant.now();
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

@@ -19,6 +19,8 @@ public interface ReviewRepository {
 
     Optional<Review> findById(UUID id);
 
+    Optional<Review> findByIdForUpdate(UUID id);
+
     List<Review> findByUserId(UUID userId);
 
     PageResult<Review> findByUserIdPaged(UUID userId, int page, int size);
