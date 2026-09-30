@@ -237,4 +237,62 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
           AND r.isAnonymous = FALSE
     """)
     long countDistinctTargetsByUserIdActiveNonAnon(@Param("userId") UUID userId);
+
+    // ------------------------------------------------------------------
+    // Feed V2 — Candidate Retrieval (Step 24.3.2)
+    // Query isolada do findFeedByFollowing do V1.
+    // Retorna projeção mínima de sinais para o FeedV2Ranker.
+    // ------------------------------------------------------------------
+
+    /**
+     * Recupera a janela de candidatos para o Feed V2 de um requester.
+     *
+     * <p>Semântica de visibilidade idêntica à do Feed V1:
+     * <ul>
+     *   <li>status = ACTIVE</li>
+     *   <li>visibility IN ('PUBLIC', 'FOLLOWERS') — PRIVATE sempre excluído</li>
+     *   <li>autor deve estar na lista de seguidos diretos do requester</li>
+     *   <li>o próprio requester é excluído automaticamente pela semântica do follow
+     *       (self-follow não existe pela constraint chk_no_self_follow)</li>
+     * </ul>
+     *
+     * <p>Retorna Object[] com as colunas na ordem:
+     * <ol>
+     *   <li>r.id (UUID) — reviewId</li>
+     *   <li>r.userId (UUID) — authorId</li>
+     *   <li>r.contextPlaceId (UUID, nullable) — target de contexto para diversidade</li>
+     *   <li>r.createdAt (Instant)</li>
+     *   <li>r.isVerifiedOnSite (boolean)</li>
+     * </ol>
+     *
+     * <p>Ordenação determinística: createdAt DESC, id ASC.
+     *
+     * <p>Índices utilizados:
+     * <ul>
+     *   <li>idx_user_follows_follower (follower_user_id)</li>
+     *   <li>idx_reviews_status_visibility (status, visibility)</li>
+     *   <li>idx_reviews_created_at (created_at DESC)</li>
+     * </ul>
+     *
+     * <p>Gap de índice a documentar para etapas futuras:
+     * Um índice composto em reviews(user_id, status, visibility, created_at DESC)
+     * poderia eliminar a varredura parcial de reviews por user_id após o join.
+     */
+    @Query("""
+        SELECT r.id,
+               r.userId,
+               r.contextPlaceId,
+               r.createdAt,
+               r.isVerifiedOnSite
+        FROM ReviewJpaEntity r
+        JOIN UserFollowJpaEntity uf ON uf.followedUserId = r.userId
+        WHERE uf.followerUserId = :requesterId
+          AND r.status = 'ACTIVE'
+          AND r.visibility IN ('PUBLIC', 'FOLLOWERS')
+        ORDER BY r.createdAt DESC, r.id ASC
+    """)
+    List<Object[]> findFeedV2Candidates(
+            @Param("requesterId") UUID requesterId,
+            Pageable pageable
+    );
 }
