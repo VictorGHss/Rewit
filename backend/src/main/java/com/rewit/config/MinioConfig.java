@@ -11,13 +11,13 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class MinioConfig {
 
-    @Value("${rewit.minio.endpoint:http://localhost:9000}")
+    @Value("${rewit.minio.endpoint:${OBJECT_STORAGE_ENDPOINT:http://localhost:8333}}")
     private String endpoint;
 
-    @Value("${rewit.minio.access-key:rewit_minio_admin}")
+    @Value("${rewit.minio.access-key:${OBJECT_STORAGE_ACCESS_KEY:change-me}}")
     private String accessKey;
 
-    @Value("${rewit.minio.secret-key:rewit_minio_secret}")
+    @Value("${rewit.minio.secret-key:${OBJECT_STORAGE_SECRET_KEY:change-me}}")
     private String secretKey;
 
     @Bean

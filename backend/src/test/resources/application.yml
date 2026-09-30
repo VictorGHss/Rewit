@@ -9,5 +9,10 @@ spring:
     open-in-view: false
 
 rewit:
+  minio:
+    endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:8333}
+    access-key: ${OBJECT_STORAGE_ACCESS_KEY:change-me}
+    secret-key: ${OBJECT_STORAGE_SECRET_KEY:change-me}
+    bucket-name: ${OBJECT_STORAGE_BUCKET:rewit-local}
   security:
     jwt-secret: ${JWT_SECRET:test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!}

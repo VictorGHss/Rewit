@@ -466,6 +466,17 @@ Avaliações ativas aceitam discussões e comentários públicos diretamente ass
 
 ---
 
+### 3.10 Mídias Anexadas a Reviews (Step 21.0)
+Avaliações ativas aceitam anexos de imagem (JPEG ou PNG) armazenados em Object Storage (SeaweedFS/MinIO):
+* **Não exposição de chaves**: **O Rewit nunca expõe diretamente a chave do object storage (`object_key`), bucket ou caminhos internos.** As mídias são consumidas exclusivamente via API Rewit (`GET /api/v1/reviews/{reviewId}/media/{mediaId}`).
+* **Sanitização obrigatória**: Todas as imagens sofrem re-encoding e eliminação completa de metadados EXIF (especialmente coordenadas GPS) antes de serem persistidas no storage.
+* **Limites**: Máximo de 10 MB por arquivo, máximo de 5 imagens ativas por avaliação e dimensões máximas de 10.000 x 10.000 pixels.
+* **Autorização**: A mídia herda integralmente a visibilidade da Review (`ReviewVisibilityPolicy`). Exclusão é permitida estritamente ao autor da Review (`DELETE /api/v1/reviews/{reviewId}/media/{mediaId}`).
+* **Preservação de anonimato**: Avaliações anônimas não expõem identificadores do autor nos payloads públicos de mídia.
+* Para documentação técnica completa, consulte [docs/api/media.md](media.md).
+
+---
+
 ## 4. Tratamento de Erros e Códigos HTTP
 
 Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
