@@ -29,14 +29,25 @@ public class UserFollowService {
     private final UserFollowRepository userFollowRepository;
     private final UserRepository userRepository;
     private final ProfileRepository profileRepository;
+    private final NotificationService notificationService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public UserFollowService(
+            UserFollowRepository userFollowRepository,
+            UserRepository userRepository,
+            ProfileRepository profileRepository,
+            NotificationService notificationService) {
+        this.userFollowRepository = userFollowRepository;
+        this.userRepository = userRepository;
+        this.profileRepository = profileRepository;
+        this.notificationService = notificationService;
+    }
 
     public UserFollowService(
             UserFollowRepository userFollowRepository,
             UserRepository userRepository,
             ProfileRepository profileRepository) {
-        this.userFollowRepository = userFollowRepository;
-        this.userRepository = userRepository;
-        this.profileRepository = profileRepository;
+        this(userFollowRepository, userRepository, profileRepository, null);
     }
 
     /**
@@ -65,7 +76,11 @@ public class UserFollowService {
             throw new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND");
         }
 
-        return userFollowRepository.follow(followerUserId, targetUserId);
+        boolean created = userFollowRepository.follow(followerUserId, targetUserId);
+        if (created && notificationService != null) {
+            notificationService.notifyNewFollower(followerUserId, targetUserId);
+        }
+        return created;
     }
 
     /**

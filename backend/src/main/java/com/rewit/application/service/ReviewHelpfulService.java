@@ -22,15 +22,27 @@ public class ReviewHelpfulService {
     private final ReviewReactionRepository reviewReactionRepository;
     private final ReviewRepository reviewRepository;
     private final UserFollowRepository userFollowRepository;
+    private final NotificationService notificationService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReviewHelpfulService(
+            ReviewReactionRepository reviewReactionRepository,
+            ReviewRepository reviewRepository,
+            UserFollowRepository userFollowRepository,
+            NotificationService notificationService
+    ) {
+        this.reviewReactionRepository = Objects.requireNonNull(reviewReactionRepository, "reviewReactionRepository must not be null");
+        this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.userFollowRepository = userFollowRepository;
+        this.notificationService = notificationService;
+    }
 
     public ReviewHelpfulService(
             ReviewReactionRepository reviewReactionRepository,
             ReviewRepository reviewRepository,
             UserFollowRepository userFollowRepository
     ) {
-        this.reviewReactionRepository = Objects.requireNonNull(reviewReactionRepository, "reviewReactionRepository must not be null");
-        this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
-        this.userFollowRepository = userFollowRepository;
+        this(reviewReactionRepository, reviewRepository, userFollowRepository, null);
     }
 
     public record HelpfulResult(boolean helpful, long helpfulCount) {}
@@ -41,7 +53,10 @@ public class ReviewHelpfulService {
     @Transactional
     public HelpfulResult addHelpful(UUID reviewId, UUID requesterUserId) {
         Review review = validateAndGetReview(reviewId, requesterUserId);
-        reviewReactionRepository.addHelpful(review.getId(), requesterUserId);
+        boolean added = reviewReactionRepository.addHelpful(review.getId(), requesterUserId);
+        if (added && notificationService != null) {
+            notificationService.notifyReviewHelpful(review.getId(), review.getUserId());
+        }
         long count = reviewReactionRepository.countHelpful(review.getId());
         return new HelpfulResult(true, count);
     }

@@ -9,6 +9,7 @@ import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewDiscussion;
 import com.rewit.infrastructure.security.DiscussionRateLimiter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,22 @@ public class DiscussionService {
     private final ReviewRepository reviewRepository;
     private final ReviewVisibilityPolicy reviewVisibilityPolicy;
     private final DiscussionRateLimiter discussionRateLimiter;
+    private final NotificationService notificationService;
+
+    @Autowired
+    public DiscussionService(
+            DiscussionRepository discussionRepository,
+            ReviewRepository reviewRepository,
+            ReviewVisibilityPolicy reviewVisibilityPolicy,
+            DiscussionRateLimiter discussionRateLimiter,
+            NotificationService notificationService
+    ) {
+        this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
+        this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
+        this.reviewVisibilityPolicy = Objects.requireNonNull(reviewVisibilityPolicy, "ReviewVisibilityPolicy must not be null");
+        this.discussionRateLimiter = Objects.requireNonNull(discussionRateLimiter, "DiscussionRateLimiter must not be null");
+        this.notificationService = notificationService;
+    }
 
     public DiscussionService(
             DiscussionRepository discussionRepository,
@@ -34,10 +51,7 @@ public class DiscussionService {
             ReviewVisibilityPolicy reviewVisibilityPolicy,
             DiscussionRateLimiter discussionRateLimiter
     ) {
-        this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
-        this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
-        this.reviewVisibilityPolicy = Objects.requireNonNull(reviewVisibilityPolicy, "ReviewVisibilityPolicy must not be null");
-        this.discussionRateLimiter = Objects.requireNonNull(discussionRateLimiter, "DiscussionRateLimiter must not be null");
+        this(discussionRepository, reviewRepository, reviewVisibilityPolicy, discussionRateLimiter, null);
     }
 
     /**
@@ -63,8 +77,9 @@ public class DiscussionService {
         reviewVisibilityPolicy.validateCanAccess(review, cmd.authorUserId());
 
         // 3. Validação de parentId e regra de nesting (máximo 1 nível de resposta)
+        ReviewDiscussion parent = null;
         if (cmd.parentId() != null) {
-            ReviewDiscussion parent = discussionRepository.findById(cmd.parentId())
+            parent = discussionRepository.findById(cmd.parentId())
                     .orElseThrow(() -> new BusinessException("Comentário pai não encontrado", HttpStatus.NOT_FOUND, "DISCUSSION_NOT_FOUND"));
 
             if (!parent.isActive()) {
@@ -94,6 +109,17 @@ public class DiscussionService {
         );
 
         ReviewDiscussion saved = discussionRepository.save(discussion);
+
+        // 6. Disparo de notificações de acordo com a hierarquia do comentário
+        if (notificationService != null) {
+            if (parent == null) {
+                notificationService.notifyNewDiscussion(review.getId(), review.getUserId(), cmd.authorUserId(), saved.getId());
+            } else {
+                boolean maskActor = review.isAnonymous() && isFromOwner;
+                notificationService.notifyDiscussionReply(review.getId(), parent.getUserId(), cmd.authorUserId(), saved.getId(), maskActor);
+            }
+        }
+
         return DiscussionView.fromDomain(saved, review.isAnonymous());
     }
 

@@ -22,7 +22,8 @@ public class Notification {
     private final Instant createdAt;
 
     public Notification(UUID id, UUID userId, String notificationType,
-                        String title, String content, String actionUrl, String metadataJson) {
+                        String title, String content, String actionUrl,
+                        String metadataJson, Instant readAt, Instant createdAt) {
         if (userId == null) {
             throw new BusinessException("O destinatário da notificação é obrigatório", "MISSING_USER_ID");
         }
@@ -37,8 +38,13 @@ public class Notification {
         this.content = content != null ? content.trim() : "";
         this.actionUrl = actionUrl;
         this.metadataJson = metadataJson;
-        this.readAt = null;
-        this.createdAt = Instant.now();
+        this.readAt = readAt;
+        this.createdAt = createdAt != null ? createdAt : Instant.now();
+    }
+
+    public Notification(UUID id, UUID userId, String notificationType,
+                        String title, String content, String actionUrl, String metadataJson) {
+        this(id, userId, notificationType, title, content, actionUrl, metadataJson, null, Instant.now());
     }
 
     /**
@@ -46,7 +52,7 @@ public class Notification {
      */
     public Notification(UUID id, UUID userId, String notificationType,
                         String title, String content, String actionUrl) {
-        this(id, userId, notificationType, title, content, actionUrl, null);
+        this(id, userId, notificationType, title, content, actionUrl, null, null, Instant.now());
     }
 
     public void markAsRead() {

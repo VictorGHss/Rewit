@@ -477,6 +477,16 @@ Avaliações ativas aceitam anexos de imagem (JPEG ou PNG) armazenados em Object
 
 ---
 
+### 3.11 Notificações In-App de Avaliações e Discussões (Step 22.0)
+Eventos relevantes originados no ciclo de vida de avaliações geram notificações in-app persistidas:
+* **Helpful**: A marcação de uma avaliação como útil gera uma notificação `REVIEW_HELPFUL` para o autor da avaliação, com identidade do votante estritamente omitida (`actorId = null`).
+* **Novo Comentário**: A criação de um comentário raiz gera notificação `NEW_DISCUSSION` para o autor da avaliação.
+* **Resposta a Comentário**: A resposta a uma discussão gera `DISCUSSION_REPLY` para o autor do comentário pai. Em avaliações anônimas onde o autor responde ao comentário, o `actorId` é mascarado como `null` para resguardar seu anonimato.
+* **Denúncias (Reports)**: Ações de denúncia nunca disparam notificações para nenhuma das partes.
+* Para documentação completa do contrato, consulte [docs/api/notifications.md](notifications.md).
+
+---
+
 ## 4. Tratamento de Erros e Códigos HTTP
 
 Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
