@@ -70,9 +70,15 @@ public class FeedV2Service {
     public FeedV2CandidatePage getCandidatePage(UUID requesterId, int page, int size, Instant referenceTime) {
         validateInputs(requesterId, page, size, referenceTime);
 
-        // Stage 1: Retrieval da janela de candidatos
+        // Stage 1: Retrieval da janela de candidatos (Social retrieval primeiro)
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
                 requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
+
+        // Fallback: Cold Start / Descoberta pública se a rede social não produzir candidatos
+        if (candidates == null || candidates.isEmpty()) {
+            candidates = feedCandidateRepository.retrieveDiscoveryCandidates(
+                    requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
+        }
 
         if (candidates == null || candidates.isEmpty()) {
             return new FeedV2CandidatePage(List.of(), page, size, 0);

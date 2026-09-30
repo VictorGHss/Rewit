@@ -525,4 +525,135 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         assertNotNull(candidates, "O retorno não deve ser null");
         assertTrue(candidates.isEmpty(), "Com requesterId null o retorno deve ser vazio");
     }
+
+    // ==================================================================
+    // 12. Cold Start / Descoberta Pública (retrieveDiscoveryCandidates - Step 24.5.1)
+    // ==================================================================
+
+    @Test
+    @DisplayName("12.1. Elegibilidade estrita: Somente ACTIVE + PUBLIC de terceiros aparecem na descoberta")
+    void discoveryEligibilityStrictlyFiltersReviews() {
+        User requester = createActiveUser();
+        User otherAuthor = createActiveUser();
+        Place place = createPlace();
+        RateableTarget target = createTarget();
+
+        Instant baseTime = Instant.now().plusSeconds(1000);
+
+        // 1. ACTIVE + PUBLIC (outro autor) -> ELEGÍVEL
+        Review rActivePublic = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, baseTime.minusSeconds(10));
+        // 2. ACTIVE + FOLLOWERS (outro autor) -> NÃO ELEGÍVEL
+        Review rActiveFollowers = createReview(otherAuthor, place, target, "FOLLOWERS", ReviewStatus.ACTIVE, false, baseTime.minusSeconds(20));
+        // 3. ACTIVE + PRIVATE (outro autor) -> NÃO ELEGÍVEL
+        Review rActivePrivate = createReview(otherAuthor, place, target, "PRIVATE", ReviewStatus.ACTIVE, false, baseTime.minusSeconds(30));
+        // 4. UNDER_REVIEW + PUBLIC (outro autor) -> NÃO ELEGÍVEL
+        Review rUnderReview = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.UNDER_REVIEW, false, baseTime.minusSeconds(40));
+        // 5. REMOVED + PUBLIC (outro autor) -> NÃO ELEGÍVEL
+        Review rRemoved = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.REMOVED, false, baseTime.minusSeconds(50));
+        // 6. Própria review do requester (ACTIVE + PUBLIC) -> NÃO ELEGÍVEL
+        Review rOwnReview = createReview(requester, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, baseTime.minusSeconds(5));
+        // 7. Review anônima de outro autor (ACTIVE + PUBLIC) -> ELEGÍVEL
+        Review rAnonymousPublic = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, true, baseTime.minusSeconds(15));
+
+        List<FeedCandidate> candidates = feedCandidateRepository.retrieveDiscoveryCandidates(
+                requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
+
+        List<UUID> returnedIds = candidates.stream().map(c -> c.reviewId()).toList();
+
+        // Elegíveis esperados
+        assertTrue(returnedIds.contains(rActivePublic.getId()), "ACTIVE + PUBLIC de terceiro deve aparecer");
+        assertTrue(returnedIds.contains(rAnonymousPublic.getId()), "ACTIVE + PUBLIC anônima de terceiro deve aparecer");
+
+        // Inelegíveis
+        assertFalse(returnedIds.contains(rActiveFollowers.getId()), "ACTIVE + FOLLOWERS não pode aparecer em descoberta");
+        assertFalse(returnedIds.contains(rActivePrivate.getId()), "ACTIVE + PRIVATE não pode aparecer em descoberta");
+        assertFalse(returnedIds.contains(rUnderReview.getId()), "UNDER_REVIEW não pode aparecer em descoberta");
+        assertFalse(returnedIds.contains(rRemoved.getId()), "REMOVED não pode aparecer em descoberta");
+        assertFalse(returnedIds.contains(rOwnReview.getId()), "Review própria do solicitante não pode aparecer em descoberta");
+    }
+
+    @Test
+    @DisplayName("12.2. Determinismo: Ordenação por createdAt DESC e desempate por id ASC")
+    void discoveryOrderingIsDeterministic() {
+        User requester = createActiveUser();
+        User otherAuthor = createActiveUser();
+        Place place = createPlace();
+        RateableTarget target = createTarget();
+
+        Instant sharedTimestamp = Instant.now().plusSeconds(600);
+        Instant olderTimestamp  = Instant.now().plusSeconds(500);
+
+        Review r1 = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, sharedTimestamp);
+        Review r2 = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, sharedTimestamp);
+        Review rOlder = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, olderTimestamp);
+
+        List<FeedCandidate> candidates = feedCandidateRepository.retrieveDiscoveryCandidates(
+                requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
+
+        List<FeedCandidate> targetGroup = candidates.stream()
+                .filter(c -> c.reviewId().equals(r1.getId()) || c.reviewId().equals(r2.getId()) || c.reviewId().equals(rOlder.getId()))
+                .toList();
+
+        assertEquals(3, targetGroup.size(), "Todas as 3 reviews devem estar no retorno da janela");
+        // Mais antigas devem vir depois das mais recentes
+        assertEquals(rOlder.getId(), targetGroup.get(2).reviewId());
+
+        // Entre as com mesmo timestamp, ordem lexicográfica do PostgreSQL (id ASC)
+        UUID expectedFirst = r1.getId().toString().compareTo(r2.getId().toString()) < 0 ? r1.getId() : r2.getId();
+        UUID expectedSecond = r1.getId().toString().compareTo(r2.getId().toString()) < 0 ? r2.getId() : r1.getId();
+
+        assertEquals(expectedFirst, targetGroup.get(0).reviewId());
+        assertEquals(expectedSecond, targetGroup.get(1).reviewId());
+    }
+
+    @Test
+    @DisplayName("12.3. Limite: Respeita o parâmetro limit e o teto CANDIDATE_WINDOW")
+    void discoveryRespectsLimit() {
+        User requester = createActiveUser();
+        User otherAuthor = createActiveUser();
+        Place place = createPlace();
+        RateableTarget target = createTarget();
+
+        Instant base = Instant.now().plusSeconds(800);
+        for (int i = 0; i < 5; i++) {
+            createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, base.minusSeconds(i * 10));
+        }
+
+        List<FeedCandidate> candidates = feedCandidateRepository.retrieveDiscoveryCandidates(requester.getId(), 3);
+        assertNotNull(candidates);
+        assertTrue(candidates.size() <= 3, "Não deve retornar mais do que o limite solicitado");
+    }
+
+    @Test
+    @DisplayName("12.4. Fatos de ranking: isDirectFollow=false e helpfulCount propagados corretamente")
+    void discoveryCandidateFactsAreCorrect() {
+        User requester = createActiveUser();
+        User otherAuthor = createActiveUser();
+        Place place = createPlace();
+        RateableTarget target = createTarget();
+
+        Review review = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().plusSeconds(500));
+        reviewReactionRepository.addHelpful(review.getId(), requester.getId());
+
+        List<FeedCandidate> candidates = feedCandidateRepository.retrieveDiscoveryCandidates(
+                requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
+
+        FeedCandidate candidate = candidates.stream()
+                .filter(c -> c.reviewId().equals(review.getId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Candidato de discovery não encontrado"));
+
+        assertFalse(candidate.isDirectFollow(), "Candidato de discovery deve ter isDirectFollow=false");
+        assertEquals(otherAuthor.getId(), candidate.authorId());
+        assertEquals(place.getId(), candidate.targetId());
+        assertEquals(1, candidate.helpfulCount());
+    }
+
+    @Test
+    @DisplayName("12.5. requesterId nulo retorna lista vazia sem lançar exceção")
+    void discoveryNullRequesterReturnsEmpty() {
+        List<FeedCandidate> candidates = feedCandidateRepository.retrieveDiscoveryCandidates(null, 10);
+        assertNotNull(candidates);
+        assertTrue(candidates.isEmpty());
+    }
 }

@@ -259,20 +259,24 @@ class FeedV2ServiceIntegrationTest {
     }
 
     // -------------------------------------------------------------------------
-    // 4. Sem Seguidos → Página Vazia sem Erro
+    // 4. Sem Seguidos → Fallback de Cold Start / Descoberta Pública sem Erro
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("4. PostgreSQL → FeedV2Service: requester sem seguidos recebe página vazia sem exceção")
-    void shouldReturnEmptyPageWhenNoFollowsExist() {
+    @DisplayName("4. PostgreSQL → FeedV2Service: requester sem seguidos aciona fallback de descoberta sem exceção")
+    void shouldReturnDiscoveryCandidatesWhenNoFollowsExist() {
         User requester = createActiveUser();
 
         FeedV2CandidatePage page = feedV2Service.getCandidatePage(requester.getId(), 0, 10, Instant.now());
 
         assertNotNull(page);
-        assertTrue(page.isEmpty());
-        assertEquals(0, page.windowSize());
-        assertEquals(0, page.totalPages());
-        assertTrue(page.isLast());
+        // Com o Cold Start (Step 24.5.1), requester sem seguidos recebe candidatos de descoberta pública existentes
+        assertFalse(page.isEmpty(), "Com cold start ativo e avaliações públicas existentes, a página não deve ser vazia");
+        assertTrue(page.windowSize() > 0, "Window size deve refletir os candidatos de descoberta");
+        assertTrue(page.totalPages() > 0);
+        // Todos os candidatos de descoberta devem possuir isDirectFollow = false
+        page.items().forEach(item ->
+                assertFalse(item.candidate().isDirectFollow(), "Candidato de descoberta deve ter isDirectFollow=false")
+        );
     }
 }

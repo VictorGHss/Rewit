@@ -110,7 +110,6 @@ public class FeedCandidateRepositoryAdapter implements FeedCandidateRepository {
         // Query 1 — reviews elegíveis da rede social direta
         // Ordenação type-safe via TypedPropertyPath (Spring Data 4.1):
         //   createdAt DESC, id ASC
-        // Substitui Sort.TypedSort (deprecated desde 4.1) sem alterar semântica.
         // ----------------------------------------------------------------
         TypedPropertyPath<ReviewJpaEntity, Instant> createdAtPath = PropertyPath.of((ReviewJpaEntity review) -> review.getCreatedAt());
         TypedPropertyPath<ReviewJpaEntity, UUID> idPath = PropertyPath.of((ReviewJpaEntity review) -> review.getId());
@@ -126,33 +125,66 @@ public class FeedCandidateRepositoryAdapter implements FeedCandidateRepository {
             return List.of();
         }
 
+        return buildCandidatesFromRows(rows, true);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Executa busca de avaliações públicas elegíveis para descoberta quando a rede social
+     * direta do usuário não produzir candidatos (Cold Start - Step 24.5.1).
+     * Todos os candidatos retornam com {@code isDirectFollow = false}.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<FeedCandidate> retrieveDiscoveryCandidates(UUID requesterId, int limit) {
+        if (requesterId == null || limit <= 0) {
+            return List.of();
+        }
+        int effectiveLimit = Math.min(limit, CANDIDATE_WINDOW);
+
+        TypedPropertyPath<ReviewJpaEntity, Instant> createdAtPath = PropertyPath.of((ReviewJpaEntity review) -> review.getCreatedAt());
+        TypedPropertyPath<ReviewJpaEntity, UUID> idPath = PropertyPath.of((ReviewJpaEntity review) -> review.getId());
+
+        Sort sort = Sort.by(
+                Sort.Order.desc(createdAtPath),
+                Sort.Order.asc(idPath)
+        );
+        PageRequest pageRequest = PageRequest.of(0, effectiveLimit, sort);
+        List<Object[]> rows = reviewJpaRepository.findFeedV2DiscoveryCandidates(requesterId, pageRequest);
+
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+
+        return buildCandidatesFromRows(rows, false);
+    }
+
+    /**
+     * Monta a lista imutável de {@link FeedCandidate} a partir das linhas retornadas pelo banco,
+     * executando as queries em lote para alvos primários e contagem de helpful.
+     */
+    private List<FeedCandidate> buildCandidatesFromRows(List<Object[]> rows, boolean isDirectFollow) {
         // Extrair IDs para as queries em lote
         List<UUID> reviewIds = new ArrayList<>(rows.size());
         for (Object[] row : rows) {
             reviewIds.add((UUID) row[COL_REVIEW_ID]);
         }
 
-        // ----------------------------------------------------------------
         // Query 2 — target primário em lote (sem N+1)
-        // Para cada review, o target primário é o de menor createdAt.
-        // ----------------------------------------------------------------
         Map<UUID, UUID> primaryTargetByReview = buildPrimaryTargetMap(reviewIds);
 
-        // ----------------------------------------------------------------
         // Query 3 — helpful count em lote (sem N+1)
-        // ----------------------------------------------------------------
         Map<UUID, Long> helpfulCounts = buildHelpfulCountMap(reviewIds);
 
-        // ----------------------------------------------------------------
         // Montagem dos FeedCandidates
-        // ----------------------------------------------------------------
         List<FeedCandidate> candidates = new ArrayList<>(rows.size());
         for (Object[] row : rows) {
-            UUID reviewId      = (UUID)    row[COL_REVIEW_ID];
-            UUID authorId      = (UUID)    row[COL_AUTHOR_ID];
-            UUID contextPlaceId = (UUID)   row[COL_CONTEXT_PLACE_ID]; // nullable
-            Instant createdAt  = (Instant) row[COL_CREATED_AT];
-            boolean verified   = (boolean) row[COL_VERIFIED];
+            UUID reviewId       = (UUID)    row[COL_REVIEW_ID];
+            UUID authorId       = (UUID)    row[COL_AUTHOR_ID];
+            UUID contextPlaceId = (UUID)    row[COL_CONTEXT_PLACE_ID]; // nullable
+            Instant createdAt   = (Instant) row[COL_CREATED_AT];
+            boolean verified    = (boolean) row[COL_VERIFIED];
 
             UUID targetId = resolveTargetId(reviewId, contextPlaceId, primaryTargetByReview);
             int helpful   = helpfulCounts.getOrDefault(reviewId, 0L).intValue();
@@ -164,7 +196,7 @@ public class FeedCandidateRepositoryAdapter implements FeedCandidateRepository {
                     createdAt,
                     verified,
                     helpful,
-                    true   // isDirectFollow — todos são follows diretos nesta etapa
+                    isDirectFollow
             ));
         }
         return Collections.unmodifiableList(candidates);

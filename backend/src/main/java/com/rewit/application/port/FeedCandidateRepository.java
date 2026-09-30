@@ -49,4 +49,26 @@ public interface FeedCandidateRepository {
      *         lista vazia se não houver follows ou candidatos elegíveis
      */
     List<FeedCandidate> retrieveCandidates(UUID requesterId, int limit);
+
+    /**
+     * Recupera candidatos para o Cold Start / Descoberta do Feed V2 (Step 24.5.1).
+     *
+     * <p>Utilizado como fallback quando o retrieval social direto não produzir
+     * candidatos elegíveis.
+     *
+     * <p>Regras de elegibilidade:
+     * <ul>
+     *   <li>Somente avaliações com status ACTIVE e visibilidade PUBLIC.</li>
+     *   <li>Avaliações do próprio solicitante são excluídas.</li>
+     *   <li>Todos os candidatos retornam com {@code isDirectFollow = false}.</li>
+     *   <li>Ordenação determinística: {@code createdAt DESC, id ASC}.</li>
+     * </ul>
+     *
+     * @param requesterId identificador interno do usuário autenticado
+     * @param limit       número máximo de candidatos; deve ser {@code > 0} e
+     *                    {@code <= CANDIDATE_WINDOW}
+     * @return lista imutável de candidatos de descoberta; lista vazia se não houver
+     *         avaliações públicas elegíveis
+     */
+    List<FeedCandidate> retrieveDiscoveryCandidates(UUID requesterId, int limit);
 }

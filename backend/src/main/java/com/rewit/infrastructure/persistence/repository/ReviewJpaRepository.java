@@ -297,4 +297,42 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             @Param("requesterId") UUID requesterId,
             Pageable pageable
     );
+
+    /**
+     * Recupera candidatos para o Cold Start / Descoberta do Feed V2 (Step 24.5.1).
+     *
+     * <p>Critérios de elegibilidade para descoberta pública:
+     * <ul>
+     *   <li>r.status = 'ACTIVE'</li>
+     *   <li>r.visibility = 'PUBLIC'</li>
+     *   <li>r.userId != :requesterId (exclui avaliações do próprio solicitante)</li>
+     * </ul>
+     *
+     * <p>Retorna Object[] com as colunas na mesma ordem de {@link #findFeedV2Candidates}:
+     * <ol>
+     *   <li>r.id (UUID) — reviewId</li>
+     *   <li>r.userId (UUID) — authorId</li>
+     *   <li>r.contextPlaceId (UUID, nullable) — target de contexto para diversidade</li>
+     *   <li>r.createdAt (Instant)</li>
+     *   <li>r.isVerifiedOnSite (boolean)</li>
+     * </ol>
+     *
+     * <p>Ordenação determinística: createdAt DESC, id ASC.
+     */
+    @Query("""
+        SELECT r.id,
+               r.userId,
+               r.contextPlaceId,
+               r.createdAt,
+               r.isVerifiedOnSite
+        FROM ReviewJpaEntity r
+        WHERE r.status = 'ACTIVE'
+          AND r.visibility = 'PUBLIC'
+          AND (:requesterId IS NULL OR r.userId != :requesterId)
+        ORDER BY r.createdAt DESC, r.id ASC
+    """)
+    List<Object[]> findFeedV2DiscoveryCandidates(
+            @Param("requesterId") UUID requesterId,
+            Pageable pageable
+    );
 }

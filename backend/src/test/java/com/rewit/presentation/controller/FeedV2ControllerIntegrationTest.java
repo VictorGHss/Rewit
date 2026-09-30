@@ -186,18 +186,18 @@ class FeedV2ControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("1.3. Retorna 200 OK com token JWT válido e feed vazio se não segue ninguém")
-    void shouldReturn200OkWithValidJwtAndEmptyFeed() throws Exception {
-        TestUser requester = registerUser("v2Empty");
+    @DisplayName("1.3. Retorna 200 OK com token JWT válido quando usuário não segue ninguém (Cold Start preservando contrato)")
+    void shouldReturn200OkWithValidJwtAndApplyColdStartWhenNoFollows() throws Exception {
+        TestUser requester = registerUser("v2NoFollow");
 
         mockMvc.perform(get("/api/v2/feed")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items", hasSize(0)))
                 .andExpect(jsonPath("$.page").value(0))
                 .andExpect(jsonPath("$.size").value(10))
-                .andExpect(jsonPath("$.windowSize").value(0))
-                .andExpect(jsonPath("$.totalPages").value(0));
+                .andExpect(jsonPath("$.windowSize", greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.totalPages", greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.items", not(empty())));
     }
 
     @Test
@@ -212,14 +212,14 @@ class FeedV2ControllerIntegrationTest {
 
         // Somente targetVictim segue o author
         userFollowRepository.follow(targetVictim.userId(), author.userId());
-        createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now());
+        Review followersReview = createReview(author.userId(), place, target, "FOLLOWERS", ReviewStatus.ACTIVE, false, Instant.now().plusSeconds(300));
 
         // Requester tenta passar ?userId=<victimId>
         mockMvc.perform(get("/api/v2/feed")
                         .param("userId", targetVictim.userId().toString())
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items", hasSize(0))); // Requester não segue o author, logo não vê nada
+                .andExpect(jsonPath("$.items[*].id", not(hasItem(followersReview.getId().toString()))));
     }
 
     // =========================================================================
@@ -496,5 +496,105 @@ class FeedV2ControllerIntegrationTest {
                 .andExpect(jsonPath("$.items[0].id").value(review.getId().toString()))
                 .andExpect(jsonPath("$.windowSize").value(1))
                 .andExpect(jsonPath("$.page").value(0));
+    }
+
+    // =========================================================================
+    // 6. Cold Start / Descoberta para Usuários Sem Seguidos (Step 24.5.1)
+    // =========================================================================
+
+    @Test
+    @DisplayName("6.1. Cold Start: Usuário sem seguidos recebe reviews públicas de terceiros com envelope e sem campos internos")
+    void shouldReturnDiscoveryCandidatesWhenRequesterHasNoFollows() throws Exception {
+        TestUser requester = registerUser("v2CsReq");
+        TestUser otherAuthor = registerUser("v2CsAuthor");
+
+        Place place = createPlace();
+        RateableTarget target = createTarget(TargetType.PLACE);
+
+        // Requester NÃO segue otherAuthor. otherAuthor cria review PUBLIC + ACTIVE recente no topo
+        Review discoveryReview = createReview(otherAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().plus(java.time.Duration.ofDays(5)));
+
+        mockMvc.perform(get("/api/v2/feed")
+                        .param("size", "50")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", not(empty())))
+                .andExpect(jsonPath("$.items[*].id", hasItem(discoveryReview.getId().toString())))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(50))
+                .andExpect(jsonPath("$.windowSize", greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.totalPages", greaterThanOrEqualTo(1)))
+                // Validação de que nenhum campo interno de ranking/pipeline vaza
+                .andExpect(jsonPath("$.items[0].score").doesNotExist())
+                .andExpect(jsonPath("$.items[0].isDirectFollow").doesNotExist())
+                .andExpect(jsonPath("$.items[0].rankingMode").doesNotExist())
+                .andExpect(jsonPath("$.items[0].coldStart").doesNotExist())
+                .andExpect(jsonPath("$.items[0].discovery").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("6.2. Cold Start e Privacidade: Review anônima pública oculta estritamente authorId, handle e dados sensíveis")
+    void shouldStrictlyPreservePrivacyForAnonymousDiscoveryCandidate() throws Exception {
+        TestUser requester = registerUser("v2AnonCsReq");
+        TestUser anonAuthor = registerUser("v2AnonCsAuthor");
+
+        Place place = createPlace();
+        RateableTarget target = createTarget(TargetType.PLACE);
+
+        // Requester NÃO segue anonAuthor. Avaliação pública anônima no topo
+        Review anonDiscoveryReview = createReview(anonAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, true, Instant.now().plus(java.time.Duration.ofDays(6)));
+
+        MvcResult result = mockMvc.perform(get("/api/v2/feed")
+                        .param("size", "50")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id", hasItem(anonDiscoveryReview.getId().toString())))
+                .andReturn();
+
+        JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode items = json.get("items");
+        JsonNode targetItem = null;
+        for (JsonNode item : items) {
+            if (anonDiscoveryReview.getId().toString().equals(item.get("id").asText())) {
+                targetItem = item;
+                break;
+            }
+        }
+
+        org.junit.jupiter.api.Assertions.assertNotNull(targetItem, "Review anônima de descoberta deve estar presente");
+        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("isAnonymous").asBoolean());
+        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("id") == null || targetItem.get("author").get("id").isNull());
+        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("handle") == null || targetItem.get("author").get("handle").isNull());
+        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("avatarUrl") == null || targetItem.get("author").get("avatarUrl").isNull());
+        org.junit.jupiter.api.Assertions.assertEquals("Anônimo", targetItem.get("author").get("displayName").asText());
+        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("isAnonymous").asBoolean());
+        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("score") == null || targetItem.get("score").isNull());
+        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("isDirectFollow") == null || targetItem.get("isDirectFollow").isNull());
+    }
+
+    @Test
+    @DisplayName("6.3. Fallback não invade rede social: Requester com candidatos sociais recebe apenas avaliações de seguidos")
+    void shouldNotInvokeColdStartWhenRequesterHasSocialCandidates() throws Exception {
+        TestUser requester = registerUser("v2SocReq");
+        TestUser followedAuthor = registerUser("v2SocFollowed");
+        TestUser unfollowedAuthor = registerUser("v2SocUnfollowed");
+
+        Place place = createPlace();
+        RateableTarget target = createTarget(TargetType.PLACE);
+
+        // Requester segue SOMENTE followedAuthor
+        userFollowRepository.follow(requester.userId(), followedAuthor.userId());
+
+        // Ambos publicam reviews públicas recentes
+        Review socialReview = createReview(followedAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().plus(java.time.Duration.ofDays(7)));
+        Review strangerReview = createReview(unfollowedAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().plus(java.time.Duration.ofDays(8)));
+
+        mockMvc.perform(get("/api/v2/feed")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].id").value(socialReview.getId().toString()))
+                .andExpect(jsonPath("$.items[*].id", not(hasItem(strangerReview.getId().toString()))))
+                .andExpect(jsonPath("$.windowSize").value(1));
     }
 }

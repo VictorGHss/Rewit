@@ -382,4 +382,124 @@ class FeedV2ServiceUnitTest {
         assertTrue(result.isEmpty());
         verify(feedCandidateRepository).retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
     }
+
+    // -------------------------------------------------------------------------
+    // 5. Cold Start / Descoberta para Usuários Sem Seguidos (Step 24.5.1)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("5.1 Retrieval social com candidatos NÃO chama discovery e usa somente candidatos sociais")
+    void socialWithCandidatesDoesNotCallDiscovery() {
+        FeedCandidate socialCandidate = createCandidate(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), now);
+        RankedFeedCandidate ranked = createRankedCandidate(socialCandidate, 0.95);
+
+        when(feedCandidateRepository.retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of(socialCandidate));
+        when(feedV2Ranker.rank(List.of(socialCandidate), now))
+                .thenReturn(List.of(ranked));
+        when(feedV2Diversifier.diversify(List.of(ranked)))
+                .thenReturn(List.of(ranked));
+
+        FeedV2CandidatePage page = feedV2Service.getCandidatePage(requesterId, 0, 10, now);
+
+        assertFalse(page.isEmpty());
+        assertEquals(1, page.items().size());
+        assertEquals(socialCandidate.reviewId(), page.items().get(0).candidate().reviewId());
+
+        verify(feedCandidateRepository, times(1)).retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
+        verify(feedCandidateRepository, never()).retrieveDiscoveryCandidates(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("5.2 Retrieval social vazio aciona discovery exatamente uma vez com isDirectFollow=false")
+    void socialEmptyTriggersDiscoveryFallback() {
+        UUID otherAuthorId = UUID.randomUUID();
+        FeedCandidate discoveryCandidate = new FeedCandidate(
+                UUID.randomUUID(),
+                otherAuthorId,
+                UUID.randomUUID(),
+                now,
+                true,
+                5,
+                false // isDirectFollow = false em discovery
+        );
+        RankedFeedCandidate ranked = createRankedCandidate(discoveryCandidate, 0.55);
+
+        when(feedCandidateRepository.retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of());
+        when(feedCandidateRepository.retrieveDiscoveryCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of(discoveryCandidate));
+        when(feedV2Ranker.rank(List.of(discoveryCandidate), now))
+                .thenReturn(List.of(ranked));
+        when(feedV2Diversifier.diversify(List.of(ranked)))
+                .thenReturn(List.of(ranked));
+
+        FeedV2CandidatePage page = feedV2Service.getCandidatePage(requesterId, 0, 10, now);
+
+        assertFalse(page.isEmpty());
+        assertEquals(1, page.items().size());
+        assertFalse(page.items().get(0).candidate().isDirectFollow(), "Candidato de discovery deve ter isDirectFollow=false");
+        assertEquals(discoveryCandidate.reviewId(), page.items().get(0).candidate().reviewId());
+
+        InOrder inOrder = inOrder(feedCandidateRepository);
+        inOrder.verify(feedCandidateRepository).retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
+        inOrder.verify(feedCandidateRepository).retrieveDiscoveryCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
+    }
+
+    @Test
+    @DisplayName("5.3 Social e discovery ambos vazios retornam página vazia sem lançar exceção")
+    void socialAndDiscoveryBothEmptyReturnsEmptyPage() {
+        when(feedCandidateRepository.retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of());
+        when(feedCandidateRepository.retrieveDiscoveryCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of());
+
+        FeedV2CandidatePage page = feedV2Service.getCandidatePage(requesterId, 0, 10, now);
+
+        assertNotNull(page);
+        assertTrue(page.isEmpty());
+        assertEquals(0, page.windowSize());
+        assertEquals(0, page.totalPages());
+
+        verify(feedCandidateRepository).retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
+        verify(feedCandidateRepository).retrieveDiscoveryCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
+        verifyNoInteractions(feedV2Ranker, feedV2Diversifier);
+    }
+
+    @Test
+    @DisplayName("5.4 Social com poucos candidatos (ex: 1 ou 2) NÃO aciona discovery nem faz backfill parcial")
+    void socialWithFewCandidatesDoesNotCallDiscoveryNorPartialBackfill() {
+        FeedCandidate c1 = createCandidate(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), now);
+        FeedCandidate c2 = createCandidate(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), now.minusSeconds(60));
+        RankedFeedCandidate r1 = createRankedCandidate(c1, 0.90);
+        RankedFeedCandidate r2 = createRankedCandidate(c2, 0.80);
+
+        when(feedCandidateRepository.retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of(c1, c2));
+        when(feedV2Ranker.rank(List.of(c1, c2), now))
+                .thenReturn(List.of(r1, r2));
+        when(feedV2Diversifier.diversify(List.of(r1, r2)))
+                .thenReturn(List.of(r1, r2));
+
+        FeedV2CandidatePage page = feedV2Service.getCandidatePage(requesterId, 0, 10, now);
+
+        assertEquals(2, page.items().size());
+        assertEquals(2, page.windowSize());
+
+        verify(feedCandidateRepository).retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW);
+        verify(feedCandidateRepository, never()).retrieveDiscoveryCandidates(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("5.5 Candidatos de discovery entregam requesterId para o repositório para exclusão das próprias reviews")
+    void discoveryPassesRequesterIdForSelfReviewExclusion() {
+        when(feedCandidateRepository.retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of());
+        when(feedCandidateRepository.retrieveDiscoveryCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of());
+
+        feedV2Service.getCandidatePage(requesterId, 0, 10, now);
+
+        verify(feedCandidateRepository).retrieveDiscoveryCandidates(eq(requesterId), eq(FeedCandidateRepository.CANDIDATE_WINDOW));
+    }
 }
