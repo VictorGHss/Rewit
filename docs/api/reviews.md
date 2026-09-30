@@ -456,6 +456,16 @@ Nas consultas de listagem (`GET /api/v1/targets/{id}/reviews` e `GET /api/v1/me/
 
 ---
 
+### 3.9 Discussões e Comentários Comunitários (Step 20.0)
+Avaliações ativas aceitam discussões e comentários públicos diretamente associados à publicação (`POST /api/v1/reviews/{reviewId}/discussions` e `GET /api/v1/reviews/{reviewId}/discussions`).
+* O sistema suporta comentários raiz e uma camada de resposta (`parentId`), com validação de limite de encadeamento (`DISCUSSION_NESTING_LIMIT_EXCEEDED`).
+* O indicador `isFromOwner` é calculado estritamente no backend.
+* Avaliações em moderação preventiva (`UNDER_REVIEW`) ou removidas (`REMOVED`) tornam-se imediatamente indisponíveis para discussões (`404 REVIEW_NOT_FOUND`).
+* A remoção de comentários é permitida exclusivamente ao autor via soft delete (`DELETE /api/v1/discussions/{discussionId}`).
+* Para documentação completa dos endpoints, paginação, rate limiting e contratos RFC 7807, consulte [docs/api/discussions.md](discussions.md).
+
+---
+
 ## 4. Tratamento de Erros e Códigos HTTP
 
 Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
