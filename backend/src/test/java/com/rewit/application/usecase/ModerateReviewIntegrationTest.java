@@ -9,7 +9,6 @@ import com.rewit.application.dto.report.ReportDtos.CreateReportCommand;
 import com.rewit.application.dto.report.ReportDtos.ModerateReviewCommand;
 import com.rewit.application.dto.report.ReportDtos.ModerateReviewResult;
 import com.rewit.application.dto.report.ReportDtos.QueryAdminReportsFilter;
-import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.RateableTargetRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.ReportService;
@@ -23,9 +22,7 @@ import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.Role;
 import com.rewit.domain.enums.TargetType;
-import com.rewit.domain.model.Place;
 import com.rewit.domain.model.RateableTarget;
-import com.rewit.domain.model.Review;
 import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.entity.ModerationAuditLogJpaEntity;
 import com.rewit.infrastructure.persistence.entity.ReportJpaEntity;
@@ -74,9 +71,6 @@ class ModerateReviewIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
-
-    @Autowired
-    private PlaceRepository placeRepository;
 
     @Autowired
     private RateableTargetRepository rateableTargetRepository;
