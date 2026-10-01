@@ -5,9 +5,12 @@ import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.notification.NotificationDtos.NotificationView;
 import com.rewit.application.dto.notification.NotificationDtos.UnreadCountView;
 import com.rewit.application.port.NotificationRepository;
+import com.rewit.application.port.OutboxRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.NotificationType;
+import com.rewit.domain.enums.OutboxStatus;
 import com.rewit.domain.model.Notification;
+import com.rewit.domain.model.OutboxMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -34,6 +37,9 @@ class NotificationServiceUnitTest {
     @Mock
     private NotificationRepository notificationRepository;
 
+    @Mock
+    private OutboxRepository outboxRepository;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private NotificationService notificationService;
 
@@ -44,7 +50,7 @@ class NotificationServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        notificationService = new NotificationService(notificationRepository, objectMapper);
+        notificationService = new NotificationService(notificationRepository, outboxRepository, objectMapper);
     }
 
     @Nested
@@ -246,6 +252,9 @@ class NotificationServiceUnitTest {
             // Segunda chamada (já lida) deve ser idempotente
             notificationService.markAsRead(notifId, userA);
             verify(notificationRepository, times(1)).save(unread);
+
+            // Leitura não gera efeito externo: nenhum push é enfileirado (Parte X)
+            verify(outboxRepository, never()).save(any());
         }
 
         @Test
@@ -267,6 +276,92 @@ class NotificationServiceUnitTest {
         void shouldMarkAllAsRead() {
             notificationService.markAllAsRead(userA);
             verify(notificationRepository).markAllAsReadByUserId(userA);
+        }
+    }
+
+    @Nested
+    @DisplayName("Enfileiramento de PUSH_NOTIFICATION no Outbox (Step 27.3)")
+    class PushOutboxEnqueue {
+
+        @Test
+        @DisplayName("21. Novo follow enfileira exatamente 1 PUSH_NOTIFICATION com payload mínimo e PENDING")
+        void shouldEnqueuePushOnNewFollower() {
+            notificationService.notifyNewFollower(userA, userB);
+
+            ArgumentCaptor<Notification> notificationCaptor = ArgumentCaptor.forClass(Notification.class);
+            verify(notificationRepository).save(notificationCaptor.capture());
+            ArgumentCaptor<OutboxMessage> outboxCaptor = ArgumentCaptor.forClass(OutboxMessage.class);
+            verify(outboxRepository).save(outboxCaptor.capture());
+
+            OutboxMessage message = outboxCaptor.getValue();
+            assertEquals("PUSH_NOTIFICATION", message.getMessageType());
+            assertEquals(OutboxStatus.PENDING, message.getStatus());
+            assertEquals("{\"notificationId\":\"" + notificationCaptor.getValue().getId() + "\"}", message.getPayload());
+        }
+
+        @Test
+        @DisplayName("22. Helpful enfileira PUSH_NOTIFICATION com payload mínimo")
+        void shouldEnqueuePushOnReviewHelpful() {
+            notificationService.notifyReviewHelpful(reviewId, userB);
+
+            ArgumentCaptor<Notification> notificationCaptor = ArgumentCaptor.forClass(Notification.class);
+            verify(notificationRepository).save(notificationCaptor.capture());
+            ArgumentCaptor<OutboxMessage> outboxCaptor = ArgumentCaptor.forClass(OutboxMessage.class);
+            verify(outboxRepository).save(outboxCaptor.capture());
+
+            OutboxMessage message = outboxCaptor.getValue();
+            assertEquals("PUSH_NOTIFICATION", message.getMessageType());
+            assertEquals("{\"notificationId\":\"" + notificationCaptor.getValue().getId() + "\"}", message.getPayload());
+        }
+
+        @Test
+        @DisplayName("23. Nova discussion enfileira PUSH_NOTIFICATION com payload mínimo")
+        void shouldEnqueuePushOnNewDiscussion() {
+            notificationService.notifyNewDiscussion(reviewId, userA, userB, discussionId);
+
+            ArgumentCaptor<Notification> notificationCaptor = ArgumentCaptor.forClass(Notification.class);
+            verify(notificationRepository).save(notificationCaptor.capture());
+            ArgumentCaptor<OutboxMessage> outboxCaptor = ArgumentCaptor.forClass(OutboxMessage.class);
+            verify(outboxRepository).save(outboxCaptor.capture());
+
+            OutboxMessage message = outboxCaptor.getValue();
+            assertEquals("PUSH_NOTIFICATION", message.getMessageType());
+            assertEquals("{\"notificationId\":\"" + notificationCaptor.getValue().getId() + "\"}", message.getPayload());
+        }
+
+        @Test
+        @DisplayName("24. Reply enfileira PUSH_NOTIFICATION com payload mínimo")
+        void shouldEnqueuePushOnDiscussionReply() {
+            notificationService.notifyDiscussionReply(reviewId, userB, userA, discussionId, false);
+
+            ArgumentCaptor<Notification> notificationCaptor = ArgumentCaptor.forClass(Notification.class);
+            verify(notificationRepository).save(notificationCaptor.capture());
+            ArgumentCaptor<OutboxMessage> outboxCaptor = ArgumentCaptor.forClass(OutboxMessage.class);
+            verify(outboxRepository).save(outboxCaptor.capture());
+
+            OutboxMessage message = outboxCaptor.getValue();
+            assertEquals("PUSH_NOTIFICATION", message.getMessageType());
+            assertEquals("{\"notificationId\":\"" + notificationCaptor.getValue().getId() + "\"}", message.getPayload());
+        }
+
+        @Test
+        @DisplayName("25. Self-follow não enfileira push no outbox")
+        void shouldNotEnqueueOnSelfFollow() {
+            notificationService.notifyNewFollower(userA, userA);
+            verify(outboxRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("26. Parâmetros nulos não enfileiram push no outbox")
+        void shouldNotEnqueueOnNullParameters() {
+            notificationService.notifyNewFollower(null, userB);
+            notificationService.notifyNewFollower(userA, null);
+            notificationService.notifyReviewHelpful(null, userB);
+            notificationService.notifyNewDiscussion(reviewId, userA, null, discussionId);
+            notificationService.notifyDiscussionReply(reviewId, userB, null, discussionId, false);
+
+            verify(outboxRepository, never()).save(any());
+            verify(notificationRepository, never()).save(any());
         }
     }
 }

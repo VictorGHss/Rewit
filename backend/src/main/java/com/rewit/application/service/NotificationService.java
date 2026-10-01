@@ -6,9 +6,12 @@ import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.notification.NotificationDtos.NotificationView;
 import com.rewit.application.dto.notification.NotificationDtos.UnreadCountView;
 import com.rewit.application.port.NotificationRepository;
+import com.rewit.application.port.OutboxRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.NotificationType;
+import com.rewit.domain.enums.OutboxMessageType;
 import com.rewit.domain.model.Notification;
+import com.rewit.domain.model.OutboxMessage;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,18 +29,21 @@ import java.util.UUID;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
+    private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public NotificationService(NotificationRepository notificationRepository) {
-        this(notificationRepository, new ObjectMapper());
+    public NotificationService(NotificationRepository notificationRepository, OutboxRepository outboxRepository) {
+        this(notificationRepository, outboxRepository, new ObjectMapper());
     }
 
     public NotificationService(
             NotificationRepository notificationRepository,
+            OutboxRepository outboxRepository,
             ObjectMapper objectMapper
     ) {
         this.notificationRepository = Objects.requireNonNull(notificationRepository, "NotificationRepository must not be null");
+        this.outboxRepository = Objects.requireNonNull(outboxRepository, "OutboxRepository must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "ObjectMapper must not be null");
     }
 
@@ -62,6 +68,7 @@ public class NotificationService {
         );
 
         notificationRepository.save(notification);
+        enqueuePush(notification);
     }
 
     /**
@@ -86,6 +93,7 @@ public class NotificationService {
         );
 
         notificationRepository.save(notification);
+        enqueuePush(notification);
     }
 
     /**
@@ -114,6 +122,7 @@ public class NotificationService {
         );
 
         notificationRepository.save(notification);
+        enqueuePush(notification);
     }
 
     /**
@@ -145,6 +154,20 @@ public class NotificationService {
         );
 
         notificationRepository.save(notification);
+        enqueuePush(notification);
+    }
+
+    /**
+     * Enfileira o efeito externo de push (Step 27.3) na MESMA transação da
+     * Notification. O payload carrega exclusivamente o notificationId — nenhum
+     * conteúdo de negócio ou dado sensível é persistido no Outbox; o handler
+     * resolve o conteúdo a partir da Notification já persistida. A chamada
+     * externa ao provider NUNCA ocorre aqui: ela é assíncrona, feita pelo
+     * dispatcher fora da transação do produtor.
+     */
+    private void enqueuePush(Notification notification) {
+        String payload = "{\"notificationId\":\"" + notification.getId() + "\"}";
+        outboxRepository.save(new OutboxMessage(OutboxMessageType.PUSH_NOTIFICATION.name(), payload));
     }
 
     /**

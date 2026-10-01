@@ -38,6 +38,16 @@ public class NotificationRepositoryAdapter implements NotificationRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<Notification> findById(UUID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return jpaRepository.findById(id)
+                .map(entity -> entity.toDomain());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<Notification> findByIdAndUserId(UUID id, UUID userId) {
         if (id == null || userId == null) {
             return Optional.empty();

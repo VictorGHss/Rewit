@@ -17,10 +17,13 @@ import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.User;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
@@ -60,6 +63,19 @@ class NotificationEventsIntegrationTest {
 
     @Autowired
     private PlaceRepository placeRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void cleanOutboxBefore() {
+        jdbcTemplate.update("DELETE FROM outbox_messages");
+    }
+
+    @AfterEach
+    void cleanOutboxAfter() {
+        jdbcTemplate.update("DELETE FROM outbox_messages");
+    }
 
     @Test
     @DisplayName("Cenário Follow: A segue B -> B recebe exatamente 1 notificação NEW_FOLLOWER; follow duplicado não duplica")

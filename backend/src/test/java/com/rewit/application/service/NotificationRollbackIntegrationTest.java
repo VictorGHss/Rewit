@@ -18,10 +18,13 @@ import com.rewit.infrastructure.persistence.repository.DiscussionJpaRepository;
 import com.rewit.infrastructure.persistence.repository.NotificationJpaRepository;
 import com.rewit.infrastructure.persistence.repository.ReviewReactionJpaRepository;
 import com.rewit.infrastructure.persistence.repository.UserFollowJpaRepository;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -85,6 +88,19 @@ class NotificationRollbackIntegrationTest {
 
     @Autowired
     private NotificationJpaRepository notificationJpaRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void cleanOutboxBefore() {
+        jdbcTemplate.update("DELETE FROM outbox_messages");
+    }
+
+    @AfterEach
+    void cleanOutboxAfter() {
+        jdbcTemplate.update("DELETE FROM outbox_messages");
+    }
 
     // =========================================================================
     // 1. Rollback de Follow

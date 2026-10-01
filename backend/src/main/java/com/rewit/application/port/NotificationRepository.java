@@ -13,6 +13,8 @@ public interface NotificationRepository {
 
     Notification save(Notification notification);
 
+    Optional<Notification> findById(UUID id);
+
     Optional<Notification> findByIdAndUserId(UUID id, UUID userId);
 
     PageResult<Notification> findByUserId(UUID userId, int page, int size);

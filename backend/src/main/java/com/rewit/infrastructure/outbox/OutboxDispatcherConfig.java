@@ -1,7 +1,11 @@
 package com.rewit.infrastructure.outbox;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.outbox.OutboxErrorSanitizer;
 import com.rewit.application.outbox.OutboxRetryPolicy;
+import com.rewit.application.outbox.PushNotificationHandler;
+import com.rewit.application.port.NotificationProvider;
+import com.rewit.application.port.NotificationRepository;
 import com.rewit.application.port.OutboxHandler;
 import com.rewit.application.port.OutboxRepository;
 import com.rewit.application.usecase.ProcessOutboxBatchUseCase;
@@ -33,6 +37,14 @@ public class OutboxDispatcherConfig {
     @Bean
     public OutboxErrorSanitizer outboxErrorSanitizer(OutboxDispatcherProperties properties) {
         return new OutboxErrorSanitizer(properties.getErrorMaxLength());
+    }
+
+    @Bean
+    public PushNotificationHandler pushNotificationHandler(
+            NotificationRepository notificationRepository,
+            NotificationProvider notificationProvider
+    ) {
+        return new PushNotificationHandler(notificationRepository, notificationProvider, new ObjectMapper());
     }
 
     @Bean
