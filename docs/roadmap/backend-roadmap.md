@@ -66,14 +66,14 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Denúncias & Moderação Preventiva** | ✅ CONCLUÍDO | [ReportController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReportController.java), rate limiting in-memory, quarentena preventiva (`UNDER_REVIEW`), mutações de resolução (`resolveAsAccepted`, `resolveAsRejected`) no domínio de [Report.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/Report.java). | Resolução transacional em lote via use case no STEP 26.2. |
 | **Discussões & Comentários** | ✅ CONCLUÍDO | [DiscussionController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/DiscussionController.java), respostas hierárquicas, soft delete por autor, notificações. | Manter isolamento e integridade. |
 | **Mídia de Avaliações (Imagens)** | ✅ CONCLUÍDO | [ReviewMediaController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewMediaController.java), SeaweedFS/S3, higienização EXIF/GPS, limite de 5 imagens. | Garbage collection de mídias órfãs (Backlog async). |
-| **Notificações In-App** | ✅ CONCLUÍDO | [NotificationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/NotificationController.java), eventos acionados em follow, helpful, discussão e resposta. | Migração para processamento assíncrono (Outbox). |
+| **Notificações In-App** | ✅ CONCLUÍDO | [NotificationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/NotificationController.java), eventos acionados em follow, helpful, discussão e resposta; API pública intocada no STEP 27.3 — o único novo comportamento é o enqueue de push na Outbox no momento da criação da `Notification`. | Notificações in-app permanecem **síncronas** (decisão do STEP 27.0); o efeito externo de push tornou-se assíncrono via Outbox (STEP 27.3), com provider ainda mock. |
 | **Reputação V1 (Snapshot Factual)** | ✅ CONCLUÍDO | [ReputationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReputationController.java), [UserReputation.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/UserReputation.java), recálculo atômico e versionado. | Manter isolado do ranking de avaliações. |
 | **Busca no Catálogo (Search V1)** | ✅ CONCLUÍDO | [CatalogSearchController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/CatalogSearchController.java), busca unificada por trigramas (`pg_trgm`) em places/products. | Monitorar performance de índices GIN. |
 | **Feed V1 (Social Cronológico)** | ✅ CONCLUÍDO | [FeedController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/FeedController.java), `GET /api/v1/feed`, estritamente cronológico, seguidos diretos, sem N+1. | Manter congelado sem alterações. |
 | **Feed V2 (Ranking & Relevância)** | ✅ CONCLUÍDO — versão social + Cold Start | [FeedV2Controller.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/FeedV2Controller.java), [FeedV2QueryService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2QueryService.java), [FeedV2Service.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Service.java), [FeedV2Hydrator.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Hydrator.java), [FeedCandidateRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/FeedCandidateRepositoryAdapter.java). | Pipeline completo com fallback de Cold Start determinístico e sem N+1. |
 | **Ciclo de Vida do Conteúdo (Content Lifecycle)** | ✅ CONCLUÍDO | [UpdateReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/UpdateReviewUseCase.java), [DeleteReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/DeleteReviewUseCase.java), [ReviewController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewController.java), [ReviewLifecycleIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ReviewLifecycleIntegrationTest.java), [ReviewLifecycleControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/ReviewLifecycleControllerIntegrationTest.java). | PATCH/DELETE funcionais, janela de 24h, trava de helpful, soft delete, lock pessimista, recomputação integral de stats no PG. |
 | **Moderação Administrativa (Backoffice)** | ✅ CONCLUÍDO — STEPs 26.1 a 26.3 Concluídos | Fundação V11, [ModerateReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/ModerateReviewUseCase.java), [QueryAdminReportsUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/QueryAdminReportsUseCase.java), [AdminModerationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/AdminModerationController.java), [AdminModerationDtos.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/dto/admin/AdminModerationDtos.java), correção de `GlobalExceptionHandler` para 403 correto, testes [AdminModerationControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/AdminModerationControllerIntegrationTest.java), auditoria de Git e limpeza de diagnostics (26.3.1/26.3.2). | Próximo: Jobs assíncronos (Outbox Pattern) ou novas features. |
-| **Jobs Assíncronos & Outbox** | ⏳ EM ANDAMENTO — STEPs 27.0 (Discovery), 27.1 (Fundação Transacional) e 27.2 (Dispatcher/Worker) concluídos | Migração [V12](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V12__outbox_messages.sql) com tabela `outbox_messages` e migração [V13](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V13__outbox_dispatcher_indexes.sql) com índice parcial de lease; domínio puro [OutboxMessage.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/OutboxMessage.java) e enum `OutboxStatus`; porta [OutboxRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/port/OutboxRepository.java) com claim atômico `FOR UPDATE SKIP LOCKED` implementado por [OutboxRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/OutboxRepositoryAdapter.java); use case puro [ProcessOutboxBatchUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/ProcessOutboxBatchUseCase.java) com ciclo `reclaim → claimBatch → handler fora da transação → finalização owner-checked`; classificação de falhas, [OutboxRetryPolicy.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxRetryPolicy.java) com backoff determinístico e [OutboxErrorSanitizer.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxErrorSanitizer.java); poller `@Scheduled` fino [OutboxDispatcherPoller.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/outbox/OutboxDispatcherPoller.java); 1087 testes verdes. | STEP 27.3 — Produtor de Notifications + `PushNotificationHandler` (integração com `NotificationProvider`). Sem produtor real: a fila `outbox_messages` permanece vazia em runtime e nenhum fluxo de negócio se tornou assíncrono. Observabilidade do worker (STEP 27.4) pendente. |
+| **Jobs Assíncronos & Outbox** | ⏳ EM ANDAMENTO — STEPs 27.0 (Discovery), 27.1 (Fundação Transacional), 27.2 (Dispatcher/Worker) e 27.3 (Produtor de Notifications + `PushNotificationHandler`) concluídos | Migração [V12](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V12__outbox_messages.sql) com tabela `outbox_messages` e migração [V13](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V13__outbox_dispatcher_indexes.sql) com índice parcial de lease; domínio puro [OutboxMessage.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/OutboxMessage.java) e enum `OutboxStatus`; enum [OutboxMessageType.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/enums/OutboxMessageType.java) com `PUSH_NOTIFICATION`; porta [OutboxRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/port/OutboxRepository.java) com claim atômico `FOR UPDATE SKIP LOCKED` implementado por [OutboxRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/OutboxRepositoryAdapter.java); use case puro [ProcessOutboxBatchUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/ProcessOutboxBatchUseCase.java) com ciclo `reclaim → claimBatch → handler fora da transação → finalização owner-checked`; classificação de falhas, [OutboxRetryPolicy.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxRetryPolicy.java) com backoff determinístico e [OutboxErrorSanitizer.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxErrorSanitizer.java); poller `@Scheduled` fino [OutboxDispatcherPoller.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/outbox/OutboxDispatcherPoller.java); no STEP 27.3 a [NotificationService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/NotificationService.java) passou a enfileirar `PUSH_NOTIFICATION` na mesma transação dos quatro fluxos de notificação (payload exclusivo `{"notificationId"}`) e o [PushNotificationHandler.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/PushNotificationHandler.java) entrega o conteúdo persistido à porta `NotificationProvider` (`MockNotificationAdapter`); 1117 testes verdes. | STEP 27.4 — Observabilidade e consolidação do Outbox (métricas Micrometer, logs operacionais, decisão de retenção/purge). O provider permanece o mock local — não há push real externo; a Notification in-app segue síncrona, apenas o efeito externo de push tornou-se assíncrono. |
 | **Observabilidade Avançada & Deploy** | ⏳ PENDENTE | Actuator básico habilitado; sem tracing distribuído ou logs estruturados JSON. | Configurar exportação Prometheus/OTel para produção. |
 | **Cache Distribuído em Redis** | 🔮 FUTURO ADIADO | Redis conectado mas sem cache de queries complexas. | Introduzir apenas sob saturação medida do PostgreSQL. |
 | **Machine Learning & Embeddings** | 🔮 FUTURO ADIADO | Arquitetura determinística prioritária; sem ML. | Avaliar apenas após escala de dezenas de milhares de reviews. |
@@ -124,6 +124,7 @@ Os principais marcos de evolução do backend encontram-se registrados nos commi
 * `fb9fd5e` — *chore: limpar diagnostics do teste de http admin* (STEP 26.3.2: eliminação dos 4 diagnostics em `AdminModerationControllerIntegrationTest` — imports `AuthProvider`/`User` não utilizados, campo `userRepository` e helper `restoreRequest()` sem referências; diff exclusivamente de deleção, zero alteração comportamental, 1016 testes verdes, 0 diagnostics).
 * `30a6191` — *feat: criar fundacao transacional do outbox* (STEP 27.1: migração Flyway `V12` com a tabela `outbox_messages`, domínio puro `OutboxMessage`/`OutboxStatus` com transições protegidas, porta `OutboxRepository` (`save`, `claimBatch`, `findById`, `countByStatus`) e adaptador JPA com claim atômico via `FOR UPDATE SKIP LOCKED`; 25 novos testes — 17 unitários de domínio e 8 de integração no PostgreSQL real; 1041 testes verdes, 0 failures, 0 errors).
 * `d11c79a` — *feat: implementar dispatcher e worker do outbox* (STEP 27.2: use case puro `ProcessOutboxBatchUseCase` com ciclo `reclaim → claimBatch → handler fora da transação → finalização owner-checked`, porta `OutboxHandler` com classificação `TRANSIENT`/`PERMANENT`, `OutboxRetryPolicy` com backoff determinístico à prova de overflow, `OutboxErrorSanitizer` do `last_error`, reclaim atômico de leases expiradas, finalizações owner-checked no repositório, poller `@Scheduled` fino com `@EnableScheduling` central, `workerId` único por instância e migração `V13` com índice parcial de lease; 46 novos testes — domínio, aplicação, integração no PostgreSQL real e poller determinístico sem relógio real; 1087 testes verdes, 0 failures, 0 errors).
+* `a4ed10f` — *feat: integrar notifications ao outbox* (STEP 27.3: `NotificationService` enfileira `PUSH_NOTIFICATION` na mesma transação dos quatro fluxos de notificação (`NEW_FOLLOWER`, `REVIEW_HELPFUL`, `NEW_DISCUSSION`, `DISCUSSION_REPLY`) com propagação `REQUIRED` e payload exclusivo `{"notificationId"}`; enum `OutboxMessageType` centralizando o message_type sem strings literais espalhadas pelo código de produção; `PushNotificationHandler` puro de `OutboxHandler` que extrai o `notificationId`, carrega a `Notification` pela porta e invoca a `NotificationProvider` com o conteúdo persistido (`MockNotificationAdapter` — sem push real); falhas permanentes → `FAILED` imediato e transitórias no mecanismo de retry/backoff herdado do 27.2; testes de atomicidade commit/rollback no PostgreSQL real com conexão observadora, E2E de entrega, retry sem sleep, falha permanente e anonimato; 30 novos testes — 15 do handler, 6 de enqueue no `NotificationServiceUnitTest`, 3 de atomicidade e 6 E2E; 1117 testes verdes, 0 failures, 0 errors).
 
 ---
 
@@ -612,7 +613,7 @@ Limpeza pontual de diagnostics em [AdminModerationControllerIntegrationTest.java
 
 ## 8. Jobs Assíncronos & Outbox Pattern — STEP 27
 
-O STEP 27 introduz o padrão **Transactional Outbox sobre o próprio PostgreSQL**, permitindo que futuros consumidores assíncronos sejam entregues de forma confiável **at-least-once** sem broker externo e sem quebrar a atomicidade transacional do produtor. O STEP 27.0 (Discovery), o STEP 27.1 (Fundação Transacional) e o STEP 27.2 (Dispatcher/Worker) encontram-se **✅ CONCLUÍDOS**. **O dispatcher/worker está ativo em runtime via `@Scheduled`, porém sem produtor real**: a fila `outbox_messages` permanece vazia, os ciclos do poller não processam nada e nenhum fluxo de negócio se tornou assíncrono.
+O STEP 27 introduz o padrão **Transactional Outbox sobre o próprio PostgreSQL**, permitindo que consumidores assíncronos sejam entregues de forma confiável **at-least-once** sem broker externo e sem quebrar a atomicidade transacional do produtor. O STEP 27.0 (Discovery), o STEP 27.1 (Fundação Transacional), o STEP 27.2 (Dispatcher/Worker) e o STEP 27.3 (Produtor de Notifications + `PushNotificationHandler`) encontram-se **✅ CONCLUÍDOS**. **A fila `outbox_messages` agora recebe mensagens `PUSH_NOTIFICATION` enfileiradas na mesma transação dos quatro fluxos de notificação, e o worker as entrega via `PushNotificationHandler` à porta `NotificationProvider`** — porém o provider segue sendo o `MockNotificationAdapter` local: **não há push real externo**. A Notification in-app continua síncrona e transacional; somente o efeito externo de push tornou-se assíncrono, com entrega at-least-once.
 
 ### 8.1 STEP 27.0 — Discovery de Jobs Assíncronos (✅ CONCLUÍDO)
 O discovery consolidou as diretrizes que governam toda a frente:
@@ -673,7 +674,7 @@ O dispatcher/worker foi implementado e validado no commit `d11c79a`: mensagens `
   - `BusinessException` → **PERMANENTE**: rejeição de negócio determinística não se resolve com retry.
   - Qualquer outra exceção (incluindo `OutboxTransientException` e falhas não classificadas) → **TRANSIENTE**: retry com backoff enquanto restarem tentativas; após esgotar `maxAttempts`, `FAILED` terminal.
   - Mensagem sem handler registrado → **PERMANENTE**: falha de roteamento determinística.
-* **Nenhum handler de push foi implementado neste step** — a lista de handlers registrados permanece vazia.
+* **Nenhum handler de push foi implementado neste step** — a lista de handlers registrados permaneceu vazia até o STEP 27.3, que registrou o `PushNotificationHandler` (ver seção 8.4).
 
 #### 3. Retry com Backoff Determinístico
 * [OutboxRetryPolicy.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxRetryPolicy.java): `delay = min(initialDelay × multiplier^(attempts−1), maxDelay)`, com proteção explícita contra overflow e `Infinity`/`NaN` no cálculo exponencial. Sem jitter — decisão documentada desta fase para manter o comportamento previsível.
@@ -721,15 +722,65 @@ As decisões abaixo valem para o MVP desta fase e devem ser reavaliadas sob carg
 4. **Sem broker externo (Kafka/RabbitMQ/Redis/Quartz/Spring Batch)**: a fila transacional em PostgreSQL atende à volumetria atual; substituição apenas sob os decision gates.
 5. **Sem jitter no backoff**: comportamento previsível priorizado nesta fase.
 
-### 8.4 Decisão Arquitetural
+### 8.4 STEP 27.3 — Produtor de Notifications + PushNotificationHandler (✅ CONCLUÍDO)
+O produtor de push e o handler de entrega foram implementados e validados no commit `a4ed10f`: os quatro fluxos de notificação passaram a enfileirar `PUSH_NOTIFICATION` na própria transação de negócio e o worker do 27.2 passou a entregá-los à porta `NotificationProvider` — **ainda sem provider real** (o único adapter é o `MockNotificationAdapter`).
+
+#### 1. Produtor Transacional (NotificationService)
+* [NotificationService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/NotificationService.java): nos quatro fluxos existentes — `NEW_FOLLOWER`, `REVIEW_HELPFUL`, `NEW_DISCUSSION` e `DISCUSSION_REPLY` — a `Notification` é salva e, logo depois, a `OutboxMessage` é enfileirada via `OutboxRepository.save` na **mesma transação** (propagação `REQUIRED`): enqueue atômico com a operação de negócio.
+* `message_type = PUSH_NOTIFICATION`, centralizado no enum [OutboxMessageType.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/enums/OutboxMessageType.java) — o roteamento não usa strings literais espalhadas pelo código de produção.
+* Payload exclusivo `{"notificationId":"<UUID>"}` (ver item 5).
+* **A Notification in-app continua síncrona**: criação, leitura e marcação de leitura permanecem na transação do produtor, como decidido no STEP 27.0. Somente o efeito externo de push tornou-se assíncrono — e **não existe push real externo**, pois o provider real não foi implementado.
+
+#### 2. PushNotificationHandler
+* [PushNotificationHandler.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/PushNotificationHandler.java): implementação **pura de aplicação** da porta `OutboxHandler` — não acessa JPA diretamente, não acessa `SecurityContext`, não conhece o scheduler e não abre transação própria; registrado como bean em [OutboxDispatcherConfig.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/outbox/OutboxDispatcherConfig.java).
+* Suporta exclusivamente `PUSH_NOTIFICATION`; extrai o `notificationId` do payload; carrega a `Notification` pela porta `NotificationRepository` (novo `findById`); usa **exclusivamente o conteúdo persistido** (destinatário, título, conteúdo e metadados) e chama a porta `NotificationProvider`.
+* A porta `NotificationProvider` permanece abstrata; o adapter utilizado é o `MockNotificationAdapter` (log local). Nada de Firebase, FCM, APNs, Expo, HTTP client de push ou credenciais reais neste step.
+
+#### 3. Falhas (Integração com o Mecanismo do STEP 27.2)
+* **Permanentes → `FAILED` imediato**, casos efetivamente cobertos: Notification inexistente; payload vazio; payload malformado; `notificationId` ausente; `notificationId` inválido; metadata ilegível.
+* **Transitórias**: falhas do provider propagam sem captura e entram no mecanismo existente de retry/backoff do worker (lease, owner check e esgotamento até `FAILED`) — nenhuma estratégia de retry nova foi criada; o handler não possui retry próprio.
+
+#### 4. Atomicidade (PostgreSQL Real)
+* **Commit**: a transação do produtor produz a `Notification` e a `OutboxMessage` `PUSH_NOTIFICATION` juntas.
+* **Rollback**: nenhuma das duas permanece.
+* Uma conexão observadora com autocommit próprio não enxerga a linha do Outbox enquanto a transação produtora não comitou. A evidência se limita ao teste realizado — nenhuma garantia além dela é extrapolada.
+
+#### 5. Payload Mínimo, Segurança e Anonimato
+* O payload contém somente `{"notificationId":"<UUID>"}` — sem `title`, `content`, `actorId`, e-mail, `recoveryEmail`, senha, token, IP, GPS, credentials ou PII desnecessária.
+* O conteúdo real do push é obtido da `Notification` persistida no momento da entrega — nunca do payload.
+* O handler não reconstrói identidade: `actorId = null` continua `null` quando a `Notification` original determina anonimato; o handler não injeta IDs de usuário; o push não desanonimiza Reviews. A política pública de anonimato permanece inalterada.
+
+#### 6. Idempotência — at-least-once
+* Garantia de entrega: **at-least-once**. Não existe garantia exactly-once.
+* O contrato da `NotificationProvider` não possui idempotency key; um crash entre o push externo e a finalização `COMPLETED` pode causar duplicidade eventual — condição conhecida e aceita na arquitetura atual. Nenhuma deduplicação foi inventada.
+
+#### 7. API Pública de Notifications Intocada
+* `findMyNotifications`, unread count, `markAsRead` e `markAllAsRead` permaneceram intocados. O único novo comportamento é a geração do Outbox no momento da criação da `Notification`.
+
+#### 8. Testes Automatizados (30 Novos Testes)
+* [PushNotificationHandlerTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/outbox/PushNotificationHandlerTest.java): **15 testes** unitários do handler (roteamento por `supports`, payload mínimo suficiente, conteúdo exato repassado ao provider, metadados, falhas permanentes de payload/Notification inexistente/metadata ilegível, propagação da falha transitória do provider e anonimato preservado).
+* [NotificationServiceUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/service/NotificationServiceUnitTest.java): **6 novos testes** de enqueue (Notification + OutboxMessage capturados nos quatro fluxos, `message_type` e payload exatos, self-follow/parâmetros nulos não enfileiram).
+* [NotificationOutboxAtomicityIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/service/NotificationOutboxAtomicityIntegrationTest.java): **3 testes** de integração no PostgreSQL real — commit produz `Notification` + `OutboxMessage` com payload só de `notificationId`; rollback não deixa nenhum dos dois (com conexão observadora); os quatro fluxos enfileiram exatamente uma mensagem por notificação.
+* [NotificationPushDeliveryIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/outbox/NotificationPushDeliveryIntegrationTest.java): **6 testes** E2E no PostgreSQL real — follow commitado → poller com handler real → `COMPLETED`; conteúdo exato entregue ao provider; retry transitório sem sleep; Notification inexistente → `FAILED` terminal; falha do provider não rollbacka a ação já commitada; anonimato do Helpful preservado na entrega.
+* Suíte completa executada com `./mvnw.cmd clean test`: baseline `1087` + incremento `30` = **1117 testes verdes** (0 failures, 0 errors, 0 skipped, BUILD SUCCESS).
+
+#### 9. Banco de Testes Durante a Validação
+* O novo comportamento do `NotificationService` fez com que testes de fluxos antigos de Notification também gerassem mensagens Outbox: ao final da suíte foram observadas **25 mensagens `PUSH_NOTIFICATION` `PENDING`**.
+* Inspeção confirmou serem resíduos sintéticos de teste — **não** uma falha funcional do Outbox. As mensagens foram removidas após inspeção, sem tocar dado alheio, e **nenhum `PROCESSING` órfão permaneceu**.
+* As classes de teste relevantes foram ajustadas para limpar o estado que passaram a produzir; nenhum teste de Feed foi modificado. A tabela `outbox_messages` terminou vazia. **Nenhuma migration adicional foi necessária** — a estrutura de `V12`/`V13` foi suficiente, sem alteração de schema e sem recriação de banco.
+
+#### 10. Diagnostics
+* **Zero diagnostics introduzidos pelo STEP 27.3**; nenhuma anotação `@SuppressWarnings` no código novo. Os 3 diagnostics históricos (`RoleTest.java`, `JwtRoleSecurityTest.java`, `ReviewLifecycleControllerIntegrationTest.java`) permanecem fora de escopo e inalterados.
+
+### 8.5 Decisão Arquitetural
 1. **PostgreSQL como Source of Truth**: a fila transacional vive no mesmo banco relacional da aplicação; nenhum componente de mensageria externo foi introduzido.
 2. **Outbox no mesmo PostgreSQL**: mensagem e negócio compartilham a mesma base, garantindo consistência ACID sem dual-write.
 3. **Enqueue na transação do produtor**: a mensagem entra na outbox atomicamente com a operação de negócio — impossível commitar um sem o outro.
 4. **Claim atômico**: a seleção de mensagens elegíveis e a marcação `PROCESSING` ocorrem na mesma transação SQL, eliminando a janela de disputa entre workers.
 5. **SKIP LOCKED como estratégia de concorrência**: workers concorrentes nunca reivindicam a mesma linha; a elegibilidade respeita `next_attempt_at <= now`.
-6. **Dispatcher ativo sem produtor**: o worker `@Scheduled` executa ciclos desde o 27.2, porém a fila permanece vazia — nenhum fluxo de negócio se tornou assíncrono; nenhuma notification, reputação ou estatística foi migrada para o outbox.
+6. **Produtor transacional e efeito externo assíncrono**: desde o 27.3, os quatro fluxos de notificação enfileiram `PUSH_NOTIFICATION` na mesma transação e o worker entrega o conteúdo persistido via `PushNotificationHandler`; a Notification in-app, a reputação e as estatísticas permanecem síncronas na transação do produtor — nada foi migrado. O provider é o mock local: não há push real externo. **A chamada externa de push nunca ocorre dentro da transação do produtor.**
 
-### 8.5 Limites do STEP 27.1 (NÃO Implementados)
+### 8.6 Limites do STEP 27.1 (NÃO Implementados)
 Os itens abaixo permanecem **fora do escopo entregue** e não devem ser assumidos como existentes:
 * Scheduler — NÃO implementado.
 * `@Scheduled` — NÃO implementado.
@@ -746,9 +797,9 @@ Os itens abaixo permanecem **fora do escopo entregue** e não devem ser assumido
 * Endpoints administrativos de outbox — NÃO implementados.
 * Broker externo (Kafka/RabbitMQ) — NÃO introduzido.
 
-> **Nota histórica**: os limites acima descrevem o estado ao fechamento do STEP 27.1. Vários deles (scheduler, dispatcher, worker, retry/backoff, lease recovery, classificação de falhas, handler genérico e índice de lease) foram entregues no STEP 27.2 — ver seção 8.3. Os limites vigentes estão em 8.6.
+> **Nota histórica**: os limites acima descrevem o estado ao fechamento do STEP 27.1. Vários deles (scheduler, dispatcher, worker, retry/backoff, lease recovery, classificação de falhas, handler genérico e índice de lease) foram entregues no STEP 27.2 — ver seção 8.3 — e a integração com a porta `NotificationProvider` no STEP 27.3 — ver seção 8.4. Os limites vigentes estão em 8.8.
 
-### 8.6 Limites do STEP 27.2 (NÃO Implementados)
+### 8.7 Limites do STEP 27.2 (NÃO Implementados)
 Os itens abaixo permanecem **fora do escopo entregue pelo 27.2** e não devem ser assumidos como existentes:
 * Produtor real de mensagens (`NotificationService` enfileirando na outbox) — NÃO implementado.
 * `PushNotificationHandler` de produção — NÃO implementado.
@@ -766,26 +817,46 @@ Os itens abaixo permanecem **fora do escopo entregue pelo 27.2** e não devem se
 * Spring Batch — NÃO introduzido.
 * Reconciliação de mídia (GC do SeaweedFS via outbox) — NÃO implementada (job direto `@Scheduled`, sem Outbox, quando iniciado).
 
-### 8.7 Backlog Atualizado de Jobs Assíncronos
+> **Nota histórica**: os limites acima descrevem o estado ao fechamento do STEP 27.2. Vários deles (produtor real de mensagens na `NotificationService`, `PushNotificationHandler`, outbox para push e integração com a porta `NotificationProvider` — ainda via `MockNotificationAdapter`) foram entregues no STEP 27.3 — ver seção 8.4. Os limites vigentes estão em 8.8.
+
+### 8.8 Limites do STEP 27.3 (NÃO Implementados)
+Os itens abaixo permanecem **fora do escopo entregue pelo 27.3** e não devem ser assumidos como existentes:
+* Provider real de push — NÃO implementado.
+* Firebase — NÃO implementado.
+* FCM — NÃO implementado.
+* APNs — NÃO implementado.
+* Expo — NÃO implementado.
+* Credenciais reais de push — NÃO configuradas.
+* Exactly-once — NÃO garantido (entrega at-least-once).
+* Deduplicação distribuída — NÃO implementada.
+* Broker externo (Kafka/RabbitMQ) — NÃO introduzido.
+* Métricas do dispatcher/worker — NÃO implementadas.
+* Dashboard de observabilidade — NÃO implementado.
+* Requeue administrativo de mensagens `FAILED` — NÃO implementado.
+* API pública nova de notifications/outbox — NÃO exposta.
+* Reconciliação de mídia (GC do SeaweedFS via outbox) — NÃO implementada.
+
+### 8.9 Backlog Atualizado de Jobs Assíncronos
 
 | Componente / Cenário | Motivação | Pré-requisito | Estado |
 | :--- | :--- | :--- | :--- |
 | **Fundação Transacional do Outbox** | Fila `outbox_messages` com enqueue atômico e claim `SKIP LOCKED`. | Concluído na migração `V12`. | ✅ CONCLUÍDO (STEP 27.1) |
 | **Dispatcher/Worker do Outbox** | Processar mensagens `PENDING` fora do boundary HTTP. | Concluído no commit `d11c79a` (lease/reclaim, retry com backoff, sanitização e poller `@Scheduled`). | ✅ CONCLUÍDO (STEP 27.2) |
-| **Produtor Real de Push** | Único consumidor previsto do outbox nesta fase. | STEP 27.3 (integração com `NotificationProvider`). | ⏳ PENDENTE |
+| **Produtor Real de Push** | Único consumidor previsto do outbox nesta fase. | Concluído no commit `a4ed10f` (enqueue transacional nos 4 fluxos de `Notification`, `PushNotificationHandler` e `MockNotificationAdapter` — sem push real externo). | ✅ CONCLUÍDO (STEP 27.3) |
 | **Observabilidade do Worker** | Métricas e logs do dispatcher. | STEP 27.4. | ⏳ PENDENTE |
 | **Notificações In-App** | Evitar lentidão caso o volume de notificações cresça. | Decisão do STEP 27.0: permanecem **síncronas** na transação do produtor (same-DB já é atômico). | **PERMANECE SÍNCRONO** |
 | **Recálculo Assíncrono de Reputação** | Eliminar lock pessimista em `users` durante a postagem de reviews. | Decisão do STEP 27.0: permanece **síncrono** na transação do produtor. | **PERMANECE SÍNCRONO** |
 | **Garbage Collection do SeaweedFS** | Remover imagens não referenciadas no S3 para economia de storage. | Job `@Scheduled` direto de varredura de órfãos — **sem Outbox** (decisão do STEP 27.0). | ⏳ PENDENTE |
 | **Cleanup de Sessões Expiradas** | Expurgar tokens revogados e sessões antigas da tabela `user_sessions`. | Job agendado de expurgo cronológico. | ⏳ PENDENTE |
 
-### 8.8 Próximo Passo — STEP 27.3: Produtor de Notifications + PushNotificationHandler (Apenas Registrado)
+### 8.10 Próximo Passo — STEP 27.4: Observabilidade e consolidação do Outbox (Apenas Registrado)
 Registrado **exclusivamente como próximo passo**, sem qualquer implementação nesta consolidação:
-* Enfileiramento na outbox na **mesma transação** da criação da `Notification` (enqueue atômico com a operação de negócio).
-* Implementação do `PushNotificationHandler` de produção, registrado na lista de handlers do dispatcher.
-* Integração com a porta `NotificationProvider` (push externo) — porta hoje nunca invocada.
-* Retentativas de push reutilizando o worker já construído no 27.2 (retry com backoff, lease e owner check) — sem lógica de retry nova.
-* Fluxo end-to-end de push: produção transacional → claim → handler → entrega externa → finalização.
+* Métricas Micrometer do dispatcher/worker.
+* Métricas de mensagens `pending`, `failed` e da idade da mensagem pendente mais antiga (*oldest pending age*).
+* Logs operacionais consolidados do Outbox.
+* Decisão sobre retenção/purge de mensagens processadas.
+* Consolidação final documental do STEP 27.
+* Eventual job de reconciliação de mídia **somente se explicitamente decidido**.
 
 ---
 
@@ -850,6 +921,8 @@ Outbox Foundation (V1)      Migração V12, claim atômico e       ✅ CONCLUÍD
                             SKIP LOCKED validados no PG real
 Outbox Dispatcher (V1)      Lease/reclaim, retry backoff e      ✅ CONCLUÍDO (STEP 27.2)
                             worker @Scheduled no PG real
+Outbox Producer (V1)        Enqueue transacional + handler      ✅ CONCLUÍDO (STEP 27.3)
+                            com retry herdado no PG real
 Cache em Redis              Latência p99 > 200ms no banco       Implementar cache layer
 Mensageria Externa          Outbox no PG > 5.000 msgs/s         Adicionar broker externo
 Migração de Banco           Nova coluna/tabela inevitável       ✅ V11, V12 e V13 CONSOLIDADAS (Roles, Audit & Outbox)
@@ -899,11 +972,25 @@ O dispatcher/worker do Outbox foi **concluído com sucesso** sob o checkpoint `d
 * **Estabilidade**: suíte completa em 1087 testes verdes (0 failures, 0 errors, 0 skipped) e working tree limpo.
 * **Escopo da garantia**: a validação cobre atomicidade, concorrência, lease/recovery e retry; **nenhuma garantia de throughput ou latência** foi estabelecida nesta etapa.
 
+### 11.6 Conclusão do Gate do Produtor de Notifications (STEP 27.3)
+O produtor de Notifications e o `PushNotificationHandler` foram **concluídos com sucesso** sob o checkpoint `a4ed10f`, com a seguinte validação registrada:
+* **Producer transacional**: `NotificationService` enfileira mensagens `PUSH_NOTIFICATION` na **mesma transação** dos quatro fluxos de notificação (`NEW_FOLLOWER`, `REVIEW_HELPFUL`, `NEW_DISCUSSION`, `DISCUSSION_REPLY`), com propagação `REQUIRED` — commit comprovado no PostgreSQL real.
+* **Rollback comprovado**: teste de rollback contra PostgreSQL real demonstra que `Notification` e linha do Outbox desaparecem juntas; uma conexão observadora não enxerga a linha do Outbox antes do commit.
+* **Payload mínimo**: payload contém exclusivamente `notificationId`; o conteúdo real de push é obtido da `Notification` persistida — sem PII no Outbox.
+* **Handler validado**: `PushNotificationHandler` puro de `OutboxHandler`, sem JPA direto, sem `SecurityContext`, sem conhecimento do scheduler e sem transação própria; falhas permanentes → `FAILED` imediato.
+* **Retry E2E validado**: falhas transitórias do provider seguem o mecanismo de backoff do STEP 27.2 (worker real, sem `sleep` em teste) — nenhuma estratégia de retry nova.
+* **Anonimato validado**: o handler não reconstrói identidade; `actorId = null` permanece `null` quando a `Notification` original determina anonimato — pushes não desanonimizam Reviews.
+* **Migração não necessária**: a estrutura de `V12`/`V13` foi suficiente; **nenhuma migration nova** no STEP 27.3.
+* **Worker existente reutilizado**: dispatcher/worker do STEP 27.2 consumiu as mensagens sem qualquer alteração.
+* **Sem provider externo real**: a porta `NotificationProvider` segue atendida pelo `MockNotificationAdapter` local — **não há push real disponível para usuários finais**.
+* **Estabilidade**: suíte completa em 1117 testes verdes (0 failures, 0 errors, 0 skipped) e working tree limpo.
+* **Escopo da garantia**: a validação cobre atomicidade de produção, entrega E2E via worker, retry herdado e falha permanente; **nenhuma garantia de throughput ou latência** foi estabelecida nesta etapa.
+
 ---
 
 ## 12. Estado Atual da Suíte de Testes
 
-* **Total de Testes**: `1087`
+* **Total de Testes**: `1117`
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`
@@ -911,9 +998,9 @@ O dispatcher/worker do Outbox foi **concluído com sucesso** sob o checkpoint `d
 * **Distribuição**:
   - Testes Unitários de Domínio puro (`FeedV2RankerUnitTest`, `FeedV2DiversifierUnitTest`, `FeedScoreUnitTest`, `ReviewLifecycleUnitTest`, [RoleTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/domain/enums/RoleTest.java), [ReviewModerationDomainTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/domain/model/ReviewModerationDomainTest.java), [ReportResolutionDomainTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/domain/model/ReportResolutionDomainTest.java), [ModerationAuditLogTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/domain/model/ModerationAuditLogTest.java), [OutboxMessageTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/domain/model/OutboxMessageTest.java) com 20 cenários de invariantes e transições do Outbox).
   - Testes de Segurança e Infraestrutura ([JwtRoleSecurityTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/security/JwtRoleSecurityTest.java) cobrindo claims JWT, extração de authorities e fallback para `ROLE_USER`; [OutboxDispatcherPollerTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/outbox/OutboxDispatcherPollerTest.java) com 2 cenários determinísticos do scheduler, sem relógio real).
-  - Testes Unitários de Aplicação (`UpdateReviewUseCaseUnitTest` com 17 cenários; `DeleteReviewUseCaseUnitTest` com 7 cenários; [ModerateReviewUseCaseUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ModerateReviewUseCaseUnitTest.java) com 25 cenários; [QueryAdminReportsUseCaseUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/QueryAdminReportsUseCaseUnitTest.java) com 10 cenários; [ProcessOutboxBatchUseCaseTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ProcessOutboxBatchUseCaseTest.java) com 14 cenários; [OutboxRetryPolicyTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/outbox/OutboxRetryPolicyTest.java) com 8 cenários; [OutboxErrorSanitizerTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/outbox/OutboxErrorSanitizerTest.java) com 8 cenários; `FeedV2ServiceUnitTest`; `FeedV2HydratorUnitTest`).
-  - Testes de Persistência com Spring Boot e banco real (`FeedCandidateRetrievalPersistenceIntegrationTest`; `FeedV2RetrievalRankerIntegrationTest`; `RateableTargetStatsPersistenceIntegrationTest`; [ModerationAuditLogPersistenceIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/persistence/ModerationAuditLogPersistenceIntegrationTest.java); [OutboxPersistenceIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/persistence/OutboxPersistenceIntegrationTest.java) com 8 cenários cobrindo JSONB, atomicidade de enqueue, claim determinístico e concorrência SKIP LOCKED no PostgreSQL real; [OutboxDispatcherIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/outbox/OutboxDispatcherIntegrationTest.java) com 11 cenários cobrindo lease recovery, claim concorrente, owner check, corrida pós-expiração de lease, retry com backoff, esgotamento até FAILED e ciclo via poller no PostgreSQL real).
-  - Testes de Integração de Aplicação (`ReviewLifecycleIntegrationTest` com 6 cenários cobrindo ponta a ponta mutações multi-alvo, bloqueio de helpful, expiração de 24h, soft delete sob moderação e teste de concorrência com lock pessimista; [ModerateReviewIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ModerateReviewIntegrationTest.java) com 4 cenários cobrindo remoção, restauração, consulta paginada sem N+1 e teste de concorrência com lock pessimista no PostgreSQL real; `FeedV2ServiceIntegrationTest`).
+  - Testes Unitários de Aplicação (`UpdateReviewUseCaseUnitTest` com 17 cenários; `DeleteReviewUseCaseUnitTest` com 7 cenários; [ModerateReviewUseCaseUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ModerateReviewUseCaseUnitTest.java) com 25 cenários; [QueryAdminReportsUseCaseUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/QueryAdminReportsUseCaseUnitTest.java) com 10 cenários; [ProcessOutboxBatchUseCaseTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ProcessOutboxBatchUseCaseTest.java) com 14 cenários; [OutboxRetryPolicyTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/outbox/OutboxRetryPolicyTest.java) com 8 cenários; [OutboxErrorSanitizerTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/outbox/OutboxErrorSanitizerTest.java) com 8 cenários; [PushNotificationHandlerTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/outbox/PushNotificationHandlerTest.java) com 15 cenários; [NotificationServiceUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/service/NotificationServiceUnitTest.java) com 6 novos cenários de enqueue transacional de push; `FeedV2ServiceUnitTest`; `FeedV2HydratorUnitTest`).
+  - Testes de Persistência com Spring Boot e banco real (`FeedCandidateRetrievalPersistenceIntegrationTest`; `FeedV2RetrievalRankerIntegrationTest`; `RateableTargetStatsPersistenceIntegrationTest`; [ModerationAuditLogPersistenceIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/persistence/ModerationAuditLogPersistenceIntegrationTest.java); [OutboxPersistenceIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/persistence/OutboxPersistenceIntegrationTest.java) com 8 cenários cobrindo JSONB, atomicidade de enqueue, claim determinístico e concorrência SKIP LOCKED no PostgreSQL real; [OutboxDispatcherIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/outbox/OutboxDispatcherIntegrationTest.java) com 11 cenários cobrindo lease recovery, claim concorrente, owner check, corrida pós-expiração de lease, retry com backoff, esgotamento até FAILED e ciclo via poller no PostgreSQL real; [NotificationPushDeliveryIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/outbox/NotificationPushDeliveryIntegrationTest.java) com 6 cenários E2E cobrindo entrega completa via poller com handler real, retry sem sleep, `FAILED` permanente, isolamento da ação commitada e anonimato no PostgreSQL real).
+  - Testes de Integração de Aplicação (`ReviewLifecycleIntegrationTest` com 6 cenários cobrindo ponta a ponta mutações multi-alvo, bloqueio de helpful, expiração de 24h, soft delete sob moderação e teste de concorrência com lock pessimista; [ModerateReviewIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ModerateReviewIntegrationTest.java) com 4 cenários cobrindo remoção, restauração, consulta paginada sem N+1 e teste de concorrência com lock pessimista no PostgreSQL real; [NotificationOutboxAtomicityIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/service/NotificationOutboxAtomicityIntegrationTest.java) com 3 cenários cobrindo commit, rollback e os quatro fluxos com conexão observadora no PostgreSQL real; `FeedV2ServiceIntegrationTest`).
   - Testes de Integração HTTP com MockMvc e Spring Security (`ReviewLifecycleControllerIntegrationTest` com 19 cenários; [AdminModerationControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/AdminModerationControllerIntegrationTest.java) com 15 cenários cobrindo 401/403 de segurança, remoção por MODERATOR e ADMIN, 404/409 de negócio e validação Bean Validation; `FeedV2ControllerIntegrationTest`; `FeedControllerIntegrationTest`; `ReviewControllerIntegrationTest`).
   - Testes de Não-Regressão das etapas anteriores (Search V1, Auth, Catálogo, Reputação, Moderação Preventiva).
 
@@ -921,17 +1008,18 @@ O dispatcher/worker do Outbox foi **concluído com sucesso** sob o checkpoint `d
 
 ## 13. Próximo Passo Imediato
 
-Com a conclusão oficial do **STEP 27.2 — Dispatcher/Worker do Outbox**, a frente de Jobs Assíncronos (STEP 27) possui fila transacional (`V12`), índice de lease (`V13`), domínio estendido, porta ampliada e dispatcher/worker com lease/reclaim, retry com backoff e sanitização entregues e validados (1087 testes verdes). O dispatcher `@Scheduled` está ativo em runtime, **porém a fila permanece vazia**: não existe produtor real de mensagens e nenhum fluxo de negócio se tornou assíncrono.
+Com a conclusão oficial do **STEP 27.3 — Produtor de Notifications + PushNotificationHandler**, a frente de Jobs Assíncronos (STEP 27) possui fila transacional (`V12`), índice de lease (`V13`), dispatcher/worker com lease/reclaim, retry com backoff e sanitização (STEP 27.2) e o produtor real de mensagens `PUSH_NOTIFICATION` com handler de entrega (STEP 27.3) entregues e validados (1117 testes verdes). A fila `outbox_messages` recebe mensagens enfileiradas na mesma transação dos quatro fluxos de notificação e o worker as entrega à porta `NotificationProvider` — **ainda via `MockNotificationAdapter` local: não há push real externo**. A Notification in-app permanece síncrona; apenas o efeito externo de push tornou-se assíncrono, com entrega at-least-once.
 
-### Próximo Passo: STEP 27.3 — Produtor de Notifications + PushNotificationHandler (Apenas Registrado, Não Iniciado)
+### Próximo Passo: STEP 27.4 — Observabilidade e consolidação do Outbox (Apenas Registrado, Não Iniciado)
 
 O escopo do próximo step desta frente é:
 
-1. **Produtor real**: enfileiramento na outbox na **mesma transação** da criação da `Notification` (enqueue atômico com a operação de negócio).
-2. **Handler de produção**: implementação do `PushNotificationHandler`, registrado na lista de handlers do dispatcher.
-3. **Push externo**: integração com a porta `NotificationProvider` — porta hoje nunca invocada.
-4. **Retry herdado**: retentativas de push reutilizando o worker já construído no 27.2 (backoff, lease e owner check) — sem lógica de retry nova.
-5. **Fluxo end-to-end**: produção transacional → claim → handler → entrega externa → finalização.
+1. **Métricas Micrometer** do dispatcher/worker.
+2. **Métricas de saúde da fila**: contagem de mensagens `pending`, `failed` e idade da mensagem pendente mais antiga (*oldest pending age*).
+3. **Logs operacionais consolidados** do Outbox.
+4. **Decisão de retenção/purge** de mensagens processadas.
+5. **Consolidação final documental** do STEP 27.
+6. **Eventual job de reconciliação de mídia** — somente se explicitamente decidido.
 
 ### Demais Frentes em Aberto
 
@@ -943,4 +1031,4 @@ As seguintes frentes encontram-se pendentes e podem ser iniciadas a qualquer mom
    - Rastreabilidade distribuída via OpenTelemetry.
 
 > [!NOTE]
-> O subsistema de Moderação Administrativa está 100% operacional. Qualquer backoffice ou painel administrativo pode consumir diretamente os endpoints `/api/v1/admin/**` com tokens JWT de MODERATOR ou ADMIN. A fundação do Outbox (STEP 27.1) ainda não processa mensagens — nenhum fluxo de negócio deve assumir entrega assíncrona.
+> O subsistema de Moderação Administrativa está 100% operacional. Qualquer backoffice ou painel administrativo pode consumir diretamente os endpoints `/api/v1/admin/**` com tokens JWT de MODERATOR ou ADMIN. O Outbox (STEPS 27.1 a 27.3) processa mensagens `PUSH_NOTIFICATION` com entrega at-least-once à porta `NotificationProvider` — **ainda o `MockNotificationAdapter` local, sem push real externo**: nenhum fluxo de negócio deve assumir entrega real de push para dispositivos. A Notification in-app permanece síncrona e transacional.
