@@ -5,6 +5,7 @@ import com.rewit.domain.enums.TargetType;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -47,6 +48,20 @@ public final class ReviewDto {
                 List<CreateReviewTargetCommand> targets
         ) {
             this(authorUserId, contextPlaceId, experienceText, isAnonymous, visibility, null, null, null, targets);
+        }
+    }
+
+    public record UpdateReviewCommand(
+            String experienceText,
+            Map<UUID, BigDecimal> targetRatings,
+            Boolean isAnonymous,
+            String visibility,
+            Instant now
+    ) {
+        public UpdateReviewCommand {
+            if (targetRatings == null) {
+                targetRatings = Map.of();
+            }
         }
     }
 
