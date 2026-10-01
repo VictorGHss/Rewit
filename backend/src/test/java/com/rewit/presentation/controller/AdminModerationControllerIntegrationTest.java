@@ -8,15 +8,12 @@ import com.rewit.application.dto.ReviewDto.CreateReviewCommand;
 import com.rewit.application.dto.ReviewDto.CreateReviewTargetCommand;
 import com.rewit.application.dto.report.ReportDtos.CreateReportCommand;
 import com.rewit.application.port.RateableTargetRepository;
-import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.ReportService;
 import com.rewit.application.service.ReviewService;
-import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.ModerationAction;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.RateableTarget;
-import com.rewit.domain.model.User;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
 import com.rewit.presentation.dto.admin.AdminModerationDtos.ModerateReviewRequest;
@@ -55,9 +52,6 @@ class AdminModerationControllerIntegrationTest {
 
     @Autowired
     private WebApplicationContext webApplicationContext;
-
-    @Autowired
-    private UserRepository userRepository;
 
     @Autowired
     private RateableTargetRepository rateableTargetRepository;
@@ -175,14 +169,6 @@ class AdminModerationControllerIntegrationTest {
                 ModerationAction.REMOVE_REVIEW,
                 "SPAM_CONFIRMED",
                 "Avaliação verificada como conteúdo de spam com padrão repetitivo identificado."
-        );
-    }
-
-    private ModerateReviewRequest restoreRequest() {
-        return new ModerateReviewRequest(
-                ModerationAction.RESTORE_REVIEW,
-                "FALSE_POSITIVE",
-                "Denúncia revisada. A avaliação não viola nenhuma política da plataforma."
         );
     }
 
