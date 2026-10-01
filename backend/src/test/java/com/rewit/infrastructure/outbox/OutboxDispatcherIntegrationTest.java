@@ -193,7 +193,8 @@ class OutboxDispatcherIntegrationTest {
         threadA.join(5000);
         threadB.join(5000);
 
-        assertNull(failure.get(), "Nenhum worker deve falhar: " + failure.get());
+        Throwable workerFailure = failure.get();
+        assertNull(workerFailure, "Nenhum worker deve falhar: " + workerFailure);
         List<OutboxMessage> claimedByA = batchA.get();
         List<OutboxMessage> claimedByB = batchB.get();
         assertNotNull(claimedByA);

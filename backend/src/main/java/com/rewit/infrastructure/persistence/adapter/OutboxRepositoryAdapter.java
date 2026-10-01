@@ -9,7 +9,6 @@ import com.rewit.infrastructure.persistence.repository.OutboxMessageJpaRepositor
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -89,7 +88,7 @@ public class OutboxRepositoryAdapter implements OutboxRepository {
     @Transactional(readOnly = true)
     public Optional<Instant> oldestPendingCreatedAt() {
         return Optional.ofNullable(jpaRepository.oldestPendingCreatedAt())
-                .map(Timestamp::toInstant);
+                .map(timestamp -> timestamp.toInstant());
     }
 
     @Override
