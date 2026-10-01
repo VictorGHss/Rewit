@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -126,4 +127,36 @@ public interface OutboxMessageJpaRepository extends JpaRepository<OutboxMessageJ
     );
 
     long countByStatus(String status);
+
+    /**
+     * Step 27.4 (Parte E): MIN(created_at) das PENDING, apoiado no índice parcial
+     * idx_outbox_pending (WHERE status = 'PENDING'). Sem índice novo: a tabela
+     * permanece limitada pelo purge e as PENDING são poucas em regime permanente.
+     */
+    @Query(value = """
+        SELECT MIN(created_at)
+        FROM outbox_messages
+        WHERE status = 'PENDING'
+        """, nativeQuery = true)
+    Timestamp oldestPendingCreatedAt();
+
+    /**
+     * Step 27.4 (Partes J/R): purge em lote de COMPLETED antigas por updated_at.
+     * Determinístico e limitado: subconsulta SELECT ... ORDER BY updated_at LIMIT
+     * remove primeiro as mais antigas; PENDING/PROCESSING/FAILED nunca são
+     * atingidos. Atômico — seguro com execuções concorrentes.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(value = """
+        DELETE FROM outbox_messages
+        WHERE id IN (
+            SELECT id
+            FROM outbox_messages
+            WHERE status = 'COMPLETED'
+              AND updated_at < :cutoff
+            ORDER BY updated_at
+            LIMIT :limit
+        )
+        """, nativeQuery = true)
+    int purgeCompletedBefore(@Param("cutoff") Instant cutoff, @Param("limit") int limit);
 }

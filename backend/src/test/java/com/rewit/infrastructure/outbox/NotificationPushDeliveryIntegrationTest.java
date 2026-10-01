@@ -1,5 +1,30 @@
 package com.rewit.infrastructure.outbox;
 
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.junit.jupiter.api.AfterEach;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.dto.ReviewDto.CreateReviewCommand;
 import com.rewit.application.dto.ReviewDto.CreateReviewTargetCommand;
@@ -26,27 +51,6 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.repository.UserFollowJpaRepository;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
-
-import java.math.BigDecimal;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * E2E do push externo contra PostgreSQL real (Step 27.3, Partes R/S/T/U/V):
@@ -68,6 +72,9 @@ class NotificationPushDeliveryIntegrationTest {
 
     @Autowired
     private OutboxRepository outboxRepository;
+
+    @Autowired
+    private OutboxMetrics outboxMetrics;
 
     @Autowired
     private OutboxRetryPolicy outboxRetryPolicy;
@@ -139,7 +146,7 @@ class NotificationPushDeliveryIntegrationTest {
         assertEquals(1, pushMessageCount(), "Commit do produtor → mensagem enfileirada");
 
         ProcessOutboxBatchUseCase useCase = useCaseWith(realPushHandler);
-        new OutboxDispatcherPoller(useCase).dispatchPendingMessages();
+        new OutboxDispatcherPoller(useCase, outboxMetrics).dispatchPendingMessages();
 
         Optional<OutboxMessage> reloaded = outboxRepository.findById(solePushMessageId());
         assertTrue(reloaded.isPresent());

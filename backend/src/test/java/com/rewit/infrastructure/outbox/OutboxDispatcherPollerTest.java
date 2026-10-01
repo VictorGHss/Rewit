@@ -20,7 +20,7 @@ class OutboxDispatcherPollerTest {
     void shouldDelegateToUseCaseOnDirectInvocation() {
         ProcessOutboxBatchUseCase useCase = mock(ProcessOutboxBatchUseCase.class);
         when(useCase.processPendingBatch()).thenReturn(new ProcessOutboxBatchResult(0, 2, 1, 1, 0, 0, 0));
-        OutboxDispatcherPoller poller = new OutboxDispatcherPoller(useCase);
+        OutboxDispatcherPoller poller = new OutboxDispatcherPoller(useCase, mock(OutboxMetrics.class));
 
         poller.dispatchPendingMessages();
 
@@ -32,7 +32,7 @@ class OutboxDispatcherPollerTest {
     void shouldAbsorbCycleFailureAndContinueOnNextTick() {
         ProcessOutboxBatchUseCase useCase = mock(ProcessOutboxBatchUseCase.class);
         when(useCase.processPendingBatch()).thenThrow(new RuntimeException("falha simulada do ciclo"));
-        OutboxDispatcherPoller poller = new OutboxDispatcherPoller(useCase);
+        OutboxDispatcherPoller poller = new OutboxDispatcherPoller(useCase, mock(OutboxMetrics.class));
 
         assertDoesNotThrow(() -> poller.dispatchPendingMessages(),
                 "Falha do ciclo não deve propagar ao scheduler");

@@ -9,6 +9,7 @@ import com.rewit.application.port.NotificationRepository;
 import com.rewit.application.port.OutboxHandler;
 import com.rewit.application.port.OutboxRepository;
 import com.rewit.application.usecase.ProcessOutboxBatchUseCase;
+import com.rewit.application.usecase.PurgeCompletedOutboxUseCase;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -64,5 +65,16 @@ public class OutboxDispatcherConfig {
                 workerIdProvider.getWorkerId(),
                 properties.getBatchSize(),
                 properties.getLeaseDuration());
+    }
+
+    @Bean
+    public PurgeCompletedOutboxUseCase purgeCompletedOutboxUseCase(
+            OutboxRepository outboxRepository,
+            OutboxDispatcherProperties properties
+    ) {
+        return new PurgeCompletedOutboxUseCase(
+                outboxRepository,
+                properties.getPurgeRetention(),
+                properties.getPurgeBatchSize());
     }
 }

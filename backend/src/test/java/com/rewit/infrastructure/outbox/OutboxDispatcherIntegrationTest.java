@@ -1,26 +1,6 @@
 package com.rewit.infrastructure.outbox;
 
-import com.rewit.application.outbox.OutboxErrorSanitizer;
-import com.rewit.application.outbox.OutboxRetryPolicy;
-import com.rewit.application.outbox.OutboxTransientException;
-import com.rewit.application.port.OutboxHandler;
-import com.rewit.application.port.OutboxRepository;
-import com.rewit.application.usecase.ProcessOutboxBatchUseCase;
-import com.rewit.application.usecase.ProcessOutboxBatchUseCase.ProcessOutboxBatchResult;
-import com.rewit.domain.enums.OutboxStatus;
-import com.rewit.domain.model.OutboxMessage;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
-
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -32,7 +12,33 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.AfterEach;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import com.rewit.application.outbox.OutboxErrorSanitizer;
+import com.rewit.application.outbox.OutboxRetryPolicy;
+import com.rewit.application.outbox.OutboxTransientException;
+import com.rewit.application.port.OutboxHandler;
+import com.rewit.application.port.OutboxRepository;
+import com.rewit.application.usecase.ProcessOutboxBatchUseCase;
+import com.rewit.application.usecase.ProcessOutboxBatchUseCase.ProcessOutboxBatchResult;
+import com.rewit.application.usecase.PurgeCompletedOutboxUseCase;
+import com.rewit.domain.enums.OutboxStatus;
+import com.rewit.domain.model.OutboxMessage;
 
 /**
  * Testes de integração do dispatcher do Outbox contra PostgreSQL real (Step 27.2).
@@ -62,6 +68,12 @@ class OutboxDispatcherIntegrationTest {
 
     @Autowired
     private WorkerIdProvider workerIdProvider;
+
+    @Autowired
+    private OutboxMetrics outboxMetrics;
+
+    @Autowired
+    private PurgeCompletedOutboxUseCase purgeCompletedOutboxUseCase;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -352,12 +364,45 @@ class OutboxDispatcherIntegrationTest {
     void shouldProcessThroughPollerWithRealUseCase() {
         OutboxMessage message = seedEligibleCommitted(60, 0);
 
-        OutboxDispatcherPoller poller = new OutboxDispatcherPoller(useCase);
+        OutboxDispatcherPoller poller = new OutboxDispatcherPoller(useCase, outboxMetrics);
         poller.dispatchPendingMessages();
 
         Optional<OutboxMessage> reloaded = outboxRepository.findById(message.getId());
         assertTrue(reloaded.isPresent());
         assertEquals(OutboxStatus.COMPLETED, reloaded.get().getStatus());
+    }
+
+    @Test
+    @DisplayName("Retenção: purge PostgreSQL remove apenas COMPLETED antigos e preserva estados ativos/FAILED")
+    void shouldPurgeOnlyOldCompletedMessages() {
+        Instant now = Instant.now();
+        UUID oldCompleted = seedRawOutbox("COMPLETED", now.minus(Duration.ofDays(31)), null);
+        UUID recentCompleted = seedRawOutbox("COMPLETED", now.minus(Duration.ofDays(1)), null);
+        UUID oldFailed = seedRawOutbox("FAILED", now.minus(Duration.ofDays(31)), null);
+        UUID oldPending = seedRawOutbox("PENDING", now.minus(Duration.ofDays(31)), null);
+        UUID activeProcessing = seedRawOutbox("PROCESSING", now.minus(Duration.ofDays(31)), now.minusSeconds(10));
+
+        assertEquals(1, purgeCompletedOutboxUseCase.purgeExpired(now));
+        assertEquals(0, countById(oldCompleted));
+        assertEquals(1, countById(recentCompleted));
+        assertEquals(1, countById(oldFailed));
+        assertEquals(1, countById(oldPending));
+        assertEquals(1, countById(activeProcessing));
+    }
+
+    @Test
+    @DisplayName("Retenção: purge respeita limite de lote")
+    void shouldRespectPurgeBatchLimit() {
+        Instant now = Instant.now();
+        seedRawOutbox("COMPLETED", now.minus(Duration.ofDays(31)), null);
+        seedRawOutbox("COMPLETED", now.minus(Duration.ofDays(32)), null);
+
+        PurgeCompletedOutboxUseCase singleRowPurge = new PurgeCompletedOutboxUseCase(
+                outboxRepository, Duration.ofDays(30), 1);
+
+        assertEquals(1, singleRowPurge.purgeExpired(now));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM outbox_messages WHERE status = 'COMPLETED'", Integer.class));
     }
 
     @Test
@@ -397,6 +442,29 @@ class OutboxDispatcherIntegrationTest {
         OutboxMessage saved = tx.execute(status -> outboxRepository.save(message));
         assertNotNull(saved);
         return saved;
+    }
+
+    private UUID seedRawOutbox(String status, Instant updatedAt, Instant lockedAt) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO outbox_messages
+                    (id, message_type, payload, status, attempts, next_attempt_at,
+                     locked_at, locked_by, last_error, created_at, updated_at)
+                VALUES (?, 'PUSH_DELIVERY', '{}', ?, 0, ?::timestamptz, ?::timestamptz, ?::varchar, NULL, ?::timestamptz, ?::timestamptz)
+                """,
+                id,
+                status,
+                Timestamp.from(updatedAt),
+                lockedAt == null ? null : Timestamp.from(lockedAt),
+                lockedAt == null ? null : "test-worker",
+                Timestamp.from(updatedAt),
+                Timestamp.from(updatedAt));
+        return id;
+    }
+
+    private int countById(UUID id) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM outbox_messages WHERE id = ?", Integer.class, id);
     }
 
     private static final class RecordingHandler implements OutboxHandler {

@@ -66,4 +66,23 @@ public interface OutboxRepository {
     Optional<OutboxMessage> findById(UUID id);
 
     long countByStatus(OutboxStatus status);
+
+    /**
+     * Instante de criação da mensagem PENDING mais antiga (Step 27.4, Parte E).
+     * Fonte de verdade é o PostgreSQL: a consulta é executada a cada chamada.
+     *
+     * @return instante da PENDING mais antiga; vazio quando não há mensagens PENDING
+     */
+    Optional<Instant> oldestPendingCreatedAt();
+
+    /**
+     * Remove em lote mensagens COMPLETED cujo updated_at é anterior ao corte
+     * informado (Step 27.4, Partes I/J/R). Só atinge estado terminal de sucesso:
+     * PENDING, PROCESSING e FAILED nunca são removidos, independentemente da idade.
+     *
+     * @param cutoff    limite de idade por updated_at (messages com updated_at >= cutoff permanecem)
+     * @param batchSize limite máximo de linhas removidas nesta chamada
+     * @return quantidade efetivamente removida
+     */
+    int purgeCompletedBefore(Instant cutoff, int batchSize);
 }

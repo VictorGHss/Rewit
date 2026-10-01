@@ -32,6 +32,21 @@ public class OutboxDispatcherProperties {
     /** Limite de caracteres do last_error persistido (sanitizado e truncado). */
     private int errorMaxLength = 512;
 
+    /** Liga/desliga o job agendado de purge de mensagens COMPLETED antigas (testes usam false). */
+    private boolean purgeEnabled = true;
+
+    /** Intervalo entre passadas do purge (fixedDelay: uma passada só inicia após a anterior terminar). */
+    private long purgeIntervalMs = 3600000;
+
+    /** Atraso inicial da primeira passada de purge após o boot. */
+    private long purgeInitialDelayMs = 60000;
+
+    /** Idade mínima (desde updated_at) para uma mensagem COMPLETED ser elegível a purge. */
+    private Duration purgeRetention = Duration.ofDays(30);
+
+    /** Tamanho máximo do lote removido por passada do purge. */
+    private int purgeBatchSize = 100;
+
     private final Retry retry = new Retry();
 
     public boolean isPollerEnabled() {
@@ -80,6 +95,46 @@ public class OutboxDispatcherProperties {
 
     public void setErrorMaxLength(int errorMaxLength) {
         this.errorMaxLength = errorMaxLength;
+    }
+
+    public boolean isPurgeEnabled() {
+        return purgeEnabled;
+    }
+
+    public void setPurgeEnabled(boolean purgeEnabled) {
+        this.purgeEnabled = purgeEnabled;
+    }
+
+    public long getPurgeIntervalMs() {
+        return purgeIntervalMs;
+    }
+
+    public void setPurgeIntervalMs(long purgeIntervalMs) {
+        this.purgeIntervalMs = purgeIntervalMs;
+    }
+
+    public long getPurgeInitialDelayMs() {
+        return purgeInitialDelayMs;
+    }
+
+    public void setPurgeInitialDelayMs(long purgeInitialDelayMs) {
+        this.purgeInitialDelayMs = purgeInitialDelayMs;
+    }
+
+    public Duration getPurgeRetention() {
+        return purgeRetention;
+    }
+
+    public void setPurgeRetention(Duration purgeRetention) {
+        this.purgeRetention = purgeRetention;
+    }
+
+    public int getPurgeBatchSize() {
+        return purgeBatchSize;
+    }
+
+    public void setPurgeBatchSize(int purgeBatchSize) {
+        this.purgeBatchSize = purgeBatchSize;
     }
 
     public Retry getRetry() {

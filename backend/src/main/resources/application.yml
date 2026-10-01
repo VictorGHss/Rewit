@@ -37,6 +37,11 @@ rewit:
     batch-size: ${OUTBOX_BATCH_SIZE:10}
     lease-duration: ${OUTBOX_LEASE_DURATION:PT2M}
     error-max-length: ${OUTBOX_ERROR_MAX_LENGTH:512}
+    purge-enabled: ${OUTBOX_PURGE_ENABLED:true}
+    purge-interval-ms: ${OUTBOX_PURGE_INTERVAL_MS:3600000}
+    purge-initial-delay-ms: ${OUTBOX_PURGE_INITIAL_DELAY_MS:60000}
+    purge-retention: ${OUTBOX_PURGE_RETENTION:PT720H}
+    purge-batch-size: ${OUTBOX_PURGE_BATCH_SIZE:100}
     retry:
       initial-delay: ${OUTBOX_RETRY_INITIAL_DELAY:PT30S}
       multiplier: ${OUTBOX_RETRY_MULTIPLIER:2.0}

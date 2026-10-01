@@ -14,6 +14,10 @@ rewit:
     # disputar linhas do outbox com testes que seguram locks manualmente.
     # O teste da Parte W invoca o poller diretamente (sem relógio real).
     poller-enabled: false
+    # Purge desligado em TODOS os testes (Step 27.4, Parte T): nenhum DELETE
+    # por relógio pode disputar com cenários que semeiam linhas antigas.
+    # O teste da Parte Q invoca o purge diretamente (sem relógio real).
+    purge-enabled: false
   minio:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:8333}
     access-key: ${OBJECT_STORAGE_ACCESS_KEY:change-me}

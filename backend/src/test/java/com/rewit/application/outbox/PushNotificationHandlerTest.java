@@ -146,14 +146,15 @@ class PushNotificationHandlerTest {
     class PermanentFailures {
 
         @Test
-        @DisplayName("P.4: notificação inexistente é falha PERMANENTE — provider nunca é chamado")
+        @DisplayName("P.4: notificação inexistente é falha PERMANENTE — provider nunca é chamado e o ID não vaza para log/last_error")
         void shouldFailPermanentlyWhenNotificationDoesNotExist() {
             when(notificationRepository.findById(notificationId)).thenReturn(Optional.empty());
 
             OutboxPermanentException ex = assertThrows(OutboxPermanentException.class,
                     () -> handler.handle(pushMessage("{\"notificationId\":\"" + notificationId + "\"}")));
 
-            assertTrue(ex.getMessage().contains(notificationId.toString()));
+            assertTrue(ex.getMessage().contains("Notificação inexistente"));
+            assertFalse(ex.getMessage().contains(notificationId.toString()));
             verify(notificationProvider, never()).sendPushNotification(any(), any(), any(), any());
         }
 

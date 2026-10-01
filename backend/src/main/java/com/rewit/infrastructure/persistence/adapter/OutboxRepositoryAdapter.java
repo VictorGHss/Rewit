@@ -9,6 +9,7 @@ import com.rewit.infrastructure.persistence.repository.OutboxMessageJpaRepositor
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -82,6 +83,25 @@ public class OutboxRepositoryAdapter implements OutboxRepository {
             return 0;
         }
         return jpaRepository.countByStatus(status.name());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Instant> oldestPendingCreatedAt() {
+        return Optional.ofNullable(jpaRepository.oldestPendingCreatedAt())
+                .map(Timestamp::toInstant);
+    }
+
+    @Override
+    @Transactional
+    public int purgeCompletedBefore(Instant cutoff, int batchSize) {
+        if (cutoff == null) {
+            throw new BusinessException("O corte de retenção é obrigatório para o purge", "MISSING_PURGE_CUTOFF");
+        }
+        if (batchSize <= 0) {
+            throw new BusinessException("O tamanho do lote do purge deve ser positivo", "INVALID_PURGE_BATCH_SIZE");
+        }
+        return jpaRepository.purgeCompletedBefore(cutoff, batchSize);
     }
 
     @Override

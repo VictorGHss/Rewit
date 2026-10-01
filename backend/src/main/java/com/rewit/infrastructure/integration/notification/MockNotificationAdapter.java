@@ -18,6 +18,8 @@ public class MockNotificationAdapter implements NotificationProvider {
 
     @Override
     public void sendPushNotification(UUID recipientUserId, String title, String body, Map<String, String> metadata) {
-        log.info("[MOCK PUSH] Destinatário: {}, Título: {}, Mensagem: {}", recipientUserId, title, body);
+        // Sem destinatário/título/corpo no log (Step 27.4, Partes F/V): dados do usuário
+        // e conteúdo da notificação não podem vazar para observabilidade.
+        log.info("[MOCK PUSH] Push simulado entregue pelo provider mock (destinatário e conteúdo não registrados)");
     }
 }

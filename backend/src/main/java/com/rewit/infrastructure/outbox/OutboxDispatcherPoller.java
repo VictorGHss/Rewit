@@ -23,6 +23,10 @@ import java.util.Objects;
  *
  * <p>Falhas do ciclo são logadas e absorvidas (Parte R): o próximo tick continua
  * normalmente — a exceção nunca é engolida silenciosamente nem derruba o scheduler.
+ *
+ * <p>Step 27.4 (Parte C): o resultado estruturado de cada ciclo é gravado como
+ * counters Micrometer por {@link OutboxMetrics#recordCycle} — o poller é o único
+ * ponto de gravação, sem dupla contagem.
  */
 @Component
 @ConditionalOnProperty(prefix = "rewit.outbox", name = "poller-enabled", havingValue = "true", matchIfMissing = true)
@@ -31,10 +35,15 @@ public class OutboxDispatcherPoller {
     private static final Logger log = LoggerFactory.getLogger(OutboxDispatcherPoller.class);
 
     private final ProcessOutboxBatchUseCase processOutboxBatchUseCase;
+    private final OutboxMetrics outboxMetrics;
 
-    public OutboxDispatcherPoller(ProcessOutboxBatchUseCase processOutboxBatchUseCase) {
+    public OutboxDispatcherPoller(
+            ProcessOutboxBatchUseCase processOutboxBatchUseCase,
+            OutboxMetrics outboxMetrics
+    ) {
         this.processOutboxBatchUseCase =
                 Objects.requireNonNull(processOutboxBatchUseCase, "ProcessOutboxBatchUseCase must not be null");
+        this.outboxMetrics = Objects.requireNonNull(outboxMetrics, "OutboxMetrics must not be null");
     }
 
     @Scheduled(
@@ -44,6 +53,7 @@ public class OutboxDispatcherPoller {
     public void dispatchPendingMessages() {
         try {
             ProcessOutboxBatchResult result = processOutboxBatchUseCase.processPendingBatch();
+            outboxMetrics.recordCycle(result);
             if (result.claimedCount() > 0) {
                 log.info(
                         "Outbox poller: lote processado — {} concluídas, {} reagendadas, {} FAILED, "

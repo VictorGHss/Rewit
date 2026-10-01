@@ -63,8 +63,11 @@ public class PushNotificationHandler implements OutboxHandler {
         UUID notificationId = extractNotificationId(message.getPayload());
 
         Notification notification = notificationRepository.findById(notificationId)
+                // Sem notificationId na mensagem: ela vira last_error e log (Step 27.4, Parte V
+                // proíbe IDs individuais de notificação em observabilidade). O ID da mensagem
+                // do Outbox, presente nos logs do dispatcher, localiza a linha e o payload.
                 .orElseThrow(() -> new OutboxPermanentException(
-                        "Notificação inexistente para push (provavelmente removida): " + notificationId));
+                        "Notificação inexistente para push (provavelmente removida)"));
 
         notificationProvider.sendPushNotification(
                 notification.getUserId(),
