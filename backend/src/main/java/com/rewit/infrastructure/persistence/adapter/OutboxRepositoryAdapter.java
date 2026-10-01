@@ -9,6 +9,7 @@ import com.rewit.infrastructure.persistence.repository.OutboxMessageJpaRepositor
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -22,7 +23,9 @@ import java.util.UUID;
  * do produtor: a mensagem só se torna visível se a transação de negócio
  * confirmar. {@code claimBatch} roda em transação própria e curta: o SELECT
  * FOR UPDATE SKIP LOCKED mantém os locks de linha até o commit da mesma
- * transação que executa o UPDATE de claim.
+ * transação que executa o UPDATE de claim. As operações do dispatcher
+ * (reclaim de leases, finalizações owner-checked) também rodam cada uma em
+ * transação própria curta — nunca ao redor da execução do handler.
  */
 @Component
 public class OutboxRepositoryAdapter implements OutboxRepository {
@@ -79,5 +82,57 @@ public class OutboxRepositoryAdapter implements OutboxRepository {
             return 0;
         }
         return jpaRepository.countByStatus(status.name());
+    }
+
+    @Override
+    @Transactional
+    public int reclaimExpiredLeases(Instant now, Duration leaseDuration) {
+        if (now == null) {
+            throw new BusinessException("O instante de referência é obrigatório para o reclaim", "MISSING_NOW");
+        }
+        if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
+            throw new BusinessException("A duração da lease deve ser positiva", "INVALID_LEASE_DURATION");
+        }
+        Instant cutoff = now.minus(leaseDuration);
+        return jpaRepository.reclaimExpiredLeases(now, cutoff);
+    }
+
+    @Override
+    @Transactional
+    public boolean markCompleted(UUID messageId, String workerId, Instant now) {
+        validateFinalizationArguments(messageId, workerId, now);
+        int updatedRows = jpaRepository.markCompletedById(messageId, workerId.trim(), now);
+        return updatedRows > 0;
+    }
+
+    @Override
+    @Transactional
+    public boolean markFailed(UUID messageId, String workerId, String lastError, Instant now) {
+        validateFinalizationArguments(messageId, workerId, now);
+        int updatedRows = jpaRepository.markFailedById(messageId, workerId.trim(), lastError, now);
+        return updatedRows > 0;
+    }
+
+    @Override
+    @Transactional
+    public boolean scheduleRetry(UUID messageId, String workerId, String lastError, Instant nextAttemptAt, Instant now) {
+        validateFinalizationArguments(messageId, workerId, now);
+        if (nextAttemptAt == null) {
+            throw new BusinessException("A data da próxima tentativa é obrigatória para o retry", "MISSING_NEXT_ATTEMPT_AT");
+        }
+        int updatedRows = jpaRepository.scheduleRetryById(messageId, workerId.trim(), lastError, nextAttemptAt, now);
+        return updatedRows > 0;
+    }
+
+    private void validateFinalizationArguments(UUID messageId, String workerId, Instant now) {
+        if (messageId == null) {
+            throw new BusinessException("O identificador da mensagem é obrigatório", "MISSING_MESSAGE_ID");
+        }
+        if (workerId == null || workerId.isBlank()) {
+            throw new BusinessException("O identificador do worker é obrigatório", "MISSING_WORKER_ID");
+        }
+        if (now == null) {
+            throw new BusinessException("O instante de referência é obrigatório", "MISSING_NOW");
+        }
     }
 }

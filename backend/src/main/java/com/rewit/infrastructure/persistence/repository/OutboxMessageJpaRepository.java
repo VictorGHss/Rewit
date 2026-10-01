@@ -12,12 +12,18 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Repositório Spring Data JPA para o Transactional Outbox (Step 27.1).
+ * Repositório Spring Data JPA para o Transactional Outbox (Step 27.1 / 27.2).
  *
  * <p>O claim é executado em duas instruções nativas dentro da MESMA transação:
  * o SELECT ... FOR UPDATE SKIP LOCKED trava as linhas elegíveis e o UPDATE
  * subsequente as move para PROCESSING antes do commit — sem janela entre
  * selecionar e atualizar.
+ *
+ * <p>O reclaim de leases expiradas (Step 27.2) é um único UPDATE atômico: o
+ * PostgreSQL serializa via locks de linha, sem janela entre recuperar e
+ * liberar. As finalizações (COMPLETED/FAILED/retry) são owner-checked: só
+ * aplicam quando {@code locked_by} ainda é o worker informado — uma mensagem
+ * cuja lease foi herdada por outro worker nunca é ressuscitada.
  */
 public interface OutboxMessageJpaRepository extends JpaRepository<OutboxMessageJpaEntity, UUID> {
 
@@ -46,6 +52,77 @@ public interface OutboxMessageJpaRepository extends JpaRepository<OutboxMessageJ
             @Param("ids") Collection<UUID> ids,
             @Param("now") Instant now,
             @Param("workerId") String workerId
+    );
+
+    @Modifying(clearAutomatically = true)
+    @Query(value = """
+        UPDATE outbox_messages
+        SET status = 'PENDING',
+            locked_at = NULL,
+            locked_by = NULL,
+            next_attempt_at = :now,
+            updated_at = :now
+        WHERE status = 'PROCESSING'
+          AND locked_at < :cutoff
+        """, nativeQuery = true)
+    int reclaimExpiredLeases(@Param("now") Instant now, @Param("cutoff") Instant cutoff);
+
+    @Modifying(clearAutomatically = true)
+    @Query(value = """
+        UPDATE outbox_messages
+        SET status = 'COMPLETED',
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = NULL,
+            updated_at = :now
+        WHERE id = :id
+          AND status = 'PROCESSING'
+          AND locked_by = :workerId
+        """, nativeQuery = true)
+    int markCompletedById(
+            @Param("id") UUID id,
+            @Param("workerId") String workerId,
+            @Param("now") Instant now
+    );
+
+    @Modifying(clearAutomatically = true)
+    @Query(value = """
+        UPDATE outbox_messages
+        SET status = 'FAILED',
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = :lastError,
+            updated_at = :now
+        WHERE id = :id
+          AND status = 'PROCESSING'
+          AND locked_by = :workerId
+        """, nativeQuery = true)
+    int markFailedById(
+            @Param("id") UUID id,
+            @Param("workerId") String workerId,
+            @Param("lastError") String lastError,
+            @Param("now") Instant now
+    );
+
+    @Modifying(clearAutomatically = true)
+    @Query(value = """
+        UPDATE outbox_messages
+        SET status = 'PENDING',
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = :lastError,
+            next_attempt_at = :nextAttemptAt,
+            updated_at = :now
+        WHERE id = :id
+          AND status = 'PROCESSING'
+          AND locked_by = :workerId
+        """, nativeQuery = true)
+    int scheduleRetryById(
+            @Param("id") UUID id,
+            @Param("workerId") String workerId,
+            @Param("lastError") String lastError,
+            @Param("nextAttemptAt") Instant nextAttemptAt,
+            @Param("now") Instant now
     );
 
     long countByStatus(String status);

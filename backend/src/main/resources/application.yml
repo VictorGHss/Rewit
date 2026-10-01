@@ -30,6 +30,18 @@ management:
         include: health,info,metrics
 
 rewit:
+  outbox:
+    poller-enabled: ${OUTBOX_POLLER_ENABLED:true}
+    poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:5000}
+    initial-delay-ms: ${OUTBOX_INITIAL_DELAY_MS:15000}
+    batch-size: ${OUTBOX_BATCH_SIZE:10}
+    lease-duration: ${OUTBOX_LEASE_DURATION:PT2M}
+    error-max-length: ${OUTBOX_ERROR_MAX_LENGTH:512}
+    retry:
+      initial-delay: ${OUTBOX_RETRY_INITIAL_DELAY:PT30S}
+      multiplier: ${OUTBOX_RETRY_MULTIPLIER:2.0}
+      max-delay: ${OUTBOX_RETRY_MAX_DELAY:PT10M}
+      max-attempts: ${OUTBOX_RETRY_MAX_ATTEMPTS:5}
   google:
     places:
       api-key: ${GOOGLE_PLACES_API_KEY:}

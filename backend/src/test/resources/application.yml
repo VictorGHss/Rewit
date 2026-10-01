@@ -9,6 +9,11 @@ spring:
     open-in-view: false
 
 rewit:
+  outbox:
+    # Poller desligado em TODOS os testes: o agendador @Scheduled não deve
+    # disputar linhas do outbox com testes que seguram locks manualmente.
+    # O teste da Parte W invoca o poller diretamente (sem relógio real).
+    poller-enabled: false
   minio:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:8333}
     access-key: ${OBJECT_STORAGE_ACCESS_KEY:change-me}

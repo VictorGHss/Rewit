@@ -17,10 +17,10 @@ import java.util.UUID;
  * <pre>
  *   PENDING    -&gt; PROCESSING  (claim)
  *   PROCESSING -&gt; COMPLETED   (sucesso)
- *   PROCESSING -&gt; PENDING     (devolução explícita; recovery por lease é futuro)
+ *   PROCESSING -&gt; PENDING     (retry com backoff ou recovery por lease expirada)
  *   PROCESSING -&gt; FAILED      (falha definitiva)
  * </pre>
- * COMPLETED e FAILED são terminais neste foundation.
+ * COMPLETED e FAILED são terminais.
  */
 public class OutboxMessage {
 
@@ -124,29 +124,59 @@ public class OutboxMessage {
 
     /**
      * Conclui a mensagem com sucesso (PROCESSING -&gt; COMPLETED).
+     * Libera o lease: estado terminal não retém lock de worker.
      */
     public void markCompleted(Instant now) {
         requireCurrentStatus(OutboxStatus.PROCESSING, OutboxStatus.COMPLETED);
         Instant effectiveNow = now != null ? now : Instant.now();
         this.status = OutboxStatus.COMPLETED;
+        this.lockedAt = null;
+        this.lockedBy = null;
         this.updatedAt = effectiveNow;
     }
 
     /**
-     * Registra falha definitiva (PROCESSING -&gt; FAILED). Sem backoff neste
-     * foundation: nextAttemptAt permanece inalterado; FAILED é terminal.
+     * Registra falha definitiva (PROCESSING -&gt; FAILED). FAILED é terminal:
+     * o lease é liberado, o lastError sanitizado é preservado e nextAttemptAt
+     * permanece inalterado.
      */
     public void markFailed(String lastError, Instant now) {
         requireCurrentStatus(OutboxStatus.PROCESSING, OutboxStatus.FAILED);
         Instant effectiveNow = now != null ? now : Instant.now();
         this.status = OutboxStatus.FAILED;
         this.lastError = lastError;
+        this.lockedAt = null;
+        this.lockedBy = null;
         this.updatedAt = effectiveNow;
     }
 
     /**
-     * Devolve a mensagem à fila (PROCESSING -&gt; PENDING), limpando o lock.
-     * Não reagenda nextAttemptAt: lease recovery/backoff são futuro (Step 27.2).
+     * Reagenda a mensagem para nova tentativa (PROCESSING -&gt; PENDING):
+     * preserva attempts (o claim já os incrementou), registra o lastError
+     * sanitizado, avança nextAttemptAt e limpa o lease.
+     *
+     * <p>A política de backoff (quanto avançar nextAttemptAt) e o limite de
+     * tentativas pertencem à camada de aplicação; o domínio apenas registra
+     * o resultado da decisão.
+     */
+    public void retry(String lastError, Instant nextAttemptAt, Instant now) {
+        requireCurrentStatus(OutboxStatus.PROCESSING, OutboxStatus.PENDING);
+        if (nextAttemptAt == null) {
+            throw new BusinessException("A data da próxima tentativa é obrigatória para o retry",
+                    "MISSING_NEXT_ATTEMPT_AT");
+        }
+        Instant effectiveNow = now != null ? now : Instant.now();
+        this.status = OutboxStatus.PENDING;
+        this.lastError = lastError;
+        this.nextAttemptAt = nextAttemptAt;
+        this.lockedAt = null;
+        this.lockedBy = null;
+        this.updatedAt = effectiveNow;
+    }
+
+    /**
+     * Devolve a mensagem à fila (PROCESSING -&gt; PENDING) sem reagendação:
+     * limpa o lease, preserva attempts e mantém nextAttemptAt inalterado.
      */
     public void requeue(Instant now) {
         requireCurrentStatus(OutboxStatus.PROCESSING, OutboxStatus.PENDING);

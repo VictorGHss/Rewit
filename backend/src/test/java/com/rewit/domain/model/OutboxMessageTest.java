@@ -80,7 +80,7 @@ class OutboxMessageTest {
     }
 
     @Test
-    @DisplayName("markCompleted: PROCESSING -> COMPLETED encerra com sucesso")
+    @DisplayName("markCompleted: PROCESSING -> COMPLETED encerra com sucesso e libera o lease")
     void shouldTransitionProcessingToCompleted() {
         OutboxMessage message = rehydratedMessage(OutboxStatus.PROCESSING, 1,
                 Instant.parse("2026-03-01T12:05:00Z"), "worker-alpha");
@@ -89,6 +89,8 @@ class OutboxMessageTest {
         message.markCompleted(completionTime);
 
         assertEquals(OutboxStatus.COMPLETED, message.getStatus());
+        assertNull(message.getLockedAt(), "Estado terminal não retém lock de worker");
+        assertNull(message.getLockedBy(), "Estado terminal não retém lock de worker");
         assertEquals(completionTime, message.getUpdatedAt());
     }
 
@@ -109,7 +111,7 @@ class OutboxMessageTest {
     }
 
     @Test
-    @DisplayName("markFailed: PROCESSING -> FAILED registra last_error e preserva nextAttemptAt")
+    @DisplayName("markFailed: PROCESSING -> FAILED registra last_error, libera o lease e preserva nextAttemptAt")
     void shouldTransitionProcessingToFailed() {
         OutboxMessage message = rehydratedMessage(OutboxStatus.PROCESSING, 2,
                 Instant.parse("2026-03-01T12:05:00Z"), "worker-alpha");
@@ -120,8 +122,53 @@ class OutboxMessageTest {
         assertEquals(OutboxStatus.FAILED, message.getStatus());
         assertEquals("Conexão com provider recusada", message.getLastError());
         assertEquals(2, message.getAttempts());
+        assertNull(message.getLockedAt(), "FAILED é terminal e não retém lock ativo");
+        assertNull(message.getLockedBy(), "FAILED é terminal e não retém lock ativo");
         assertEquals(message.getCreatedAt(), message.getNextAttemptAt());
         assertEquals(failTime, message.getUpdatedAt());
+    }
+
+    @Test
+    @DisplayName("retry: PROCESSING -> PENDING avança nextAttemptAt preservando attempts e lock limpo")
+    void shouldRetryProcessingToPendingWithRescheduledNextAttempt() {
+        OutboxMessage message = rehydratedMessage(OutboxStatus.PROCESSING, 3,
+                Instant.parse("2026-03-01T12:05:00Z"), "worker-alpha");
+        Instant retryAt = Instant.parse("2026-03-01T12:09:00Z");
+        Instant nextAttempt = Instant.parse("2026-03-01T12:10:00Z");
+
+        message.retry("timeout do provider", nextAttempt, retryAt);
+
+        assertEquals(OutboxStatus.PENDING, message.getStatus());
+        assertEquals(nextAttempt, message.getNextAttemptAt(),
+                "next_attempt_at deve avançar para a nova janela de elegibilidade");
+        assertEquals(3, message.getAttempts(), "O claim já incrementou attempts; o retry não incrementa novamente");
+        assertNull(message.getLockedAt());
+        assertNull(message.getLockedBy());
+        assertEquals("timeout do provider", message.getLastError());
+        assertEquals(retryAt, message.getUpdatedAt());
+        assertEquals(Instant.parse("2026-03-01T10:00:00Z"), message.getCreatedAt(),
+                "createdAt deve ser preservado pelo retry");
+    }
+
+    @Test
+    @DisplayName("retry: rejeita nextAttemptAt nulo com MISSING_NEXT_ATTEMPT_AT")
+    void shouldRejectRetryWithoutNextAttemptAt() {
+        OutboxMessage message = rehydratedMessage(OutboxStatus.PROCESSING, 1,
+                Instant.parse("2026-03-01T12:05:00Z"), "worker-alpha");
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                message.retry("timeout", null, Instant.now()));
+        assertEquals("MISSING_NEXT_ATTEMPT_AT", ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("retry: rejeita transição a partir de PENDING com INVALID_OUTBOX_TRANSITION")
+    void shouldRejectRetryFromPending() {
+        OutboxMessage message = rehydratedMessage(OutboxStatus.PENDING, 0, null, null);
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                message.retry("timeout", Instant.now().plusSeconds(30), Instant.now()));
+        assertEquals("INVALID_OUTBOX_TRANSITION", ex.getErrorCode());
     }
 
     @Test
@@ -145,6 +192,10 @@ class OutboxMessageTest {
         BusinessException exFail = assertThrows(BusinessException.class, () ->
                 completed.markFailed("erro", now));
         assertEquals("INVALID_OUTBOX_TRANSITION", exFail.getErrorCode());
+
+        BusinessException exRetry = assertThrows(BusinessException.class, () ->
+                completed.retry("erro", now.plusSeconds(30), now));
+        assertEquals("INVALID_OUTBOX_TRANSITION", exRetry.getErrorCode());
     }
 
     @Test
@@ -160,6 +211,10 @@ class OutboxMessageTest {
         BusinessException exRequeue = assertThrows(BusinessException.class, () ->
                 failed.requeue(now));
         assertEquals("INVALID_OUTBOX_TRANSITION", exRequeue.getErrorCode());
+
+        BusinessException exRetry = assertThrows(BusinessException.class, () ->
+                failed.retry("erro", now.plusSeconds(30), now));
+        assertEquals("INVALID_OUTBOX_TRANSITION", exRetry.getErrorCode());
     }
 
     @Test
