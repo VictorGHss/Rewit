@@ -36,7 +36,7 @@ class RoleTest {
         assertEquals("user@rewit.com", principal.getUsername());
         assertEquals(1, principal.getAuthorities().size());
         assertTrue(principal.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_USER")));
     }
 
@@ -53,7 +53,7 @@ class RoleTest {
 
         assertEquals(1, principal.getAuthorities().size());
         assertTrue(principal.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_MODERATOR")));
     }
 
@@ -70,7 +70,7 @@ class RoleTest {
 
         assertEquals(1, principal.getAuthorities().size());
         assertTrue(principal.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_ADMIN")));
     }
 
@@ -82,7 +82,7 @@ class RoleTest {
 
         assertEquals(1, principal.getAuthorities().size());
         assertTrue(principal.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_USER")));
     }
 }

@@ -54,7 +54,7 @@ class JwtRoleSecurityTest {
         assertNotNull(authentication);
         assertEquals(userId.toString(), authentication.getName());
         assertTrue(authentication.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_USER")));
     }
 
@@ -77,7 +77,7 @@ class JwtRoleSecurityTest {
         assertNotNull(authentication);
         assertEquals(userId.toString(), authentication.getName());
         assertTrue(authentication.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_MODERATOR")));
     }
 
@@ -100,7 +100,7 @@ class JwtRoleSecurityTest {
         assertNotNull(authentication);
         assertEquals(userId.toString(), authentication.getName());
         assertTrue(authentication.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_ADMIN")));
     }
 
@@ -135,7 +135,7 @@ class JwtRoleSecurityTest {
         AbstractAuthenticationToken auth1 = jwtAuthenticationConverter.convert(jwtWithoutRole);
         assertNotNull(auth1);
         assertTrue(auth1.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_USER")));
 
         // 2. Claim inválida
@@ -151,7 +151,7 @@ class JwtRoleSecurityTest {
         AbstractAuthenticationToken auth2 = jwtAuthenticationConverter.convert(jwtInvalidRole);
         assertNotNull(auth2);
         assertTrue(auth2.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.getAuthority())
                 .anyMatch(a -> a.equals("ROLE_USER")));
     }
 
