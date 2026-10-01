@@ -613,7 +613,7 @@ Limpeza pontual de diagnostics em [AdminModerationControllerIntegrationTest.java
 
 ## 8. Jobs Assíncronos & Outbox Pattern — STEP 27
 
-O STEP 27 introduz o padrão **Transactional Outbox sobre o próprio PostgreSQL**, permitindo que consumidores assíncronos sejam entregues de forma confiável **at-least-once** sem broker externo e sem quebrar a atomicidade transacional do produtor. O STEP 27.0 (Discovery), o STEP 27.1 (Fundação Transacional), o STEP 27.2 (Dispatcher/Worker) e o STEP 27.3 (Produtor de Notifications + `PushNotificationHandler`) encontram-se **✅ CONCLUÍDOS**. **A fila `outbox_messages` agora recebe mensagens `PUSH_NOTIFICATION` enfileiradas na mesma transação dos quatro fluxos de notificação, e o worker as entrega via `PushNotificationHandler` à porta `NotificationProvider`** — porém o provider segue sendo o `MockNotificationAdapter` local: **não há push real externo**. A Notification in-app continua síncrona e transacional; somente o efeito externo de push tornou-se assíncrono, com entrega at-least-once.
+O STEP 27 introduz o padrão **Transactional Outbox sobre o próprio PostgreSQL**, permitindo que consumidores assíncronos sejam entregues de forma confiável **at-least-once** sem broker externo e sem quebrar a atomicidade transacional do produtor. O STEP 27.0 (Discovery), o STEP 27.1 (Fundação Transacional), o STEP 27.2 (Dispatcher/Worker), o STEP 27.3 (Produtor de Notifications + `PushNotificationHandler`), o STEP 27.4 (Observabilidade e Retenção) e o STEP 27.4.1 (Limpeza de Diagnostics) encontram-se **✅ CONCLUÍDOS**. **A fila `outbox_messages` agora recebe mensagens `PUSH_NOTIFICATION` enfileiradas na mesma transação dos quatro fluxos de notificação, e o worker as entrega via `PushNotificationHandler` à porta `NotificationProvider`** — porém o provider segue sendo o `MockNotificationAdapter` local: **não há push real externo**. A Notification in-app continua síncrona e transacional; somente o efeito externo de push tornou-se assíncrono, com entrega at-least-once.
 
 ### 8.1 STEP 27.0 — Discovery de Jobs Assíncronos (✅ CONCLUÍDO)
 O discovery consolidou as diretrizes que governam toda a frente:
@@ -772,6 +772,43 @@ O produtor de push e o handler de entrega foram implementados e validados no com
 #### 10. Diagnostics
 * **Zero diagnostics introduzidos pelo STEP 27.3**; nenhuma anotação `@SuppressWarnings` no código novo. Os 3 diagnostics históricos (`RoleTest.java`, `JwtRoleSecurityTest.java`, `ReviewLifecycleControllerIntegrationTest.java`) permanecem fora de escopo e inalterados.
 
+### 8.4.1 STEP 27.4 — Observabilidade, Retenção e Consolidação Operacional (✅ CONCLUÍDO)
+
+O STEP 27.4 foi implementado no commit `eae44ab` e teve a limpeza de diagnostics concluída no commit `6ca6cc`. A etapa tornou o Outbox V1 observável e operável sem criar broker, dashboard, endpoint administrativo ou nova infraestrutura de jobs.
+
+#### 1. Métricas Micrometer
+As gauges consultam o PostgreSQL como source of truth:
+* `rewit.outbox.pending` — quantidade atual de mensagens `PENDING`.
+* `rewit.outbox.failed` — quantidade atual de mensagens `FAILED`.
+* `rewit.outbox.oldest_pending_age` — idade em segundos da `PENDING` mais antiga, ou `0` quando não há mensagens pendentes.
+
+Os counters efetivamente implementados são `rewit.outbox.messages.claimed`, `rewit.outbox.messages.completed`, `rewit.outbox.messages.retried`, `rewit.outbox.messages.failed`, `rewit.outbox.leases.reclaimed`, `rewit.outbox.messages.lost_ownership` e `rewit.outbox.finalize.errors`. Também existem `rewit.outbox.purge.deleted` e o timer `rewit.outbox.purge.duration` para o purge. Não há tags de alta cardinalidade e não existe health indicator customizado.
+
+#### 2. Logs e segurança operacional
+O worker registra os eventos operacionais relevantes do ciclo, incluindo reclaim, processamento, retry, falha terminal, perda de ownership e falha do ciclo. Payloads, corpos de Notification e IDs sensíveis não são registrados como conteúdo operacional. Erros passam pelo `OutboxErrorSanitizer`; bearer tokens e segredos não são persistidos em `last_error`.
+
+#### 3. Retenção e purge
+A política V1 mantém `COMPLETED` por 30 dias e remove registros antigos em lotes limitados, usando `updated_at` como corte. O purge nunca remove `PENDING`, `PROCESSING` ou `FAILED`; `FAILED` permanece visível para análise e não há requeue automático nem endpoint administrativo. A migração [V14__outbox_observability_indexes.sql](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V14__outbox_observability_indexes.sql) adiciona o índice parcial `idx_outbox_pending_created_at` para a consulta da `PENDING` mais antiga. V14 foi aplicada e validada no PostgreSQL real; V13 não foi alterada.
+
+#### 4. Estado operacional observado
+Após a suíte final, a tabela `outbox_messages` apresentou `PENDING = 25`, `PROCESSING = 0`, `COMPLETED = 0` e `FAILED = 0`. As 25 mensagens são `PUSH_NOTIFICATION` recentes geradas por testes com o poller desabilitado, e não representam produção. Não foram removidas manualmente nem houve alteração arbitrária no banco; são resíduos sintéticos dos testes que passaram a produzir Outbox no STEP 27.3.
+
+#### 5. Diagnostics e validação
+* O diagnostic Java `67109822` em `OutboxRepositoryAdapter.java` foi corrigido substituindo a method reference por lambda explícita.
+* Hints de `catch(Throwable)` foram mantidos onde necessários para capturar falhas das threads concorrentes dos testes; não são erros de compilação.
+* Hints `never used` em métodos anotados com `@BeforeEach`/`@AfterEach` são falsos positivos do analisador local de callbacks JUnit; os métodos permanecem.
+* Os diagnostics `COMMENT ON INDEX` de `mssql9` em V13/V14 são `FALSE_POSITIVE_LIKELY` por incompatibilidade de dialeto: PostgreSQL 18.6 aceitou os comandos, Flyway aplicou as migrations e os índices existem.
+* Os diagnostics históricos de `RoleTest.java`, `JwtRoleSecurityTest.java` e `ReviewLifecycleControllerIntegrationTest.java` permanecem fora de escopo.
+* Baseline: `1117`; incremento do STEP 27.4: `6`; total final: `1123` testes, `0` failures, `0` errors, `0` skipped, `BUILD SUCCESS`. O cleanup foi validado com 21 testes direcionados e a suíte completa; a consolidação documental não rerodou Maven.
+
+#### 6. Gate final do Outbox V1
+O gate final foi atendido: V12, V13 e V14 aplicadas; Outbox transacional; claim concorrente com `FOR UPDATE SKIP LOCKED`; lease recovery; retry/backoff; produtor e handler de push; métricas; retenção; 1123 testes verdes; diagnostics Java novos reais resolvidos; working tree limpo. Reconciliação de mídia, provider real, dashboard, alertas, admin requeue, broker externo, exactly-once e deduplicação distribuída permanecem futuros e dependem de novos decision gates.
+
+#### 7. Checkpoints e fechamento
+O histórico relevante permanece: `30a6191` (foundation), `ab317a0` e consolidação documental correspondente, `d11c79a` (dispatcher/worker), `e881406` (consolidação), `a4ed10f` (Notifications → Outbox), `729a0b1` (consolidação do producer), `eae44ab` (observabilidade) e `6ca6cc` (cleanup de diagnostics). Com esta consolidação documental, o **STEP 27 — Jobs Assíncronos & Outbox Pattern → ✅ CONCLUÍDO**.
+
+O backlog posterior permanece separado: Garbage Collection do SeaweedFS e Cleanup de Sessões Expiradas continuam pendentes, cada um sujeito ao seu próprio decision gate. Nenhuma dessas frentes foi iniciada nesta consolidação.
+
 ### 8.5 Decisão Arquitetural
 1. **PostgreSQL como Source of Truth**: a fila transacional vive no mesmo banco relacional da aplicação; nenhum componente de mensageria externo foi introduzido.
 2. **Outbox no mesmo PostgreSQL**: mensagem e negócio compartilham a mesma base, garantindo consistência ACID sem dual-write.
@@ -843,20 +880,14 @@ Os itens abaixo permanecem **fora do escopo entregue pelo 27.3** e não devem se
 | **Fundação Transacional do Outbox** | Fila `outbox_messages` com enqueue atômico e claim `SKIP LOCKED`. | Concluído na migração `V12`. | ✅ CONCLUÍDO (STEP 27.1) |
 | **Dispatcher/Worker do Outbox** | Processar mensagens `PENDING` fora do boundary HTTP. | Concluído no commit `d11c79a` (lease/reclaim, retry com backoff, sanitização e poller `@Scheduled`). | ✅ CONCLUÍDO (STEP 27.2) |
 | **Produtor Real de Push** | Único consumidor previsto do outbox nesta fase. | Concluído no commit `a4ed10f` (enqueue transacional nos 4 fluxos de `Notification`, `PushNotificationHandler` e `MockNotificationAdapter` — sem push real externo). | ✅ CONCLUÍDO (STEP 27.3) |
-| **Observabilidade do Worker** | Métricas e logs do dispatcher. | STEP 27.4. | ⏳ PENDENTE |
+| **Observabilidade do Worker** | Métricas, logs e retenção operacional do dispatcher. | Concluído no STEP 27.4; cleanup de diagnostics no STEP 27.4.1. | ✅ CONCLUÍDO (STEP 27.4) |
 | **Notificações In-App** | Evitar lentidão caso o volume de notificações cresça. | Decisão do STEP 27.0: permanecem **síncronas** na transação do produtor (same-DB já é atômico). | **PERMANECE SÍNCRONO** |
 | **Recálculo Assíncrono de Reputação** | Eliminar lock pessimista em `users` durante a postagem de reviews. | Decisão do STEP 27.0: permanece **síncrono** na transação do produtor. | **PERMANECE SÍNCRONO** |
 | **Garbage Collection do SeaweedFS** | Remover imagens não referenciadas no S3 para economia de storage. | Job `@Scheduled` direto de varredura de órfãos — **sem Outbox** (decisão do STEP 27.0). | ⏳ PENDENTE |
 | **Cleanup de Sessões Expiradas** | Expurgar tokens revogados e sessões antigas da tabela `user_sessions`. | Job agendado de expurgo cronológico. | ⏳ PENDENTE |
 
-### 8.10 Próximo Passo — STEP 27.4: Observabilidade e consolidação do Outbox (Apenas Registrado)
-Registrado **exclusivamente como próximo passo**, sem qualquer implementação nesta consolidação:
-* Métricas Micrometer do dispatcher/worker.
-* Métricas de mensagens `pending`, `failed` e da idade da mensagem pendente mais antiga (*oldest pending age*).
-* Logs operacionais consolidados do Outbox.
-* Decisão sobre retenção/purge de mensagens processadas.
-* Consolidação final documental do STEP 27.
-* Eventual job de reconciliação de mídia **somente se explicitamente decidido**.
+### 8.10 Próximo Passo após o STEP 27
+O STEP 27 está fechado. O próximo trabalho técnico já registrado no backlog é **Garbage Collection do SeaweedFS**, como job direto `@Scheduled` e sem Outbox, condicionado a novo decision gate. O Cleanup de Sessões Expiradas permanece como frente posterior. Nenhuma dessas frentes é iniciada nesta consolidação.
 
 ---
 
@@ -923,6 +954,8 @@ Outbox Dispatcher (V1)      Lease/reclaim, retry backoff e      ✅ CONCLUÍDO (
                             worker @Scheduled no PG real
 Outbox Producer (V1)        Enqueue transacional + handler      ✅ CONCLUÍDO (STEP 27.3)
                             com retry herdado no PG real
+Outbox Operational V1       Métricas, retenção, purge e        ✅ CONCLUÍDO (STEP 27.4 / 27.4.1)
+                            diagnostics Java reais resolvidos
 Cache em Redis              Latência p99 > 200ms no banco       Implementar cache layer
 Mensageria Externa          Outbox no PG > 5.000 msgs/s         Adicionar broker externo
 Migração de Banco           Nova coluna/tabela inevitável       ✅ V11, V12 e V13 CONSOLIDADAS (Roles, Audit & Outbox)
