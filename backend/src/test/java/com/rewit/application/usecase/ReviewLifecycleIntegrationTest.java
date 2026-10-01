@@ -36,6 +36,12 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -358,5 +364,67 @@ class ReviewLifecycleIntegrationTest {
 
         ReviewJpaEntity dbReview = reviewJpaRepository.findById(created.id()).orElseThrow();
         assertEquals("REMOVED", dbReview.getStatus());
+    }
+
+    @Test
+    @DisplayName("Caso 6: Concorrência - duas requisições simultâneas de delete na mesma review garantem serialização determinística via lock pessimista")
+    void shouldPreventDoubleDeleteAndStateCorruptionUnderConcurrentCallsInPostgres() throws Exception {
+        User author = createActiveUser();
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView created = reviewService.createReview(new CreateReviewCommand(
+                author.getId(),
+                null,
+                "Review para teste concorrente de exclusão",
+                false,
+                "PUBLIC",
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("5.0"), "Excelente"))
+        ));
+
+        // Sanity check inicial de stats
+        assertEquals(1, reviewService.getTargetStats(target.getId()).reviewsCount());
+        assertEquals(new BigDecimal("5.00"), reviewService.getTargetStats(target.getId()).averageRating());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch startGate = new CountDownLatch(1);
+        CountDownLatch doneGate = new CountDownLatch(2);
+
+        Callable<Boolean> deleteTask = () -> {
+            startGate.await();
+            try {
+                deleteReviewUseCase.execute(created.id(), author.getId(), Instant.now());
+                return true;
+            } catch (BusinessException ex) {
+                if ("REVIEW_ALREADY_REMOVED".equals(ex.getErrorCode())) {
+                    return false;
+                }
+                throw ex;
+            } finally {
+                doneGate.countDown();
+            }
+        };
+
+        Future<Boolean> future1 = executor.submit(deleteTask);
+        Future<Boolean> future2 = executor.submit(deleteTask);
+
+        startGate.countDown();
+        boolean completed = doneGate.await(10, TimeUnit.SECONDS);
+        assertTrue(completed, "As operações concorrentes devem concluir dentro do tempo limite");
+
+        boolean result1 = future1.get();
+        boolean result2 = future2.get();
+
+        // Exatamente uma transação deve ter sucesso e a outra deve ser rejeitada com REVIEW_ALREADY_REMOVED
+        assertTrue(result1 ^ result2, "Exatamente uma das chamadas concorrentes deve ter sucesso (XOR)");
+
+        // Estado final persistido no PostgreSQL deve ser consistente
+        ReviewJpaEntity dbReview = reviewJpaRepository.findById(created.id()).orElseThrow();
+        assertEquals("REMOVED", dbReview.getStatus());
+
+        // Stats do target não sofrem double-decremento: reviewsCount = 0, averageRating = 0.00
+        assertEquals(0, reviewService.getTargetStats(target.getId()).reviewsCount());
+        assertEquals(new BigDecimal("0.00"), reviewService.getTargetStats(target.getId()).averageRating());
+
+        executor.shutdown();
     }
 }

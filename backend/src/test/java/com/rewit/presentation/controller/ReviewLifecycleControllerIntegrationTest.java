@@ -43,7 +43,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -68,9 +67,6 @@ class ReviewLifecycleControllerIntegrationTest {
 
     @Autowired
     private ReviewTargetJpaRepository reviewTargetJpaRepository;
-
-    @Autowired
-    private CheckInJpaRepository checkInJpaRepository;
 
     @Autowired
     private ReviewService reviewService;
