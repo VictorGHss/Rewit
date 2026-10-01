@@ -1,10 +1,10 @@
 # Roadmap Técnico e Documento de Recuperação de Contexto do Backend — REWIT
 
-> **Data de Atualização**: 30/09/2026  
+> **Data de Atualização**: 01/10/2026  
 > **Status do Repositório**: Verde e Estabilizado  
-> **Checkpoint Atual (HEAD)**: `b73aebf48c545178fce38373b0e78f770793cc81`  
+> **Checkpoint Atual (HEAD)**: `c878153`  
 > **Branch**: `main` (ahead do origin em commits consolidados)  
-> **Total de Testes Automatizados**: `859` (0 failures, 0 errors, 0 skipped)  
+> **Total de Testes Automatizados**: `923` (0 failures, 0 errors, 0 skipped)  
 > **Working Tree**: `clean`  
 
 ---
@@ -22,7 +22,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 859, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`.
+*Resultado esperado*: `Tests run: 923, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -35,12 +35,16 @@ cd backend
 4. **Governança de Privacidade e Segurança**:
    - `ReviewVisibilityPolicy` é a única autoridade para autorizar visualização de avaliações (`PUBLIC`, `FOLLOWERS`, `PRIVATE`).
    - Status `UNDER_REVIEW` e `REMOVED` saem imediatamente da visibilidade pública e feeds.
-   - **Anonimato Absoluto**: Avaliações anônimas (`is_anonymous = true`) nunca têm seu autor interno exposto ou inferido via API, ranking ou metadados de notificação.
+   - **Anonimato Absoluto**: Avaliações anônimas (`is_anonymous = true`) nunca têm seu autor interno exposto ou inferido via API pública, ranking ou metadados de notificação. A autorização interna é sempre vinculada ao `userId` real do autor (anti-IDOR).
    - **Localização Estática e Protegida**: Sem tracking contínuo. Coordenadas brutas (*raw GPS*) nunca são expostas ao cliente. Metadados EXIF/GPS de imagens são higienizados antes do upload no SeaweedFS.
 5. **Separação de Reputação e Ranking**:
    - `UserReputation` é um snapshot factual e versionado de histórico do usuário. Não é score subjetivo e **não deve ser usado como peso de ranking** para não gerar elitismo algorítmico nem penalizar novos usuários.
    - Denúncias (`reports`) pertencem à moderação; nunca viram penalidade matemática de ordenação.
    - Sem modelos de Machine Learning ou embeddings nesta etapa.
+6. **Consistência do Ciclo de Vida do Conteúdo**:
+   - Edição de avaliações é parcial (PATCH), restrita a 24 horas a partir de `createdAt`, bloqueada para notas caso haja votos úteis recebidos (`helpfulCount > 0`) e proibida sob moderação (`UNDER_REVIEW`).
+   - Exclusão é lógica (Soft Delete: `ReviewStatus.REMOVED`), mantendo integridade histórica, auditabilidade e dados físicos de check-in intactos.
+   - Estatísticas de alvos (`RateableTargetStats`) utilizam **recomputação integral via PostgreSQL como Source of Truth**, sem deltas incrementais aproximados.
 
 ---
 
@@ -55,23 +59,22 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Autenticação, JWT & Sessões** | ✅ CONCLUÍDO | [AuthController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/AuthController.java), Argon2id, JWT assinado, revogação de sessões e refresh token. | Manter bloqueio estrito de IDOR em todos os novos endpoints. |
 | **Catálogo Base & Alvos Avaliáveis** | ✅ CONCLUÍDO | [PlaceController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/PlaceController.java), [ProductController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ProductController.java), raiz polimórfica `RateableTarget` e cálculo de estatísticas. | Expandir endpoints de catálogo sob demanda do app mobile. |
 | **Integração Google Places** | ✅ CONCLUÍDO | [PlaceDiscoveryController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/PlaceDiscoveryController.java), isolamento via ACL, deduplicação por `place_external_references`. | Monitorar quotas e latência externa. |
-| **Avaliações Multi-Alvo & Check-In** | ✅ CONCLUÍDO | [ReviewController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewController.java), multi-target atômico, validação de presença via PostGIS geofence. | Suporte futuro a edições com regras estritas. |
+| **Avaliações Multi-Alvo & Check-In** | ✅ CONCLUÍDO | [ReviewController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewController.java), multi-target atômico, validação de presença via PostGIS geofence. | Suporte completo a ciclo de vida (STEP 25). |
 | **Rede Social (Seguidores & Conexões)**| ✅ CONCLUÍDO | [UserFollowController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/UserFollowController.java), `user_follows`, bloqueio de auto-follow, integridade relacional. | Base consolidada para Feed V1 e Feed V2. |
-| **Reações de Utilidade (Helpful)** | ✅ CONCLUÍDO | [ReviewHelpfulController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewHelpfulController.java), `review_reactions`, contagem e batching sem N+1. | Reutilizado como sinal no ranking V2. |
+| **Reações de Utilidade (Helpful)** | ✅ CONCLUÍDO | [ReviewHelpfulController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewHelpfulController.java), `review_reactions`, contagem e batching sem N+1. | Atua como trava de alteração de ratings no lifecycle. |
 | **Perfil Público & Estatísticas** | ✅ CONCLUÍDO | [MeController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/MeController.java), [UserController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/UserController.java), agregação factual de reviews e seguidores. | Manter consistência de dados públicos. |
-| **Denúncias & Moderação Preventiva** | ✅ CONCLUÍDO | [ReportController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReportController.java), rate limiting in-memory, quarentena automática (`UNDER_REVIEW`) ao atingir 3 denúncias. | Painel e fluxo administrativo de moderação (Backlog). |
+| **Denúncias & Moderação Preventiva** | ✅ CONCLUÍDO | [ReportController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReportController.java), rate limiting in-memory, quarentena automática (`UNDER_REVIEW`) ao atingir 3 denúncias. | Painel e fluxo administrativo de moderação (STEP 26.0). |
 | **Discussões & Comentários** | ✅ CONCLUÍDO | [DiscussionController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/DiscussionController.java), respostas hierárquicas, soft delete por autor, notificações. | Manter isolamento e integridade. |
 | **Mídia de Avaliações (Imagens)** | ✅ CONCLUÍDO | [ReviewMediaController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewMediaController.java), SeaweedFS/S3, higienização EXIF/GPS, limite de 5 imagens. | Garbage collection de mídias órfãs (Backlog async). |
 | **Notificações In-App** | ✅ CONCLUÍDO | [NotificationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/NotificationController.java), eventos acionados em follow, helpful, discussão e resposta. | Migração para processamento assíncrono (Outbox). |
 | **Reputação V1 (Snapshot Factual)** | ✅ CONCLUÍDO | [ReputationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReputationController.java), [UserReputation.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/UserReputation.java), recálculo atômico e versionado. | Manter isolado do ranking de avaliações. |
 | **Busca no Catálogo (Search V1)** | ✅ CONCLUÍDO | [CatalogSearchController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/CatalogSearchController.java), busca unificada por trigramas (`pg_trgm`) em places/products. | Monitorar performance de índices GIN. |
 | **Feed V1 (Social Cronológico)** | ✅ CONCLUÍDO | [FeedController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/FeedController.java), `GET /api/v1/feed`, estritamente cronológico, seguidos diretos, sem N+1. | Manter congelado sem alterações. |
-| **Feed V2 (Ranking & Relevância)** | ✅ CONCLUÍDO — versão inicial + Cold Start | [FeedV2Controller.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/FeedV2Controller.java), [FeedV2QueryService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2QueryService.java), [FeedV2Service.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Service.java), [FeedV2Hydrator.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Hydrator.java), [FeedCandidateRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/FeedCandidateRepositoryAdapter.java). | Pipeline completo com fallback de Cold Start determinístico e sem N+1. |
-| **Ciclo de Vida do Conteúdo (Edição)** | ⏳ PENDENTE | Soft delete existe em discussões; reviews são imutáveis após criação. | Definir regras de edição/exclusão pós-interações. |
-| **Moderação Administrativa (Backoffice)** | ⏳ PENDENTE | Quarentena preventiva comunitária existe; não há controllers de administração. | Especificar API administrativa e roles (`ROLE_ADMIN`). |
+| **Feed V2 (Ranking & Relevância)** | ✅ CONCLUÍDO — versão social + Cold Start | [FeedV2Controller.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/FeedV2Controller.java), [FeedV2QueryService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2QueryService.java), [FeedV2Service.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Service.java), [FeedV2Hydrator.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Hydrator.java), [FeedCandidateRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/FeedCandidateRepositoryAdapter.java). | Pipeline completo com fallback de Cold Start determinístico e sem N+1. |
+| **Ciclo de Vida do Conteúdo (Content Lifecycle)** | ✅ CONCLUÍDO | [UpdateReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/UpdateReviewUseCase.java), [DeleteReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/DeleteReviewUseCase.java), [ReviewController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewController.java), [ReviewLifecycleIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ReviewLifecycleIntegrationTest.java), [ReviewLifecycleControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/ReviewLifecycleControllerIntegrationTest.java). | PATCH/DELETE funcionais, janela de 24h, trava de helpful, soft delete, lock pessimista, recomputação integral de stats no PG. |
+| **Moderação Administrativa (Backoffice)** | ⏳ PENDENTE | Quarentena preventiva comunitária existe; não há controllers de administração. | Especificar API administrativa e roles (`ROLE_ADMIN`) no STEP 26.0. |
 | **Jobs Assíncronos & Outbox** | ⏳ PENDENTE | Todas as operações são síncronas/transacionais no PostgreSQL. | Criar padrão de Outbox transacional no banco. |
 | **Observabilidade Avançada & Deploy** | ⏳ PENDENTE | Actuator básico habilitado; sem tracing distribuído ou logs estruturados JSON. | Configurar exportação Prometheus/OTel para produção. |
-| **Cold Start / Descoberta Fora da Rede** | ✅ CONCLUÍDO — fallback público determinístico | [ReviewJpaRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/repository/ReviewJpaRepository.java), [FeedCandidateRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/FeedCandidateRepositoryAdapter.java), [FeedV2Service.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Service.java). | Fallback transparente para usuários sem seguidos (não inclui backfill híbrido, cursor, personalização, ML ou novos pesos). |
 | **Cache Distribuído em Redis** | 🔮 FUTURO ADIADO | Redis conectado mas sem cache de queries complexas. | Introduzir apenas sob saturação medida do PostgreSQL. |
 | **Machine Learning & Embeddings** | 🔮 FUTURO ADIADO | Arquitetura determinística prioritária; sem ML. | Avaliar apenas após escala de dezenas de milhares de reviews. |
 
@@ -105,7 +108,13 @@ Os principais marcos de evolução do backend encontram-se registrados nos commi
 * `243c8b6` — *feat: adicionar hydration e projection do feed v2* (`FeedV2Hydrator`, projeção pública determinística sem N+1, testes de batching).
 * `38ea4e9` — *feat: adicionar endpoint http publico do feed v2* (`FeedV2Controller`, `FeedV2QueryService`, `FeedV2PageResponse`, 15 testes de integração MockMvc, 846 testes verdes).
 * `3fc7e8c` — *docs: consolidar fechamento do feed v2 no roadmap* (fechamento oficial da fase 24.4, auditoria de I/O e limitações conhecidas).
-* `b73aebf` — *feat: adicionar fallback de cold start ao feed v2* (fallback público determinístico para usuários sem seguidos: `retrieveDiscoveryCandidates`, exclusão do requester, `isDirectFollow = false`, limite de 100, reaproveitamento integral do ranker/diversifier/hydrator, sem N+1, 859 testes verdes).
+* `b73aebf` — *feat: adicionar fallback de cold start ao feed v2* (fallback público determinístico para usuários sem seguidos, 859 testes verdes).
+* `c35141c` — *docs: consolidar fechamento do cold start no roadmap* (consolidação oficial do STEP 24.5).
+* `f311b7b` — *feat: adicionar mutacoes de dominio do ciclo de vida da review* (STEP 25.1: métodos de domínio `editContent`, `softDelete`, `updateVisibility`, porta `ReviewRepository.findByIdForUpdate` com lock pessimista).
+* `98854aa` — *feat: adicionar casos de uso do ciclo de vida da review* (STEP 25.2: `UpdateReviewUseCase` e `DeleteReviewUseCase`, orquestração transacional de review, alvos, reputação, mídias e stats).
+* `575ed26` — *chore: limpar diagnostics do ciclo de vida da review* (STEP 25.2.1: eliminação pontual de warnings de compilação e null type safety no use case).
+* `7dd3ee5` — *feat: expor ciclo de vida de reviews via api* (STEP 25.3: endpoints `PATCH /api/v1/reviews/{id}` e `DELETE /api/v1/reviews/{id}`, DTO `UpdateReviewRequest`, respostas 200 OK / 204 No Content, tratamento RFC 7807 e 19 testes de integração MockMvc com PostgreSQL real).
+* `c878153` — *chore: auditar consistencia do ciclo de vida da review* (STEP 25.3.1: auditoria pós-implementação comprovando recomputação integral de stats no PostgreSQL, ausência de `deletedAt` em reviews, `visibility` consistente, boundary transacional, teste de concorrência determinístico com PostgreSQL real e zero warnings; 923 testes verdes).
 
 ---
 
@@ -116,15 +125,16 @@ O backend adota o paradigma de **Arquitetura Hexagonal (Ports & Adapters)** comb
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                           PRESENTATION LAYER                                    │
-│   Controllers RESTful (ex: FeedV2Controller, FeedController, ReviewController)  │
+│   Controllers RESTful (ex: FeedV2Controller, ReviewController, PlaceController) │
 │   DTOs de Request/Response • Validações Bean Validation • RFC 7807 Errors        │
 └──────────────────────────────────────┬──────────────────────────────────────────┘
                                        │ (Invoca Casos de Uso / Facades)
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                            APPLICATION LAYER                                    │
-│   Services de Aplicação (ex: FeedV2QueryService, FeedV2Service, FeedV2Hydrator) │
-│   Portas de Saída / Interfaces (ex: FeedCandidateRepository, ReviewRepository) │
+│   Casos de Uso (UpdateReviewUseCase, DeleteReviewUseCase)                       │
+│   Services de Aplicação (FeedV2QueryService, FeedV2Service, FeedV2Hydrator)     │
+│   Portas de Saída / Interfaces (ReviewRepository, RateableTargetStatsRepository)│
 │   Políticas de Autorização (ReviewVisibilityPolicy)                             │
 └──────────────────┬───────────────────────────────────────┬──────────────────────┘
                    │                                       │
@@ -142,10 +152,11 @@ O backend adota o paradigma de **Arquitetura Hexagonal (Ports & Adapters)** comb
 ```
 
 ### Princípios Técnicos Consolidados
-- **PostgreSQL como Fonte Única da Verdade**: Todas as consultas e operações transacionais derivam do PostgreSQL.
+- **PostgreSQL como Fonte Única da Verdade**: Todas as consultas, agregações analíticas e operações transacionais derivam do PostgreSQL.
 - **PostGIS para Operações Espaciais**: Distâncias geodésicas, validação de check-in e centroides são processados no banco via funções espaciais nativas (`ST_DWithin`, coordenadas EPSG:4326).
 - **Sem N+1 Queries**: Todo enriquecimento em massa (targets, perfis de autor, contagem de helpful e flags de interação) ocorre obrigatoriamente através de **batch loaders** (`IN (:ids)` e agregações agrupadas em lote).
 - **Tratamento de Mídia**: Higienização estrita de streams de imagens. Metadados de geolocalização e identificadores de câmera são expurgados no backend antes de persistir o arquivo no SeaweedFS.
+- **Controle Pessimista de Concorrência**: Mutações concorrentes sobre o agregado de avaliações utilizam `SELECT ... FOR UPDATE` (`PESSIMISTIC_WRITE`) gerenciado pelo Spring Transactional (`Propagation.REQUIRED`), garantindo isolamento total durante o recálculo de agregados.
 
 ---
 
@@ -156,8 +167,6 @@ O Feed V2 substitui a ordenação puramente cronológica por uma experiência de
 A versão inicial social e o fallback determinístico de Cold Start encontram-se **✅ CONCLUÍDOS**, auditados contratualmente e validados contra PostgreSQL real.
 
 ### 5.1 Pipeline Oficial Ponta a Ponta
-
-O processamento de cada requisição do Feed V2 segue um fluxo desacoplado de responsabilidades:
 
 ```
 [Cliente HTTP]
@@ -189,162 +198,191 @@ O processamento de cada requisição do Feed V2 segue um fluxo desacoplado de re
 [FeedV2PageResponse] ── Mapeamento DTO público e retorno HTTP 200 OK
 ```
 
-### 5.2 Arquitetura Definitiva do Cold Start (STEP 24.5 / 24.5.1)
+### 5.2 Arquitetura do Cold Start (STEP 24.5 / 24.5.1)
+- **Fallback Puro**: Sem mistura de candidatos sociais e públicos na mesma requisição. Se o retrieval social retornar $\ge 1$ item, a descoberta não é acionada.
+- **Elegibilidade**: Reviews com `status = ACTIVE`, `visibility = PUBLIC` e `userId != requesterId` (auto-exclusão estrita).
+- **Anonimato**: Máscara pública mantida na projeção; `authorId` interno é usado em memória exclusivamente para espaçamento no diversificador.
 
-O Cold Start adiciona uma segunda fonte de candidatos ao Feed V2 para permitir descoberta pública quando o usuário não possui seguidos ou sua rede social não produz nenhum candidato elegível:
+---
+
+## 6. Content Lifecycle — Estado Atual, Arquitetura e Regras de Governança (STEP 25)
+
+O ciclo de vida do conteúdo foi oficialmente consolidado no **STEP 25**, permitindo que o próprio autor de uma avaliação possa realizar **atualizações parciais controladas (PATCH)** e **exclusão lógica (DELETE / Soft Delete)**, com garantia de integridade transacional absoluta entre reviews, alvos, estatísticas, votos úteis, moderação, reputação e feeds.
+
+### 6.1 Visão Geral dos Incrementos Concluídos
+* **STEP 25.1 (Domínio & Persistência — `f311b7b`)**:
+  - Métodos mutadores controlados na entidade de domínio [Review.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/Review.java): `editContent()`, `softDelete()`, `updateExperienceText()`, `updateTargetRating()`, `updateVisibility()`.
+  - Método com lock pessimista na porta de persistência [ReviewRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/repository/ReviewRepository.java): `Optional<Review> findByIdForUpdate(UUID id)`.
+  - Implementação JPA correspondente utilizando `LockModeType.PESSIMISTIC_WRITE` (`SELECT ... FOR UPDATE`).
+* **STEP 25.2 (Casos de Uso na Camada Application — `98854aa`)**:
+  - [UpdateReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/UpdateReviewUseCase.java): Coordena autorização anti-IDOR, janela de 24h, bloqueio por votos de helpful, recálculo atômico de estatísticas de alvos e atualização da reputação factual.
+  - [DeleteReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/DeleteReviewUseCase.java): Executa soft delete lógico (`ReviewStatus.REMOVED`), marcação lógica de mídias ativas como `REMOVED`, recálculo integral de estatísticas e dedução factual da reputação.
+  - Testes de usecase unitários e de integração com PostgreSQL real ([ReviewLifecycleIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ReviewLifecycleIntegrationTest.java)).
+* **STEP 25.2.1 (Limpeza de Diagnostics — `575ed26`)**:
+  - Eliminação pontual de warnings de compilação, null type safety e imports não utilizados.
+* **STEP 25.3 (Exposição HTTP da API REST — `7dd3ee5`)**:
+  - Endpoints REST expostos em [ReviewController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewController.java): `PATCH /api/v1/reviews/{reviewId}` e `DELETE /api/v1/reviews/{reviewId}`.
+  - DTO representacional `UpdateReviewRequest` em [ReviewPresentationDtos.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/dto/review/ReviewPresentationDtos.java).
+  - Tratamento padronizado de erros RFC 7807 (`400`, `401`, `403`, `404`, `409`).
+  - Suíte completa de 19 testes de integração MockMvc cobrindo ponta a ponta todas as regras da API ([ReviewLifecycleControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/ReviewLifecycleControllerIntegrationTest.java)).
+* **STEP 25.3.1 (Auditoria de Consistência & Concorrência — `c878153`)**:
+  - Auditoria profunda confirmando conformidade arquitetural integral com o STEP 25.0.
+  - Prova empírica de recomputação agregada integral no PostgreSQL (sem deltas incrementais).
+  - Teste determinístico de concorrência com PostgreSQL real e sincronização explícita via `CountDownLatch`.
+  - Zero warnings em todas as classes do backend. Suíte estabilizada em 923 testes verdes.
+
+### 6.2 Fluxo Arquitetural Ponta a Ponta
+O processamento de mutações de lifecycle obedece ao isolamento de camadas estrito:
 
 ```text
-Social Retrieval
-      |
-      | candidatos encontrados
-      v
-   Ranker
-      |
-      v
- Diversifier
-      |
-      v
-  Hydration
-
-Caso Social Retrieval = vazio
-      |
-      v
-Discovery Retrieval
-      |
-      v
-   Ranker
-      |
-      v
- Diversifier
-      |
-      v
-  Hydration
+HTTP Request (PATCH / DELETE)
+       │
+       ▼
+[ReviewController] ── Extrai requesterUserId via Authentication.getName() (JWT Bearer)
+       │
+       ▼
+[UpdateReviewUseCase / DeleteReviewUseCase] ── Início do boundary @Transactional
+       │
+       ├─► [ReviewRepository.findByIdForUpdate] (SELECT ... FOR UPDATE no PostgreSQL)
+       │
+       ├─► Verificação de Autorização Anti-IDOR (review.userId == requesterUserId)
+       ├─► Validação de Estado (ACTIVE / UNDER_REVIEW / REMOVED)
+       ├─► Validação de Janela Temporal de 24h (para PATCH)
+       ├─► Verificação de Trava de Helpful (helpfulCount == 0 para alteração de notas)
+       │
+       ├─► [Review Domain Mutation] (review.editContent / review.softDelete)
+       ├─► [ReviewRepository.save] (Atualização no PostgreSQL)
+       │
+       ├─► [RateableTargetStatsRepository.recalculateAndSave] (Ordenado por targetId ASC)
+       │         └─► Recomputação integral via SELECT AVG, COUNT na tabela review_targets
+       │
+       ├─► [ReputationService.recalculateAndSave] (Atualização de snapshot factual)
+       ├─► [ReviewMediaRepository.saveAll] (Marcação lógica REMOVED em mídias no DELETE)
+       │
+       ▼
+Commit da Transação (Liberação dos Locks Pessimistas)
+       │
+       ▼
+HTTP Response: 200 OK (com ReviewResponse) no PATCH / 204 No Content no DELETE
 ```
 
-#### 5.2.1 Regra de Orquestração Estrita (Fallback Puro)
-> **Cold Start é um fallback completo, não um backfill parcial.**
+### 6.3 Regras de Edição Parcial (PATCH)
+1. **Autenticação e Identidade**:
+   - Requester extraído obrigatoriamente do JWT (`Authentication.getName()`).
+   - Bloqueio estrito de IDOR: se `requesterUserId != review.userId`, a requisição é rejeitada com `403 Forbidden` (`REVIEW_NOT_OWNED`).
+   - O payload HTTP nunca recebe nem confia em `userId`, `authorId`, `reviewId` ou `createdAt`.
+2. **Janela Máxima de Tolerância**:
+   - Edições de avaliações são permitidas exclusivamente dentro da **janela de 24 horas** a partir de `createdAt`.
+   - Limite exato no boundary de 24h é aceito com sucesso; requisições após 24h são rejeitadas com `409 Conflict` (`REVIEW_EDIT_WINDOW_EXPIRED`).
+3. **Semântica de Patch Parcial e Proteção contra Nulos**:
+   - Campos omitidos ou explicitamente `null` no JSON da requisição significam "não alterar", preservando fielmente os dados existentes.
+   - `experienceText`: se `null`, mantém o texto atual.
+   - `targetRatings`: se `null`, mantém as notas atuais dos alvos.
+   - `isAnonymous`: se `null`, mantém a flag atual.
+   - `visibility`: se `null`, mantém a visibilidade atual.
+4. **Regras de Votos de Utilidade (Helpful Locking)**:
+   - Se a avaliação **não possui votos de útil** (`helpfulCount == 0`): permite alteração de texto e de notas dos alvos dentro da janela de 24h.
+   - Se a avaliação **já recebeu votos de útil** (`helpfulCount > 0`): a alteração de notas é bloqueada com `409 Conflict` (`REVIEW_EDIT_RATING_BLOCKED_BY_HELPFUL`), impedindo estelionato de utilidade. A alteração de texto (`experienceText`) continua permitida dentro das 24h.
+5. **Regras de Moderação**:
+   - Avaliação com `status = UNDER_REVIEW`: alteração de conteúdo rejeitada com `409 Conflict` (`REVIEW_UNDER_REVIEW_MUTATION_DENIED`).
+   - Avaliação com `status = REMOVED`: rejeitada com `409 Conflict` (`REVIEW_ALREADY_REMOVED`).
+6. **Multi-Target**:
+   - Alvos estruturais são estritamente imutáveis (proibida adição ou remoção de targets via PATCH).
+   - Notas de targets existentes podem ser atualizadas pontualmente; apenas os alvos com nota realmente alterada acionam recomputação de estatísticas.
+7. **Imutabilidade Temporal**:
+   - `createdAt` é `@Column(updatable = false)` e permanece rigorosamente idêntico.
+   - `updatedAt` reflete o instante exato da mutação.
 
-* **Sem Mistura**: Candidatos sociais e de descoberta nunca são combinados na mesma requisição.
-* **Sem Backfill Parcial**: Se o retrieval social retornar 1 ou mais candidatos (mesmo abaixo do tamanho da página), a descoberta **não** é acionada.
-* **Isolamento de Camadas**: A aplicação (`FeedV2Service`) é a única dona da decisão de transição. A infraestrutura (`FeedCandidateRepositoryAdapter`) apenas provê cada fonte de candidatos. O domínio (`FeedV2Ranker`, `FeedV2Diversifier`) não conhece o conceito de Cold Start.
+### 6.4 Regras de Soft Delete (DELETE)
+1. **Transição de Status**:
+   - A avaliação transita para `ReviewStatus.REMOVED`.
+   - Mídias vinculadas ativas transitam para `ReviewMediaStatus.REMOVED`.
+   - Mutações subsequentes sobre review removida são rejeitadas com `409 Conflict` (`REVIEW_ALREADY_REMOVED`).
+2. **Exclusão a partir de Moderação**:
+   - Se a review estiver em quarentena (`UNDER_REVIEW`), o autor legítimo pode excluí-la voluntariamente para retirá-la imediatamente do ar.
+3. **Preservação de Dados e Integridade Física**:
+   - O soft delete **não executa hard delete** em nenhuma tabela.
+   - Permanecem preservados no PostgreSQL: o registro em `reviews`, os itens em `review_targets`, os votos em `review_reactions`, as denúncias em `reports` e os check-ins em `check_ins`.
+   - Os arquivos binários de imagem no SeaweedFS permanecem preservados (descarte físico reservado para futuro garbage collector assíncrono).
 
-#### 5.2.2 Fonte e Regras de Elegibilidade
-* **Fonte Única**: Tabela relacional `reviews`.
-* **Critérios Obrigatórios de Inclusão**:
-  * `status = ACTIVE`
-  * `visibility = PUBLIC`
-  * `user_id != requesterId` (avaliações do próprio usuário são estritamente excluídas da descoberta)
-* **Critérios de Exclusão Estrita**:
-  * `FOLLOWERS` (conteúdo exclusivo para conexões sociais diretas)
-  * `PRIVATE`
-  * `UNDER_REVIEW` (quarentena moderada)
-  * `REMOVED` (soft delete)
-  * Avaliações de autoria do próprio solicitante
-* **Ordenação Base Determinística**: `createdAt DESC, id ASC` com `LIMIT = CANDIDATE_WINDOW` (100).
-* **Privacidade e Anonimato**: Avaliações com `isAnonymous = true` continuam elegíveis quando públicas. A projeção pública mascara estritamente a identidade (`displayName = "Anônimo"`, campos de perfil nulos). O `authorId` interno atua exclusivamente como detalhe técnico em memória para o diversificador.
+### 6.5 Decisão de Stats: Recomputação Integral via PostgreSQL
+Fielmente alinhada à **Estratégia B do STEP 25.0**:
+* **Fonte Única da Verdade**: A tabela `rateable_target_stats` é atualizada através do método `recalculateAndSave(targetId)` em [RateableTargetStatsRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/RateableTargetStatsRepositoryAdapter.java).
+* **Ausência de Deltas**: Não existe e nunca existiu delta incremental (`recordRatingDelta`), eliminando qualquer risco de drift numérico por arredondamento cumulativo ou concorrência.
+* **Consulta de Agregação Nativa**:
+  ```sql
+  SELECT
+      COALESCE(ROUND(AVG(rt.rating), 2), 0.00) AS average_rating,
+      COUNT(rt.id) AS reviews_count
+  FROM review_targets rt
+  JOIN reviews r ON r.id = rt.review_id
+  WHERE rt.target_id = :targetId
+    AND r.status = 'ACTIVE'
+  ```
+* **Lock Pessimista e Ordenação**: Para prevenir deadlocks em reviews multi-alvo, os identificadores são processados em ordem lexicográfica ascendente (`targetId ASC`), e cada linha de stats é atualizada sob `SELECT ... FOR UPDATE`.
 
-#### 5.2.3 Reutilização Integral do Ranker e Diversifier
-* **Ranker Inalterado**: O `FeedV2Ranker` não sofreu nenhuma alteração. Todos os candidatos de descoberta entram com `isDirectFollow = false`. A fórmula matemática permanece idêntica:
-  $$\text{Score} = 0.40 \times 0.0 + 0.30 \times \text{recency} + 0.20 \times \text{verified} + 0.10 \times \text{helpful}$$
-  Não foram criados `rankingMode`, novos pesos ou lógicas condicionais no domínio.
-* **Diversifier Inalterado**: O `FeedV2Diversifier` aplica exatamente as mesmas regras de espaçamento (máximo de 2 autores consecutivos e 2 alvos consecutivos), preservando todos os candidatos e o determinismo (sem shuffle).
+### 6.6 Recálculo Factual de Reputação
+* A reputação do usuário ([UserReputation](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/UserReputation.java)) é um snapshot puramente factual e versionado.
+* **Transição de Anonimato**:
+  - `Público -> Anônimo`: A review deixa de pontuar como autoria pública verificada; o snapshot deduz os pontos correspondentes.
+  - `Anônimo -> Público`: A review volta a pontuar e o snapshot restabelece a pontuação.
+* **Soft Delete**:
+  - A review em status `REMOVED` é expurgada do cálculo de reputação, deduzindo os pontos anteriormente concedidos pela criação da review e por check-in no local.
+* Edições puramente textuais ou de notas não alteram desnecessariamente o snapshot de reputação.
 
-#### 5.2.4 Contrato da API Pública Preservado
-* O endpoint `GET /api/v2/feed` não recebeu novos campos ou parâmetros para o Cold Start.
-* O envelope `FeedV2PageResponse` (`items`, `page`, `size`, `windowSize`, `totalPages`) permanece idêntico.
-* `windowSize` reflete a quantidade real de candidatos de descoberta colocados no pipeline (até 100).
-* Sinais internos (`score`, `isDirectFollow`, `rankingMode`, `coldStart`, `discovery`) continuam estritamente blindados e não expostos.
+### 6.7 Imutabilidade de Check-in e Governança de Privacidade
+1. **Inviolabilidade de Presença Presencial**:
+   - Os parâmetros de check-in (`contextPlaceId`, `userLatitude`, `userLongitude`, `locationAccuracyMeters` e `isVerifiedOnSite`) são blindados contra qualquer alteração via PATCH.
+   - O registro físico na tabela `check_ins` permanece íntegro no banco mesmo após o soft delete da avaliação.
+2. **Anonimato no Lifecycle**:
+   - Autores de reviews anônimas possuem permissão total para editar ou excluir suas publicações, pois a autorização interna se baseia estritamente no `userId` extraído do JWT.
+   - A resposta da API pública (`ReviewResponse`) continua mascarando integralmente a identidade do autor (`author = null`), impedindo qualquer vazamento de dados.
 
-#### 5.2.5 Auditoria de I/O e Índices
-* **Orçamento de I/O no Cold Start**:
-  * Discovery Retrieval: Até 3 queries em lote (candidatos, alvos primários, agregação de helpful).
-  * Hydration: Até 5 queries em lote (reviews fatiadas, alvos detalhados, perfis de não-anônimos, helpful count, helpful do usuário).
-  * Custo total mantido em **até 8 queries por requisição normal preenchida**, com **zero N+1**.
-* **Zero Migrations no STEP 24.5.1**: A consulta JPQL `findFeedV2DiscoveryCandidates` é suportada pelos índices já existentes em `reviews` (`idx_reviews_active_public_created_at`). Não foram criados índices especulativos.
+### 6.8 Contrato da API REST e Códigos de Erro RFC 7807
+* **Endpoints Expostos**:
+  - `PATCH /api/v1/reviews/{reviewId}` ── Retorna `200 OK` com o DTO `ReviewResponse` atualizado.
+  - `DELETE /api/v1/reviews/{reviewId}` ── Retorna `204 No Content` sem corpo.
+* **Mapeamento Consistente de Erros**:
+  - `400 BAD_REQUEST` / `INVALID_INPUT`: Payload inválido, nota fora de [1.0, 5.0], texto > 2000 chars, visibilidade inválida.
+  - `401 UNAUTHORIZED` / `UNAUTHORIZED`: Ausência ou inconsistência de token JWT Bearer.
+  - `403 FORBIDDEN` / `REVIEW_NOT_OWNED`: Tentativa de edição ou exclusão por usuário que não seja o autor legítimo.
+  - `404 NOT_FOUND` / `REVIEW_NOT_FOUND`: Review inexistente no banco de dados.
+  - `409 CONFLICT` / `REVIEW_UNDER_REVIEW_MUTATION_DENIED`: Tentativa de editar review em quarentena de moderação.
+  - `409 CONFLICT` / `REVIEW_ALREADY_REMOVED`: Tentativa de editar ou excluir review que já sofreu soft delete.
+  - `409 CONFLICT` / `REVIEW_EDIT_WINDOW_EXPIRED`: Tentativa de editar após 24 horas da publicação.
+  - `409 CONFLICT` / `REVIEW_EDIT_RATING_BLOCKED_BY_HELPFUL`: Tentativa de alterar notas quando já existem votos de útil.
 
-#### 5.2.6 Limitações Conhecidas do Cold Start
-* **`CANDIDATE_WINDOW = 100`**: A descoberta avalia no máximo os 100 candidatos públicos mais recentes do sistema.
-* **Drift Temporal**: Paginação por offset sujeita a drift entre requisições consecutivas caso novas avaliações públicas sejam criadas.
-* **Descoberta Global**: O Cold Start atual é global e não personalizado por localização implícita ou preferências do usuário. Essa é uma decisão deliberada de design da primeira versão para garantir simplicidade, transparência e ausência de tracking invasivo.
+### 6.9 Preservação e Não-Regressão de Feeds e Search
+* **Feed V1 (Social Cronológico)**:
+  - Nenhuma alteração de código.
+  - Reviews em status `REMOVED` deixam imediatamente de ser retornadas (filtradas por `status = 'ACTIVE'`).
+  - Edição de conteúdo preserva `createdAt`, garantindo que reviews editadas não realizam bump artificial na timeline.
+* **Feed V2 (Relevância & Descoberta)**:
+  - Nenhuma alteração de código.
+  - Retrieval exclui reviews não-ativas na fonte (`r.status = 'ACTIVE'`).
+  - A hidratação confirma o status ativo como defesa adicional em profundidade.
+  - Cold Start exclui reviews removidas do discovery pool.
+* **Search V1 (Catálogo)**:
+  - Permanece 100% isolado, operando exclusivamente sobre lugares e alvos avaliáveis.
 
-### 5.3 Contrato da API Pública
+### 6.10 Concorrência Determinística sob Lock Pessimista
+* A concorrência transacional é garantida pelo Spring `@Transactional` (`Propagation.REQUIRED`) combinado com `PESSIMISTIC_WRITE` (`SELECT ... FOR UPDATE`) no PostgreSQL.
+* O lock é mantido durante toda a execução do caso de uso, garantindo que efeitos derivados (targets, stats, reputação, mídias) sejam comitados atomicamente.
+* **Validação Empírica em Teste**:
+  - O teste [shouldPreventDoubleDeleteAndStateCorruptionUnderConcurrentCallsInPostgres](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ReviewLifecycleIntegrationTest.java#L368) valida duas threads simultâneas disparadas via `CountDownLatch` contra o PostgreSQL real: exatamente uma thread executa o delete com sucesso (204) e a outra é bloqueada pelo lock pessimista e rejeitada deterministicamente com `409 REVIEW_ALREADY_REMOVED`, mantendo a contagem de estatísticas exata (sem double-decrement).
 
-* **Endpoint**: `GET /api/v2/feed`
-* **Parâmetros de Query**:
-  * `page` (int, default: `0`, mínimo: `0`)
-  * `size` (int, default: `10`, mínimo: `1`, máximo: `50`)
-* **Autenticação**: `Bearer JWT` obrigatório. O `requesterUserId` é extraído exclusivamente do token autenticado (bloqueio estrito de IDOR).
-* **Tratamento de Erros**: Padrão RFC 7807 (`application/problem+json`) com status HTTP correspondente (`400 BAD_REQUEST`, `401 UNAUTHORIZED`).
-* **Anonimato Estrito na Resposta**:
-  * Para reviews anônimas (`isAnonymous = true`):
-    * `author.id = null`
-    * `author.handle = null`
-    * `author.displayName = "Anônimo"`
-    * `author.avatarUrl = null`
-    * `author.isAnonymous = true`
-* **Blindagem de Sinais Algorítmicos**: Scores matemáticos, pesos e identificadores internos nunca são expostos externamente no JSON.
-
-### 5.4 Custo Real de I/O Auditado (Zero N+1)
-
-A auditoria técnica (STEP 24.4.4.1 e 24.5.1) confirmou a contagem de queries executadas por requisição:
-
-* **Retrieval (Janela de Candidatos)**: Até **3 queries** em lote:
-  1. `findFeedV2Candidates` (social) ou `findFeedV2DiscoveryCandidates` (descoberta): Busca os até 100 candidatos elegíveis com projeção colunar mínima.
-  2. `findByReviewIdIn` (targets): Busca alvos em lote para determinar o `targetId` primário para o diversificador.
-  3. `countHelpfulByReviewIds` (reações): Agregação via `GROUP BY review_id` para computar o sinal de utilidade para o ranker.
-* **Orchestration**: **0 queries**. O rankeamento linear com decaimento temporal, diversificação greedy de autores/targets e o corte da página (`subList`) são puramente computacionais em memória.
-* **Hydration (Itens Fatiados da Página)**: Até **5 queries** em lote:
-  1. `findByIdIn` (reviews): Carga profunda das entidades `Review` para os $M$ itens da página ($M \le 50$).
-  2. `findByReviewIdIn` (targets): Carregamento multi-alvo completo com notas (`rating`) e comentários específicos.
-  3. `findByUserIdIn` (profiles): Busca em lote de perfis exclusivamente para autores não-anônimos da página.
-  4. `countHelpfulByReviewIds`: Contagem de votos úteis para popular `helpfulCount` na projeção pública.
-  5. `findHelpfulReviewIdsByUser`: Verificação em lote se o usuário solicitante votou em cada review da página (`isHelpfulByMe`).
-* **Custo Total Típico**: **Até 8 queries por requisição** para uma página normal preenchida.
-* **Comportamentos de Borda**:
-  * **Página vazia (sem candidatos sociais nem públicos)**: Mínimo de **2 queries** de busca de candidatos e interrompe o pipeline; a hidratação faz 0 queries.
-  * **Página além do offset da janela**: **3 queries** (retrieval busca candidatos, o slicing entrega lista vazia e a hidratação faz 0 queries).
-  * **Página 100% anônima**: **7 queries** (a consulta de perfis é suprimida).
-  * **Zero N+1**: A quantidade de consultas é invariante em relação ao `size` da página ($O(1)$ queries para `size=10` ou `size=50`).
-
-### 5.5 Known Optimizations / Technical Debt
-
-| Item | Descrição | Motivo Atual | Status |
-| :--- | :--- | :--- | :---: |
-| **Duplicação de Helpful Count** | `countHelpfulByReviewIds` é executado no retrieval (para os 100 candidatos) e novamente na hydration (para os 10 itens fatiados). | O retrieval calcula para o ranking; a hydration foi concebida com porta independente para compor a projeção. Reutilizar o valor diretamente aumentaria o acoplamento ou exigiria alteração de contratos consolidados. | ⏳ Otimização futura |
-| **Índice Composto para Retrieval Social** | Criação de índice `reviews(user_id, status, visibility, created_at DESC)` para acelerar a varredura após o join com `user_follows`. | Dispensável no volume atual de desenvolvimento; manter banco sem migrations desnecessárias. | ⏳ Avaliação futura |
-
-### 5.6 Limitações Conhecidas do Feed V2
-
-* **`CANDIDATE_WINDOW = 100` (LIMITAÇÃO CONHECIDA)**:
-  * O retrieval carrega no máximo os 100 candidatos mais recentes (sociais ou descoberta). Avaliações anteriores aos primeiros 100 não participam da ordenação daquela requisição.
-  * **Justificativa**: Protege o consumo de memória, CPU e I/O do banco, mantendo previsibilidade e prevenindo varreduras não limitadas. Não se trata de um bug, mas de um teto deliberado de dimensionamento da versão inicial.
-* **Paginação por Offset e Drift Temporal (LIMITAÇÃO CONHECIDA)**:
-  * Como cada requisição HTTP captura `referenceTime = Instant.now()`, novas avaliações inseridas na rede entre a consulta da página 0 e da página 1 podem empurrar candidatos já visualizados para a página seguinte (*offset drift*).
-  * **Evolução Planejada**: Introdução de âncora temporal (*reference time anchor*) ou paginação baseada em cursor em etapas futuras.
-
----
-
-## 6. Backlog: Ciclo de Vida do Conteúdo (Content Lifecycle)
-
-Análise do estado real do código referente a edições e exclusões:
-
-| Funcionalidade | Classificação | Situação no Código Atual | Risco / Decisão Pendente |
-| :--- | :---: | :--- | :--- |
-| **Edição de Avaliação** | NÃO IMPLEMENTADO | Não existem endpoints `PUT` ou `PATCH` em `ReviewController`. Avaliações são imutáveis após persistência. | Se permitida, a edição pode invalidar o check-in presencial ou alterar o sentido após votos de Helpful recebidos. Requer janela de tolerância de edição (ex: 15 min) ou histórico de revisões. |
-| **Exclusão de Avaliação (Soft Delete)** | NÃO IMPLEMENTADO | `ReviewStatus.REMOVED` existe no domínio, mas apenas para uso da moderação preventiva. Não há endpoint de exclusão pelo usuário. | Necessário definir o impacto nas médias calculadas de alvos (`rateable_target_stats`) e na reputação do autor. |
-| **Edição de Discussão / Comentário** | NÃO IMPLEMENTADO | Comentários não possuem endpoint de edição. | Evita alteração de contexto em threads onde outros usuários já responderam. |
-| **Exclusão de Discussão (Soft Delete)** | JÁ EXISTE | `DELETE /api/v1/discussions/{id}` altera o status para `REMOVED`. Apenas o próprio autor pode remover seu comentário. | Totalmente implementado e coberto por testes. |
-| **Regras Pós-Interação** | NÃO DEFINIDO | Não há travas de alteração baseadas na presença de reações ou comentários de terceiros. | Definir se reviews com mais de $N$ votos úteis podem ter seu texto principal alterado. |
-| **Trilha de Auditoria / Histórico** | NÃO IMPLEMENTADO | Não há tabelas de auditoria (ex: `review_audits`, `review_history`). | Backlog para requisitos de compliance futuros. |
-| **Descarte de Mídia Órfã** | NÃO IMPLEMENTADO | Imagens permanecem no SeaweedFS mesmo se a publicação associada for rejeitada ou entrar em quarentena. | Necessário job de garbage collection assíncrono. |
+### 6.11 Limitações Conhecidas e Evolução Futura do Lifecycle
+* **Histórico de Edições (Audit Trail)**: No MVP do lifecycle, apenas `updatedAt` registra a alteração mais recente. Histórico completo de revisões (*review revisions table*) permanece como evolução futura.
+* **Sem Restauração de Avaliação (Undelete)**: O soft delete pelo autor é definitivo para o usuário comum; restauração de publicações excluídas por engano permanece restrita a futura moderação administrativa.
+* **Garbage Collection de Imagens**: O soft delete marca mídias lógicas como `REMOVED`, mas não expurga blobs físicos do SeaweedFS de forma síncrona. O descarte definitivo será orquestrado por job assíncrono via Outbox.
 
 ---
 
-## 7. Backlog: Moderação Administrativa (Backoffice)
+## 7. Backlog: Moderação Administrativa (Backoffice) — STEP 26.0
 
-O sistema conta atualmente com um mecanismo robusto de **moderação preventiva comunitária** via [ReportService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/ReportService.java) (3 denúncias pendentes colocam a avaliação automaticamente em quarentena `UNDER_REVIEW`). No entanto, o fluxo administrativo de análise humana encontra-se pendente:
+Com a conclusão do Content Lifecycle, a moderação administrativa é o próximo subsistema planejado no backend:
 
-### Componentes Mapeados (Backlog a Validar)
+### Componentes Mapeados para o STEP 26.0
 1. **Consulta Administrativa de Denúncias**:
    - Endpoint `GET /api/v1/admin/reports` com filtros por motivo (`reason`), status da denúncia (`PENDING`, `REVIEWED`, `DISMISSED`) e paginação.
 2. **Fluxo de Decisão de Moderação**:
@@ -361,13 +399,13 @@ O sistema conta atualmente com um mecanismo robusto de **moderação preventiva 
 
 ## 8. Backlog: Processamento Assíncrono & Outbox Pattern
 
-Atualmente, **todas as operações do backend são síncronas e transacionais**. Eventos de notificação e recálculo de reputação rodam dentro da mesma transação de banco da requisição original.
+Atualmente, **todas as operações do backend são síncronas e transacionais**. Eventos de notificação, recálculo de estatísticas e reputação rodam dentro da mesma transação de banco da requisição original.
 
 ### Proposta Técnica de Transição (Sem Adição Prematura de Mensageria Externa)
 Não há necessidade imediata de brokers como Kafka ou RabbitMQ. O padrão **Transactional Outbox sobre PostgreSQL** é suficiente e preserva a consistência ACID:
 
 | Componente / Cenário | Motivação | Pré-requisito | Estado |
-| :--- | :--- | :--- | :---: |
+| :--- | :--- | :--- | :--- |
 | **Tabela `outbox_events`** | Desacoplar operações pesadas da thread HTTP do usuário. | Criar migration Flyway para tabela de outbox. | ⏳ PENDENTE |
 | **Notificações Assíncronas** | Evitar lentidão na criação de reviews/comentários caso o volume de notificações cresça. | Worker de polling da outbox (`@Scheduled`). | ⏳ PENDENTE |
 | **Recálculo Assíncrono de Reputação** | Eliminar lock pessimista em `users` durante a postagem de reviews. | Worker da outbox para reputação. | ⏳ PENDENTE |
@@ -400,9 +438,9 @@ Não há necessidade imediata de brokers como Kafka ou RabbitMQ. O padrão **Tra
 As seguintes frentes tecnológicas e melhorias algorítmicas foram **propositadamente congeladas** e não devem ser iniciadas sem a satisfação de seus critérios de entrada (*gates*):
 
 1. **Backfill Parcial entre Social e Descoberta**:
-   - *Decisão*: Atualmente o Cold Start é um fallback completo (acionado exclusivamente quando o retrieval social retorna vazio). O preenchimento híbrido parcial (completar páginas quando a rede social tem poucos candidatos) foi adiado para evitar mistura de contextos na fase inicial.
+   - *Decisão*: Atualmente o Cold Start é um fallback completo (acionado exclusivamente quando o retrieval social retorna vazio). O preenchimento híbrido parcial foi adiado para evitar mistura de contextos na fase inicial.
 2. **Segmentação Visual entre Conteúdo Social e Descoberto**:
-   - *Decisão*: Não há flags na API indicando se o item proveio da rede social ou de descoberta global. Qualquer rotulação visual no cliente dependerá de revisão futura de contrato.
+   - *Decisão*: Não há flags na API indicando se o item proveio da rede social ou de descoberta global.
 3. **Paginação Baseada em Cursor**:
    - *Decisão*: O Feed V2 utiliza offset pagination (`page`, `size`) sobre uma janela delimitada de 100 candidatos. O cursor será avaliado quando for necessário mitigar drift temporal sob alto volume de escrita simultânea.
 4. **Ranking Contextual e Personalização**:
@@ -412,11 +450,11 @@ As seguintes frentes tecnológicas e melhorias algorítmicas foram **propositada
 6. **Cache Agressivo de Feed em Redis**:
    - *Decisão*: O PostgreSQL 18 resolve o candidate retrieval com tempo de resposta excelente para a janela atual. Não introduzir cache de feed em Redis até que medições sob carga real apontem saturação de CPU/IOPS no banco.
 7. **Modelos de Machine Learning & Embeddings Vetoriais**:
-   - *Decisão*: O produto prioriza explicabilidade, transparência e determinismo. Modelos neurais ou embeddings de recomendação estão suspensos até que haja massa de dados expressiva e problema comprovado de relevância que regras determinísticas não possam resolver.
+   - *Decisão*: O produto prioriza explicabilidade, transparência e determinismo. Modelos neurais ou embeddings de recomendação estão suspensos.
 8. **Cluster Externo de Mensageria (Kafka/RabbitMQ)**:
    - *Decisão*: Evitar complexidade operacional prematura enquanto a fila transacional em PostgreSQL atender com folga à volumetria do sistema.
 9. **Substituição do Feed V1 ou Search V1**:
-   - *Decisão*: O Feed V1 (`GET /api/v1/feed`) permanece congelado e independente, atendendo consumidores que exigem ordenação estritamente cronológica. O Search V1 permanece independente.
+   - *Decisão*: O Feed V1 (`GET /api/v1/feed`) e o Search V1 permanecem congelados e independentes.
 
 ---
 
@@ -428,48 +466,52 @@ Para evitar retrabalho e desvios arquiteturais, toda evolução relevante deve o
 [Decisão Técnica] ────────► [Critério Mínimo / Gate] ─────────► [Ação Permitida]
 Cold Start (V2)             Fase de descoberta e fallback       ✅ CONCLUÍDO (STEP 24.5 / 24.5.1)
                             determinístico implementados
+Content Lifecycle (V1)      Mutações de domínio, 24h window,    ✅ CONCLUÍDO (STEP 25.1 a 25.3.1)
+                            helpful lock, soft delete e HTTP
+Moderação Admin (V1)        Roles ROLE_ADMIN e fluxo backoffice ⏳ PRÓXIMO PASSO (STEP 26.0)
 Cache em Redis              Latência p99 > 200ms no banco       Implementar cache layer
 Mensageria Externa          Outbox no PG > 5.000 msgs/s         Adicionar broker externo
 Migração de Banco           Nova coluna/tabela inevitável       Criar V11 com rollback previsto
 ```
 
-### 11.1 Conclusão do Gate de Cold Start (STEP 24.5 / 24.5.1)
-A fase de descoberta arquitetural (STEP 24.5) e a implementação do fallback determinístico (STEP 24.5.1) foram **concluídas com sucesso** sob o checkpoint `b73aebf`:
-* **Fonte**: Reviews com `status = ACTIVE` e `visibility = PUBLIC`.
-* **Segurança e Privacidade**: Exclusão de avaliações próprias (`userId != requesterId`) e mascaramento estrito de avaliações anônimas.
-* **Orquestração**: Fallback puro no `FeedV2Service` (sem backfill parcial, sem mistura de candidatos).
-* **Reaproveitamento**: `FeedV2Ranker`, `FeedV2Diversifier` e `FeedV2Hydrator` reutilizados integralmente sem novas flags de modo.
-* **Desempenho**: Orçamento mantido em até 8 queries por requisição normal, sem queries N+1 e sem novas migrations Flyway.
+### 11.1 Conclusão do Gate de Content Lifecycle (STEP 25)
+A implementação do ciclo de vida de avaliações foi **concluída com sucesso** sob os checkpoints `f311b7b`, `98854aa`, `575ed26`, `7dd3ee5` e `c878153`:
+* **Domínio**: Mutações parciais protegidas por invariantes temporais, moderação e integridade de alvos.
+* **Persistência**: Lock pessimista `findByIdForUpdate` e recomputação integral no PostgreSQL (Estratégia B).
+* **API REST**: Endpoints `PATCH` (200 OK) e `DELETE` (204 No Content) com RFC 7807 e bloqueio anti-IDOR.
+* **Testes & Concorrência**: 19 testes MockMvc + 6 testes de integração de usecase, incluindo prova de concorrência com PostgreSQL real e sincronização explícita via `CountDownLatch`.
 
 ---
 
 ## 12. Estado Atual da Suíte de Testes
 
-* **Total de Testes**: `859`
+* **Total de Testes**: `923`
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`
 * **Perfil de Execução**: `local` (executa contra PostgreSQL e PostGIS reais via Docker Compose).
 * **Distribuição**:
-  - Testes Unitários de Domínio puro (`FeedV2RankerUnitTest`, `FeedV2DiversifierUnitTest`, `FeedScoreUnitTest`).
-  - Testes Unitários de Aplicação (`FeedV2ServiceUnitTest` com 20 cenários cobrindo ranking, diversificação, fatiamento e os 5 cenários do fallback de Cold Start; `FeedV2HydratorUnitTest`).
-  - Testes de Persistência com Spring Boot e banco real (`FeedCandidateRetrievalPersistenceIntegrationTest` com 21 cenários cobrindo retrieval social e descoberta pública com PostgreSQL real; `FeedV2RetrievalRankerIntegrationTest`).
-  - Testes de Integração de Aplicação (`FeedV2ServiceIntegrationTest` validando orquestração e fallback contra banco real).
-  - Testes de Integração HTTP com MockMvc e Spring Security (`FeedV2ControllerIntegrationTest` com 18 cenários cobrindo autenticação, paginação, IDOR, privacidade, multi-target, helpful, não-regressão do Feed V1 e os 3 novos cenários de Cold Start; `FeedControllerIntegrationTest`; `ReviewControllerIntegrationTest`).
-  - Testes de Não-Regressão das etapas anteriores (Search V1, Auth, Catálogo, Reputação, Moderação).
+  - Testes Unitários de Domínio puro (`FeedV2RankerUnitTest`, `FeedV2DiversifierUnitTest`, `FeedScoreUnitTest`, `ReviewLifecycleUnitTest`).
+  - Testes Unitários de Aplicação (`UpdateReviewUseCaseUnitTest` com 17 cenários; `DeleteReviewUseCaseUnitTest` com 7 cenários; `FeedV2ServiceUnitTest`; `FeedV2HydratorUnitTest`).
+  - Testes de Persistência com Spring Boot e banco real (`FeedCandidateRetrievalPersistenceIntegrationTest`; `FeedV2RetrievalRankerIntegrationTest`; `RateableTargetStatsPersistenceIntegrationTest`).
+  - Testes de Integração de Aplicação (`ReviewLifecycleIntegrationTest` com 6 cenários cobrindo ponta a ponta mutações multi-alvo, bloqueio de helpful, expiração de 24h, soft delete sob moderação e teste de concorrência com lock pessimista; `FeedV2ServiceIntegrationTest`).
+  - Testes de Integração HTTP com MockMvc e Spring Security (`ReviewLifecycleControllerIntegrationTest` com 19 cenários cobrindo PATCH, DELETE, IDOR, helpful blocking, anonymous masking, validações Bean Validation e não-regressão de feeds; `FeedV2ControllerIntegrationTest`; `FeedControllerIntegrationTest`; `ReviewControllerIntegrationTest`).
+  - Testes de Não-Regressão das etapas anteriores (Search V1, Auth, Catálogo, Reputação, Moderação Preventiva).
 
 ---
 
 ## 13. Próximo Passo Imediato
 
-Com a conclusão do **Feed V2** e do **Cold Start determinístico** (STEP 24.4 e 24.5), o próximo subsistema planejado no backlog do backend é:
+Com a conclusão oficial do **Content Lifecycle (STEP 25)**, o próximo subsistema planejado no backlog do backend é:
 
-### **STEP 25.0 — Ciclo de Vida do Conteúdo (Edição e Exclusão de Avaliações / Content Lifecycle)**
-1. **Regras de Edição de Avaliações**:
-   - Definir políticas para edição de texto de avaliações após criação (ex: janela de tolerância temporal, regras pós-recebimento de votos úteis).
-   - Garantir que a validação de presença presencial (check-in via PostGIS geofence) permaneça inviolável após edição.
-2. **Exclusão de Avaliação pelo Autor (Soft Delete)**:
-   - Implementar endpoint autenticado para soft delete pelo autor (`ReviewStatus.REMOVED`).
-   - Definir o impacto em cascata no recálculo atômico de médias de alvos (`rateable_target_stats`), votos úteis e na reputação factual do autor.
-3. **Integridade Arquitetural**:
-   - Preservar integridade de Feed V1, Feed V2 (social + cold start) e Search V1.
+### **STEP 26.0 — Moderação Administrativa (Backoffice)**
+1. **Controle de Acesso Administrativo**:
+   - Introdução de roles administrativas no Spring Security (`ROLE_ADMIN`, `ROLE_MODERATOR`).
+   - Proteção de rotas restritas sob `/api/v1/admin/**`.
+2. **Consulta e Triagem de Denúncias**:
+   - Endpoint administrativo `GET /api/v1/admin/reports` com filtros por status (`PENDING`, `REVIEWED`, `DISMISSED`) e motivo da denúncia.
+3. **Ações de Moderação Humana**:
+   - Deferimento com exclusão administrativa da avaliação (`ReviewStatus.REMOVED`) e recálculo em cascata de estatísticas e reputação.
+   - Indeferimento com descarte da denúncia e retorno da avaliação ao status `ACTIVE` para reexibição nos feeds.
+4. **Trilha de Auditoria Administrativa**:
+   - Registro persistido do moderador responsável, carimbo temporal e justificativa da ação tomada.
