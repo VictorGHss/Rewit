@@ -81,15 +81,15 @@ public class UpdateReviewUseCase {
 
         // 2. Autorização anti-IDOR
         if (!review.getUserId().equals(requesterId)) {
-            throw new BusinessException("Apenas o autor pode editar a avaliação", HttpStatus.FORBIDDEN, "FORBIDDEN");
+            throw new BusinessException("Apenas o autor pode editar a avaliação", HttpStatus.FORBIDDEN, "REVIEW_NOT_OWNED");
         }
 
         // 3. Validação de estado
         if (review.getStatus() == ReviewStatus.REMOVED) {
-            throw new BusinessException("A avaliação já se encontra removida", HttpStatus.UNPROCESSABLE_CONTENT, "REVIEW_ALREADY_REMOVED");
+            throw new BusinessException("A avaliação já se encontra removida", HttpStatus.CONFLICT, "REVIEW_ALREADY_REMOVED");
         }
         if (review.getStatus() != ReviewStatus.ACTIVE) {
-            throw new BusinessException("Avaliações sob moderação não podem ser editadas", HttpStatus.UNPROCESSABLE_CONTENT, "INVALID_REVIEW_STATUS_FOR_EDIT");
+            throw new BusinessException("Avaliações sob moderação não podem sofrer alteração de conteúdo", HttpStatus.CONFLICT, "REVIEW_UNDER_REVIEW_MUTATION_DENIED");
         }
 
         // 4. Janela temporal de tolerância de 24 horas
@@ -98,7 +98,7 @@ public class UpdateReviewUseCase {
             throw new BusinessException("O timestamp de atualização não pode ser anterior à data de criação", HttpStatus.BAD_REQUEST, "INVALID_UPDATE_TIMESTAMP");
         }
         if (command.now().isAfter(maxEditWindow)) {
-            throw new BusinessException("A janela de edição de 24 horas expirou", HttpStatus.UNPROCESSABLE_CONTENT, "EDIT_WINDOW_EXPIRED");
+            throw new BusinessException("A janela permitida de 24 horas para edição expirou", HttpStatus.CONFLICT, "REVIEW_EDIT_WINDOW_EXPIRED");
         }
 
         // 5. Identificação precisa de alvos com alteração real de nota
@@ -131,8 +131,8 @@ public class UpdateReviewUseCase {
             if (helpfulCount > 0) {
                 throw new BusinessException(
                         "Não é permitido alterar notas de uma avaliação que já possui votos de útil",
-                        HttpStatus.UNPROCESSABLE_CONTENT,
-                        "RATING_EDIT_BLOCKED_BY_HELPFUL"
+                        HttpStatus.CONFLICT,
+                        "REVIEW_EDIT_RATING_BLOCKED_BY_HELPFUL"
                 );
             }
         }
@@ -142,9 +142,13 @@ public class UpdateReviewUseCase {
         Boolean newAnonymous = command.isAnonymous();
         boolean anonymousChanged = (newAnonymous != null && newAnonymous != oldAnonymous);
 
-        // 8. Mutação de Domínio
+        // 8. Mutação de Domínio (preserva experienceText caso não enviado no payload de PATCH)
+        String resolvedExperienceText = command.experienceText() != null
+                ? command.experienceText()
+                : review.getExperienceText();
+
         review.editContent(
-                command.experienceText(),
+                resolvedExperienceText,
                 command.targetRatings(),
                 command.isAnonymous(),
                 command.visibility(),

@@ -223,7 +223,7 @@ class ReviewLifecycleIntegrationTest {
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 updateReviewUseCase.execute(created.id(), author.getId(), ratingCmd));
-        assertEquals("RATING_EDIT_BLOCKED_BY_HELPFUL", ex.getErrorCode());
+        assertEquals("REVIEW_EDIT_RATING_BLOCKED_BY_HELPFUL", ex.getErrorCode());
 
         // Tentativa de alterar apenas texto: permitida com sucesso
         UpdateReviewCommand textCmd = new UpdateReviewCommand(
@@ -260,7 +260,7 @@ class ReviewLifecycleIntegrationTest {
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 updateReviewUseCase.execute(created.id(), author.getId(), cmd));
-        assertEquals("EDIT_WINDOW_EXPIRED", ex.getErrorCode());
+        assertEquals("REVIEW_EDIT_WINDOW_EXPIRED", ex.getErrorCode());
     }
 
     @Test

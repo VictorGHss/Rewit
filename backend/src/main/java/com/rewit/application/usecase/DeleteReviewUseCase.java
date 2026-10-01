@@ -8,7 +8,6 @@ import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewMedia;
-import com.rewit.domain.model.ReviewTarget;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -78,12 +77,12 @@ public class DeleteReviewUseCase {
 
         // 2. Autorização anti-IDOR
         if (!review.getUserId().equals(requesterId)) {
-            throw new BusinessException("Apenas o autor pode excluir a avaliação", HttpStatus.FORBIDDEN, "FORBIDDEN");
+            throw new BusinessException("Apenas o autor pode excluir a avaliação", HttpStatus.FORBIDDEN, "REVIEW_NOT_OWNED");
         }
 
         // 3. Validação de estado
         if (review.getStatus() == ReviewStatus.REMOVED) {
-            throw new BusinessException("A avaliação já se encontra removida", HttpStatus.UNPROCESSABLE_CONTENT, "REVIEW_ALREADY_REMOVED");
+            throw new BusinessException("A avaliação já se encontra removida", HttpStatus.CONFLICT, "REVIEW_ALREADY_REMOVED");
         }
 
         // 4. Mutação de Domínio para Soft Delete

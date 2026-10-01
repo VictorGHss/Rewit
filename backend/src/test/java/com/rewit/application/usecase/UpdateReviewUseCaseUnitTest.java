@@ -195,7 +195,7 @@ class UpdateReviewUseCaseUnitTest {
                 updateReviewUseCase.execute(reviewId, imposterId, command));
 
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
-        assertEquals("FORBIDDEN", ex.getErrorCode());
+        assertEquals("REVIEW_NOT_OWNED", ex.getErrorCode());
         verify(reviewRepository, never()).save(any());
         verifyNoInteractions(rateableTargetStatsRepository);
         verifyNoInteractions(reputationService);
@@ -229,7 +229,8 @@ class UpdateReviewUseCaseUnitTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 updateReviewUseCase.execute(reviewId, authorId, command));
 
-        assertEquals("INVALID_REVIEW_STATUS_FOR_EDIT", ex.getErrorCode());
+        assertEquals("REVIEW_UNDER_REVIEW_MUTATION_DENIED", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         verify(reviewRepository, never()).save(any());
     }
 
@@ -248,6 +249,7 @@ class UpdateReviewUseCaseUnitTest {
                 updateReviewUseCase.execute(reviewId, authorId, command));
 
         assertEquals("REVIEW_ALREADY_REMOVED", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         verify(reviewRepository, never()).save(any());
     }
 
@@ -277,7 +279,8 @@ class UpdateReviewUseCaseUnitTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 updateReviewUseCase.execute(reviewId, authorId, command));
 
-        assertEquals("EDIT_WINDOW_EXPIRED", ex.getErrorCode());
+        assertEquals("REVIEW_EDIT_WINDOW_EXPIRED", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         verify(reviewRepository, never()).save(any());
     }
 
@@ -315,7 +318,8 @@ class UpdateReviewUseCaseUnitTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 updateReviewUseCase.execute(reviewId, authorId, command));
 
-        assertEquals("RATING_EDIT_BLOCKED_BY_HELPFUL", ex.getErrorCode());
+        assertEquals("REVIEW_EDIT_RATING_BLOCKED_BY_HELPFUL", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         verify(reviewRepository, never()).save(any());
         verifyNoInteractions(rateableTargetStatsRepository);
     }

@@ -162,7 +162,7 @@ class DeleteReviewUseCaseUnitTest {
                 deleteReviewUseCase.execute(reviewId, imposterId, Instant.now()));
 
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
-        assertEquals("FORBIDDEN", ex.getErrorCode());
+        assertEquals("REVIEW_NOT_OWNED", ex.getErrorCode());
         verify(reviewRepository, never()).save(any());
         verifyNoInteractions(rateableTargetStatsRepository);
         verifyNoInteractions(reputationService);
@@ -178,6 +178,7 @@ class DeleteReviewUseCaseUnitTest {
                 deleteReviewUseCase.execute(reviewId, authorId, Instant.now()));
 
         assertEquals("REVIEW_ALREADY_REMOVED", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         verify(reviewRepository, never()).save(any());
         verifyNoInteractions(rateableTargetStatsRepository);
         verifyNoInteractions(reputationService);

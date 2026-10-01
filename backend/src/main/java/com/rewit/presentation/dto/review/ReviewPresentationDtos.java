@@ -5,14 +5,17 @@ import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
- * Contratos de DTO representacionais para a API REST de Reviews (Step 11.0).
+ * Contratos de DTO representacionais para a API REST de Reviews (Step 11.0 / Step 25.3).
  */
 public final class ReviewPresentationDtos {
 
@@ -60,6 +63,18 @@ public final class ReviewPresentationDtos {
             this(contextPlaceId, experienceText, isAnonymous, visibility, null, null, null, targets);
         }
     }
+
+    public record UpdateReviewRequest(
+            @Size(max = 2000, message = "O texto da avaliação não pode exceder 2000 caracteres")
+            String experienceText,
+
+            Map<UUID, @DecimalMin(value = "1.0", message = "A nota deve ser no mínimo 1.0") @DecimalMax(value = "5.0", message = "A nota deve ser no máximo 5.0") BigDecimal> targetRatings,
+
+            Boolean isAnonymous,
+
+            @Pattern(regexp = "^(?i)(PUBLIC|FOLLOWERS|PRIVATE)$", message = "Visibilidade inválida. Valores aceitos: PUBLIC, FOLLOWERS, PRIVATE")
+            String visibility
+    ) {}
 
     public record ReviewAuthorResponse(
             UUID id,
