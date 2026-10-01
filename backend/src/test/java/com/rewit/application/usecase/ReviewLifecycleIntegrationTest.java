@@ -8,20 +8,15 @@ import com.rewit.application.dto.ReviewDto.UpdateReviewCommand;
 import com.rewit.application.dto.reputation.ReputationDtos.ReputationView;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.RateableTargetRepository;
-import com.rewit.application.port.ReviewRepository;
-import com.rewit.application.port.ReviewTargetRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.ReputationService;
 import com.rewit.application.service.ReviewHelpfulService;
 import com.rewit.application.service.ReviewService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AuthProvider;
-import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.RateableTarget;
-import com.rewit.domain.model.Review;
-import com.rewit.domain.model.ReviewTarget;
 import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.entity.ReviewJpaEntity;
 import com.rewit.infrastructure.persistence.repository.CheckInJpaRepository;
@@ -57,12 +52,6 @@ class ReviewLifecycleIntegrationTest {
 
     @Autowired
     private ReviewService reviewService;
-
-    @Autowired
-    private ReviewRepository reviewRepository;
-
-    @Autowired
-    private ReviewTargetRepository reviewTargetRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -178,7 +167,7 @@ class ReviewLifecycleIntegrationTest {
                 editTime
         );
 
-        Review updatedReview = updateReviewUseCase.execute(created.id(), author.getId(), updateCmd);
+        updateReviewUseCase.execute(created.id(), author.getId(), updateCmd);
 
         // 3. Verificações no PostgreSQL:
         // Target 1 teve nota atualizada para 5.00:

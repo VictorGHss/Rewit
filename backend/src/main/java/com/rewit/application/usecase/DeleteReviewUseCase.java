@@ -94,7 +94,7 @@ public class DeleteReviewUseCase {
 
         // 6. Recálculo de RateableTargetStats para todos os alvos da review em ordem determinística (targetId ASC)
         review.getTargets().stream()
-                .map(ReviewTarget::getTargetId)
+                .map(target -> target.getTargetId())
                 .distinct()
                 .sorted()
                 .forEach(rateableTargetStatsRepository::recalculateAndSave);
