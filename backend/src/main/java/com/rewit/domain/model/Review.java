@@ -4,10 +4,12 @@ import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.CheckInStatus;
 import com.rewit.domain.enums.ReviewStatus;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -27,8 +29,8 @@ public class Review {
     private final UUID id;
     private final UUID userId;
     private final UUID contextPlaceId;
-    private final String experienceText;
-    private final boolean isAnonymous;
+    private String experienceText;
+    private boolean isAnonymous;
     private boolean isVerifiedOnSite; // Projeção/cache de leitura sincronizada por CheckIn
     private final Double userLatitude;
     private final Double userLongitude;
@@ -254,6 +256,140 @@ public class Review {
         }
         this.status = ReviewStatus.UNDER_REVIEW;
         this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Transiciona o status da avaliação para REMOVED quando solicitado pelo autor (Soft Delete).
+     * Permite transição a partir de ACTIVE ou UNDER_REVIEW.
+     * Rejeita se já estiver REMOVED ou em estado inconsistente.
+     *
+     * @param now instante explícito da mutação
+     */
+    public void markRemovedByAuthor(Instant now) {
+        validateTimestamp(now);
+        if (this.status == ReviewStatus.REMOVED) {
+            throw new BusinessException("A avaliação já se encontra removida", "REVIEW_ALREADY_REMOVED");
+        }
+        if (this.status != ReviewStatus.ACTIVE && this.status != ReviewStatus.UNDER_REVIEW) {
+            throw new BusinessException("Transição de estado inválida para remoção", "INVALID_REVIEW_STATUS_TRANSITION");
+        }
+        this.status = ReviewStatus.REMOVED;
+        this.updatedAt = now;
+    }
+
+    /**
+     * Edição controlada de propriedades editáveis pelo autor (texto, notas dos alvos existentes, anonimato e visibilidade).
+     * Rejeita se a avaliação não estiver ACTIVE (ex: REMOVED ou UNDER_REVIEW).
+     * Rejeita targetId não associado a esta avaliação (targets são estruturalmente imutáveis).
+     *
+     * @param experienceText novo texto de experiência
+     * @param targetRatings mapa de targetId para nova nota (pode ser nulo ou vazio)
+     * @param isAnonymous novo valor de anonimato (se nulo, mantém o atual)
+     * @param visibility novo valor de visibilidade (se nulo, mantém o atual)
+     * @param now timestamp explícito da mutação
+     */
+    public void editContent(String experienceText,
+                            Map<UUID, BigDecimal> targetRatings,
+                            Boolean isAnonymous,
+                            String visibility,
+                            Instant now) {
+        validateActiveForEdit();
+        validateTimestamp(now);
+
+        this.experienceText = experienceText;
+
+        if (targetRatings != null && !targetRatings.isEmpty()) {
+            for (Map.Entry<UUID, BigDecimal> entry : targetRatings.entrySet()) {
+                UUID targetId = entry.getKey();
+                BigDecimal newRating = entry.getValue();
+
+                if (targetId == null) {
+                    throw new BusinessException("O identificador do alvo avaliado é obrigatório", "MISSING_TARGET_ID");
+                }
+
+                ReviewTarget target = this.targets.stream()
+                        .filter(t -> t.getTargetId().equals(targetId))
+                        .findFirst()
+                        .orElseThrow(() -> new BusinessException("Alvo avaliado não pertence a esta avaliação", "TARGET_NOT_FOUND"));
+
+                target.updateRating(newRating);
+            }
+        }
+
+        if (isAnonymous != null) {
+            this.isAnonymous = isAnonymous;
+        }
+
+        if (visibility != null) {
+            this.visibility = normalizeAndValidateVisibility(visibility);
+        }
+
+        this.updatedAt = now;
+    }
+
+    /**
+     * Atualiza o texto da experiência da avaliação de forma controlada.
+     */
+    public void updateExperienceText(String experienceText, Instant now) {
+        validateActiveForEdit();
+        validateTimestamp(now);
+        this.experienceText = experienceText;
+        this.updatedAt = now;
+    }
+
+    /**
+     * Atualiza a nota de um alvo avaliado específico pertencente a esta publicação.
+     */
+    public void updateTargetRating(UUID targetId, BigDecimal newRating, Instant now) {
+        validateActiveForEdit();
+        validateTimestamp(now);
+
+        if (targetId == null) {
+            throw new BusinessException("O identificador do alvo avaliado é obrigatório", "MISSING_TARGET_ID");
+        }
+
+        ReviewTarget target = this.targets.stream()
+                .filter(t -> t.getTargetId().equals(targetId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException("Alvo avaliado não pertence a esta avaliação", "TARGET_NOT_FOUND"));
+
+        target.updateRating(newRating);
+        this.updatedAt = now;
+    }
+
+    /**
+     * Atualiza a opção de anonimato da publicação.
+     */
+    public void updateAnonymous(boolean isAnonymous, Instant now) {
+        validateActiveForEdit();
+        validateTimestamp(now);
+        this.isAnonymous = isAnonymous;
+        this.updatedAt = now;
+    }
+
+    /**
+     * Atualiza a visibilidade da publicação.
+     */
+    public void updateVisibility(String visibility, Instant now) {
+        validateActiveForEdit();
+        validateTimestamp(now);
+        this.visibility = normalizeAndValidateVisibility(visibility);
+        this.updatedAt = now;
+    }
+
+    private void validateActiveForEdit() {
+        if (this.status == ReviewStatus.REMOVED) {
+            throw new BusinessException("Avaliações removidas não podem ser editadas", "REVIEW_ALREADY_REMOVED");
+        }
+        if (this.status != ReviewStatus.ACTIVE) {
+            throw new BusinessException("Apenas avaliações ativas podem ser editadas", "INVALID_REVIEW_STATUS_FOR_EDIT");
+        }
+    }
+
+    private static void validateTimestamp(Instant timestamp) {
+        if (timestamp == null) {
+            throw new BusinessException("O timestamp de atualização é obrigatório", "MISSING_UPDATE_TIMESTAMP");
+        }
     }
 
     public Instant getCreatedAt() {

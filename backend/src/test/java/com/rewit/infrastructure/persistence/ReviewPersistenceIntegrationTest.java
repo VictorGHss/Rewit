@@ -11,6 +11,7 @@ import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.ReviewService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.RateableTarget;
@@ -31,7 +32,10 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -376,5 +380,119 @@ class ReviewPersistenceIntegrationTest {
 
         assertEquals(initialReviewsCount, finalReviewsCount, "O Review inserido antes da falha deve ter sido completamente revertido pelo ROLLBACK");
         assertEquals(initialTargetsCount, finalTargetsCount, "O ReviewTarget inserido antes da falha deve ter sido completamente revertido pelo ROLLBACK");
+    }
+
+    @Test
+    @DisplayName("Caso H: findByIdForUpdate recupera Review existente com lock pessimista e targets hidratados")
+    void shouldAcquirePessimisticLockViaFindByIdForUpdate() {
+        User user = createActiveUser();
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView created = reviewService.createReview(new CreateReviewCommand(
+                user.getId(),
+                null,
+                "Review para lock pessimista",
+                false,
+                "PUBLIC",
+                null,
+                null,
+                null,
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.5"), "Muito bom"))
+        ));
+
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+
+        Review lockedReview = template.execute(status -> {
+            Optional<Review> opt = reviewRepository.findByIdForUpdate(created.id());
+            assertTrue(opt.isPresent(), "findByIdForUpdate deve recuperar a Review existente");
+            return opt.get();
+        });
+
+        assertNotNull(lockedReview);
+        assertEquals(created.id(), lockedReview.getId());
+        assertEquals(user.getId(), lockedReview.getUserId());
+        assertEquals("Review para lock pessimista", lockedReview.getExperienceText());
+        assertEquals(ReviewStatus.ACTIVE, lockedReview.getStatus());
+        assertEquals(1, lockedReview.getTargets().size());
+        assertEquals(target.getId(), lockedReview.getTargets().get(0).getTargetId());
+        assertEquals(new BigDecimal("4.5"), lockedReview.getTargets().get(0).getRating());
+    }
+
+    @Test
+    @DisplayName("Caso I: findByIdForUpdate retorna Optional.empty para ID inexistente")
+    void shouldReturnEmptyWhenReviewNotFoundInFindByIdForUpdate() {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+
+        Optional<Review> opt = template.execute(status -> reviewRepository.findByIdForUpdate(UUID.randomUUID()));
+
+        assertNotNull(opt);
+        assertTrue(opt.isEmpty(), "findByIdForUpdate deve retornar Optional.empty quando o reviewId não existir");
+    }
+
+    @Test
+    @DisplayName("Caso J: save persiste transição de status para REMOVED mantendo targets intactos no banco")
+    void shouldPersistSoftDeleteAndPreserveTargetsInDatabase() {
+        User user = createActiveUser();
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView created = reviewService.createReview(new CreateReviewCommand(
+                user.getId(),
+                null,
+                "Review para soft delete",
+                false,
+                "PUBLIC",
+                null,
+                null,
+                null,
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.0"), "Bom"))
+        ));
+
+        Review review = reviewRepository.findById(created.id()).orElseThrow();
+        assertEquals(ReviewStatus.ACTIVE, review.getStatus());
+
+        Instant deleteTime = Instant.now().plusSeconds(120).truncatedTo(ChronoUnit.MICROS);
+        review.markRemovedByAuthor(deleteTime);
+        reviewRepository.save(review);
+
+        ReviewJpaEntity dbEntity = reviewJpaRepository.findById(created.id()).orElseThrow();
+        assertEquals("REMOVED", dbEntity.getStatus());
+        assertEquals(deleteTime, dbEntity.getUpdatedAt());
+
+        List<ReviewTargetJpaEntity> targetsInDb = reviewTargetJpaRepository.findByReviewId(created.id());
+        assertEquals(1, targetsInDb.size(), "Alvos avaliados não devem ser apagados fisicamente no soft delete");
+        assertEquals(target.getId(), targetsInDb.get(0).getTargetId());
+    }
+
+    @Test
+    @DisplayName("Caso K: save persiste edição de experienceText e visibilidade mantendo createdAt inalterado")
+    void shouldPersistEditedContentAndPreserveCreatedAt() {
+        User user = createActiveUser();
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView created = reviewService.createReview(new CreateReviewCommand(
+                user.getId(),
+                null,
+                "Texto antes da edição",
+                false,
+                "PUBLIC",
+                null,
+                null,
+                null,
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("3.5"), "Médio"))
+        ));
+
+        Review review = reviewRepository.findById(created.id()).orElseThrow();
+        Instant originalCreatedAt = review.getCreatedAt();
+        Instant editTime = Instant.now().plusSeconds(300).truncatedTo(ChronoUnit.MICROS);
+
+        review.editContent("Texto após edição com sucesso", null, true, "PRIVATE", editTime);
+        reviewRepository.save(review);
+
+        ReviewJpaEntity dbEntity = reviewJpaRepository.findById(created.id()).orElseThrow();
+        assertEquals("Texto após edição com sucesso", dbEntity.getExperienceText());
+        assertTrue(dbEntity.isAnonymous());
+        assertEquals("PRIVATE", dbEntity.getVisibility());
+        assertEquals(editTime, dbEntity.getUpdatedAt());
+        assertEquals(originalCreatedAt, dbEntity.getCreatedAt(), "createdAt deve permanecer estritamente inalterado");
     }
 }

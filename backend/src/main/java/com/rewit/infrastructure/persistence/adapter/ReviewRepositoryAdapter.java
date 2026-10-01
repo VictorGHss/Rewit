@@ -76,6 +76,7 @@ public class ReviewRepositoryAdapter implements ReviewRepository {
     }
 
     @Override
+    @Transactional
     public Optional<Review> findByIdForUpdate(UUID id) {
         if (id == null) {
             return Optional.empty();

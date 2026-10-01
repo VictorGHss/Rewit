@@ -15,7 +15,7 @@ public class ReviewTarget {
     private final UUID id;
     private final UUID reviewId;
     private final UUID targetId;
-    private final BigDecimal rating;
+    private BigDecimal rating;
     private final String specificComment;
     private final Instant createdAt;
 
@@ -59,6 +59,19 @@ public class ReviewTarget {
 
     public BigDecimal getRating() {
         return rating;
+    }
+
+    /**
+     * Atualiza a nota atribuída ao alvo dentro dos limites válidos [1.0, 5.0] com no máximo uma casa decimal.
+     */
+    public void updateRating(BigDecimal newRating) {
+        if (newRating == null || newRating.compareTo(BigDecimal.valueOf(1.0)) < 0 || newRating.compareTo(BigDecimal.valueOf(5.0)) > 0) {
+            throw new BusinessException("A nota de avaliação deve estar rigorosamente entre 1.0 e 5.0", "INVALID_RATING_RANGE");
+        }
+        if (newRating.scale() > 1) {
+            throw new BusinessException("A nota deve possuir no máximo uma casa decimal", "INVALID_RATING_PRECISION");
+        }
+        this.rating = newRating;
     }
 
     public String getSpecificComment() {
