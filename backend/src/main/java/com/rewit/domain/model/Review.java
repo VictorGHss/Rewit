@@ -278,6 +278,44 @@ public class Review {
     }
 
     /**
+     * Transiciona o status da avaliação para REMOVED por ação de moderação administrativa.
+     * Permite transição a partir de ACTIVE ou UNDER_REVIEW.
+     * Rejeita se já estiver REMOVED.
+     *
+     * @param now instante explícito da mutação
+     */
+    public void markRemovedByModerator(Instant now) {
+        validateTimestamp(now);
+        if (this.status == ReviewStatus.REMOVED) {
+            throw new BusinessException("A avaliação já se encontra removida", "REVIEW_ALREADY_REMOVED");
+        }
+        if (this.status != ReviewStatus.ACTIVE && this.status != ReviewStatus.UNDER_REVIEW) {
+            throw new BusinessException("Transição de estado inválida para remoção", "INVALID_REVIEW_STATUS_TRANSITION");
+        }
+        this.status = ReviewStatus.REMOVED;
+        this.updatedAt = now;
+    }
+
+    /**
+     * Restaura o status da avaliação de UNDER_REVIEW para ACTIVE após decisão de moderação.
+     * Permite exclusivamente transição a partir de UNDER_REVIEW.
+     * Rejeita se já estiver ACTIVE ou REMOVED.
+     *
+     * @param now instante explícito da mutação
+     */
+    public void restoreFromUnderReview(Instant now) {
+        validateTimestamp(now);
+        if (this.status == ReviewStatus.ACTIVE) {
+            throw new BusinessException("A avaliação já se encontra ativa", "REVIEW_ALREADY_ACTIVE");
+        }
+        if (this.status != ReviewStatus.UNDER_REVIEW) {
+            throw new BusinessException("Transição de estado inválida para restauração", "INVALID_REVIEW_STATUS_TRANSITION");
+        }
+        this.status = ReviewStatus.ACTIVE;
+        this.updatedAt = now;
+    }
+
+    /**
      * Edição controlada de propriedades editáveis pelo autor (texto, notas dos alvos existentes, anonimato e visibilidade).
      * Rejeita se a avaliação não estiver ACTIVE (ex: REMOVED ou UNDER_REVIEW).
      * Rejeita targetId não associado a esta avaliação (targets são estruturalmente imutáveis).

@@ -76,6 +76,39 @@ public class Report {
         return status;
     }
 
+    /**
+     * Resolve a denúncia como deferida/aceita (ACCEPTED).
+     * Rejeita se a denúncia já estiver resolvida (ACCEPTED ou REJECTED).
+     *
+     * @param now instante explícito da resolução
+     */
+    public void resolveAsAccepted(Instant now) {
+        validateResolution(now);
+        this.status = ReportStatus.ACCEPTED;
+        this.updatedAt = now;
+    }
+
+    /**
+     * Resolve a denúncia como indeferida/rejeitada (REJECTED).
+     * Rejeita se a denúncia já estiver resolvida (ACCEPTED ou REJECTED).
+     *
+     * @param now instante explícito da resolução
+     */
+    public void resolveAsRejected(Instant now) {
+        validateResolution(now);
+        this.status = ReportStatus.REJECTED;
+        this.updatedAt = now;
+    }
+
+    private void validateResolution(Instant now) {
+        if (now == null) {
+            throw new BusinessException("O timestamp de atualização é obrigatório", "MISSING_UPDATE_TIMESTAMP");
+        }
+        if (this.status != ReportStatus.PENDING) {
+            throw new BusinessException("A denúncia já se encontra resolvida", "REPORT_ALREADY_RESOLVED");
+        }
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

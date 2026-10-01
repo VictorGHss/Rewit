@@ -184,17 +184,53 @@ class FlywayMigrationScriptTest {
     }
 
     @Test
-    @DisplayName("Todas as migrações Flyway devem existir e manter sequência ordenada (V1, V2, V3, V4, V5)")
+    @DisplayName("V11__governance_roles_and_audit.sql deve existir e conter roles e tabela de auditoria")
+    void shouldValidateV11MigrationScriptContents() throws Exception {
+        InputStream is = getClass().getResourceAsStream("/db/migration/V11__governance_roles_and_audit.sql");
+        assertNotNull(is, "O script de migração Flyway V11__governance_roles_and_audit.sql deve estar presente no classpath");
+
+        String sql = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+
+        // 1. Role em users
+        assertTrue(sql.contains("role VARCHAR(32) NOT NULL DEFAULT 'USER'"), "V11 deve adicionar coluna role com default USER");
+        assertTrue(sql.contains("chk_users_role"), "V11 deve conter constraint de roles");
+        assertTrue(sql.contains("USER"), "V11 deve permitir USER");
+        assertTrue(sql.contains("MODERATOR"), "V11 deve permitir MODERATOR");
+        assertTrue(sql.contains("ADMIN"), "V11 deve permitir ADMIN");
+
+        // 2. Tabela de auditoria
+        assertTrue(sql.contains("CREATE TABLE moderation_audit_logs") || sql.contains("CREATE TABLE IF NOT EXISTS moderation_audit_logs"),
+                "V11 deve criar a tabela moderation_audit_logs");
+        assertTrue(sql.contains("review_id UUID NOT NULL"), "V11 deve conter review_id");
+        assertTrue(sql.contains("moderator_user_id UUID NOT NULL"), "V11 deve conter moderator_user_id");
+        assertTrue(sql.contains("action VARCHAR(32) NOT NULL"), "V11 deve conter action");
+        assertTrue(sql.contains("decision VARCHAR(32) NOT NULL"), "V11 deve conter decision");
+        assertTrue(sql.contains("reason_code VARCHAR(64) NOT NULL"), "V11 deve conter reason_code");
+        assertTrue(sql.contains("justification TEXT NOT NULL"), "V11 deve conter justification");
+        assertTrue(sql.contains("previous_review_status VARCHAR(32) NOT NULL"), "V11 deve conter previous_review_status");
+        assertTrue(sql.contains("new_review_status VARCHAR(32) NOT NULL"), "V11 deve conter new_review_status");
+        assertTrue(sql.contains("reports_affected_count INT NOT NULL DEFAULT 0"), "V11 deve conter reports_affected_count");
+        assertTrue(sql.contains("ON DELETE RESTRICT"), "V11 deve conter ON DELETE RESTRICT para moderator_user_id");
+
+        // 3. Índices de auditoria
+        assertTrue(sql.contains("idx_moderation_audit_review"), "V11 deve conter índice para review_id");
+        assertTrue(sql.contains("idx_moderation_audit_moderator"), "V11 deve conter índice para moderator_user_id");
+        assertTrue(sql.contains("idx_moderation_audit_created"), "V11 deve conter índice para created_at");
+    }
+
+    @Test
+    @DisplayName("Todas as migrações Flyway devem existir e manter sequência ordenada (V1 a V11)")
     void shouldEnsureMigrationsAreOrderedAndConsecutive() {
-        assertNotNull(getClass().getResourceAsStream("/db/migration/V1__initial_schema.sql"),
-                "V1 deve existir no classpath");
-        assertNotNull(getClass().getResourceAsStream("/db/migration/V2__domain_consolidation.sql"),
-                "V2 deve existir no classpath");
-        assertNotNull(getClass().getResourceAsStream("/db/migration/V3__domain_integrity_refinement.sql"),
-                "V3 deve existir no classpath");
-        assertNotNull(getClass().getResourceAsStream("/db/migration/V4__identity_integrity.sql"),
-                "V4 deve existir no classpath");
-        assertNotNull(getClass().getResourceAsStream("/db/migration/V5__authentication_sessions.sql"),
-                "V5 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V1__initial_schema.sql"), "V1 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V2__domain_consolidation.sql"), "V2 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V3__domain_integrity_refinement.sql"), "V3 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V4__identity_integrity.sql"), "V4 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V5__authentication_sessions.sql"), "V5 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V6__external_reference_unbounded_id.sql"), "V6 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V7__review_listing_indexes.sql"), "V7 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V8__review_reports.sql"), "V8 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V9__review_media.sql"), "V9 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V10__user_reputation.sql"), "V10 deve existir no classpath");
+        assertNotNull(getClass().getResourceAsStream("/db/migration/V11__governance_roles_and_audit.sql"), "V11 deve existir no classpath");
     }
 }

@@ -27,6 +27,9 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import com.rewit.domain.enums.Role;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -42,6 +45,7 @@ import java.util.Map;
  */
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private final String jwtSecret;
@@ -111,6 +115,19 @@ public class SecurityConfig {
     public JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
         converter.setPrincipalClaimName("sub");
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            String role = jwt.getClaimAsString("role");
+            if (role == null || role.isBlank()) {
+                return List.of(new SimpleGrantedAuthority(Role.USER.getAuthority()));
+            }
+            Role resolvedRole;
+            try {
+                resolvedRole = Role.valueOf(role.trim().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                resolvedRole = Role.USER;
+            }
+            return List.of(new SimpleGrantedAuthority(resolvedRole.getAuthority()));
+        });
         return converter;
     }
 

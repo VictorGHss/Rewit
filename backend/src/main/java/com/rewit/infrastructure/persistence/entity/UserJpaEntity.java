@@ -1,6 +1,7 @@
 package com.rewit.infrastructure.persistence.entity;
 
 import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.enums.Role;
 import com.rewit.domain.model.User;
 import jakarta.persistence.*;
 
@@ -9,7 +10,7 @@ import java.util.UUID;
 
 /**
  * Entidade JPA mapeando a tabela users no PostgreSQL.
- * Valida com o schema gerado pelas migrations Flyway V1 -> V4.
+ * Valida com o schema gerado pelas migrations Flyway V1 -> V4 e V11.
  * Mantida estritamente isolada na camada de infraestrutura.
  */
 @Entity
@@ -32,6 +33,10 @@ public class UserJpaEntity {
 
     @Column(name = "provider_user_id", length = 128)
     private String providerUserId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false, length = 32)
+    private Role role = Role.USER;
 
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
@@ -81,6 +86,7 @@ public class UserJpaEntity {
                 this.providerUserId,
                 this.isActive,
                 this.isVerified,
+                this.role != null ? this.role : Role.USER,
                 this.deletedAt,
                 this.createdAt,
                 this.updatedAt
@@ -98,6 +104,7 @@ public class UserJpaEntity {
         entity.setPasswordHash(user.getPasswordHash());
         entity.setAuthProvider(user.getAuthProvider());
         entity.setProviderUserId(user.getProviderUserId());
+        entity.setRole(user.getRole() != null ? user.getRole() : Role.USER);
         entity.setActive(user.isActive());
         entity.setVerified(user.isVerified());
         entity.setDeletedAt(user.getDeletedAt());
@@ -114,6 +121,7 @@ public class UserJpaEntity {
         this.passwordHash = user.getPasswordHash();
         this.authProvider = user.getAuthProvider();
         this.providerUserId = user.getProviderUserId();
+        this.role = user.getRole() != null ? user.getRole() : Role.USER;
         this.isActive = user.isActive();
         this.isVerified = user.isVerified();
         this.deletedAt = user.getDeletedAt();
@@ -190,6 +198,14 @@ public class UserJpaEntity {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Role getRole() {
+        return role;
+    }
+
+    public void setRole(Role role) {
+        this.role = role != null ? role : Role.USER;
     }
 
     public Instant getUpdatedAt() {

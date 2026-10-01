@@ -5,6 +5,7 @@ import com.nimbusds.jose.crypto.MACSigner;
 import com.nimbusds.jose.crypto.MACVerifier;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import com.rewit.domain.enums.Role;
 import com.rewit.application.port.TokenService;
 import com.rewit.common.exception.BusinessException;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,7 +49,13 @@ public class JwtTokenService implements TokenService {
 
     @Override
     public String generateAccessToken(UUID userId) {
+        return generateAccessToken(userId, Role.USER);
+    }
+
+    @Override
+    public String generateAccessToken(UUID userId, Role role) {
         Objects.requireNonNull(userId, "userId cannot be null");
+        Role effectiveRole = role != null ? role : Role.USER;
         Instant now = Instant.now();
         Instant expiry = now.plusSeconds(accessTokenTtlSeconds);
 
@@ -56,6 +63,7 @@ public class JwtTokenService implements TokenService {
                 .issuer(issuer)
                 .subject(userId.toString())
                 .audience(audience)
+                .claim("role", effectiveRole.name())
                 .issueTime(Date.from(now))
                 .expirationTime(Date.from(expiry))
                 .jwtID(UUID.randomUUID().toString())
@@ -94,6 +102,28 @@ public class JwtTokenService implements TokenService {
 
     @Override
     public UUID extractUserIdFromAccessToken(String token) {
+        JWTClaimsSet claims = validateAndGetClaims(token);
+        String sub = claims.getSubject();
+        if (sub == null || sub.isBlank()) {
+            throw new BusinessException("Identificador do sujeito ausente no token", "INVALID_TOKEN");
+        }
+        return UUID.fromString(sub);
+    }
+
+    public Role extractRoleFromAccessToken(String token) {
+        JWTClaimsSet claims = validateAndGetClaims(token);
+        Object roleClaim = claims.getClaim("role");
+        if (roleClaim instanceof String roleStr && !roleStr.isBlank()) {
+            try {
+                return Role.valueOf(roleStr.trim().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return Role.USER;
+            }
+        }
+        return Role.USER;
+    }
+
+    private JWTClaimsSet validateAndGetClaims(String token) {
         if (token == null || token.isBlank()) {
             throw new BusinessException("Token JWT não informado", "AUTHENTICATION_REQUIRED");
         }
@@ -133,11 +163,7 @@ public class JwtTokenService implements TokenService {
                 throw new BusinessException("Destinatário do token inválido", "INVALID_TOKEN");
             }
 
-            String sub = claims.getSubject();
-            if (sub == null || sub.isBlank()) {
-                throw new BusinessException("Identificador do sujeito ausente no token", "INVALID_TOKEN");
-            }
-            return UUID.fromString(sub);
+            return claims;
         } catch (BusinessException be) {
             throw be;
         } catch (Exception e) {

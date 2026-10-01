@@ -157,7 +157,7 @@ public class AuthService {
         currentSession.rotate(savedNewSession.getId());
         authSessionRepository.save(currentSession);
 
-        String newAccessToken = tokenService.generateAccessToken(user.getId());
+        String newAccessToken = tokenService.generateAccessToken(user.getId(), user.getRole());
 
         return new AuthResult(user, profile, newAccessToken, newRawRefreshToken, tokenService.getAccessTokenTtlSeconds());
     }
@@ -195,7 +195,7 @@ public class AuthService {
     }
 
     private AuthResult createSessionAndGenerateResult(User user, Profile profile, String userAgent, String ipAddress) {
-        String accessToken = tokenService.generateAccessToken(user.getId());
+        String accessToken = tokenService.generateAccessToken(user.getId(), user.getRole());
         String rawRefreshToken = tokenService.generateRefreshToken();
         String tokenHash = tokenService.hashRefreshToken(rawRefreshToken);
         Instant expiresAt = Instant.now().plusSeconds(tokenService.getRefreshTokenTtlSeconds());

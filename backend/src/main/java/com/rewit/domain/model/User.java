@@ -2,6 +2,7 @@ package com.rewit.domain.model;
 
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.enums.Role;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -19,6 +20,7 @@ public class User {
     private final String providerUserId;
     private boolean isActive;
     private boolean isVerified;
+    private Role role;
     private Instant deletedAt;
     private final Instant createdAt;
     private Instant updatedAt;
@@ -31,13 +33,14 @@ public class User {
         this.providerUserId = providerUserId != null && !providerUserId.isBlank() ? providerUserId.trim() : null;
         this.isActive = true;
         this.isVerified = false;
+        this.role = Role.USER;
         this.deletedAt = null;
         this.createdAt = Instant.now();
         this.updatedAt = Instant.now();
     }
 
     private User(UUID id, String email, String passwordHash, AuthProvider authProvider,
-                 String providerUserId, boolean isActive, boolean isVerified,
+                 String providerUserId, boolean isActive, boolean isVerified, Role role,
                  Instant deletedAt, Instant createdAt, Instant updatedAt) {
         this.id = id;
         this.email = email;
@@ -46,6 +49,7 @@ public class User {
         this.providerUserId = providerUserId;
         this.isActive = isActive;
         this.isVerified = isVerified;
+        this.role = role != null ? role : Role.USER;
         this.deletedAt = deletedAt;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
@@ -62,10 +66,10 @@ public class User {
     }
 
     /**
-     * Reconstrói uma instância de User a partir da camada de persistência.
+     * Reconstrói uma instância de User a partir da camada de persistência com papel (Role).
      */
     public static User rehydrate(UUID id, String email, String passwordHash, AuthProvider authProvider,
-                                 String providerUserId, boolean isActive, boolean isVerified,
+                                 String providerUserId, boolean isActive, boolean isVerified, Role role,
                                  Instant deletedAt, Instant createdAt, Instant updatedAt) {
         if (id == null) {
             throw new BusinessException("O identificador do usuário é obrigatório", "MISSING_USER_ID");
@@ -73,9 +77,19 @@ public class User {
         return new User(id, normalizeEmail(email), passwordHash,
                 authProvider != null ? authProvider : AuthProvider.LOCAL,
                 providerUserId != null && !providerUserId.isBlank() ? providerUserId.trim() : null,
-                isActive, isVerified, deletedAt,
+                isActive, isVerified, role != null ? role : Role.USER, deletedAt,
                 createdAt != null ? createdAt : Instant.now(),
                 updatedAt != null ? updatedAt : Instant.now());
+    }
+
+    /**
+     * Reconstrói uma instância de User a partir da camada de persistência (retrocompatibilidade, default USER).
+     */
+    public static User rehydrate(UUID id, String email, String passwordHash, AuthProvider authProvider,
+                                 String providerUserId, boolean isActive, boolean isVerified,
+                                 Instant deletedAt, Instant createdAt, Instant updatedAt) {
+        return rehydrate(id, email, passwordHash, authProvider, providerUserId, isActive, isVerified, Role.USER,
+                deletedAt, createdAt, updatedAt);
     }
 
     public void softDelete() {
@@ -118,6 +132,18 @@ public class User {
 
     public void setVerified(boolean verified) {
         this.isVerified = verified;
+        this.updatedAt = Instant.now();
+    }
+
+    public Role getRole() {
+        return role != null ? role : Role.USER;
+    }
+
+    public void changeRole(Role newRole) {
+        if (newRole == null) {
+            throw new BusinessException("O papel (Role) do usuário é obrigatório", "MISSING_ROLE");
+        }
+        this.role = newRole;
         this.updatedAt = Instant.now();
     }
 

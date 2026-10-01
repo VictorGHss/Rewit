@@ -1,5 +1,7 @@
 package com.rewit.application.port;
 
+import com.rewit.domain.enums.Role;
+
 import java.util.UUID;
 
 /**
@@ -8,6 +10,8 @@ import java.util.UUID;
 public interface TokenService {
 
     String generateAccessToken(UUID userId);
+
+    String generateAccessToken(UUID userId, Role role);
 
     String generateRefreshToken();
 
