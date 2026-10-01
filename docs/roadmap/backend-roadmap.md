@@ -2,10 +2,10 @@
 
 > **Data de Atualização**: 01/10/2026  
 > **Status do Repositório**: Verde e Estabilizado  
-> **Checkpoint Atual (HEAD)**: `8045614`  
+> **Checkpoint Atual (HEAD)**: `fb9fd5e`  
 > **Branch**: `main` (ahead do origin em commits consolidados)  
-> **Total de Testes Automatizados**: `1001` (0 failures, 0 errors, 0 skipped)  
-> **Working Tree**: `clean`  
+> **Total de Testes Automatizados**: `1016` (0 failures, 0 errors, 0 skipped)  
+> **Working Tree**: `3 arquivos de teste com alterações cosméticas unstaged (ver 7.7)`  
 
 ---
 
@@ -22,7 +22,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1001, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`.
+*Resultado esperado*: `Tests run: 1016, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -72,7 +72,7 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Feed V1 (Social Cronológico)** | ✅ CONCLUÍDO | [FeedController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/FeedController.java), `GET /api/v1/feed`, estritamente cronológico, seguidos diretos, sem N+1. | Manter congelado sem alterações. |
 | **Feed V2 (Ranking & Relevância)** | ✅ CONCLUÍDO — versão social + Cold Start | [FeedV2Controller.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/FeedV2Controller.java), [FeedV2QueryService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2QueryService.java), [FeedV2Service.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Service.java), [FeedV2Hydrator.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/FeedV2Hydrator.java), [FeedCandidateRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/FeedCandidateRepositoryAdapter.java). | Pipeline completo com fallback de Cold Start determinístico e sem N+1. |
 | **Ciclo de Vida do Conteúdo (Content Lifecycle)** | ✅ CONCLUÍDO | [UpdateReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/UpdateReviewUseCase.java), [DeleteReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/DeleteReviewUseCase.java), [ReviewController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewController.java), [ReviewLifecycleIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ReviewLifecycleIntegrationTest.java), [ReviewLifecycleControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/ReviewLifecycleControllerIntegrationTest.java). | PATCH/DELETE funcionais, janela de 24h, trava de helpful, soft delete, lock pessimista, recomputação integral de stats no PG. |
-| **Moderação Administrativa (Backoffice)** | 🔄 EM ANDAMENTO — STEP 26.1, 26.1.1, 26.2 e 26.2.1 Concluídos | Fundação V11, [ModerateReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/ModerateReviewUseCase.java), [QueryAdminReportsUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/QueryAdminReportsUseCase.java), [ReportDtos.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/dto/report/ReportDtos.java), extensões em [ReportRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/port/ReportRepository.java), [ReportRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/ReportRepositoryAdapter.java), [ReportJpaRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/repository/ReportJpaRepository.java), [ModerationAuditLogJpaRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/repository/ModerationAuditLogJpaRepository.java), testes [ModerateReviewUseCaseUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ModerateReviewUseCaseUnitTest.java), [QueryAdminReportsUseCaseUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/QueryAdminReportsUseCaseUnitTest.java), [ModerateReviewIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ModerateReviewIntegrationTest.java). | STEP 26.3 — Exposição HTTP da API de Moderação (Presentation Layer). |
+| **Moderação Administrativa (Backoffice)** | ✅ CONCLUÍDO — STEPs 26.1 a 26.3 Concluídos | Fundação V11, [ModerateReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/ModerateReviewUseCase.java), [QueryAdminReportsUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/QueryAdminReportsUseCase.java), [AdminModerationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/AdminModerationController.java), [AdminModerationDtos.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/dto/admin/AdminModerationDtos.java), correção de `GlobalExceptionHandler` para 403 correto, testes [AdminModerationControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/AdminModerationControllerIntegrationTest.java), auditoria de Git e limpeza de diagnostics (26.3.1/26.3.2). | Próximo: Jobs assíncronos (Outbox Pattern) ou novas features. |
 | **Jobs Assíncronos & Outbox** | ⏳ PENDENTE | Todas as operações são síncronas/transacionais no PostgreSQL. | Criar padrão de Outbox transacional no banco. |
 | **Observabilidade Avançada & Deploy** | ⏳ PENDENTE | Actuator básico habilitado; sem tracing distribuído ou logs estruturados JSON. | Configurar exportação Prometheus/OTel para produção. |
 | **Cache Distribuído em Redis** | 🔮 FUTURO ADIADO | Redis conectado mas sem cache de queries complexas. | Introduzir apenas sob saturação medida do PostgreSQL. |
@@ -120,6 +120,8 @@ Os principais marcos de evolução do backend encontram-se registrados nos commi
 * `a74397f` — *chore: limpar diagnostics de roles e jwt* (STEP 26.1.1: eliminação dos 12 diagnostics `67109822` em `JwtRoleSecurityTest` e `RoleTest`, substituição de method references por lambdas explícitas, 0 warnings, 962 testes verdes).
 * `e00ce33` — *feat: implementar casos de uso de moderacao administrativa* (STEP 26.2: `ModerateReviewUseCase` sob lock pessimista com resolução em lote de reports, audit log append-only, recomputação integral de stats no PostgreSQL, recálculo factual de reputação, soft delete de mídias e preservação de check-ins; `QueryAdminReportsUseCase` com filtros dinâmicos, paginação defensiva, ordenação determinística e projeção sem N+1; 39 novos testes automatizados).
 * `8045614` — *chore: limpar diagnostics dos testes de moderacao administrativa* (STEP 26.2.1: eliminação dos 8 diagnostics de severidade 4 correspondentes a imports e campo `placeRepository` não utilizados nos testes de moderação administrativa, 0 warnings, suíte completa consolidada em 1001 testes verdes).
+* `b1b7871` — *feat: implementar HTTP admin moderation (STEP 26.3)* (`AdminModerationController` com endpoints `GET /api/v1/admin/reports` e `POST /api/v1/admin/reviews/{reviewId}/moderate`, DTOs de apresentação `AdminModerationDtos`, correção do `GlobalExceptionHandler` para re-lançar `AccessDeniedException`/`AuthenticationException` evitando captura indevida como 500, 15 testes de integração MockMvc cobrindo 401/403 de segurança, remoção e restauração por MODERATOR/ADMIN, 404/409 de negócio e validação Bean Validation; 1016 testes verdes, 0 failures, 0 errors).
+* `fb9fd5e` — *chore: limpar diagnostics do teste de http admin* (STEP 26.3.2: eliminação dos 4 diagnostics em `AdminModerationControllerIntegrationTest` — imports `AuthProvider`/`User` não utilizados, campo `userRepository` e helper `restoreRequest()` sem referências; diff exclusivamente de deleção, zero alteração comportamental, 1016 testes verdes, 0 diagnostics).
 
 ---
 
@@ -542,14 +544,67 @@ Após a implementação funcional do STEP 26.2, uma etapa pontual de manutençã
 
 ---
 
-### 7.6 Próximo Incremento de Moderação Administrativa
+### 7.6 STEP 26.3 — Exposição HTTP da API de Moderação (✅ CONCLUÍDO)
 
-O próximo passo do subsistema de moderação administrativa é:
+A camada de apresentação HTTP foi implementada no commit `b1b7871`, expondo os casos de uso do STEP 26.2 através de endpoints REST protegidos por roles:
 
-* **STEP 26.3 — Exposição HTTP da API de Moderação (Presentation Layer)**:
-  - Controllers REST administrativos sob o prefixo `/api/v1/admin/**` protegidos por `@PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")`.
-  - Endpoints `GET /api/v1/admin/reports` e `POST /api/v1/admin/reviews/{reviewId}/moderate`.
-  - DTOs de entrada e saída, padronização RFC 7807 e testes de integração MockMvc com PostgreSQL real.
+#### 1. Endpoints Administrativos
+* **`GET /api/v1/admin/reports`** — Consulta paginada e filtrada da fila de denúncias via `QueryAdminReportsUseCase`.
+  - Parâmetros: `page`, `size`, `status`, `reason`, `reviewId`, `reporterUserId`, `sort` (asc/desc) — padrões: `page=0`, `size=20`, `sort=asc`.
+  - Resposta: envelope `PagedResponse<AdminReportResponse>` (via `PagedResponse.of(...)` sobre o `PageResult` da aplicação), reutilizando o contrato de paginação já consolidado no projeto.
+* **`POST /api/v1/admin/reviews/{reviewId}/moderate`** — Execução de decisão administrativa via `ModerateReviewUseCase`.
+  - Payload: `ModerateReviewRequest` com campos `action` (`REMOVE_REVIEW` | `RESTORE_REVIEW`), `reasonCode` e `justification` (15–1000 chars).
+  - Resposta: `ModerateReviewResponse` com dados do `ModerationAuditLog` gerado e status anterior/novo da review.
+
+#### 2. Segurança e Autorização
+* Ambos os endpoints protegidos por `@PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")`.
+* O identificador do moderador (`moderatorUserId`) é extraído **exclusivamente** do JWT via `authentication.getName()` — nunca do payload HTTP.
+* Acesso por `ROLE_USER` resulta em `403 Forbidden` (garantido pelo `@PreAuthorize` + Spring Security).
+* Acesso sem token resulta em `401 Unauthorized`.
+* **Privacidade na visão administrativa**: `AdminReportResponse` expõe `reviewAuthorUserId` exclusivamente no contexto de investigação interna de denúncias (incluindo o autor interno de reviews anônimas). Nenhum dado sensível é exposto — sem e-mail de recuperação, hash de senha, credenciais, IP ou coordenadas GPS brutas — e o anonimato público das avaliações anônimas permanece intacto.
+
+#### 3. Correção no `GlobalExceptionHandler`
+Foi identificado e corrigido um bug latente no handler genérico `@ExceptionHandler(Exception.class)`: a captura de `AccessDeniedException` e `AuthenticationException` antes do Spring Security causava retorno de `500 Internal Server Error` em vez de `403 Forbidden` / `401 Unauthorized`. A solução adotada re-lança essas exceções de segurança para que o framework as trate corretamente:
+```java
+if (ex instanceof AccessDeniedException || ex instanceof AuthenticationException) {
+    throw ex;
+}
+```
+Trata-se de correção de mapeamento na camada de segurança, sem qualquer alteração de regras de negócio.
+
+#### 4. DTOs de Apresentação
+* [AdminModerationDtos.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/dto/admin/AdminModerationDtos.java): Contém `ModerateReviewRequest`, `ModerateReviewResponse` e `AdminReportResponse` — separados da camada de aplicação para manter o isolamento arquitetural. São projeções HTTP↔aplicação que reutilizam diretamente os enums de domínio (`ModerationAction`, `ReportReason`, `ReportStatus`, `ReviewStatus`), sem duplicação de enums na camada HTTP.
+
+#### 5. Testes de Integração MockMvc (15 Novos Testes)
+[AdminModerationControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/AdminModerationControllerIntegrationTest.java) cobre:
+* **Segurança (4 testes)**: 401 sem token (GET e POST), 403 com `ROLE_USER` (GET e POST).
+* **Fluxo feliz — GET** (3 testes): MODERATOR vê página vazia, ADMIN vê relatórios existentes com dados corretos, filtro por `status=PENDING`.
+* **Fluxo feliz — POST** (2 testes): MODERATOR remove review ACTIVE com sucesso (verifica `auditLogId`, `previousStatus`, `newStatus`, `resolvedReportsCount`); ADMIN remove review (verificando que a autoridade ADMIN é aceita).
+* **Erros de negócio** (3 testes): 404 `REVIEW_NOT_FOUND`, 409 `REVIEW_ALREADY_REMOVED`, 403 `SELF_MODERATION_FORBIDDEN`.
+* **Erros de validação** (3 testes): 400 por justificativa curta (< 15 chars), 400 por `action` nulo e 400 por `size=0` na consulta paginada.
+
+#### 6. Estratégia de Promoção de Role nos Testes
+Como o endpoint `/api/v1/auth/register` sempre cria usuários com `ROLE_USER`, a promoção para MODERATOR/ADMIN nos testes é realizada via `JdbcTemplate.update("UPDATE users SET role = ? WHERE id = ?")` seguida de novo login via `/api/v1/auth/login` para obter token atualizado com a role persistida — abordagem end-to-end compatível com os padrões do projeto.
+
+### 7.7 STEP 26.3.1 — Auditoria e Saneamento do Estado Git (✅ CONCLUÍDO)
+
+Micro-step exclusivamente de auditoria, sem qualquer alteração funcional no código:
+
+* **Integridade da implementação**: A implementação do STEP 26.3 foi confirmada integralmente presente no commit `b1b7871` — nenhum commit de implementação duplicado foi criado.
+* **Reversão de alterações cosméticas**: Três modificações sem justificativa no escopo do STEP 26.3 foram identificadas em arquivos de teste preexistentes (`RoleTest`, `JwtRoleSecurityTest`, `ReviewLifecycleControllerIntegrationTest`) — imports não utilizados e reflow estético — e revertidas para o estado exato de `b1b7871`.
+* **Roadmap fora da staged area**: A consolidação documental preliminar do STEP 26.3 foi removida da staged area (`git restore --staged`), preservando o conteúdo em disco para o fechamento documental oficial.
+* **Dados efêmeros de teste**: Os 91 registros de reviews com data futura identificados no PostgreSQL compartilhado persistente foram caracterizados como estado transiente de execuções anteriores de testes — não alteração arquitetural. Nenhum arquivo SQL, migration, seed ou fixture do projeto foi modificado.
+* **Recorrência pós-consolidação**: As mesmas alterações cosméticas nos 3 arquivos reapareceram no working tree após o commit `fb9fd5e` (modificação externa ao fluxo dos micro-steps, consistente com auto-correção de warnings pela IDE). Permanecem unstaged e fora do commit documental, aguardando decisão explícita do usuário — manter ou reverter novamente.
+
+### 7.8 STEP 26.3.2 — Limpeza de Diagnostics do HTTP Admin Moderation (✅ CONCLUÍDO)
+
+Limpeza pontual de diagnostics em [AdminModerationControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/AdminModerationControllerIntegrationTest.java), consolidada no commit `fb9fd5e`:
+
+* **Escopo exato**: 4 diagnostics eliminados — imports não utilizados (`AuthProvider` e `User`), campo `userRepository` sem uso (com seu import `UserRepository` órfão removido junto) e método auxiliar privado `restoreRequest()` sem referências.
+* **Verificação prévia**: Ausência de uso indireto confirmada por busca em setup, fixtures, helpers e reflection antes de cada remoção.
+* **Zero alteração comportamental**: Diff exclusivamente de deleção (0 inserções / 14 remoções); nenhuma asserção, fixture, mock, payload, status code, configuração de segurança, ator ou role foi alterado. Sem `@SuppressWarnings`.
+* **Fora de escopo (preservados)**: Os 3 warnings históricos em `RoleTest`, `JwtRoleSecurityTest` e `ReviewLifecycleControllerIntegrationTest` permanecem — anteriores ao STEP 26.3, deliberadamente não tratados neste micro-step e não contabilizados como introduzidos pelo 26.3.
+* **Validação**: Suíte completa em **1016/1016** aprovados (0 failures, 0 errors, 0 skipped) e 0 diagnostics no módulo HTTP Admin.
 
 ---
 
@@ -626,7 +681,7 @@ Content Lifecycle (V1)      Mutações de domínio, 24h window,    ✅ CONCLUÍD
                             helpful lock, soft delete e HTTP
 Moderação Admin (V1)        Roles, auditoria e migração V11     ✅ FUNDAÇÃO CONCLUÍDA (STEP 26.1 / 26.1.1)
 Casos de Uso de Moderação   ModerateReviewUseCase & QueryReports✅ CONCLUÍDO (STEP 26.2 / 26.2.1)
-HTTP Admin Moderation (V1)  Endpoints REST /api/v1/admin/**     ⏳ PRÓXIMO PASSO (STEP 26.3)
+HTTP Admin Moderation (V1)  Endpoints REST /api/v1/admin/**     ✅ CONCLUÍDO (STEP 26.3)
 Cache em Redis              Latência p99 > 200ms no banco       Implementar cache layer
 Mensageria Externa          Outbox no PG > 5.000 msgs/s         Adicionar broker externo
 Migração de Banco           Nova coluna/tabela inevitável       ✅ V11 CONSOLIDADA (Roles & Audit)
@@ -660,7 +715,7 @@ A camada de aplicação para a moderação administrativa foi **concluída com s
 
 ## 12. Estado Atual da Suíte de Testes
 
-* **Total de Testes**: `1001`
+* **Total de Testes**: `1016`
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`
@@ -671,30 +726,27 @@ A camada de aplicação para a moderação administrativa foi **concluída com s
   - Testes Unitários de Aplicação (`UpdateReviewUseCaseUnitTest` com 17 cenários; `DeleteReviewUseCaseUnitTest` com 7 cenários; [ModerateReviewUseCaseUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ModerateReviewUseCaseUnitTest.java) com 25 cenários; [QueryAdminReportsUseCaseUnitTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/QueryAdminReportsUseCaseUnitTest.java) com 10 cenários; `FeedV2ServiceUnitTest`; `FeedV2HydratorUnitTest`).
   - Testes de Persistência com Spring Boot e banco real (`FeedCandidateRetrievalPersistenceIntegrationTest`; `FeedV2RetrievalRankerIntegrationTest`; `RateableTargetStatsPersistenceIntegrationTest`; [ModerationAuditLogPersistenceIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/infrastructure/persistence/ModerationAuditLogPersistenceIntegrationTest.java)).
   - Testes de Integração de Aplicação (`ReviewLifecycleIntegrationTest` com 6 cenários cobrindo ponta a ponta mutações multi-alvo, bloqueio de helpful, expiração de 24h, soft delete sob moderação e teste de concorrência com lock pessimista; [ModerateReviewIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/application/usecase/ModerateReviewIntegrationTest.java) com 4 cenários cobrindo remoção, restauração, consulta paginada sem N+1 e teste de concorrência com lock pessimista no PostgreSQL real; `FeedV2ServiceIntegrationTest`).
-  - Testes de Integração HTTP com MockMvc e Spring Security (`ReviewLifecycleControllerIntegrationTest` com 19 cenários cobrindo PATCH, DELETE, IDOR, helpful blocking, anonymous masking, validações Bean Validation e não-regressão de feeds; `FeedV2ControllerIntegrationTest`; `FeedControllerIntegrationTest`; `ReviewControllerIntegrationTest`).
+  - Testes de Integração HTTP com MockMvc e Spring Security (`ReviewLifecycleControllerIntegrationTest` com 19 cenários; [AdminModerationControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/AdminModerationControllerIntegrationTest.java) com 15 cenários cobrindo 401/403 de segurança, remoção por MODERATOR e ADMIN, 404/409 de negócio e validação Bean Validation; `FeedV2ControllerIntegrationTest`; `FeedControllerIntegrationTest`; `ReviewControllerIntegrationTest`).
   - Testes de Não-Regressão das etapas anteriores (Search V1, Auth, Catálogo, Reputação, Moderação Preventiva).
 
 ---
 
 ## 13. Próximo Passo Imediato
 
-Com a conclusão oficial do **STEP 26.2 — Implementação dos Casos de Uso de Moderação Administrativa** e do micro-step **STEP 26.2.1 — Limpeza de Diagnostics dos Testes de Moderação Administrativa**, a próxima etapa oficial do desenvolvimento do backend é:
+Com a conclusão oficial do **STEP 26.3 — Exposição HTTP da API de Moderação (Presentation Layer)**, o subsistema de Moderação Administrativa (`STEP 26`) está **completamente entregue**. Os micro-steps de saneamento (`26.3.1` — auditoria do estado Git — e `26.3.2` — limpeza de diagnostics) consolidaram a entrega sem alterações funcionais.
 
-### **STEP 26.3 — Exposição HTTP da API de Moderação (Presentation Layer)**
+### Próximas Frentes em Aberto
 
-Nesta etapa serão construídos exclusivamente os endpoints REST administrativos sob o prefixo `/api/v1/admin/**`, integrando a camada de apresentação aos casos de uso recém-consolidados:
+As seguintes frentes encontram-se pendentes e podem ser iniciadas a qualquer momento, de acordo com as prioridades do produto:
 
-1. **Endpoints Administrativos**:
-   - `GET /api/v1/admin/reports`: Consulta e triagem paginada de denúncias via `QueryAdminReportsUseCase`, com parâmetros de filtro de `QueryAdminReportsFilter`.
-   - `POST /api/v1/admin/reviews/{reviewId}/moderate`: Execução da decisão administrativa via `ModerateReviewUseCase`, recebendo payload com `action`, `reason`, `justification` e `notes` opcionais.
-2. **Segurança e Autorização Baseada em Roles**:
-   - Proteção de endpoints via anotações `@PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")`.
-   - Extração do identificador do moderador (`moderatorId`) a partir do `RewitUserPrincipal` autenticado via JWT.
-3. **Padronização de Respostas e Tratamento de Erros**:
-   - DTOs de entrada e saída padronizados.
-   - Respostas HTTP com tratamento RFC 7807 (`ProblemDetail`) para rejeições de negócio (400, 403, 404, 409).
-4. **Validação & Testes**:
-   - Testes de integração HTTP com MockMvc e Spring Security cobrindo autenticação JWT com roles, bloqueio de usuários não autorizados (`403 Forbidden` para `ROLE_USER`) e validações de ponta a ponta contra PostgreSQL real.
+1. **Jobs Assíncronos & Outbox Pattern (STEP 27)**:
+   - Criação da tabela `outbox_events` via migration Flyway.
+   - Extração assíncrona de notificações in-app, recálculo de reputação e garbage collection do SeaweedFS para fora do boundary transacional HTTP.
 
-> [!IMPORTANT]
-> A implementação deve restringir-se à camada de apresentação HTTP, sem alterar use cases, domínio ou persistência consolidados no STEP 26.2.
+2. **Observabilidade Avançada**:
+   - Logs estruturados JSON (Logback/Logstash encoder).
+   - Métricas Prometheus/Micrometer customizadas.
+   - Rastreabilidade distribuída via OpenTelemetry.
+
+> [!NOTE]
+> O subsistema de Moderação Administrativa está 100% operacional. Qualquer backoffice ou painel administrativo pode consumir diretamente os endpoints `/api/v1/admin/**` com tokens JWT de MODERATOR ou ADMIN.
