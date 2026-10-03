@@ -56,6 +56,60 @@ public final class StorageQuarantineDtos {
         }
     }
 
+    /**
+     * Resultado da exclusão de um CONFIRMED_ORPHAN executada sob o lock de criação de mídia (Step 28.4).
+     *
+     * @param referenceStatus status da referência encontrada; somente em REFERENCE_FOUND
+     * @param deletionResult  resultado do storage; somente em STORAGE_ATTEMPTED
+     */
+    public record QuarantinePurgeResolution(
+            Kind kind,
+            ReviewMediaStatus referenceStatus,
+            ObjectDeletionResult deletionResult
+    ) {
+        public enum Kind {
+            /** Não há linha CONFIRMED_ORPHAN correspondente à observação avaliada; storage intocado. */
+            ENTRY_CHANGED,
+            /** Existe linha em review_media (qualquer status): storage intocado, quarentena liberada. */
+            REFERENCE_FOUND,
+            /** Sem referência sob o lock: a exclusão física foi tentada; a quarentena só sai se o objeto ficou ausente. */
+            STORAGE_ATTEMPTED
+        }
+
+        public QuarantinePurgeResolution {
+            Objects.requireNonNull(kind, "kind must not be null");
+        }
+    }
+
+    /** Desfecho da exclusão física segura de um objeto em quarentena (Step 28.4). */
+    public enum StoragePurgeOutcome {
+        /** Chave fora do formato gerenciado: nada consultado nem removido. */
+        INVALID_OBJECT_KEY,
+        /** Não há quarentena (ou ela mudou desde a leitura); storage intocado. */
+        NOT_QUARANTINED,
+        /** A quarentena existe mas não está CONFIRMED_ORPHAN; storage intocado. */
+        NOT_CONFIRMED,
+        /** A consulta sob o lock encontrou review_media ACTIVE ou REMOVED; storage intocado, quarentena liberada. */
+        WITH_REFERENCE,
+        /** O objeto foi removido (DELETED) ou já estava ausente (NOT_FOUND); quarentena encerrada. */
+        PURGED,
+        /** Falha transitória do storage; quarentena mantida como CONFIRMED_ORPHAN para nova tentativa. */
+        RETRYABLE_FAILURE,
+        /** Falha permanente do storage; quarentena mantida para investigação. */
+        PERMANENT_FAILURE
+    }
+
+    /**
+     * @param deletionResult  resultado do storage quando a exclusão foi tentada; null caso contrário
+     * @param referenceStatus status da referência encontrada; somente em WITH_REFERENCE
+     */
+    public record StoragePurgeResult(
+            String objectKey,
+            StoragePurgeOutcome outcome,
+            ObjectDeletionResult deletionResult,
+            ReviewMediaStatus referenceStatus
+    ) {}
+
     /** Desfecho da rechecagem de um objeto em quarentena. */
     public enum QuarantineRecheckOutcome {
         /** Não há quarentena correspondente à observação avaliada; nada a rechecar. */

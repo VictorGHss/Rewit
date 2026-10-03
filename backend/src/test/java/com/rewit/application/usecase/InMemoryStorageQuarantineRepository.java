@@ -1,5 +1,7 @@
 package com.rewit.application.usecase;
 
+import com.rewit.application.dto.storage.ObjectDeletionResult;
+import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinePurgeResolution;
 import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantineResolution;
 import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinedStorageObject;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.OrphanCandidate;
@@ -15,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Quarentena em memória com a mesma semântica do adapter PostgreSQL, para testes de use case.
@@ -26,6 +29,8 @@ final class InMemoryStorageQuarantineRepository implements StorageQuarantineRepo
     final Map<String, ReviewMediaStatus> references = new HashMap<>();
     final List<List<String>> recordedBatches = new ArrayList<>();
     final List<UUID> lockedReviewIds = new ArrayList<>();
+    /** Simula queda entre a exclusão no storage e a remoção da linha: a transação é desfeita. */
+    boolean crashAfterStorageDeletion;
 
     @Override
     public void recordObservations(Collection<OrphanCandidate> candidates) {
@@ -68,5 +73,30 @@ final class InMemoryStorageQuarantineRepository implements StorageQuarantineRepo
         entries.put(objectKey, new QuarantinedStorageObject(objectKey, StorageQuarantineStatus.CONFIRMED_ORPHAN,
                 current.firstObservedAt(), current.lastObservedAt(), current.lastModifiedAt(), confirmedAt));
         return new QuarantineResolution(QuarantineResolution.Kind.CONFIRMED_ORPHAN, null);
+    }
+
+    @Override
+    public QuarantinePurgeResolution purgeConfirmedOrphanUnderCreationLock(String objectKey, UUID reviewId,
+                                                                           Instant expectedFirstObservedAt,
+                                                                           Function<String, ObjectDeletionResult> physicalDeletion) {
+        lockedReviewIds.add(reviewId);
+        QuarantinedStorageObject current = entries.get(objectKey);
+        if (current == null || current.status() != StorageQuarantineStatus.CONFIRMED_ORPHAN
+                || !current.firstObservedAt().equals(expectedFirstObservedAt)) {
+            return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.ENTRY_CHANGED, null, null);
+        }
+        ReviewMediaStatus reference = references.get(objectKey);
+        if (reference != null) {
+            entries.remove(objectKey);
+            return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND, reference, null);
+        }
+        ObjectDeletionResult deletionResult = physicalDeletion.apply(objectKey);
+        if (crashAfterStorageDeletion) {
+            throw new IllegalStateException("queda simulada antes do commit");
+        }
+        if (deletionResult.isAbsentAfterwards()) {
+            entries.remove(objectKey);
+        }
+        return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.STORAGE_ATTEMPTED, null, deletionResult);
     }
 }

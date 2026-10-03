@@ -51,21 +51,26 @@ class SeaweedStorageIntegrationTest {
     @Test
     @DisplayName("Listagem paginada por prefixo com start-after contra SeaweedFS local (Step 28.1)")
     void testPaginatedListingAgainstRealSeaweedFs() {
-        // Prefixo exclusivo fora de reviews/: nunca participa da reconciliação. O teste não remove objetos.
+        // Prefixo exclusivo fora de reviews/: nunca participa da reconciliação. Remove somente os próprios objetos.
         String prefix = "integration-tests/listing-" + UUID.randomUUID() + "/";
         List<String> keys = List.of(prefix + "a.txt", prefix + "b.txt", prefix + "c.txt");
-        for (String key : keys) {
-            storageAdapter.put(key, "text/plain", key.getBytes(StandardCharsets.UTF_8));
+        try {
+            for (String key : keys) {
+                storageAdapter.put(key, "text/plain", key.getBytes(StandardCharsets.UTF_8));
+            }
+
+            StoredObjectPage first = storageAdapter.listObjects(prefix, null, 2);
+            StoredObjectPage second = storageAdapter.listObjects(prefix, first.nextStartAfter(), 2);
+
+            assertEquals(keys.subList(0, 2), first.objects().stream().map(object -> object.key()).toList());
+            assertEquals(keys.get(1), first.nextStartAfter());
+            assertEquals(keys.subList(2, 3), second.objects().stream().map(object -> object.key()).toList());
+            assertFalse(second.hasMore());
+            assertEquals(keys.get(2).length(), second.objects().get(0).sizeBytes());
+            assertNotNull(second.objects().get(0).lastModified());
+        } finally {
+            keys.forEach(key -> storageAdapter.delete(key));
         }
-
-        StoredObjectPage first = storageAdapter.listObjects(prefix, null, 2);
-        StoredObjectPage second = storageAdapter.listObjects(prefix, first.nextStartAfter(), 2);
-
-        assertEquals(keys.subList(0, 2), first.objects().stream().map(object -> object.key()).toList());
-        assertEquals(keys.get(1), first.nextStartAfter());
-        assertEquals(keys.subList(2, 3), second.objects().stream().map(object -> object.key()).toList());
-        assertFalse(second.hasMore());
-        assertEquals(keys.get(2).length(), second.objects().get(0).sizeBytes());
-        assertNotNull(second.objects().get(0).lastModified());
+        assertTrue(storageAdapter.listObjects(prefix, null, 10).objects().isEmpty());
     }
 }

@@ -1,6 +1,6 @@
-# Reconciliação de Storage de Mídia — Contrato (STEPs 28.1 e 28.3)
+# Reconciliação de Storage de Mídia — Contrato (STEPs 28.1, 28.3 e 28.4)
 
-Este documento registra o contrato que compara os objetos do Object Storage (SeaweedFS via API S3) com as referências de mídia persistidas no PostgreSQL, e a quarentena que prepara uma futura remoção. **Até aqui a reconciliação é somente diagnóstico/planejamento: nenhum objeto é removido**, não há scheduler, job periódico nem endpoint.
+Este documento registra o contrato que compara os objetos do Object Storage (SeaweedFS via API S3) com as referências de mídia persistidas no PostgreSQL, a quarentena e a exclusão física segura. A varredura (28.1) e a rechecagem (28.3) nunca removem objetos. A exclusão física (28.4) só atinge objetos `CONFIRMED_ORPHAN`, após nova consulta sob os locks. Ainda não há scheduler, job periódico nem endpoint: nada dispara esses use cases automaticamente.
 
 ## Fonte de verdade e namespace gerenciado
 
@@ -79,7 +79,7 @@ O caminho até uma futura remoção separa quatro perguntas. Este passo responde
 
 `ReviewMediaService.uploadMedia` adquire `ReviewJpaRepository.findByIdForUpdate` (`PESSIMISTIC_WRITE` na linha de `reviews`) **antes** de enviar o objeto ao storage e o mantém até o commit da linha em `review_media`. Como toda chave contém o `reviewId` e cada upload gera um `mediaId` aleatório novo, uma transação que detém esse mesmo lock e não encontra referência sabe que não há upload em andamento para aquela chave.
 
-A segunda consulta usa exatamente esse lock. Em uma única transação, `resolveUnderCreationLock`:
+A segunda consulta usa exatamente esse lock. Em uma única transação PostgreSQL (sem nenhuma operação de storage), `resolveUnderCreationLock`:
 
 1. adquire `findByIdForUpdate(reviewId)`, com o `reviewId` extraído da chave. Se a review não existe, nenhum upload consegue criar referência para ela;
 2. trava a linha de quarentena exigindo o `first_observed_at` avaliado pelo grace period. Se a linha sumiu ou foi recriada, nada muda (`NOT_QUARANTINED`);
@@ -98,11 +98,64 @@ Desfechos de `RecheckQuarantinedStorageObjectUseCase`:
 
 Rechecagens concorrentes da mesma chave são serializadas pelo lock da review. Uma rechecagem que encontra um upload em andamento espera o commit e então vê a referência. Isso é coberto por teste de integração, e o teste falha se o lock for removido.
 
-### O que o STEP 28.4 deve fazer
+### `CONFIRMED_ORPHAN` não autoriza delete sozinho
 
-`CONFIRMED_ORPHAN` **não autoriza delete**: o lock é liberado no commit da rechecagem. A remoção física deverá, numa única transação, adquirir `findByIdForUpdate` da review da chave, travar a linha de quarentena `CONFIRMED_ORPHAN`, repetir a consulta a `review_media`, remover o objeto e só então encerrar a quarentena.
+O lock é liberado no commit da rechecagem. `CONFIRMED_ORPHAN` torna o objeto **elegível** para a exclusão física do STEP 28.4, que repete a consulta sob os locks antes de tocar o storage. Nem a rechecagem nem o adapter da quarentena têm acesso a `ObjectStoragePort`, o que é verificado por testes de fronteira. Os logs registram apenas desfecho, status da referência e duração, nunca a `object_key`.
 
-Nem a rechecagem nem o adapter da quarentena têm acesso a `ObjectStoragePort`, o que é verificado por testes de fronteira. Os logs registram apenas desfecho, status da referência e duração, nunca a `object_key`.
+## Exclusão física segura (STEP 28.4)
+
+### Contrato de exclusão
+
+`ObjectStorageDeletionPort.delete(key)` devolve `ObjectDeletionResult`, sem lançar erros de storage. `ObjectStoragePort` estende essa porta, então os chamadores existentes (compensação do upload e exclusão de mídia) não mudaram. `PurgeConfirmedOrphanStorageObjectUseCase` recebe **somente** `ObjectStorageDeletionPort`, sem gravação, leitura nem listagem, e atua sempre no bucket configurado.
+
+| Resultado | Origem no SeaweedFS/S3 (verificada contra o SeaweedFS 4.47) | Significado |
+| :--- | :--- | :--- |
+| `DELETED` | `statObject` e `removeObject` com sucesso | objeto removido |
+| `NOT_FOUND` | `NoSuchKey`/`ResourceNotFound` no `statObject` (ou na remoção) | **sucesso idempotente**: o estado desejado já existe |
+| `PERMANENT_FAILURE` | `AccessDenied`, `InvalidAccessKeyId`, `SignatureDoesNotMatch`, `NoSuchBucket`; `InvalidKeyException`/`NoSuchAlgorithmException`; `IllegalArgumentException` dos argumentos | credencial/configuração/contrato: repetir não resolve |
+| `TRANSIENT_FAILURE` | demais `ErrorResponseException`; `ServerException`, `IOException` (ex.: `ConnectException`), `InsufficientDataException`, `InternalException`, `InvalidResponseException`, `XmlParserException` | repetir é seguro |
+
+- O `statObject` existe porque o `DeleteObject` do S3 responde sucesso também para chave ausente. Sem ele, `DELETED` e `NOT_FOUND` seriam indistinguíveis.
+- Exceções fora dessas categorias não são engolidas: propagam.
+- O log de falha registra apenas o resultado e o código/classe do erro, nunca a chave, o endpoint ou a mensagem do SDK.
+
+### Ordem das operações
+
+PostgreSQL e SeaweedFS **não formam uma transação distribuída**. A exclusão mantém uma transação PostgreSQL com os locks ativos **enquanto** chama o storage, mas a exclusão no storage é uma operação externa: rollback do PostgreSQL **não** a desfaz. A ordem existe para que qualquer falha deixe o estado recuperável por nova tentativa:
+
+1. lock da review dona da chave (`findByIdForUpdate`, o mesmo do upload e da rechecagem);
+2. lock da linha de quarentena, exigindo `CONFIRMED_ORPHAN` e o `first_observed_at` lido antes;
+3. nova consulta a `review_media`. Se houver referência, ACTIVE ou REMOVED, o storage não é tocado e a quarentena é liberada (`WITH_REFERENCE`);
+4. exclusão no storage;
+5. remoção da linha de quarentena, **somente** se o resultado for `DELETED` ou `NOT_FOUND`;
+6. commit.
+
+Remover a linha de quarentena antes da exclusão física é proibido: uma falha entre as duas apagaria o único registro persistido que permite repetir a operação.
+
+A ordem dos locks é a mesma da rechecagem (review → quarentena). Durante a exclusão, uploads para a mesma review aguardam a chamada ao storage terminar.
+
+### Desfechos
+
+| Desfecho | Storage | Quarentena |
+| :--- | :--- | :--- |
+| `INVALID_OBJECT_KEY` | intocado (nenhuma consulta nem lock) | intocada |
+| `NOT_QUARANTINED` | intocado | inexistente ou alterada desde a leitura |
+| `NOT_CONFIRMED` | intocado | permanece `OBSERVED` |
+| `WITH_REFERENCE` | intocado | liberada |
+| `PURGED` | `DELETED` ou `NOT_FOUND` | removida |
+| `RETRYABLE_FAILURE` | `TRANSIENT_FAILURE` | mantida `CONFIRMED_ORPHAN`, para nova tentativa |
+| `PERMANENT_FAILURE` | `PERMANENT_FAILURE` | mantida `CONFIRMED_ORPHAN`, para investigação |
+
+Nenhuma falha altera `review_media`. A chave é validada de novo antes de derivar o `reviewId`.
+
+### Janela de queda e retry
+
+Se o processo cair (ou a transação falhar) depois da exclusão física e antes do commit, a linha `CONFIRMED_ORPHAN` permanece, porque o rollback a preserva, mas o objeto já não existe. A próxima execução refaz os locks e a consulta, recebe `NOT_FOUND` do storage e encerra a quarentena. Nenhum estado intermediário "DELETED" é necessário. Isso é coberto por teste de integração contra PostgreSQL e SeaweedFS reais.
+
+### Concorrência
+
+- **Upload em andamento:** a exclusão espera o lock da review, vê a referência após o commit do upload e não apaga. O teste de integração falha se o lock for removido.
+- **Duas exclusões da mesma chave:** são serializadas pelos locks. A primeira chama o storage e remove a linha; a segunda não encontra mais `CONFIRMED_ORPHAN` e termina como `NOT_QUARANTINED`, sem chamar o storage.
 
 ## Separação do Outbox
 

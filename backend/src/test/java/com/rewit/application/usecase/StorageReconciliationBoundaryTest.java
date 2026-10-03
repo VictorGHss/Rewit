@@ -7,6 +7,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -41,6 +44,23 @@ class StorageReconciliationBoundaryTest {
                 MAIN_SOURCES.resolve("application/storage/FixedStorageQuarantineGracePolicy.java"))) {
             assertFalse(read(file).contains(".delete("), file.toString());
         }
+    }
+
+    @Test
+    @DisplayName("Exclusão no storage só ocorre nos fluxos autorizados (Step 28.4)")
+    void storageDeletionOnlyInAuthorizedFlows() throws IOException {
+        Pattern storageDelete = Pattern.compile("\\b(objectStoragePort|deletionPort)\\.delete\\(");
+        Set<String> deletingFiles = javaFilesUnder(MAIN_SOURCES)
+                .filter(file -> storageDelete.matcher(read(file)).find())
+                .map(file -> file.getFileName().toString())
+                .collect(Collectors.toSet());
+        assertEquals(Set.of("ReviewMediaService.java", "PurgeConfirmedOrphanStorageObjectUseCase.java"), deletingFiles);
+
+        Set<String> sdkRemovals = javaFilesUnder(MAIN_SOURCES)
+                .filter(file -> read(file).contains("removeObject("))
+                .map(file -> file.getFileName().toString())
+                .collect(Collectors.toSet());
+        assertEquals(Set.of("MinioStorageAdapter.java"), sdkRemovals);
     }
 
     @Test

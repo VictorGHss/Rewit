@@ -59,6 +59,19 @@ public interface StorageObjectQuarantineJpaRepository extends JpaRepository<Stor
             @Param("firstObservedAt") Instant firstObservedAt
     );
 
+    @Query(value = """
+        SELECT id
+        FROM storage_object_quarantine
+        WHERE object_key = :objectKey
+          AND first_observed_at = :firstObservedAt
+          AND status = 'CONFIRMED_ORPHAN'
+        FOR UPDATE
+        """, nativeQuery = true)
+    Optional<UUID> lockConfirmedEntry(
+            @Param("objectKey") String objectKey,
+            @Param("firstObservedAt") Instant firstObservedAt
+    );
+
     @Modifying(clearAutomatically = true)
     @Query(value = """
         UPDATE storage_object_quarantine

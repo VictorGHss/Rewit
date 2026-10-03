@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.storage;
 
+import com.rewit.application.dto.storage.ObjectDeletionResult;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObject;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
 import com.rewit.application.port.ObjectStorageListingPort;
@@ -15,7 +16,12 @@ import io.minio.RemoveObjectArgs;
 import io.minio.Result;
 import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
+import io.minio.errors.InsufficientDataException;
+import io.minio.errors.InternalException;
+import io.minio.errors.InvalidResponseException;
 import io.minio.errors.MinioException;
+import io.minio.errors.ServerException;
+import io.minio.errors.XmlParserException;
 import io.minio.messages.Item;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,10 +33,13 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.GeneralSecurityException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -41,6 +50,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MinioStorageAdapter implements ObjectStoragePort, ObjectStorageListingPort {
 
     private static final Logger log = LoggerFactory.getLogger(MinioStorageAdapter.class);
+
+    private static final Set<String> NOT_FOUND_ERROR_CODES = Set.of("NoSuchKey", "ResourceNotFound");
+
+    // Erros S3 de credencial/configuração: repetir não resolve. Qualquer outro erro é tratado como transitório.
+    private static final Set<String> PERMANENT_ERROR_CODES = Set.of(
+            "AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket");
 
     private final MinioClient minioClient;
     private final String bucketName;
@@ -124,21 +139,35 @@ public class MinioStorageAdapter implements ObjectStoragePort, ObjectStorageList
     }
 
     @Override
-    public void delete(String key) {
+    public ObjectDeletionResult delete(String key) {
         if (key == null || key.isBlank()) {
-            return;
+            return ObjectDeletionResult.NOT_FOUND;
         }
         try {
-            minioClient.removeObject(
-                    RemoveObjectArgs.builder()
-                            .bucket(bucketName)
-                            .object(key)
-                            .build()
-            );
-        } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
-            log.warn("Falha ao remover objeto '{}' do storage: {}", key, e.getMessage());
-            // Exclusão é melhor esforço / idempotente
+            // DeleteObject do S3 responde sucesso também para chave ausente: o stat é o que distingue NOT_FOUND
+            minioClient.statObject(StatObjectArgs.builder().bucket(bucketName).object(key).build());
+            minioClient.removeObject(RemoveObjectArgs.builder().bucket(bucketName).object(key).build());
+            return ObjectDeletionResult.DELETED;
+        } catch (ErrorResponseException e) {
+            String code = e.errorResponse() != null ? e.errorResponse().code() : null;
+            if (code != null && NOT_FOUND_ERROR_CODES.contains(code)) {
+                return ObjectDeletionResult.NOT_FOUND;
+            }
+            boolean permanent = code != null && PERMANENT_ERROR_CODES.contains(code);
+            return deletionFailure(permanent ? ObjectDeletionResult.PERMANENT_FAILURE : ObjectDeletionResult.TRANSIENT_FAILURE,
+                    code != null ? code : "ErrorResponseException");
+        } catch (ServerException | InsufficientDataException | InternalException | InvalidResponseException
+                 | XmlParserException | IOException e) {
+            return deletionFailure(ObjectDeletionResult.TRANSIENT_FAILURE, e.getClass().getSimpleName());
+        } catch (InvalidKeyException | NoSuchAlgorithmException | IllegalArgumentException e) {
+            return deletionFailure(ObjectDeletionResult.PERMANENT_FAILURE, e.getClass().getSimpleName());
         }
+    }
+
+    // Sem chave, endpoint ou mensagem do SDK no log: a mensagem pode conter o caminho do recurso
+    private static ObjectDeletionResult deletionFailure(ObjectDeletionResult result, String reason) {
+        log.warn("Falha ao remover objeto do storage: resultado={}, motivo={}", result, reason);
+        return result;
     }
 
     @Override

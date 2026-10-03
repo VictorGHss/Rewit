@@ -1,5 +1,7 @@
 package com.rewit.infrastructure.persistence.adapter;
 
+import com.rewit.application.dto.storage.ObjectDeletionResult;
+import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinePurgeResolution;
 import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantineResolution;
 import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinedStorageObject;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.OrphanCandidate;
@@ -18,6 +20,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Adaptador de persistência da quarentena de storage (Step 28.3).
@@ -28,8 +31,9 @@ import java.util.UUID;
  * um mediaId novo, uma transação que detém esse mesmo lock e não encontra referência sabe que não há
  * upload em andamento para a chave. Review inexistente dispensa o lock: nenhum upload consegue
  * criar referência para ela (o upload exige a linha e a FK de review_media também).
- * Qualquer etapa futura de remoção física deve repetir esta consulta e remover o objeto
- * dentro da mesma transação que detém este lock.
+ * A exclusão física ({@link #purgeConfirmedOrphanUnderCreationLock}) repete a consulta e chama o
+ * storage com esse lock mantido pela transação PostgreSQL. O storage é uma operação externa: não
+ * participa da transação e não é desfeito por rollback.
  */
 @Component
 public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepository {
@@ -96,5 +100,43 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
 
         quarantineJpaRepository.markConfirmedOrphan(entryId.get(), now);
         return new QuarantineResolution(QuarantineResolution.Kind.CONFIRMED_ORPHAN, null);
+    }
+
+    @Override
+    @Transactional
+    public QuarantinePurgeResolution purgeConfirmedOrphanUnderCreationLock(String objectKey, UUID reviewId,
+                                                                           Instant expectedFirstObservedAt,
+                                                                           Function<String, ObjectDeletionResult> physicalDeletion) {
+        Objects.requireNonNull(objectKey, "objectKey must not be null");
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(expectedFirstObservedAt, "expectedFirstObservedAt must not be null");
+        Objects.requireNonNull(physicalDeletion, "physicalDeletion must not be null");
+
+        // 1. Mesmo lock do upload e da rechecagem, na mesma ordem (review → quarentena)
+        reviewJpaRepository.findByIdForUpdate(reviewId);
+
+        // 2. Somente a observação avaliada, e somente se ainda estiver CONFIRMED_ORPHAN
+        Optional<UUID> entryId = quarantineJpaRepository.lockConfirmedEntry(objectKey, expectedFirstObservedAt);
+        if (entryId.isEmpty()) {
+            return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.ENTRY_CHANGED, null, null);
+        }
+
+        // 3. A consulta sob o lock é a autoridade: ACTIVE ou REMOVED protegem o objeto
+        List<ReviewMediaJpaEntity> references = reviewMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
+        if (!references.isEmpty()) {
+            quarantineJpaRepository.releaseEntry(entryId.get());
+            return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND,
+                    ReviewMediaStatus.valueOf(references.get(0).getStatus()), null);
+        }
+
+        // 4. Operação externa, com os locks mantidos; não é revertida por rollback
+        ObjectDeletionResult deletionResult = Objects.requireNonNull(physicalDeletion.apply(objectKey),
+                "physicalDeletion must return a result");
+
+        // 5. A linha só sai depois do storage: se o commit falhar, a próxima execução obtém NOT_FOUND
+        if (deletionResult.isAbsentAfterwards()) {
+            quarantineJpaRepository.releaseEntry(entryId.get());
+        }
+        return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.STORAGE_ATTEMPTED, null, deletionResult);
     }
 }
