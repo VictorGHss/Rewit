@@ -313,7 +313,7 @@ HTTP Response: 200 OK (com ReviewResponse) no PATCH / 204 No Content no DELETE
 3. **Preservação de Dados e Integridade Física**:
    - O soft delete **não executa hard delete** em nenhuma tabela.
    - Permanecem preservados no PostgreSQL: o registro em `reviews`, os itens em `review_targets`, os votos em `review_reactions`, as denúncias em `reports` e os check-ins em `check_ins`.
-   - Os arquivos binários de imagem no SeaweedFS permanecem preservados (descarte físico reservado para futuro garbage collector assíncrono).
+   - Os arquivos binários de imagem no SeaweedFS permanecem preservados. Mídias `REMOVED` continuam sendo referência e não são coletadas pelo GC de storage do STEP 28; uma política de retenção para elas é uma decisão separada.
 
 ### 6.5 Decisão de Stats: Recomputação Integral via PostgreSQL
 Fielmente alinhada à **Estratégia B do STEP 25.0**:
@@ -384,7 +384,7 @@ Fielmente alinhada à **Estratégia B do STEP 25.0**:
 ### 6.11 Limitações Conhecidas e Evolução Futura do Lifecycle
 * **Histórico de Edições (Audit Trail)**: No MVP do lifecycle, apenas `updatedAt` registra a alteração mais recente. Histórico completo de revisões (*review revisions table*) permanece como evolução futura.
 * **Sem Restauração de Avaliação (Undelete)**: O soft delete pelo autor é definitivo para o usuário comum; restauração de publicações excluídas por engano permanece restrita a futura moderação administrativa.
-* **Garbage Collection de Imagens**: O soft delete marca mídias lógicas como `REMOVED`, mas não expurga blobs físicos do SeaweedFS de forma síncrona. O descarte definitivo será orquestrado por job assíncrono via Outbox.
+* **Garbage Collection de Imagens**: O soft delete marca mídias lógicas como `REMOVED`, mas não expurga blobs físicos do SeaweedFS de forma síncrona. O GC de storage do STEP 28 (job direto, sem Outbox) remove apenas objetos sem nenhuma linha em `review_media`; blobs de mídias `REMOVED` dependem de uma política de retenção ainda não decidida.
 
 ---
 
@@ -883,7 +883,7 @@ Os itens abaixo permanecem **fora do escopo entregue pelo 27.3** e não devem se
 | **Observabilidade do Worker** | Métricas, logs e retenção operacional do dispatcher. | Concluído no STEP 27.4; cleanup de diagnostics no STEP 27.4.1. | ✅ CONCLUÍDO (STEP 27.4) |
 | **Notificações In-App** | Evitar lentidão caso o volume de notificações cresça. | Decisão do STEP 27.0: permanecem **síncronas** na transação do produtor (same-DB já é atômico). | **PERMANECE SÍNCRONO** |
 | **Recálculo Assíncrono de Reputação** | Eliminar lock pessimista em `users` durante a postagem de reviews. | Decisão do STEP 27.0: permanece **síncrono** na transação do produtor. | **PERMANECE SÍNCRONO** |
-| **Garbage Collection do SeaweedFS** | Remover imagens não referenciadas no S3 para economia de storage. | Job `@Scheduled` direto de varredura de órfãos — **sem Outbox** (decisão do STEP 27.0). | ⏳ PENDENTE |
+| **Garbage Collection do SeaweedFS** | Remover imagens não referenciadas no S3 para economia de storage. | Job `@Scheduled` direto de varredura de órfãos — **sem Outbox** (decisão do STEP 27.0). Implementado no STEP 28, desligado por padrão: [storage-reconciliation.md](../architecture/storage-reconciliation.md), [ADR-010](../decisions/ADR-010-storage-garbage-collection.md). | ✅ CONCLUÍDO (STEP 28) |
 | **Cleanup de Sessões Expiradas** | Expurgar tokens revogados e sessões antigas da tabela `user_sessions`. | Job agendado de expurgo cronológico. | ⏳ PENDENTE |
 
 ### 8.10 Próximo Passo após o STEP 27

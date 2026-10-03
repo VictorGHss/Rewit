@@ -226,7 +226,8 @@ public class MinioStorageAdapter implements ObjectStoragePort, ObjectStorageList
                 ));
             }
         } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
-            log.error("Erro ao listar objetos do bucket '{}' sob o prefixo '{}': {}", bucketName, prefix, e.getMessage());
+            // Sem mensagem do SDK, que pode conter o endpoint ou o caminho do recurso
+            log.error("Erro ao listar objetos do storage (erro={})", e.getClass().getSimpleName());
             throw new BusinessException("Falha ao listar objetos do armazenamento",
                     HttpStatus.SERVICE_UNAVAILABLE, "STORAGE_LIST_FAILED");
         }
