@@ -404,7 +404,8 @@ class ReviewMediaServiceUnitTest {
                 .when(objectStoragePort).put(anyString(), anyString(), any(byte[].class));
 
         UploadMediaCommand cmd = new UploadMediaCommand(reviewId, authorUserId, validJpegBytes, "photo.jpg");
-        assertThrows(BusinessException.class, () -> reviewMediaService.uploadMedia(cmd));
+        BusinessException ex = assertThrows(BusinessException.class, () -> reviewMediaService.uploadMedia(cmd));
+        assertEquals("STORAGE_FAILED", ex.getErrorCode());
         verify(reviewMediaRepository, never()).save(any());
     }
 
@@ -418,7 +419,8 @@ class ReviewMediaServiceUnitTest {
         when(reviewMediaRepository.save(any())).thenThrow(new RuntimeException("DB Connection Timeout"));
 
         UploadMediaCommand cmd = new UploadMediaCommand(reviewId, authorUserId, validJpegBytes, "photo.jpg");
-        assertThrows(RuntimeException.class, () -> reviewMediaService.uploadMedia(cmd));
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> reviewMediaService.uploadMedia(cmd));
+        assertEquals("DB Connection Timeout", ex.getMessage());
 
         verify(objectStoragePort).put(anyString(), anyString(), any());
         verify(objectStoragePort).delete(anyString());
@@ -530,7 +532,8 @@ class ReviewMediaServiceUnitTest {
         byte[] corruptBytes = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0, 0, 0, 0, 0};
         UploadMediaCommand cmd = new UploadMediaCommand(reviewId, authorUserId, corruptBytes, "corrupt.jpg");
 
-        assertThrows(BusinessException.class, () -> reviewMediaService.uploadMedia(cmd));
+        BusinessException ex = assertThrows(BusinessException.class, () -> reviewMediaService.uploadMedia(cmd));
+        assertEquals("INVALID_IMAGE_FILE", ex.getErrorCode());
         verify(objectStoragePort, never()).put(anyString(), anyString(), any());
         verify(reviewMediaRepository, never()).save(any());
     }
@@ -571,9 +574,10 @@ class ReviewMediaServiceUnitTest {
         when(reviewMediaRepository.findById(media.getId())).thenReturn(Optional.of(media));
         when(reviewMediaRepository.save(any())).thenThrow(new RuntimeException("PostgreSQL Deadlock"));
 
-        assertThrows(RuntimeException.class, () ->
+        RuntimeException ex = assertThrows(RuntimeException.class, () ->
                 reviewMediaService.deleteMedia(reviewId, media.getId(), authorUserId)
         );
+        assertEquals("PostgreSQL Deadlock", ex.getMessage());
 
         verify(objectStoragePort, never()).delete(anyString());
     }

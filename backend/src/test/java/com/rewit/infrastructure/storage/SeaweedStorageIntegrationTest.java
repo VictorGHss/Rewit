@@ -1,7 +1,6 @@
 package com.rewit.infrastructure.storage;
 
 import io.minio.MinioClient;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -13,17 +12,13 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integração de Storage: SeaweedFS Real (Step 21.0 - Requisito 28)")
 class SeaweedStorageIntegrationTest {
 
-    private MinioStorageAdapter storageAdapter;
-
-    @BeforeEach
-    void setUp() {
-        MinioClient minioClient = MinioClient.builder()
-                .endpoint("http://localhost:8333")
-                .credentials("change-me", "change-me")
-                .build();
-
-        storageAdapter = new MinioStorageAdapter(minioClient, "rewit-local");
-    }
+    // JUnit cria uma instância por teste, então o adaptador continua isolado por método
+    private final MinioStorageAdapter storageAdapter = new MinioStorageAdapter(
+            MinioClient.builder()
+                    .endpoint("http://localhost:8333")
+                    .credentials("change-me", "change-me")
+                    .build(),
+            "rewit-local");
 
     @Test
     @DisplayName("Ciclo completo de put, get, exists e delete contra SeaweedFS local")

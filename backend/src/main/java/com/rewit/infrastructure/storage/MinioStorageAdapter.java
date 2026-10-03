@@ -10,6 +10,7 @@ import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
+import io.minio.errors.MinioException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,7 +18,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.security.GeneralSecurityException;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -55,7 +58,7 @@ public class MinioStorageAdapter implements ObjectStoragePort {
                     log.info("Bucket '{}' criado com sucesso no Object Storage.", bucketName);
                 }
                 bucketChecked.set(true);
-            } catch (Exception e) {
+            } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
                 log.error("Erro ao verificar/criar bucket '{}' no Object Storage: {}", bucketName, e.getMessage());
                 throw new BusinessException("Falha na inicialização do serviço de armazenamento",
                         HttpStatus.SERVICE_UNAVAILABLE, "STORAGE_UNAVAILABLE");
@@ -78,7 +81,7 @@ public class MinioStorageAdapter implements ObjectStoragePort {
                             .contentType(contentType != null ? contentType : "application/octet-stream")
                             .build()
             );
-        } catch (Exception e) {
+        } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
             log.error("Erro ao gravar objeto '{}' no bucket '{}': {}", key, bucketName, e.getMessage());
             throw new BusinessException("Falha ao persistir arquivo no armazenamento de objetos",
                     HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_WRITE_FAILED");
@@ -104,7 +107,7 @@ public class MinioStorageAdapter implements ObjectStoragePort {
             log.error("Erro ao obter objeto '{}' do storage: {}", key, e.getMessage());
             throw new BusinessException("Falha ao ler arquivo do armazenamento",
                     HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_READ_FAILED");
-        } catch (Exception e) {
+        } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
             log.error("Erro inesperado ao obter objeto '{}' do storage: {}", key, e.getMessage());
             throw new BusinessException("Falha ao ler arquivo do armazenamento",
                     HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_READ_FAILED");
@@ -123,7 +126,7 @@ public class MinioStorageAdapter implements ObjectStoragePort {
                             .object(key)
                             .build()
             );
-        } catch (Exception e) {
+        } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
             log.warn("Falha ao remover objeto '{}' do storage: {}", key, e.getMessage());
             // Exclusão é melhor esforço / idempotente
         }
@@ -148,7 +151,7 @@ public class MinioStorageAdapter implements ObjectStoragePort {
                 return false;
             }
             return false;
-        } catch (Exception e) {
+        } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
             return false;
         }
     }

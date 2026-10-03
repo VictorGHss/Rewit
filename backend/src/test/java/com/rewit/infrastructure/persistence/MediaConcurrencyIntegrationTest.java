@@ -125,7 +125,7 @@ class MediaConcurrencyIntegrationTest {
         return placeRepository.save(place);
     }
 
-    private RateableTarget createTestTarget(UUID placeId) {
+    private RateableTarget createTestTarget() {
         RateableTarget target = new RateableTarget(UUID.randomUUID(), TargetType.PLACE);
         return targetRepository.save(target);
     }
@@ -150,7 +150,7 @@ class MediaConcurrencyIntegrationTest {
     void testConcurrentMediaUploadRespectsMaxLimitOfFive() throws Exception {
         User author = createTestUser("conc_auth");
         Place place = createTestPlace();
-        RateableTarget target = createTestTarget(place.getId());
+        RateableTarget target = createTestTarget();
         ReviewDetailView review = createTestReview(author.getId(), place.getId(), target.getId());
 
         // 1. Pré-popula com 4 mídias com sucesso
@@ -175,7 +175,7 @@ class MediaConcurrencyIntegrationTest {
                 UploadMediaCommand cmd = new UploadMediaCommand(review.id(), author.getId(), validJpegBytes, "photo_concurrent.jpg");
                 var view = reviewMediaService.uploadMedia(cmd);
                 successes.add(view);
-            } catch (Throwable t) {
+            } catch (InterruptedException | BrokenBarrierException | TimeoutException | RuntimeException t) {
                 errors.add(t);
             } finally {
                 endLatch.countDown();

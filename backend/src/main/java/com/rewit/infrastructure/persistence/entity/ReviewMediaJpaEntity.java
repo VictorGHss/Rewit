@@ -94,6 +94,11 @@ public class ReviewMediaJpaEntity {
     }
 
     public ReviewMedia toDomain() {
+        // size_bytes é NOT NULL no schema (V9); null aqui indica estado corrompido, não mídia vazia
+        Long persistedSizeBytes = this.sizeBytes;
+        if (persistedSizeBytes == null) {
+            throw new IllegalStateException("review_media.size_bytes nulo para a mídia " + this.id);
+        }
         return new ReviewMedia(
                 this.id,
                 this.reviewId,
@@ -101,7 +106,7 @@ public class ReviewMediaJpaEntity {
                 this.objectKey,
                 ReviewMediaType.valueOf(this.mediaType),
                 this.mimeType,
-                this.sizeBytes != null ? this.sizeBytes : 0L,
+                persistedSizeBytes,
                 this.width,
                 this.height,
                 ReviewMediaStatus.valueOf(this.status),
