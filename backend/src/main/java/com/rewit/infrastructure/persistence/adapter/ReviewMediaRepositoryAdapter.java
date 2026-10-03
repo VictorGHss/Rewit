@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.adapter;
 
+import com.rewit.application.dto.storage.StorageReconciliationDtos.ReviewMediaReference;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.model.ReviewMedia;
@@ -7,6 +8,7 @@ import com.rewit.infrastructure.persistence.entity.ReviewMediaJpaEntity;
 import com.rewit.infrastructure.persistence.repository.ReviewMediaJpaRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -58,5 +60,24 @@ public class ReviewMediaRepositoryAdapter implements ReviewMediaRepository {
             return 0;
         }
         return reviewMediaJpaRepository.countByReviewIdAndStatus(reviewId, ReviewMediaStatus.ACTIVE.name());
+    }
+
+    @Override
+    public List<ReviewMediaReference> findReferencesByObjectKeys(Collection<String> objectKeys) {
+        if (objectKeys == null || objectKeys.isEmpty()) {
+            return List.of();
+        }
+        // Projeção direta da linha, sem passar pelas invariantes de ReviewMedia: a reconciliação só lê
+        return reviewMediaJpaRepository.findByObjectKeyIn(objectKeys)
+                .stream()
+                .map(entity -> new ReviewMediaReference(
+                        entity.getId(),
+                        entity.getReviewId(),
+                        entity.getObjectKey(),
+                        ReviewMediaStatus.valueOf(entity.getStatus()),
+                        entity.getCreatedAt(),
+                        entity.getUpdatedAt()
+                ))
+                .toList();
     }
 }

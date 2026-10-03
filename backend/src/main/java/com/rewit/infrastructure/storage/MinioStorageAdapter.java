@@ -1,16 +1,22 @@
 package com.rewit.infrastructure.storage;
 
+import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObject;
+import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
+import com.rewit.application.port.ObjectStorageListingPort;
 import com.rewit.application.port.ObjectStoragePort;
 import com.rewit.common.exception.BusinessException;
 import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
+import io.minio.ListObjectsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
+import io.minio.Result;
 import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
 import io.minio.errors.MinioException;
+import io.minio.messages.Item;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +27,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -29,7 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Implementa a porta ObjectStoragePort isolando o restante da aplicação do SDK do MinIO.
  */
 @Component
-public class MinioStorageAdapter implements ObjectStoragePort {
+public class MinioStorageAdapter implements ObjectStoragePort, ObjectStorageListingPort {
 
     private static final Logger log = LoggerFactory.getLogger(MinioStorageAdapter.class);
 
@@ -154,5 +163,47 @@ public class MinioStorageAdapter implements ObjectStoragePort {
         } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
             return false;
         }
+    }
+
+    @Override
+    public StoredObjectPage listObjects(String prefix, String startAfter, int maxKeys) {
+        Objects.requireNonNull(prefix, "Storage prefix cannot be null");
+        if (maxKeys <= 0) {
+            throw new IllegalArgumentException("maxKeys must be positive");
+        }
+        // Somente leitura: não chama ensureBucketExists(), que criaria o bucket como efeito colateral
+        ListObjectsArgs.Builder args = ListObjectsArgs.builder()
+                .bucket(bucketName)
+                .prefix(prefix)
+                .recursive(true)
+                .maxKeys(maxKeys);
+        if (startAfter != null) {
+            args.startAfter(startAfter);
+        }
+
+        List<StoredObject> objects = new ArrayList<>(maxKeys);
+        try {
+            // O Iterable do SDK busca páginas sob demanda: parar em maxKeys evita ler o restante do bucket
+            Iterator<Result<Item>> results = minioClient.listObjects(args.build()).iterator();
+            while (objects.size() < maxKeys && results.hasNext()) {
+                Item item = results.next().get();
+                if (item.isDir()) {
+                    continue;
+                }
+                objects.add(new StoredObject(
+                        item.objectName(),
+                        item.size(),
+                        item.lastModified() != null ? item.lastModified().toInstant() : null
+                ));
+            }
+        } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
+            log.error("Erro ao listar objetos do bucket '{}' sob o prefixo '{}': {}", bucketName, prefix, e.getMessage());
+            throw new BusinessException("Falha ao listar objetos do armazenamento",
+                    HttpStatus.SERVICE_UNAVAILABLE, "STORAGE_LIST_FAILED");
+        }
+
+        // Página cheia: pode haver mais objetos; a última chave lida é o marcador da próxima página
+        String nextStartAfter = objects.size() == maxKeys ? objects.get(objects.size() - 1).key() : null;
+        return new StoredObjectPage(objects, nextStartAfter);
     }
 }

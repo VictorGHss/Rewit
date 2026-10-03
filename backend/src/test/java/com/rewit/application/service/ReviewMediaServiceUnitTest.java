@@ -12,12 +12,14 @@ import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewMedia;
+import com.rewit.domain.model.ReviewMediaObjectKey;
 import com.rewit.infrastructure.security.MediaRateLimiter;
 import com.rewit.infrastructure.storage.ImageSanitizer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
@@ -627,5 +629,24 @@ class ReviewMediaServiceUnitTest {
         ImageSanitizer sanitizer = new ImageSanitizer();
         // Imagem válida com 100x100 passa
         assertNotNull(sanitizer.sanitize(validJpegBytes));
+    }
+
+    // 33. Contrato de reconciliação: a chave gerada no upload pertence ao namespace gerenciado
+    @Test
+    @DisplayName("33. Chaves geradas no upload (JPEG e PNG) são reconhecidas pelo contrato de reconciliação de storage")
+    void testGeneratedObjectKeysAreRecognizedByReconciliationContract() {
+        Review review = createReview(reviewId, authorUserId, "PUBLIC", ReviewStatus.ACTIVE, false);
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
+        when(reviewMediaRepository.countActiveByReviewId(reviewId)).thenReturn(0L);
+        when(reviewMediaRepository.save(any(ReviewMedia.class))).thenAnswer(i -> i.getArgument(0));
+
+        reviewMediaService.uploadMedia(new UploadMediaCommand(reviewId, authorUserId, validJpegBytes, "photo.jpg"));
+        reviewMediaService.uploadMedia(new UploadMediaCommand(reviewId, authorUserId, validPngBytes, "photo.png"));
+
+        ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+        verify(objectStoragePort, times(2)).put(keys.capture(), anyString(), any(byte[].class));
+        for (String key : keys.getAllValues()) {
+            assertTrue(ReviewMediaObjectKey.isManagedKey(key), key);
+        }
     }
 }
