@@ -7,6 +7,7 @@ import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObject;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
 import com.rewit.application.port.ObjectStorageListingPort;
 import com.rewit.application.port.ReviewMediaRepository;
+import com.rewit.application.port.StorageQuarantineRepository;
 import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.model.ReviewMediaObjectKey;
 import org.slf4j.Logger;
@@ -33,7 +34,9 @@ import java.util.Set;
  *       são contadas como não reconhecidas, nunca como órfãs.</li>
  *   <li>Qualquer linha em review_media, em qualquer status, impede a classificação como órfão.
  *       Linhas REMOVED com objeto presente são reportadas à parte; não há política de retenção aqui.</li>
- *   <li>O resultado é observação, não autorização: veja {@link OrphanCandidate}.</li>
+ *   <li>O resultado é observação, não autorização: veja {@link OrphanCandidate}. Cada candidato é
+ *       registrado na quarentena persistente ao fim da sua página (Step 28.3); a rechecagem fica a cargo
+ *       de {@link RecheckQuarantinedStorageObjectUseCase}.</li>
  *   <li>Varredura em lotes: cada página é cruzada com o banco por uma consulta limitada às suas chaves,
  *       e uma execução lê no máximo {@code maxPages} páginas, retornando o marcador para retomar.</li>
  * </ul>
@@ -48,15 +51,18 @@ public class ReconcileReviewMediaStorageUseCase {
 
     private final ObjectStorageListingPort storageListingPort;
     private final ReviewMediaRepository reviewMediaRepository;
+    private final StorageQuarantineRepository quarantineRepository;
     private final int pageSize;
     private final int maxPages;
 
     public ReconcileReviewMediaStorageUseCase(ObjectStorageListingPort storageListingPort,
                                               ReviewMediaRepository reviewMediaRepository,
+                                              StorageQuarantineRepository quarantineRepository,
                                               int pageSize,
                                               int maxPages) {
         this.storageListingPort = Objects.requireNonNull(storageListingPort, "storageListingPort must not be null");
         this.reviewMediaRepository = Objects.requireNonNull(reviewMediaRepository, "reviewMediaRepository must not be null");
+        this.quarantineRepository = Objects.requireNonNull(quarantineRepository, "quarantineRepository must not be null");
         if (pageSize <= 0) {
             throw new IllegalArgumentException("pageSize must be positive");
         }
@@ -121,15 +127,21 @@ public class ReconcileReviewMediaStorageUseCase {
                 }
             }
 
+            List<OrphanCandidate> pageCandidates = new ArrayList<>();
             for (StoredObject object : managed.values()) {
                 ReviewMediaReference reference = references.get(object.key());
                 if (reference == null) {
-                    orphanCandidates.add(new OrphanCandidate(object.key(), object.sizeBytes(), object.lastModified(), now));
+                    pageCandidates.add(new OrphanCandidate(object.key(), object.sizeBytes(), object.lastModified(), now));
                 } else if (reference.status() == ReviewMediaStatus.ACTIVE) {
                     activeReferences++;
                 } else {
                     removedReferences.add(reference);
                 }
+            }
+            if (!pageCandidates.isEmpty()) {
+                // Persistido por página: uma passada interrompida não perde as observações já feitas
+                quarantineRepository.recordObservations(pageCandidates);
+                orphanCandidates.addAll(pageCandidates);
             }
 
             if (!page.hasMore()) {

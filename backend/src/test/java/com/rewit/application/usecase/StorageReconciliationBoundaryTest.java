@@ -30,13 +30,27 @@ class StorageReconciliationBoundaryTest {
     }
 
     @Test
-    @DisplayName("O fluxo de reconciliação não contém nenhuma chamada de remoção")
+    @DisplayName("Os fluxos de reconciliação e rechecagem não contêm nenhuma chamada de remoção")
     void reconciliationSourcesNeverDelete() {
         for (Path file : List.of(
                 MAIN_SOURCES.resolve("application/usecase/ReconcileReviewMediaStorageUseCase.java"),
-                MAIN_SOURCES.resolve("application/port/ObjectStorageListingPort.java"))) {
+                MAIN_SOURCES.resolve("application/port/ObjectStorageListingPort.java"),
+                MAIN_SOURCES.resolve("application/usecase/RecheckQuarantinedStorageObjectUseCase.java"),
+                MAIN_SOURCES.resolve("application/port/StorageQuarantineRepository.java"),
+                MAIN_SOURCES.resolve("application/storage/StorageQuarantineGracePolicy.java"),
+                MAIN_SOURCES.resolve("application/storage/FixedStorageQuarantineGracePolicy.java"))) {
             assertFalse(read(file).contains(".delete("), file.toString());
         }
+    }
+
+    @Test
+    @DisplayName("O adapter da quarentena não depende do storage")
+    void quarantineAdapterDoesNotTouchStorage() {
+        String adapter = read(MAIN_SOURCES.resolve(
+                "infrastructure/persistence/adapter/StorageQuarantineRepositoryAdapter.java"));
+        assertFalse(adapter.contains("ObjectStoragePort"));
+        assertFalse(adapter.contains("io.minio"));
+        assertFalse(adapter.contains("MinioClient"));
     }
 
     private static Stream<Path> javaFilesUnder(Path... roots) throws IOException {

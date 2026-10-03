@@ -41,4 +41,13 @@ class ReviewMediaObjectKeyTest {
         assertFalse(ReviewMediaObjectKey.isInManagedNamespace("avatars/x.jpg"));
         assertFalse(ReviewMediaObjectKey.isInManagedNamespace(null));
     }
+
+    @Test
+    @DisplayName("reviewIdOf extrai a review dona da chave e rejeita chaves fora do formato (Step 28.3)")
+    void reviewIdOfExtractsOwningReview() {
+        assertEquals(UUID.fromString(REVIEW_ID),
+                ReviewMediaObjectKey.reviewIdOf("reviews/" + REVIEW_ID + "/" + MEDIA_ID + "/image.png"));
+        assertThrows(IllegalArgumentException.class, () -> ReviewMediaObjectKey.reviewIdOf("reviews/manual-upload.jpg"));
+        assertThrows(IllegalArgumentException.class, () -> ReviewMediaObjectKey.reviewIdOf(null));
+    }
 }

@@ -1,5 +1,6 @@
 package com.rewit.domain.model;
 
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -36,5 +37,17 @@ public final class ReviewMediaObjectKey {
      */
     public static boolean isManagedKey(String key) {
         return key != null && MANAGED_KEY.matcher(key).matches();
+    }
+
+    /**
+     * Extrai o reviewId de uma chave gerenciada.
+     *
+     * @throws IllegalArgumentException se a chave não segue o formato gerenciado
+     */
+    public static UUID reviewIdOf(String key) {
+        if (!isManagedKey(key)) {
+            throw new IllegalArgumentException("Object key is not a managed review media key");
+        }
+        return UUID.fromString(key.substring(MANAGED_PREFIX.length(), MANAGED_PREFIX.length() + 36));
     }
 }

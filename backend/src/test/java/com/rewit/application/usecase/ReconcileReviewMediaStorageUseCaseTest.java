@@ -37,6 +37,7 @@ class ReconcileReviewMediaStorageUseCaseTest {
     private static final Instant MODIFIED = Instant.parse("2026-10-01T08:30:00Z");
 
     private final FakeReviewMediaRepository repository = new FakeReviewMediaRepository();
+    private final InMemoryStorageQuarantineRepository quarantine = new InMemoryStorageQuarantineRepository();
 
     @Test
     @DisplayName("Objeto com referência ACTIVE não é candidato")
@@ -51,6 +52,7 @@ class ReconcileReviewMediaStorageUseCaseTest {
         assertEquals(1, report.activeReferences());
         assertTrue(report.removedReferences().isEmpty());
         assertTrue(report.complete());
+        assertTrue(quarantine.entries.isEmpty());
     }
 
     @Test
@@ -64,6 +66,8 @@ class ReconcileReviewMediaStorageUseCaseTest {
         assertEquals(List.of(new OrphanCandidate(key, 2048, MODIFIED, NOW)), report.orphanCandidates());
         assertEquals(0, report.activeReferences());
         assertEquals(NOW, report.observedAt());
+        assertEquals(NOW, quarantine.entries.get(key).firstObservedAt());
+        assertEquals(MODIFIED, quarantine.entries.get(key).lastModifiedAt());
     }
 
     @Test
@@ -78,6 +82,7 @@ class ReconcileReviewMediaStorageUseCaseTest {
         assertTrue(report.orphanCandidates().isEmpty());
         assertEquals(List.of(reference), report.removedReferences());
         assertEquals(0, report.activeReferences());
+        assertTrue(quarantine.entries.isEmpty(), "REMOVED é referência: nunca entra na quarentena");
     }
 
     @Test
@@ -91,6 +96,7 @@ class ReconcileReviewMediaStorageUseCaseTest {
         assertEquals(2, report.outOfNamespaceIgnored());
         assertEquals(2, report.objectsExamined());
         assertTrue(repository.queriedKeys.isEmpty(), "chaves fora do prefixo não devem ser consultadas");
+        assertTrue(quarantine.entries.isEmpty(), "objetos fora de reviews/ nunca entram na quarentena");
     }
 
     @Test
@@ -102,6 +108,43 @@ class ReconcileReviewMediaStorageUseCaseTest {
 
         assertTrue(report.orphanCandidates().isEmpty());
         assertEquals(1, report.unrecognizedKeys());
+        assertTrue(quarantine.entries.isEmpty(), "chave malformada nunca entra na quarentena");
+    }
+
+    @Test
+    @DisplayName("Candidatos são persistidos na quarentena ao fim de cada página, antes de uma falha posterior")
+    void candidatesAreQuarantinedPerPageBeforeLaterFailure() {
+        String key = managedKey();
+        ObjectStorageListingPort failingSecondPage = new ObjectStorageListingPort() {
+            private int calls;
+
+            @Override
+            public StoredObjectPage listObjects(String prefix, String startAfter, int maxKeys) {
+                if (calls++ > 0) {
+                    throw new IllegalStateException("storage indisponível");
+                }
+                return page(key, key);
+            }
+        };
+
+        assertThrows(IllegalStateException.class, () -> useCase(failingSecondPage, 1, 10).reconcile(null, NOW));
+        assertEquals(List.of(List.of(key)), quarantine.recordedBatches);
+        assertTrue(quarantine.entries.containsKey(key));
+    }
+
+    @Test
+    @DisplayName("Reexecução sobre o mesmo objeto preserva firstObservedAt e avança lastObservedAt")
+    void repeatedObservationKeepsFirstObservedAt() {
+        String key = managedKey();
+        SortedStorage storage = new SortedStorage().add(key);
+        Instant later = NOW.plusSeconds(3600);
+
+        useCase(storage, 10, 10).reconcile(null, NOW);
+        useCase(storage, 10, 10).reconcile(null, later);
+
+        assertEquals(1, quarantine.entries.size());
+        assertEquals(NOW, quarantine.entries.get(key).firstObservedAt());
+        assertEquals(later, quarantine.entries.get(key).lastObservedAt());
     }
 
     @Test
@@ -214,7 +257,7 @@ class ReconcileReviewMediaStorageUseCaseTest {
     }
 
     private ReconcileReviewMediaStorageUseCase useCase(ObjectStorageListingPort storage, int pageSize, int maxPages) {
-        return new ReconcileReviewMediaStorageUseCase(storage, repository, pageSize, maxPages);
+        return new ReconcileReviewMediaStorageUseCase(storage, repository, quarantine, pageSize, maxPages);
     }
 
     private static String managedKey() {
