@@ -1,20 +1,21 @@
 package com.rewit.infrastructure.persistence.adapter;
 
-import com.rewit.application.port.OutboxRepository;
-import com.rewit.common.exception.BusinessException;
-import com.rewit.domain.enums.OutboxStatus;
-import com.rewit.domain.model.OutboxMessage;
-import com.rewit.infrastructure.persistence.entity.OutboxMessageJpaEntity;
-import com.rewit.infrastructure.persistence.repository.OutboxMessageJpaRepository;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.rewit.application.port.OutboxRepository;
+import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.OutboxStatus;
+import com.rewit.domain.model.OutboxMessage;
+import com.rewit.infrastructure.persistence.entity.OutboxMessageJpaEntity;
+import com.rewit.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 
 /**
  * Adaptador de persistência para o Transactional Outbox (Step 27.1).

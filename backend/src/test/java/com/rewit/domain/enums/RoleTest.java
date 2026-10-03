@@ -1,14 +1,14 @@
 package com.rewit.domain.enums;
 
-import com.rewit.domain.model.User;
-import com.rewit.infrastructure.security.RewitUserPrincipal;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.springframework.security.core.GrantedAuthority;
-
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import com.rewit.domain.model.User;
+import com.rewit.infrastructure.security.RewitUserPrincipal;
 
 @DisplayName("Testes de Unidade: Enum Role e RewitUserPrincipal (Step 26.1)")
 class RoleTest {

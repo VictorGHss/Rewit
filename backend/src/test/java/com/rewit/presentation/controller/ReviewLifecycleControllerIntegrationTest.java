@@ -14,7 +14,6 @@ import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.RateableTarget;
 import com.rewit.infrastructure.persistence.entity.ReviewJpaEntity;
-import com.rewit.infrastructure.persistence.repository.CheckInJpaRepository;
 import com.rewit.infrastructure.persistence.repository.ReviewJpaRepository;
 import com.rewit.infrastructure.persistence.repository.ReviewTargetJpaRepository;
 import com.rewit.presentation.dto.auth.RegisterRequest;
@@ -89,8 +88,9 @@ class ReviewLifecycleControllerIntegrationTest {
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @BeforeEach
-    void setUp() {
+        @BeforeEach
+        @SuppressWarnings("unused")
+        void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .apply(springSecurity())
                 .build();

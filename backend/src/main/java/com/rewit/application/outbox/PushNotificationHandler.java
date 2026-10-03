@@ -1,5 +1,12 @@
 package com.rewit.application.outbox;
 
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.port.NotificationProvider;
@@ -8,12 +15,6 @@ import com.rewit.application.port.OutboxHandler;
 import com.rewit.domain.enums.OutboxMessageType;
 import com.rewit.domain.model.Notification;
 import com.rewit.domain.model.OutboxMessage;
-
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
 
 /**
  * Handler do Outbox que entrega o efeito externo de push (Step 27.3).
@@ -89,7 +90,7 @@ public class PushNotificationHandler implements OutboxHandler {
             return UUID.fromString(idNode.asText());
         } catch (OutboxPermanentException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (JsonProcessingException | IllegalArgumentException e) {
             throw new OutboxPermanentException("Payload do push malformado", e);
         }
     }
@@ -113,7 +114,7 @@ public class PushNotificationHandler implements OutboxHandler {
             return metadata;
         } catch (OutboxPermanentException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (JsonProcessingException | IllegalArgumentException e) {
             throw new OutboxPermanentException("Metadados da notificação malformados", e);
         }
     }

@@ -8,7 +8,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 
@@ -29,6 +28,7 @@ class JwtRoleSecurityTest {
     private JwtAuthenticationConverter jwtAuthenticationConverter;
 
     @BeforeEach
+    @SuppressWarnings("unused")
     void setUp() {
         tokenService = new JwtTokenService(STRONG_SECRET, ISSUER, AUDIENCE, 900, 2592000);
         SecurityConfig securityConfig = new SecurityConfig(STRONG_SECRET, ISSUER, AUDIENCE);

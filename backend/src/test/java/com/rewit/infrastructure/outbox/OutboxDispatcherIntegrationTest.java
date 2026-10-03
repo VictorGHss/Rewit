@@ -87,6 +87,7 @@ class OutboxDispatcherIntegrationTest {
     private ProcessOutboxBatchUseCase useCase;
 
     @BeforeEach
+    @SuppressWarnings("unused")
     void setUp() {
         jdbcTemplate.update("DELETE FROM outbox_messages");
         recordingHandler = new RecordingHandler();
@@ -101,6 +102,7 @@ class OutboxDispatcherIntegrationTest {
     }
 
     @AfterEach
+    @SuppressWarnings("unused")
     void cleanOutboxAfter() {
         jdbcTemplate.update("DELETE FROM outbox_messages");
     }
@@ -166,7 +168,7 @@ class OutboxDispatcherIntegrationTest {
                 startGate.await(10, TimeUnit.SECONDS);
                 TransactionTemplate tx = new TransactionTemplate(transactionManager);
                 batchA.set(tx.execute(s -> outboxRepository.claimBatch(2, "worker-A")));
-            } catch (Throwable e) {
+            } catch (InterruptedException | RuntimeException e) {
                 failure.set(e);
             } finally {
                 bothDone.countDown();
@@ -177,7 +179,7 @@ class OutboxDispatcherIntegrationTest {
                 startGate.await(10, TimeUnit.SECONDS);
                 TransactionTemplate tx = new TransactionTemplate(transactionManager);
                 batchB.set(tx.execute(s -> outboxRepository.claimBatch(2, "worker-B")));
-            } catch (Throwable e) {
+            } catch (InterruptedException | RuntimeException e) {
                 failure.set(e);
             } finally {
                 bothDone.countDown();
