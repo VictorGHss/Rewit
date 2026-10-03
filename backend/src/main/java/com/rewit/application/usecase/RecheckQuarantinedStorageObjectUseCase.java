@@ -81,7 +81,7 @@ public class RecheckQuarantinedStorageObjectUseCase {
 
     // Log sem object_key: somente desfecho e duração
     private static QuarantineRecheckResult finish(QuarantineRecheckResult result, long startedAt) {
-        log.info("Rechecagem de quarentena de storage: desfecho={}, statusReferencia={}, duracaoMs={}",
+        log.debug("Rechecagem de quarentena de storage: desfecho={}, statusReferencia={}, duracaoMs={}",
                 result.outcome(), result.referenceStatus(), Duration.ofNanos(System.nanoTime() - startedAt).toMillis());
         return result;
     }

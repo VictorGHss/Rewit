@@ -18,6 +18,10 @@ rewit:
     # por relógio pode disputar com cenários que semeiam linhas antigas.
     # O teste da Parte Q invoca o purge diretamente (sem relógio real).
     purge-enabled: false
+  # GC de storage desligado em TODOS os testes: nenhum ciclo agendado toca o bucket compartilhado.
+  # Os testes do Step 28.5 montam o orquestrador diretamente, com objetos próprios.
+  storage-gc:
+    enabled: false
   minio:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:8333}
     access-key: ${OBJECT_STORAGE_ACCESS_KEY:change-me}

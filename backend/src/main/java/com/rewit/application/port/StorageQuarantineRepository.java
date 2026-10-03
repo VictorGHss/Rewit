@@ -5,9 +5,11 @@ import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinePurgeRe
 import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantineResolution;
 import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinedStorageObject;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.OrphanCandidate;
+import com.rewit.domain.enums.StorageQuarantineStatus;
 
 import java.time.Instant;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -29,6 +31,15 @@ public interface StorageQuarantineRepository {
     void recordObservations(Collection<OrphanCandidate> candidates);
 
     Optional<QuarantinedStorageObject> findByObjectKey(String objectKey);
+
+    /**
+     * Linhas no status informado, da primeira observação mais antiga para a mais recente (Step 28.5).
+     *
+     * @param limit quantidade máxima retornada (positiva)
+     */
+    List<QuarantinedStorageObject> findByStatus(StorageQuarantineStatus status, int limit);
+
+    long countByStatus(StorageQuarantineStatus status);
 
     /**
      * Segunda consulta a review_media, atômica e sob o mesmo lock de linha em {@code reviews} que o

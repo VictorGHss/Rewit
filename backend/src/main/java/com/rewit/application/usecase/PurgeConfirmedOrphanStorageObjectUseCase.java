@@ -89,7 +89,7 @@ public class PurgeConfirmedOrphanStorageObjectUseCase {
             log.warn("Exclusão de órfão de storage: desfecho={}, resultadoStorage={}, duracaoMs={}",
                     result.outcome(), result.deletionResult(), durationMs);
         } else {
-            log.info("Exclusão de órfão de storage: desfecho={}, resultadoStorage={}, statusReferencia={}, duracaoMs={}",
+            log.debug("Exclusão de órfão de storage: desfecho={}, resultadoStorage={}, statusReferencia={}, duracaoMs={}",
                     result.outcome(), result.deletionResult(), result.referenceStatus(), durationMs);
         }
         return result;

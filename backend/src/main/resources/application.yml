@@ -47,6 +47,12 @@ rewit:
       multiplier: ${OUTBOX_RETRY_MULTIPLIER:2.0}
       max-delay: ${OUTBOX_RETRY_MAX_DELAY:PT10M}
       max-attempts: ${OUTBOX_RETRY_MAX_ATTEMPTS:5}
+  # GC de storage (Step 28.5): desligado por padrão. Ao ligar, defina também, sem defaults:
+  # interval-ms, page-size, max-pages, max-candidates, max-deletes, grace-period e max-duration
+  # (ex.: REWIT_STORAGE_GC_GRACE_PERIOD). O modo destrutivo exige STORAGE_GC_DRY_RUN=false explícito.
+  storage-gc:
+    enabled: ${STORAGE_GC_ENABLED:false}
+    dry-run: ${STORAGE_GC_DRY_RUN:true}
   google:
     places:
       api-key: ${GOOGLE_PLACES_API_KEY:}

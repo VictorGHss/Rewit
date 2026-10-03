@@ -12,6 +12,7 @@ import com.rewit.domain.enums.StorageQuarantineStatus;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,8 @@ final class InMemoryStorageQuarantineRepository implements StorageQuarantineRepo
     final List<UUID> lockedReviewIds = new ArrayList<>();
     /** Simula queda entre a exclusão no storage e a remoção da linha: a transação é desfeita. */
     boolean crashAfterStorageDeletion;
+    /** Simula PostgreSQL indisponível nas consultas por status. */
+    RuntimeException findByStatusFailure;
 
     @Override
     public void recordObservations(Collection<OrphanCandidate> candidates) {
@@ -54,6 +57,24 @@ final class InMemoryStorageQuarantineRepository implements StorageQuarantineRepo
     @Override
     public Optional<QuarantinedStorageObject> findByObjectKey(String objectKey) {
         return Optional.ofNullable(entries.get(objectKey));
+    }
+
+    @Override
+    public List<QuarantinedStorageObject> findByStatus(StorageQuarantineStatus status, int limit) {
+        if (findByStatusFailure != null) {
+            throw findByStatusFailure;
+        }
+        return entries.values().stream()
+                .filter(entry -> entry.status() == status)
+                .sorted(Comparator.comparing((QuarantinedStorageObject entry) -> entry.firstObservedAt())
+                        .thenComparing(entry -> entry.objectKey()))
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public long countByStatus(StorageQuarantineStatus status) {
+        return entries.values().stream().filter(entry -> entry.status() == status).count();
     }
 
     @Override

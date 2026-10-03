@@ -64,6 +64,31 @@ class StorageReconciliationBoundaryTest {
     }
 
     @Test
+    @DisplayName("Scheduler e orquestrador do GC só coordenam: sem SDK, repositório JPA, Outbox ou endpoint (Step 28.5)")
+    void storageGcOperationOnlyCoordinates() throws IOException {
+        String orchestrator = read(MAIN_SOURCES.resolve("application/usecase/RunStorageGcCycleUseCase.java"));
+        String scheduler = read(MAIN_SOURCES.resolve("infrastructure/storagegc/StorageGcScheduler.java"));
+        for (String source : List.of(orchestrator, scheduler)) {
+            assertFalse(source.contains("io.minio"));
+            assertFalse(source.contains("JpaRepository"));
+            assertFalse(source.contains("import com.rewit.application.outbox")
+                    || source.contains("import com.rewit.infrastructure.outbox")
+                    || source.contains("OutboxRepository") || source.contains("OutboxHandler"));
+            assertFalse(source.contains(".delete("));
+        }
+        assertFalse(scheduler.contains("Repository"), "o scheduler não acessa repositórios");
+
+        List<Path> gcSources = javaFilesUnder(MAIN_SOURCES.resolve("infrastructure/storagegc")).toList();
+        assertFalse(gcSources.isEmpty());
+        for (Path file : gcSources) {
+            String source = read(file);
+            assertFalse(source.contains("@RestController") || source.contains("@Controller")
+                    || source.contains("Mapping("), "endpoint em " + file);
+            assertFalse(source.contains("io.minio"), file.toString());
+        }
+    }
+
+    @Test
     @DisplayName("O adapter da quarentena não depende do storage")
     void quarantineAdapterDoesNotTouchStorage() {
         String adapter = read(MAIN_SOURCES.resolve(

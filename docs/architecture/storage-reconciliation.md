@@ -1,6 +1,6 @@
-# Reconciliação de Storage de Mídia — Contrato (STEPs 28.1, 28.3 e 28.4)
+# Reconciliação de Storage de Mídia — Contrato e Operação (STEPs 28.1 a 28.5)
 
-Este documento registra o contrato que compara os objetos do Object Storage (SeaweedFS via API S3) com as referências de mídia persistidas no PostgreSQL, a quarentena e a exclusão física segura. A varredura (28.1) e a rechecagem (28.3) nunca removem objetos. A exclusão física (28.4) só atinge objetos `CONFIRMED_ORPHAN`, após nova consulta sob os locks. Ainda não há scheduler, job periódico nem endpoint: nada dispara esses use cases automaticamente.
+Este documento registra o contrato que compara os objetos do Object Storage (SeaweedFS via API S3) com as referências de mídia persistidas no PostgreSQL, a quarentena, a exclusão física segura e a operação agendada. A varredura (28.1) e a rechecagem (28.3) nunca removem objetos. A exclusão física (28.4) só atinge objetos `CONFIRMED_ORPHAN`, após nova consulta sob os locks. O ciclo agendado (28.5) vem **desligado por padrão** e não há endpoint HTTP.
 
 ## Fonte de verdade e namespace gerenciado
 
@@ -156,6 +156,92 @@ Se o processo cair (ou a transação falhar) depois da exclusão física e antes
 
 - **Upload em andamento:** a exclusão espera o lock da review, vê a referência após o commit do upload e não apaga. O teste de integração falha se o lock for removido.
 - **Duas exclusões da mesma chave:** são serializadas pelos locks. A primeira chama o storage e remove a linha; a segunda não encontra mais `CONFIRMED_ORPHAN` e termina como `NOT_QUARANTINED`, sem chamar o storage.
+
+## Operação agendada (STEP 28.5)
+
+### Arquitetura
+
+`StorageGcScheduler` (`@Scheduled`, fixedDelay) apenas chama `RunStorageGcCycleUseCase.runCycle()`. O orquestrador coordena os use cases existentes, sem duplicar locks, segunda consulta ou grace period:
+
+1. adquire o lock global do GC; se estiver ocupado, o ciclo é `SKIPPED_LOCKED`;
+2. listagem e reconciliação, uma página por vez (`ReconcileReviewMediaStorageUseCase`), registrando observações na quarentena;
+3. rechecagem das linhas `OBSERVED` mais antigas (`RecheckQuarantinedStorageObjectUseCase`); o grace period continua decidido só pela política;
+4. exclusão das `CONFIRMED_ORPHAN` mais antigas (`PurgeConfirmedOrphanStorageObjectUseCase`) ou, em dry-run, apenas a contagem;
+5. relatório agregado (`StorageGcCycleReport`), métricas e um log de resumo.
+
+O GC é independente do Outbox: não gera nem consome mensagens. Não há endpoint HTTP, CLI nem command runner. O disparo manual interno é a própria chamada `runCycle()` do bean, com a mesma configuração, modo, limites, lock e métricas do agendamento.
+
+### Configuração (`rewit.storage-gc`)
+
+| Propriedade | Padrão | Regra |
+| :--- | :--- | :--- |
+| `enabled` | `false` | Desligado: nenhum componente do GC é criado (sem scheduler, orquestrador ou acesso de exclusão). Um aviso único é registrado no boot. |
+| `dry-run` | sem padrão no código; `application.yml` usa `${STORAGE_GC_DRY_RUN:true}` | Obrigatório quando habilitado. O modo destrutivo exige `false` explícito. |
+| `interval-ms` | — | Obrigatório, positivo. |
+| `initial-delay-ms` | `60000` | Não negativo. |
+| `page-size` | — | Obrigatório, de 1 a 1000 (teto do `max-keys` do S3). |
+| `max-pages` | — | Obrigatório, de 1 a 10000. |
+| `max-candidates` | — | Obrigatório, de 1 a 10000: rechecagens por ciclo. |
+| `max-deletes` | — | Obrigatório, de 1 a 10000: exclusões (ou contagens, em dry-run) por ciclo. |
+| `grace-period` | — | Obrigatório, positivo. Constrói `FixedStorageQuarantineGracePolicy`. **Nenhum valor padrão.** |
+| `max-duration` | — | Obrigatório, positivo: timeout do ciclo. |
+| `max-consecutive-failures` | `3` | De 1 a 10000. |
+
+Com `enabled=true`, a configuração é validada no boot e a aplicação não sobe se algo faltar ou for inválido. Nenhum valor de infraestrutura local é um padrão de produção. Os valores obrigatórios são definidos por ambiente (ex.: `REWIT_STORAGE_GC_GRACE_PERIOD`).
+
+### Dry-run
+
+O orquestrador em dry-run é construído **sem** o use case de exclusão. A configuração nem obtém a porta de exclusão do storage, então não existe caminho até o storage delete. O dry-run lista, registra observações e recheca (estado apenas no PostgreSQL); a fase de exclusão só informa `wouldDelete`, que é um limite superior, pois a exclusão real repete a consulta sob os locks. Logs e métricas distinguem o modo: o resumo diz "dry-run: nada foi removido", existe o contador `runs.dry_run`, e o timer tem a tag `mode`.
+
+### Limites, retomada e status
+
+- Uma página por chamada ao reconciliador; `max-pages`, `max-candidates` e `max-deletes` limitam cada fase, e nenhuma fase lê além do seu limite.
+- O marcador `nextStartAfter` do STEP 28.1 fica **em memória** na instância entre ciclos. Ele não é persistido: um reinício recomeça do início do prefixo, sem pular objetos. Um marcador recusado, ou uma listagem que não avança, também recomeça do início.
+- Listagem incompleta nunca é tomada como prova de ausência de objetos: a segurança da exclusão vem da consulta sob lock, não da varredura.
+- Status: `COMPLETED`; `PARTIAL` (algum limite atingido, pode restar trabalho); `TIMED_OUT` (`max-duration` verificado entre etapas, sem interromper uma chamada em curso); `ABORTED`; `FAILED`; `SKIPPED_LOCKED`.
+- Sem paralelismo de exclusão: o processamento é sequencial.
+
+### Múltiplas instâncias
+
+O ciclo inteiro roda sob um advisory lock **de sessão** do PostgreSQL (`pg_try_advisory_lock`, com chave exclusiva do GC), mantido por uma conexão dedicada durante o ciclo:
+
+- não espera: se outra instância detém o lock, o ciclo é ignorado;
+- é liberado com `pg_advisory_unlock` ao fim, com sucesso ou falha. Se a liberação falhar, a conexão é descartada do pool, e a sessão encerrada libera o lock. Se o processo morrer, o PostgreSQL também libera o lock;
+- não envolve linhas de domínio: uploads e operações de usuário nunca o aguardam. Os locks por candidato (review → quarentena) dos STEPs 28.3 e 28.4 continuam sendo a garantia de correção, e o lock global evita apenas a disputa pelas mesmas páginas;
+- Redis não é usado: o PostgreSQL já é a fonte de verdade da quarentena.
+
+### Falhas
+
+| Situação | Comportamento |
+| :--- | :--- |
+| Storage indisponível na listagem | `FAILED`; nenhuma rechecagem ou exclusão neste ciclo; o marcador é mantido |
+| PostgreSQL indisponível (lock, quarentena) | `FAILED`; nenhuma exclusão; quarentena preservada pelas transações |
+| Timeout | `TIMED_OUT` entre etapas |
+| Erro isolado em um candidato | contado em `candidateErrors`; o ciclo segue com os demais; a quarentena do candidato não muda |
+| `TRANSIENT_FAILURE` | candidato mantido `CONFIRMED_ORPHAN`; `max-consecutive-failures` seguidas encerram o ciclo como `ABORTED` |
+| `PERMANENT_FAILURE` | credencial/configuração: as exclusões do ciclo param imediatamente (`ABORTED`); candidato mantido para investigação |
+
+Não há retry dentro do ciclo: cada linha é tentada no máximo uma vez por ciclo, e o próximo ciclo tenta de novo.
+
+### Métricas (`rewit.storage_gc.*`)
+
+Os counters são derivados do relatório do ciclo, sem tags e sem chaves:
+
+- execuções: `runs.started`, `runs.completed`, `runs.partial`, `runs.timed_out`, `runs.aborted`, `runs.failed`, `runs.skipped` (lock ocupado), `runs.dry_run`;
+- listagem e candidatos: `objects.listed`, `objects.ignored`, `candidates.observed`, `rechecks`, `candidates.grace_pending`, `candidates.eligible`, `candidates.protected`, `candidates.errors`;
+- exclusões: `deletes.would_delete`, `deletes.attempted`, `deletes.succeeded`, `deletes.already_absent`, `deletes.retryable_failure`, `deletes.permanent_failure`.
+
+O timer `run.duration` tem a tag `mode=dry_run|destructive`. Os gauges `quarantine.observed` e `quarantine.confirmed` medem o backlog e consultam o PostgreSQL. Com o GC desligado, nenhuma métrica do GC é registrada. As métricas do Outbox não mudaram.
+
+### Logs
+
+Por ciclo há um log de início e um resumo agregado (status, modo, duração, contagens). Os logs por candidato dos use cases ficam em `debug`, exceto falhas de exclusão. Nunca são registrados object key, endpoint, URL, credenciais, conteúdo ou mensagem bruta do SDK; erros aparecem como classificação, código sanitizado e contagem.
+
+### Primeiro rollout recomendado
+
+1. Habilitar com `dry-run=true`, limites baixos e um grace period definido pela operação.
+2. Acompanhar `runs.*`, `candidates.*`, `deletes.would_delete` e os gauges de quarentena por alguns ciclos.
+3. Só então definir `dry-run=false` explicitamente.
 
 ## Separação do Outbox
 

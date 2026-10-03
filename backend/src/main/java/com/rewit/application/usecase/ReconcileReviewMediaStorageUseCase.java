@@ -171,7 +171,7 @@ public class ReconcileReviewMediaStorageUseCase {
         );
 
         // Somente contagens: chaves e metadados ficam no relatório, fora do log
-        log.info("Reconciliação de storage (prefixo '{}'): páginas={}, examinados={}, ativos={}, removidos={}, "
+        log.debug("Reconciliação de storage (prefixo '{}'): páginas={}, examinados={}, ativos={}, removidos={}, "
                         + "candidatosOrfaos={}, naoReconhecidos={}, foraDoPrefixo={}, duplicados={}, completo={}",
                 prefix, pagesScanned, objectsExamined, activeReferences, removedReferences.size(),
                 orphanCandidates.size(), unrecognized, outOfNamespace, duplicates, complete);

@@ -7,10 +7,12 @@ import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinedStorag
 import com.rewit.application.dto.storage.StorageReconciliationDtos.OrphanCandidate;
 import com.rewit.application.port.StorageQuarantineRepository;
 import com.rewit.domain.enums.ReviewMediaStatus;
+import com.rewit.domain.enums.StorageQuarantineStatus;
 import com.rewit.infrastructure.persistence.entity.ReviewMediaJpaEntity;
 import com.rewit.infrastructure.persistence.repository.ReviewJpaRepository;
 import com.rewit.infrastructure.persistence.repository.ReviewMediaJpaRepository;
 import com.rewit.infrastructure.persistence.repository.StorageObjectQuarantineJpaRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -70,6 +72,25 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
             return Optional.empty();
         }
         return quarantineJpaRepository.findByObjectKey(objectKey).map(entity -> entity.toDto());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<QuarantinedStorageObject> findByStatus(StorageQuarantineStatus status, int limit) {
+        Objects.requireNonNull(status, "status must not be null");
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        return quarantineJpaRepository.findByStatusOrderByFirstObservedAtAscIdAsc(status.name(), PageRequest.of(0, limit))
+                .stream()
+                .map(entity -> entity.toDto())
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countByStatus(StorageQuarantineStatus status) {
+        return quarantineJpaRepository.countByStatus(Objects.requireNonNull(status, "status must not be null").name());
     }
 
     @Override
