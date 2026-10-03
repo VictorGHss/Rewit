@@ -118,13 +118,11 @@ class NotificationPushDeliveryIntegrationTest {
     private final String workerId = "worker-push-e2e-" + UUID.randomUUID().toString().substring(0, 8);
 
     @BeforeEach
-    @SuppressWarnings("unused")
     void cleanOutboxBefore() {
         jdbcTemplate.update("DELETE FROM outbox_messages");
     }
 
     @AfterEach
-    @SuppressWarnings("unused")
     void cleanOutboxAfter() {
         jdbcTemplate.update("DELETE FROM outbox_messages");
     }

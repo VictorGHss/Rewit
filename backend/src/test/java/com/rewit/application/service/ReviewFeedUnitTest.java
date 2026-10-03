@@ -64,7 +64,6 @@ class ReviewFeedUnitTest {
     private final UUID followedUserA = UUID.randomUUID();
     private final UUID followedUserB = UUID.randomUUID();
 
-    @SuppressWarnings("unused")
     @BeforeEach
     void setUp() {
         reviewService = new ReviewService(

@@ -89,7 +89,6 @@ class ReviewLifecycleControllerIntegrationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
-    @SuppressWarnings("unused")
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .apply(springSecurity())

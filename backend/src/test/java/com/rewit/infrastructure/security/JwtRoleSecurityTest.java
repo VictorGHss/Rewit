@@ -28,7 +28,6 @@ class JwtRoleSecurityTest {
     private JwtAuthenticationConverter jwtAuthenticationConverter;
 
     @BeforeEach
-    @SuppressWarnings("unused")
     void setUp() {
         tokenService = new JwtTokenService(STRONG_SECRET, ISSUER, AUDIENCE, 900, 2592000);
         SecurityConfig securityConfig = new SecurityConfig(STRONG_SECRET, ISSUER, AUDIENCE);

@@ -87,7 +87,6 @@ class OutboxDispatcherIntegrationTest {
     private ProcessOutboxBatchUseCase useCase;
 
     @BeforeEach
-    @SuppressWarnings("unused")
     void setUp() {
         jdbcTemplate.update("DELETE FROM outbox_messages");
         recordingHandler = new RecordingHandler();
@@ -102,7 +101,6 @@ class OutboxDispatcherIntegrationTest {
     }
 
     @AfterEach
-    @SuppressWarnings("unused")
     void cleanOutboxAfter() {
         jdbcTemplate.update("DELETE FROM outbox_messages");
     }

@@ -34,7 +34,6 @@ class CatalogSearchControllerIntegrationTest {
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @SuppressWarnings("unused")
     @BeforeEach
     void beforeEach() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
