@@ -12,6 +12,13 @@ spring:
     postgresql:
       transactional-lock: false
 
+# Observabilidade V1 (ADR-012): nenhum span é exportado nos testes; os testes de tracing religam a exportação
+# para um exportador em memória. Logs ficam em texto e o Actuator no default (só health na porta da aplicação).
+management:
+  tracing:
+    export:
+      enabled: false
+
 rewit:
   outbox:
     # Poller desligado em TODOS os testes: o agendador @Scheduled não deve

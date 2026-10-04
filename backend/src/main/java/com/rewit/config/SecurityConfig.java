@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.infrastructure.security.Argon2PasswordHasher;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -72,9 +73,13 @@ public class SecurityConfig {
                 .formLogin(SecurityConfig::disableFormLogin)
                 .httpBasic(SecurityConfig::disableHttpBasic)
                 .authorizeHttpRequests(auth -> auth
+                        // Actuator (ADR-012): esta chain também protege a porta de management. Só health, info e
+                        // prometheus, sem credencial (o isolamento é a porta interna); qualquer outro endpoint é negado
+                        .requestMatchers(EndpointRequest.to("health", "info", "prometheus")).permitAll()
+                        .requestMatchers(EndpointRequest.toAnyEndpoint()).denyAll()
                         // Endpoints públicos de autenticação e documentação
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
-                        .requestMatchers("/actuator/health", "/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
+                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
                         // Endpoints de autenticação protegidos
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").authenticated()

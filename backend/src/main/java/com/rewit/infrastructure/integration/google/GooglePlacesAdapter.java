@@ -3,8 +3,10 @@ package com.rewit.infrastructure.integration.google;
 import com.rewit.application.port.PlaceDiscoveryPort;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.PlaceCandidate;
+import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -43,11 +45,14 @@ public class GooglePlacesAdapter implements PlaceDiscoveryPort {
     @Autowired
     public GooglePlacesAdapter(
             GooglePlacesProperties properties,
-            @Autowired(required = false) RestClient.Builder restClientBuilder
+            @Autowired(required = false) RestClient.Builder restClientBuilder,
+            ObjectProvider<ObservationRegistry> observationRegistry
     ) {
+        // A observação dá o span de cliente e propaga o traceparent (ADR-012); sem tracing, o registry é NOOP
         this(properties, (restClientBuilder != null ? restClientBuilder : RestClient.builder())
                 .baseUrl(properties.getBaseUrl())
                 .requestFactory(createRequestFactory(properties))
+                .observationRegistry(observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP))
                 .build());
     }
 
@@ -134,7 +139,7 @@ public class GooglePlacesAdapter implements PlaceDiscoveryPort {
             handleHttpException(ex);
             return Collections.emptyList();
         } catch (RestClientException ex) {
-            log.error("Erro inesperado na resposta da API Google Places: {}", ex.getMessage());
+            log.error("Erro inesperado na resposta da API Google Places (erro={})", ex.getClass().getSimpleName());
             throw new BusinessException("Resposta inválida recebida do Google Places", HttpStatus.BAD_GATEWAY, "EXTERNAL_SERVICE_INVALID_RESPONSE");
         }
     }
@@ -180,7 +185,7 @@ public class GooglePlacesAdapter implements PlaceDiscoveryPort {
             handleHttpException(ex);
             return Optional.empty();
         } catch (RestClientException ex) {
-            log.error("Erro inesperado na resposta do Google Places Details: {}", ex.getMessage());
+            log.error("Erro inesperado na resposta do Google Places Details (erro={})", ex.getClass().getSimpleName());
             throw new BusinessException("Resposta inválida recebida do Google Places", HttpStatus.BAD_GATEWAY, "EXTERNAL_SERVICE_INVALID_RESPONSE");
         }
 
@@ -206,7 +211,7 @@ public class GooglePlacesAdapter implements PlaceDiscoveryPort {
                     "EXTERNAL_SERVICE_TIMEOUT"
             );
         }
-        log.error("Google Places indisponível ou inalcançável: {}", ex.getMessage());
+        log.error("Google Places indisponível ou inalcançável (erro={})", ex.getClass().getSimpleName());
         throw new BusinessException(
                 "Serviço Google Places indisponível",
                 HttpStatus.BAD_GATEWAY,

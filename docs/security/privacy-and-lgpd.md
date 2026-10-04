@@ -58,6 +58,7 @@ Toda foto capturada por smartphones modernos embute metadados EXIF detalhados no
      - Cabeçalhos `Authorization`;
      - Coordenadas geográficas residenciais;
      - E-mails não mascarados.
+   - A política completa de logs, traces e métricas está na §7.
 
 ---
 
@@ -68,3 +69,16 @@ Registro técnico do que o código faz; não é parecer jurídico.
 - **Dados de segurança** (`user_id`, `token_hash`, timestamps de emissão, expiração e revogação, `replaced_by_session_id`): mantidos enquanto sustentam o refresh e a detecção de reúso. Uma sessão só é removida quando está expirada e não tem sucessora de rotação (ADR-011). Em cadeias de rotação de usuários ativos, esse histórico permanece enquanto a cadeia estiver viva.
 - **Dados técnicos pessoais** (`ip_address`, `user_agent`): capturados no registro, login e refresh e **não lidos por nenhum código**. O job de cleanup os apaga (`NULL`) assim que a sessão deixa de estar ativa (revogada ou expirada), sem esperar a remoção da linha. Assim, a retenção de segurança da cadeia não implica reter IP e user agent.
 - **Pendente (produto/jurídico)**: a coleta e a retenção de `ip_address` e `user_agent` **enquanto a sessão está ativa** (até o `expires_at`, 30 dias após o último refresh com o TTL padrão). Nenhum uso funcional desses dados existe hoje.
+
+---
+
+## 7. Observabilidade: Logs, Traces e Métricas (ADR-012)
+
+Registro técnico do que o código faz; não é parecer jurídico. Arquitetura em [observability.md](../architecture/observability.md).
+
+- **Logs estruturados**: JSON no stdout (formato `logstash` do Spring Boot), em texto no perfil `local`. O stack trace sai sem as mensagens das exceções, que podem carregar SQL, URLs ou chaves de objeto.
+- **Nunca aparecem em logs, spans ou labels de métricas**: `userId`, `sessionId`, access token, refresh token, hash de token, cabeçalho `Authorization`, IP, User-Agent, e-mail, query string (que pode conter coordenadas), corpo de requisição, SQL e valores de parâmetros, mensagens de exceção de terceiros.
+- **Sem `userId`**: nem em logs de negócio nem em eventos de segurança. Com reviews anônimas (§4), `userId` ao lado de `reviewId` em um log desanonimizaria o autor para quem tem acesso aos logs. A correlação de uma requisição é feita pelo `traceId`.
+- **Permitido com restrição**: `objectKey` de mídia (`reviews/{reviewId}/{mediaId}/...`) somente nos logs de falha de upload e remoção que já existiam; ids técnicos do Outbox (`messageId`, workerId).
+- **Tracing**: só requisições HTTP recebidas e chamadas ao Google Places. Atributos: método, rota normalizada, status, resultado, classe da exceção e o path da requisição (`http.url`, sem query string, podendo conter UUIDs). Sem tracing de banco de dados. A exportação só ocorre para um endpoint OTLP configurado explicitamente no deploy; o acesso ao backend de traces deve ser restrito.
+- **Métricas**: agregadas, sem identificadores, servidas só na porta de management interna; usuários da API não têm acesso.

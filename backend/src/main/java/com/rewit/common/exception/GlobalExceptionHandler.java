@@ -1,10 +1,13 @@
 package com.rewit.common.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -19,6 +22,8 @@ import java.util.Map;
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BusinessException.class)
     public ProblemDetail handleBusinessException(BusinessException ex) {
@@ -122,6 +127,12 @@ public class GlobalExceptionHandler {
         // Deixa o Spring Security tratar suas próprias exceções (403/401)
         if (ex instanceof AccessDeniedException || ex instanceof AuthenticationException) {
             throw ex;
+        }
+        // Erro inesperado: só a classe na mensagem (ADR-012). Sem path, headers, corpo ou mensagem da exceção;
+        // o stack trace dos logs JSON sai sem mensagens. Exceções do framework que já são 4xx (rota inexistente,
+        // método não suportado) não são erros do servidor e não geram ERROR.
+        if (!(ex instanceof ErrorResponse errorResponse && errorResponse.getStatusCode().is4xxClientError())) {
+            log.error("Erro interno inesperado ao processar a requisição (erro={})", ex.getClass().getName(), ex);
         }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "Ocorreu um erro interno inesperado no servidor.");
         problem.setTitle("Erro Interno do Servidor");

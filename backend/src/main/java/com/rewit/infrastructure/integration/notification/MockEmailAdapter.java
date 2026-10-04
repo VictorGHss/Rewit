@@ -15,6 +15,8 @@ public class MockEmailAdapter implements EmailProvider {
 
     @Override
     public void sendEmail(String toAddress, String subject, String bodyHtml) {
-        log.info("[MOCK EMAIL] Para: {}, Assunto: {}", toAddress, subject);
+        // Sem destinatário/assunto no log (ADR-012): e-mail não mascarado é proibido em logs
+        // (privacy-and-lgpd.md §5), como no MockNotificationAdapter
+        log.info("[MOCK EMAIL] E-mail simulado pelo provider mock (destinatário e conteúdo não registrados)");
     }
 }

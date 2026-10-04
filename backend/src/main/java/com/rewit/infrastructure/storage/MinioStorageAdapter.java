@@ -83,7 +83,7 @@ public class MinioStorageAdapter implements ObjectStoragePort, ObjectStorageList
                 }
                 bucketChecked.set(true);
             } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
-                log.error("Erro ao verificar/criar bucket '{}' no Object Storage: {}", bucketName, e.getMessage());
+                log.error("Erro ao verificar/criar bucket '{}' no Object Storage (erro={})", bucketName, e.getClass().getSimpleName());
                 throw new BusinessException("Falha na inicialização do serviço de armazenamento",
                         HttpStatus.SERVICE_UNAVAILABLE, "STORAGE_UNAVAILABLE");
             }
@@ -106,7 +106,7 @@ public class MinioStorageAdapter implements ObjectStoragePort, ObjectStorageList
                             .build()
             );
         } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
-            log.error("Erro ao gravar objeto '{}' no bucket '{}': {}", key, bucketName, e.getMessage());
+            log.error("Erro ao gravar objeto '{}' no bucket '{}' (erro={})", key, bucketName, e.getClass().getSimpleName());
             throw new BusinessException("Falha ao persistir arquivo no armazenamento de objetos",
                     HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_WRITE_FAILED");
         }
@@ -128,11 +128,11 @@ public class MinioStorageAdapter implements ObjectStoragePort, ObjectStorageList
                 throw new BusinessException("Arquivo de mídia não encontrado no armazenamento",
                         HttpStatus.NOT_FOUND, "MEDIA_OBJECT_NOT_FOUND");
             }
-            log.error("Erro ao obter objeto '{}' do storage: {}", key, e.getMessage());
+            log.error("Erro ao obter objeto '{}' do storage (erro={}, codigo={})", key, e.getClass().getSimpleName(), e.errorResponse().code());
             throw new BusinessException("Falha ao ler arquivo do armazenamento",
                     HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_READ_FAILED");
         } catch (MinioException | IOException | GeneralSecurityException | RuntimeException e) {
-            log.error("Erro inesperado ao obter objeto '{}' do storage: {}", key, e.getMessage());
+            log.error("Erro inesperado ao obter objeto '{}' do storage (erro={})", key, e.getClass().getSimpleName());
             throw new BusinessException("Falha ao ler arquivo do armazenamento",
                     HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_READ_FAILED");
         }

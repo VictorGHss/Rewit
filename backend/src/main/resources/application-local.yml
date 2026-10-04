@@ -36,6 +36,17 @@ spring:
       password: ${REDIS_PASSWORD:}
       timeout: 3000ms
 
+# Observabilidade local (ADR-012): management na 8081 do base, logs em texto e todas as requisições amostradas
+management:
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+
+logging:
+  structured:
+    format:
+      console: ${LOG_STRUCTURED_FORMAT:}
+
 # Configurações de serviços locais
 rewit:
   minio:

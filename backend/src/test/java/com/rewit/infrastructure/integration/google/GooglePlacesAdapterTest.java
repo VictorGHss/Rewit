@@ -1,10 +1,14 @@
 package com.rewit.infrastructure.integration.google;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.PlaceCandidate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -331,6 +335,29 @@ class GooglePlacesAdapterTest {
         mockServer.verify();
         assertEquals(HttpStatus.BAD_GATEWAY, ex.getStatus());
         assertEquals("EXTERNAL_SERVICE_INVALID_RESPONSE", ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("Text Search: falha de resposta é logada só com a classe do erro, sem trecho do corpo nem mensagem do cliente HTTP")
+    void searchByText_failureLogHasNoRawMessage() {
+        mockServer.expect(requestTo("https://places.googleapis.com/v1/places:searchText"))
+                .andRespond(withSuccess("{places: [conteudo-upstream-sensivel", MediaType.APPLICATION_JSON));
+        Logger logger = (Logger) LoggerFactory.getLogger(GooglePlacesAdapter.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertThrows(BusinessException.class, () -> adapter.searchByText("Teste", null, null, null, 10, "pt-BR"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertEquals(1, appender.list.size());
+        String message = appender.list.getFirst().getFormattedMessage();
+        assertTrue(message.contains("(erro="));
+        assertFalse(message.contains("conteudo-upstream-sensivel"));
+        assertFalse(message.contains("places.googleapis.com"));
+        assertNull(appender.list.getFirst().getThrowableProxy());
     }
 
     @Test

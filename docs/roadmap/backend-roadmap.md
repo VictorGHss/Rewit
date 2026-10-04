@@ -2,11 +2,11 @@
 
 > **Data de Atualização**: 03/10/2026\
 > **Status do Repositório**: Verde e Estabilizado\
-> **Checkpoint Atual (HEAD)**: `2d49b38` (STEP 29.3) + consolidação documental do gate do STEP 29\
+> **Checkpoint Atual (HEAD)**: commit `feat: implementar observabilidade v1` (sobre `364b856`)\
 > **Branch**: `main` (ahead do origin em commits consolidados)\
-> **Total de Testes Automatizados**: `1271` (0 failures, 0 errors, 0 skipped)\
+> **Total de Testes Automatizados**: `1293` (0 failures, 0 errors, 0 skipped)\
 > **Working Tree**: `Limpo`\
-> **Próximo Trabalho**: decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (única pendência do STEP 29; ADR-011 Proposto)
+> **Próximo Trabalho**: decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (pendência do STEP 29; ADR-011 Proposto). Prontidão de produção (rate limiting distribuído, backup/restore, testes de carga) segue como frente separada
 
 ---
 
@@ -23,7 +23,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1243, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`.
+*Resultado esperado*: `Tests run: 1293, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -77,7 +77,8 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Jobs Assíncronos & Outbox** | ✅ CONCLUÍDO — STEPs 27.0 a 27.4 (Discovery, Fundação Transacional, Dispatcher/Worker, Produtor de Notifications + `PushNotificationHandler`, Observabilidade e Retenção) | Migração [V12](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V12__outbox_messages.sql) com tabela `outbox_messages` e migração [V13](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V13__outbox_dispatcher_indexes.sql) com índice parcial de lease; domínio puro [OutboxMessage.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/OutboxMessage.java) e enum `OutboxStatus`; enum [OutboxMessageType.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/enums/OutboxMessageType.java) com `PUSH_NOTIFICATION`; porta [OutboxRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/port/OutboxRepository.java) com claim atômico `FOR UPDATE SKIP LOCKED` implementado por [OutboxRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/OutboxRepositoryAdapter.java); use case puro [ProcessOutboxBatchUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/ProcessOutboxBatchUseCase.java) com ciclo `reclaim → claimBatch → handler fora da transação → finalização owner-checked`; classificação de falhas, [OutboxRetryPolicy.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxRetryPolicy.java) com backoff determinístico e [OutboxErrorSanitizer.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxErrorSanitizer.java); poller `@Scheduled` fino [OutboxDispatcherPoller.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/outbox/OutboxDispatcherPoller.java); no STEP 27.3 a [NotificationService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/NotificationService.java) passou a enfileirar `PUSH_NOTIFICATION` na mesma transação dos quatro fluxos de notificação (payload exclusivo `{"notificationId"}`) e o [PushNotificationHandler.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/PushNotificationHandler.java) entrega o conteúdo persistido à porta `NotificationProvider` (`MockNotificationAdapter`); 1117 testes verdes. | Outbox V1 encerrado (detalhes em §8.4.1). O provider permanece o mock local — não há push real externo; a Notification in-app segue síncrona, apenas o efeito externo de push tornou-se assíncrono. |
 | **Storage GC (Reconciliação de Mídia)** | ✅ CONCLUÍDO — STEP 28 | Contrato de listagem paginada, quarentena persistente (`V15`), grace period configurável, rechecagem sob lock, exclusão física idempotente, dry-run, scheduler desligado por padrão e métricas `rewit.storage_gc.*`. Ver [storage-reconciliation.md](../architecture/storage-reconciliation.md) e [ADR-010](../decisions/ADR-010-storage-garbage-collection.md). | Ativação operacional conforme o rollout seguro documentado (dry-run primeiro). |
 | **Cleanup de Sessões Expiradas** | ✅ TECNICAMENTE CONCLUÍDO — STEP 29 (decisão de produto/jurídico pendente) | Job `@Scheduled` ligado por padrão: limpa IP/User-Agent de sessões inativas e expurga sessões expiradas sem sucessora (`expires_at < now AND replaced_by_session_id IS NULL`), em lotes `FOR UPDATE SKIP LOCKED`, sem recursão; índice `V16`; métricas `rewit.auth_session_cleanup.*`. Ver [authentication.md §4.5](../architecture/authentication.md) e [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) (Proposto). | Decisão de produto/jurídico sobre a coleta de IP/User-Agent durante a sessão ativa. |
-| **Observabilidade Avançada & Deploy** | ⏳ PENDENTE | Actuator básico habilitado; sem tracing distribuído ou logs estruturados JSON. | Configurar exportação Prometheus/OTel para produção. |
+| **Observabilidade V1** | ✅ CONCLUÍDO | Métricas por scrape Prometheus (`/actuator/prometheus`), logs JSON no stdout, tracing HTTP (servidor e Google Places) via OTLP desligado sem endpoint, Actuator em porta de management própria. Ver [observability.md](../architecture/observability.md) e [ADR-012](../decisions/ADR-012-observability.md) (Proposto). | Definir collector OTLP e Prometheus no deploy; não publicar a porta de management. |
+| **Prontidão de Produção** | ⏳ PENDENTE | Rate limiting em memória, sem backup/restore documentado, sem testes de carga. | Rate limiting distribuído, backup/restore e testes de carga (itens separados, sem decisão tomada). |
 | **Cache Distribuído em Redis** | 🔮 FUTURO ADIADO | Redis conectado mas sem cache de queries complexas. | Introduzir apenas sob saturação medida do PostgreSQL. |
 | **Machine Learning & Embeddings** | 🔮 FUTURO ADIADO | Arquitetura determinística prioritária; sem ML. | Avaliar apenas após escala de dezenas de milhares de reviews. |
 
@@ -931,16 +932,18 @@ Pendente: decisão de produto/jurídico sobre a coleta de IP/User-Agent enquanto
 ## 9. Observabilidade, Performance e Produção
 
 ### 9.1 O que já existe
-- **Spring Boot Actuator**: Endpoints `/actuator/health`, `/actuator/info` e `/actuator/metrics` expostos.
+- **Observabilidade V1** ([observability.md](../architecture/observability.md), [ADR-012](../decisions/ADR-012-observability.md)): Actuator só na porta de management (`MANAGEMENT_SERVER_PORT`, padrão `8081`) com `health`, `info` e `prometheus`; 41 métricas `rewit.*` (Outbox, Storage GC, cleanup de sessões) mais as automáticas de JVM, Hikari e HTTP, exportadas por scrape; logs JSON (formato `logstash` nativo do Spring Boot) com `traceId`/`spanId`; tracing OpenTelemetry de HTTP servidor e do cliente do Google Places, exportado por OTLP só com endpoint configurado; sampling por variável. Sem `userId` em logs, spans ou métricas; sem tracing de JDBC nem de `@Scheduled`.
+- **Spring Boot Actuator**: antes `/actuator/metrics` ficava na porta da API e era legível por qualquer usuário autenticado; deixou de ser exposto.
 - **Hikari Connection Pool**: Configurado com limite de 10 conexões locais e timeouts defensivos.
 - **Rate Limiting In-Memory**: Proteção contra flood de denúncias via `ReportRateLimiter`.
 - **Flyway Validation**: Validação rigorosa dos checksums das migrações no startup da aplicação.
 - **Java Virtual Threads**: Ativadas nativamente (`spring.threads.virtual.enabled: true`) para alto throughput de I/O bloqueante.
 
 ### 9.2 O que falta para Prontidão de Produção
-- **Logs Estruturados em JSON**: Configuração do Logback com formato JSON estruturado (Logstash encoder) contendo `traceId`, `spanId` e `userId`.
-- **Métricas Prometheus / Micrometer**: Exposição de métricas customizadas de latência do Feed V2, taxa de cache hits e contagem de check-ins rejeitados.
-- **Distributed Tracing**: Instrumentação com OpenTelemetry ou Micrometer Tracing para rastreabilidade ponta a ponta.
+Logs JSON, métricas Prometheus e tracing HTTP foram entregues na Observabilidade V1 (§9.1) e saíram desta lista. Restam, como frentes separadas e sem decisão tomada:
+
+- **Métricas de negócio novas**: latência do Feed V2 e contagem de check-ins rejeitados (a "taxa de cache hits" saiu do escopo: o cache está adiado, §10).
+- **Tracing além do HTTP**: JDBC e jobs `@Scheduled` foram deliberadamente deixados de fora (ADR-012).
 - **Rate Limiting Distribuído**: Migração do rate limiter in-memory para Redis (Token Bucket com scripts Lua) para suportar múltiplas instâncias da API.
 - **Políticas de Backup e Restore**: Rotinas documentadas de backup contínuo (WAL archiving e pg_dump) para o PostgreSQL com PostGIS.
 - **Testes de Carga Automatizados**: Scripts de teste de stress (k6 ou Gatling) simulando centenas de usuários navegando no feed simultaneamente.
@@ -1064,7 +1067,7 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
 
 ## 12. Estado Atual da Suíte de Testes
 
-* **Total de Testes**: `1271`
+* **Total de Testes**: `1293`
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`
@@ -1078,6 +1081,7 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
   - Testes de Integração HTTP com MockMvc e Spring Security (`ReviewLifecycleControllerIntegrationTest` com 19 cenários; [AdminModerationControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/AdminModerationControllerIntegrationTest.java) com 15 cenários cobrindo 401/403 de segurança, remoção por MODERATOR e ADMIN, 404/409 de negócio e validação Bean Validation; `FeedV2ControllerIntegrationTest`; `FeedControllerIntegrationTest`; `ReviewControllerIntegrationTest`).
   - Testes de Não-Regressão das etapas anteriores (Search V1, Auth, Catálogo, Reputação, Moderação Preventiva).
   - Testes do Storage GC (STEP 28): unitários de reconciliação, quarentena, rechecagem, exclusão, orquestração, configuração, métricas e scheduler; integração com PostgreSQL e SeaweedFS reais (lock da review, advisory lock, janela de queda, ciclo dry-run e destrutivo) e testes de fronteira arquitetural.
+  - Testes da Observabilidade V1: `ActuatorManagementPortIntegrationTest` (7, servidor real com API e management em portas aleatórias), `ObservabilityTracingLoggingIntegrationTest` (5, exportador de spans em memória e stub do Google), `ObservabilityConfigurationTest` (4), `SanitizedStackTracePrinterTest` (2), `MockEmailAdapterTest` (1), `MinioStorageAdapterErrorLoggingTest` (2) e um caso novo em `GooglePlacesAdapterTest`.
   - Testes do Cleanup de Sessões (STEP 29.3): [CleanupAuthSessionsUseCaseTest.java](../../backend/src/test/java/com/rewit/application/usecase/CleanupAuthSessionsUseCaseTest.java) (5), scheduler (2), configuração (3) e [AuthSessionCleanupIntegrationTest.java](../../backend/src/test/java/com/rewit/infrastructure/authsession/AuthSessionCleanupIntegrationTest.java) (8) no PostgreSQL real: elegibilidade, cadeia A→B→C→D, metadados, reúso, SKIP LOCKED, rollback, espera do `revokeAllByUserId` e índice `V16`.
 
 ---
@@ -1095,10 +1099,7 @@ O STEP 29 está tecnicamente concluído (§8.12). Resta uma pendência que não 
 
 As seguintes frentes encontram-se pendentes e podem ser iniciadas a qualquer momento, de acordo com as prioridades do produto:
 
-1. **Observabilidade Avançada**:
-   - Logs estruturados JSON (Logback/Logstash encoder).
-   - Métricas Prometheus/Micrometer customizadas.
-   - Rastreabilidade distribuída via OpenTelemetry.
+1. **Prontidão de Produção** (§9.2): rate limiting distribuído, backup/restore e testes de carga, cada um sujeito ao seu próprio decision gate. A Observabilidade V1 já foi entregue (§9.1).
 
 > [!NOTE]
 > O subsistema de Moderação Administrativa está 100% operacional. Qualquer backoffice ou painel administrativo pode consumir diretamente os endpoints `/api/v1/admin/**` com tokens JWT de MODERATOR ou ADMIN. O Outbox (STEPS 27.1 a 27.4) processa mensagens `PUSH_NOTIFICATION` com entrega at-least-once à porta `NotificationProvider` — **ainda o `MockNotificationAdapter` local, sem push real externo**: nenhum fluxo de negócio deve assumir entrega real de push para dispositivos. A Notification in-app permanece síncrona e transacional.

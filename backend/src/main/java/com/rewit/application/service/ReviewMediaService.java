@@ -130,7 +130,7 @@ public class ReviewMediaService {
             try {
                 objectStoragePort.delete(objectKey);
             } catch (Exception compensationEx) {
-                log.error("Erro durante compensação ao deletar objeto '{}' após falha no banco: {}", objectKey, compensationEx.getMessage());
+                log.error("Erro durante compensação ao deletar objeto '{}' após falha no banco (erro={})", objectKey, compensationEx.getClass().getSimpleName());
             }
             throw ex;
         }
@@ -247,7 +247,7 @@ public class ReviewMediaService {
         try {
             objectStoragePort.delete(media.getObjectKey());
         } catch (Exception ex) {
-            log.warn("Falha ao remover arquivo físico do storage '{}' durante exclusão: {}", media.getObjectKey(), ex.getMessage());
+            log.warn("Falha ao remover arquivo físico do storage '{}' durante exclusão (erro={})", media.getObjectKey(), ex.getClass().getSimpleName());
             // Mantém registro como REMOVED no banco: a mídia está logicamente eliminada e inacessível
         }
     }
