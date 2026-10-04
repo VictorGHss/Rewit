@@ -12,6 +12,8 @@ import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.PrecisionModel;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -42,8 +44,9 @@ public class CheckInJpaEntity {
     @Column(name = "coordinates", columnDefinition = "geography(Point, 4326)", nullable = false)
     private Point coordinates;
 
-    @Column(name = "distance_to_centroid_meters", nullable = false)
-    private double distanceToCentroidMeters;
+    // NUMERIC(7,2) em V1: mapeado como BigDecimal, como as demais colunas NUMERIC; o domínio mantém double
+    @Column(name = "distance_to_centroid_meters", nullable = false, precision = 7, scale = 2)
+    private BigDecimal distanceToCentroidMeters;
 
     @Column(name = "status", nullable = false, length = 32)
     private String status;
@@ -72,7 +75,9 @@ public class CheckInJpaEntity {
         entity.setUserId(domain.getUserId());
         entity.setPlaceId(domain.getPlaceId());
         entity.setCoordinates(toPoint(domain.getLatitude(), domain.getLongitude()));
-        entity.setDistanceToCentroidMeters(domain.getDistanceToCentroidMeters());
+        // Mesmo arredondamento que o PostgreSQL aplicava ao receber o double na coluna NUMERIC(7,2)
+        entity.setDistanceToCentroidMeters(
+                BigDecimal.valueOf(domain.getDistanceToCentroidMeters()).setScale(2, RoundingMode.HALF_UP));
         entity.setStatus(domain.getStatus() != null ? domain.getStatus().name() : "PENDING");
         entity.setVerificationMethod(domain.getVerificationMethod() != null ? domain.getVerificationMethod().name() : "GPS");
         entity.setVerifiedAt(domain.getVerifiedAt());
@@ -106,7 +111,7 @@ public class CheckInJpaEntity {
                 this.placeId,
                 lat,
                 lon,
-                this.distanceToCentroidMeters,
+                this.distanceToCentroidMeters.doubleValue(),
                 checkInStatus,
                 method,
                 this.verifiedAt
@@ -153,11 +158,11 @@ public class CheckInJpaEntity {
         this.coordinates = coordinates;
     }
 
-    public double getDistanceToCentroidMeters() {
+    public BigDecimal getDistanceToCentroidMeters() {
         return distanceToCentroidMeters;
     }
 
-    public void setDistanceToCentroidMeters(double distanceToCentroidMeters) {
+    public void setDistanceToCentroidMeters(BigDecimal distanceToCentroidMeters) {
         this.distanceToCentroidMeters = distanceToCentroidMeters;
     }
 

@@ -13,7 +13,7 @@ Este documento descreve a modelagem física relacional, a extensão espacial Pos
 - **Sistema de Coordenadas (SRID)**: `4326` (WGS 84 - Elipsoide geodésico universal)
 - **Tipo de Dado Espacial Padrão**: `GEOGRAPHY(Point, 4326)`
 - **Estratégia de Versionamento**: **Flyway 11.x** (todas as alterações de banco são arquivos `.sql` imutáveis versionados em `backend/src/main/resources/db/migration`)
-- **Validação no Hibernate**: `spring.jpa.hibernate.ddl-auto: validate` (proibido `update` ou `create`)
+- **Validação no Hibernate**: `spring.jpa.hibernate.ddl-auto: validate` na aplicação (proibido `update` ou `create`). O perfil de testes não aplica essa validação a todos os contextos; o contrato entre entidades JPA e o schema Flyway é verificado por `JpaSchemaValidationIntegrationTest`, que sobe o contexto com `validate` e o mesmo dialeto PostGIS da aplicação. Colunas `NUMERIC` são mapeadas como `BigDecimal` com `precision`/`scale` correspondentes.
 
 ---
 
