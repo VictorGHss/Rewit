@@ -169,15 +169,32 @@ class ActuatorManagementPortIntegrationTest {
     }
 
     @Test
-    @DisplayName("A API não serve nenhum endpoint do Actuator, nem para USER autenticado")
+    @DisplayName("A API não serve nenhum endpoint do Actuator: anônimo 401, USER autenticado 404")
     void apiPortDoesNotServeActuator() throws Exception {
         for (String path : new String[]{"/actuator/prometheus", "/actuator/metrics", "/actuator/health",
                 "/actuator/info", "/actuator"}) {
-            assertNotEquals(200, get(api(path), null).statusCode(), path);
+            assertEquals(401, get(api(path), null).statusCode(), path + " sem credencial (a autenticação não mudou)");
             HttpResponse<String> withUser = get(api(path), userToken);
-            assertNotEquals(200, withUser.statusCode(), path + " com JWT de USER");
+            assertEquals(404, withUser.statusCode(), path + " com JWT de USER: recurso inexistente, não erro de servidor");
+            assertTrue(withUser.body().contains("RESOURCE_NOT_FOUND"), path);
             assertFalse(withUser.body().contains("rewit_outbox_pending"), path);
         }
+    }
+
+    @Test
+    @DisplayName("Rota inexistente aparece nas métricas HTTP como 404/CLIENT_ERROR, nunca como 500")
+    void unknownRouteIsAClientErrorInMetrics() throws Exception {
+        HttpResponse<String> response = get(api("/api/v1/rota-inexistente-" + UUID.randomUUID()), userToken);
+        assertEquals(404, response.statusCode());
+        assertTrue(response.body().contains("\"title\":\"Recurso Não Encontrado\"") && response.body().contains("\"timestamp\""),
+                "mesmo formato RFC 7807 dos demais erros");
+
+        String metrics = get(management("/actuator/prometheus"), null).body();
+        assertTrue(metrics.lines().anyMatch(line -> line.startsWith("http_server_requests_seconds_count")
+                && line.contains("status=\"404\"") && line.contains("outcome=\"CLIENT_ERROR\"")),
+                "série 404/CLIENT_ERROR presente");
+        assertTrue(metrics.lines().noneMatch(line -> line.startsWith("http_server_requests_seconds_count")
+                && line.contains("status=\"500\"")), "nenhuma requisição virou 500");
     }
 
     @Test

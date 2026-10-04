@@ -204,11 +204,15 @@ class ObservabilityTracingLoggingIntegrationTest {
     @DisplayName("Rota inexistente não é erro do servidor: nenhum log ERROR, e a rota do span fica normalizada")
     void unknownRouteIsNotLoggedAsError(CapturedOutput output) throws Exception {
         String path = "/api/v1/rota-inexistente-" + UUID.randomUUID();
-        send(authorized(api(path)).GET());
+        HttpResponse<String> response = send(authorized(api(path)).GET());
+        assertEquals(404, response.statusCode());
+        assertTrue(response.body().contains("RESOURCE_NOT_FOUND"));
         // O handler de recursos estáticos casa "/**": a tag de rota não carrega o UUID do path
         SpanData span = awaitSpan(candidate -> candidate.getKind() == SpanKind.SERVER
                 && path.equals(attribute(candidate, "http.url")));
         assertEquals("/**", attribute(span, "uri"));
+        assertEquals("404", attribute(span, "status"));
+        assertEquals("CLIENT_ERROR", attribute(span, "outcome"));
 
         assertTrue(jsonLogs(output, log -> "ERROR".equals(log.path("level").asText())).isEmpty());
     }

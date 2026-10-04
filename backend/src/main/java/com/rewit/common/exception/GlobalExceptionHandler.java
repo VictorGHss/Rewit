@@ -11,6 +11,7 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.net.URI;
 import java.time.Instant;
@@ -118,6 +119,20 @@ public class GlobalExceptionHandler {
         problem.setTitle("Requisição Inválida");
         problem.setType(URI.create("https://api.rewit.app/errors/malformed-request"));
         problem.setProperty("code", "MALFORMED_REQUEST");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Rota sem handler nem recurso estático (inclui /actuator/* na porta da API, onde não existe).
+     * É erro do cliente: 404, sem log de erro, e não pode cair no handler genérico (500).
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ProblemDetail handleNoResourceFound(NoResourceFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "Recurso não encontrado");
+        problem.setTitle("Recurso Não Encontrado");
+        problem.setType(URI.create("https://api.rewit.app/errors/resource-not-found"));
+        problem.setProperty("code", "RESOURCE_NOT_FOUND");
         problem.setProperty("timestamp", Instant.now());
         return problem;
     }
