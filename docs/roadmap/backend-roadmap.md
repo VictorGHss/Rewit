@@ -2,11 +2,11 @@
 
 > **Data de Atualização**: 03/10/2026\
 > **Status do Repositório**: Verde e Estabilizado\
-> **Checkpoint Atual (HEAD)**: commit `feat: implementar cleanup de sessoes expiradas` (STEP 29.3, sobre `ddc959b`)\
+> **Checkpoint Atual (HEAD)**: `2d49b38` (STEP 29.3) + consolidação documental do gate do STEP 29\
 > **Branch**: `main` (ahead do origin em commits consolidados)\
 > **Total de Testes Automatizados**: `1271` (0 failures, 0 errors, 0 skipped)\
 > **Working Tree**: `Limpo`\
-> **Próximo Trabalho**: STEP 29 — decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (ADR-011 Proposto) e gate de fechamento
+> **Próximo Trabalho**: decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (única pendência do STEP 29; ADR-011 Proposto)
 
 ---
 
@@ -76,7 +76,7 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Moderação Administrativa (Backoffice)** | ✅ CONCLUÍDO — STEPs 26.1 a 26.3 Concluídos | Fundação V11, [ModerateReviewUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/ModerateReviewUseCase.java), [QueryAdminReportsUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/QueryAdminReportsUseCase.java), [AdminModerationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/AdminModerationController.java), [AdminModerationDtos.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/dto/admin/AdminModerationDtos.java), correção de `GlobalExceptionHandler` para 403 correto, testes [AdminModerationControllerIntegrationTest.java](file:///d:/Codigos/Projetos/Rewit/backend/src/test/java/com/rewit/presentation/controller/AdminModerationControllerIntegrationTest.java), auditoria de Git e limpeza de diagnostics (26.3.1/26.3.2). | Manter; sem pendências nesta frente. |
 | **Jobs Assíncronos & Outbox** | ✅ CONCLUÍDO — STEPs 27.0 a 27.4 (Discovery, Fundação Transacional, Dispatcher/Worker, Produtor de Notifications + `PushNotificationHandler`, Observabilidade e Retenção) | Migração [V12](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V12__outbox_messages.sql) com tabela `outbox_messages` e migração [V13](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V13__outbox_dispatcher_indexes.sql) com índice parcial de lease; domínio puro [OutboxMessage.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/OutboxMessage.java) e enum `OutboxStatus`; enum [OutboxMessageType.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/enums/OutboxMessageType.java) com `PUSH_NOTIFICATION`; porta [OutboxRepository.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/port/OutboxRepository.java) com claim atômico `FOR UPDATE SKIP LOCKED` implementado por [OutboxRepositoryAdapter.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/persistence/adapter/OutboxRepositoryAdapter.java); use case puro [ProcessOutboxBatchUseCase.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/usecase/ProcessOutboxBatchUseCase.java) com ciclo `reclaim → claimBatch → handler fora da transação → finalização owner-checked`; classificação de falhas, [OutboxRetryPolicy.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxRetryPolicy.java) com backoff determinístico e [OutboxErrorSanitizer.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/OutboxErrorSanitizer.java); poller `@Scheduled` fino [OutboxDispatcherPoller.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/outbox/OutboxDispatcherPoller.java); no STEP 27.3 a [NotificationService.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/NotificationService.java) passou a enfileirar `PUSH_NOTIFICATION` na mesma transação dos quatro fluxos de notificação (payload exclusivo `{"notificationId"}`) e o [PushNotificationHandler.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/outbox/PushNotificationHandler.java) entrega o conteúdo persistido à porta `NotificationProvider` (`MockNotificationAdapter`); 1117 testes verdes. | Outbox V1 encerrado (detalhes em §8.4.1). O provider permanece o mock local — não há push real externo; a Notification in-app segue síncrona, apenas o efeito externo de push tornou-se assíncrono. |
 | **Storage GC (Reconciliação de Mídia)** | ✅ CONCLUÍDO — STEP 28 | Contrato de listagem paginada, quarentena persistente (`V15`), grace period configurável, rechecagem sob lock, exclusão física idempotente, dry-run, scheduler desligado por padrão e métricas `rewit.storage_gc.*`. Ver [storage-reconciliation.md](../architecture/storage-reconciliation.md) e [ADR-010](../decisions/ADR-010-storage-garbage-collection.md). | Ativação operacional conforme o rollout seguro documentado (dry-run primeiro). |
-| **Cleanup de Sessões Expiradas** | 🟡 IMPLEMENTADO — STEP 29.3 | Job `@Scheduled` ligado por padrão: limpa IP/User-Agent de sessões inativas e expurga sessões expiradas sem sucessora (`expires_at < now AND replaced_by_session_id IS NULL`), em lotes `FOR UPDATE SKIP LOCKED`, sem recursão; índice `V16`; métricas `rewit.auth_session_cleanup.*`. Ver [authentication.md §4.5](../architecture/authentication.md) e [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) (Proposto). | Decisão de produto/jurídico sobre a coleta de IP/User-Agent durante a sessão ativa; gate de fechamento do STEP 29. |
+| **Cleanup de Sessões Expiradas** | ✅ TECNICAMENTE CONCLUÍDO — STEP 29 (decisão de produto/jurídico pendente) | Job `@Scheduled` ligado por padrão: limpa IP/User-Agent de sessões inativas e expurga sessões expiradas sem sucessora (`expires_at < now AND replaced_by_session_id IS NULL`), em lotes `FOR UPDATE SKIP LOCKED`, sem recursão; índice `V16`; métricas `rewit.auth_session_cleanup.*`. Ver [authentication.md §4.5](../architecture/authentication.md) e [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) (Proposto). | Decisão de produto/jurídico sobre a coleta de IP/User-Agent durante a sessão ativa. |
 | **Observabilidade Avançada & Deploy** | ⏳ PENDENTE | Actuator básico habilitado; sem tracing distribuído ou logs estruturados JSON. | Configurar exportação Prometheus/OTel para produção. |
 | **Cache Distribuído em Redis** | 🔮 FUTURO ADIADO | Redis conectado mas sem cache de queries complexas. | Introduzir apenas sob saturação medida do PostgreSQL. |
 | **Machine Learning & Embeddings** | 🔮 FUTURO ADIADO | Arquitetura determinística prioritária; sem ML. | Avaliar apenas após escala de dezenas de milhares de reviews. |
@@ -888,13 +888,13 @@ Os itens abaixo permanecem **fora do escopo entregue pelo 27.3** e não devem se
 | **Notificações In-App** | Evitar lentidão caso o volume de notificações cresça. | Decisão do STEP 27.0: permanecem **síncronas** na transação do produtor (same-DB já é atômico). | **PERMANECE SÍNCRONO** |
 | **Recálculo Assíncrono de Reputação** | Eliminar lock pessimista em `users` durante a postagem de reviews. | Decisão do STEP 27.0: permanece **síncrono** na transação do produtor. | **PERMANECE SÍNCRONO** |
 | **Garbage Collection do SeaweedFS** | Remover imagens não referenciadas no S3 para economia de storage. | Job `@Scheduled` direto de varredura de órfãos — **sem Outbox** (decisão do STEP 27.0). Implementado no STEP 28, desligado por padrão: [storage-reconciliation.md](../architecture/storage-reconciliation.md), [ADR-010](../decisions/ADR-010-storage-garbage-collection.md). | ✅ CONCLUÍDO (STEP 28) |
-| **STEP 29 — Cleanup de Sessões Expiradas** | Expurgar sessões expiradas da tabela `auth_sessions` (o nome `user_sessions` usado anteriormente neste roadmap não é o nome físico) e minimizar IP/User-Agent de sessões inativas. | Job `@Scheduled` direto, **sem Outbox**, com critério estrutural (sem retenção numérica). Implementado no STEP 29.3: [authentication.md §4.5](../architecture/authentication.md), [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) (Proposto). | 🟡 IMPLEMENTADO (STEP 29.3) — ADR-011 Proposto |
+| **STEP 29 — Cleanup de Sessões Expiradas** | Expurgar sessões expiradas da tabela `auth_sessions` (o nome `user_sessions` usado anteriormente neste roadmap não é o nome físico) e minimizar IP/User-Agent de sessões inativas. | Job `@Scheduled` direto, **sem Outbox**, com critério estrutural (sem retenção numérica). Implementado no STEP 29.3: [authentication.md §4.5](../architecture/authentication.md), [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) (Proposto). | ✅ TECNICAMENTE CONCLUÍDO (STEP 29) — decisão de produto/jurídico pendente; ADR-011 Proposto |
 
 ### 8.10 Sequência após o STEP 27
 O STEP 27 está fechado. A sequência registrada no backlog seguiu com:
 
 1. **STEP 28 — Garbage Collection do SeaweedFS** (✅ CONCLUÍDO): job direto `@Scheduled`, sem Outbox. Ver §8.11.
-2. **STEP 29 — Cleanup de Sessões Expiradas** (🟡 EM ANDAMENTO): correções 29.1 e 29.2 e implementação 29.3 concluídas; ADR-011 permanece Proposto. Ver §8.12 e §13.
+2. **STEP 29 — Cleanup de Sessões Expiradas** (✅ TECNICAMENTE CONCLUÍDO): correções 29.1 e 29.2, implementação 29.3 e gate final concluídos; resta a decisão de produto/jurídico sobre IP/User-Agent em sessões ativas, e a ADR-011 permanece Proposto. Ver §8.12 e §13.
 
 ### 8.11 STEP 28 — Storage GC (✅ CONCLUÍDO)
 
@@ -909,11 +909,11 @@ O STEP 28 implementou o garbage collection de objetos de mídia sem referência 
 
 Fechamento: commit final `add58f1`; suíte com `1243` testes, `0` failures, `0` errors, `0` skipped; diagnostics Java `0`; working tree limpo; sem push. Nenhum objeto histórico do bucket foi removido manualmente. Detalhes em [storage-reconciliation.md](../architecture/storage-reconciliation.md) e na [ADR-010](../decisions/ADR-010-storage-garbage-collection.md).
 
-### 8.12 STEP 29 — Cleanup de Sessões Expiradas (🟡 EM ANDAMENTO)
+### 8.12 STEP 29 — Cleanup de Sessões Expiradas (✅ TECNICAMENTE CONCLUÍDO; decisão de produto/jurídico pendente)
 
 * **29.1** (`5336306`): a revogação de todas as sessões do usuário no reúso de refresh token passa a persistir (`noRollbackFor = RefreshTokenReuseDetectedException`).
 * **29.2** (`ddc959b`): mapeamento de `check_ins.distance_to_centroid_meters` alinhado ao schema; a aplicação real volta a subir com `ddl-auto=validate`.
-* **29.3** (`feat: implementar cleanup de sessoes expiradas`):
+* **29.3** (`2d49b38`):
   - **Metadados**: `ip_address` e `user_agent` viram `NULL` em sessões inativas (`revoked_at IS NOT NULL OR expires_at < now`); sessões ativas não são tocadas.
   - **Purge**: remove somente `expires_at < now AND replaced_by_session_id IS NULL`. Antecessoras de cadeias vivas ficam protegidas; o `ON DELETE SET NULL` desmonta a cadeia um elo por lote, sem CTE recursiva.
   - **Concorrência**: lotes `FOR UPDATE SKIP LOCKED`, uma transação por lote, sem advisory lock.
@@ -921,6 +921,8 @@ Fechamento: commit final `add58f1`; suíte com `1243` testes, `0` failures, `0` 
   - **Operação**: job ligado por padrão (`rewit.auth-session-cleanup.*`, lote 100, 1 lote por fase a cada hora), desligado nos testes, sem dry-run e sem endpoint; métricas `rewit.auth_session_cleanup.*`; logs sem token, hash, IP, User-Agent ou ids.
   - `AuthService`, TTL, refresh e logout não foram alterados.
   - Suíte com `1271` testes, `0` failures, `0` errors, `0` skipped; sem push.
+
+* **Gate final**: V16 válida, query de purge e cadeia conforme a ADR-011, reuse detection do `5336306` intacta (`AuthService` inalterado desde então), scheduler único, métricas e logs sanitizados, documentação consistente; sem alteração de código.
 
 Pendente: decisão de produto/jurídico sobre a coleta de IP/User-Agent enquanto a sessão está ativa ([privacy-and-lgpd.md §6](../security/privacy-and-lgpd.md)). Até lá a [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) permanece **Proposto**.
 
@@ -993,7 +995,7 @@ Outbox Operational V1       Métricas, retenção, purge e        ✅ CONCLUÍDO
                             diagnostics Java reais resolvidos
 Storage GC (V1)             Quarentena, rechecagem sob lock,    ✅ CONCLUÍDO (STEP 28)
                             exclusão idempotente e dry-run
-Cleanup de Sessões          Critério estrutural, SKIP LOCKED,   🟡 IMPLEMENTADO (STEP 29.3, ADR-011 Proposto)
+Cleanup de Sessões          Critério estrutural, SKIP LOCKED,   ✅ TECNICAMENTE CONCLUÍDO (STEP 29; ADR-011 Proposto)
                             minimização de IP/User-Agent
 Cache em Redis              Latência p99 > 200ms no banco       Implementar cache layer
 Mensageria Externa          Outbox no PG > 5.000 msgs/s         Adicionar broker externo
@@ -1082,13 +1084,12 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
 
 ## 13. Próximo Passo Imediato
 
-O STEP 29 já tem a implementação do cleanup (§8.12). O próximo trabalho é:
+O STEP 29 está tecnicamente concluído (§8.12). Resta uma pendência que não é técnica:
 
-### Próximo Passo: Fechamento do STEP 29 — Cleanup de Sessões Expiradas
+### Próximo Passo: Decisão de Produto/Jurídico sobre IP/User-Agent em Sessões Ativas
 
 1. **Decisão de produto/jurídico** sobre a coleta de IP/User-Agent enquanto a sessão está ativa (finalidade, base legal e eventual minimização na coleta). Não é uma decisão técnica; ver [privacy-and-lgpd.md §6](../security/privacy-and-lgpd.md).
 2. **ADR-011**: passar de Proposto para Aprovado (ou revisar) conforme essa decisão.
-3. **Gate de fechamento do STEP 29**: consolidar a documentação e confirmar a suíte e os diagnostics.
 
 ### Demais Frentes em Aberto
 

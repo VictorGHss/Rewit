@@ -14,6 +14,7 @@ Este documento descreve a modelagem física relacional, a extensão espacial Pos
 - **Tipo de Dado Espacial Padrão**: `GEOGRAPHY(Point, 4326)`
 - **Estratégia de Versionamento**: **Flyway 11.x** (todas as alterações de banco são arquivos `.sql` imutáveis versionados em `backend/src/main/resources/db/migration`)
 - **Validação no Hibernate**: `spring.jpa.hibernate.ddl-auto: validate` na aplicação (proibido `update` ou `create`). O perfil de testes não aplica essa validação a todos os contextos; o contrato entre entidades JPA e o schema Flyway é verificado por `JpaSchemaValidationIntegrationTest`, que sobe o contexto com `validate` e o mesmo dialeto PostGIS da aplicação. Colunas `NUMERIC` são mapeadas como `BigDecimal` com `precision`/`scale` correspondentes.
+- **Migrations não transacionais**: uma migration com `CREATE INDEX CONCURRENTLY` (como a V16) precisa de um `.sql.conf` com `executeInTransaction=false` e de `spring.flyway.postgresql.transactional-lock=false`. Com o lock transacional padrão, o Flyway segura `pg_try_advisory_xact_lock` em uma transação aberta numa conexão separada, e o `CONCURRENTLY` espera essa transação terminar, o que nunca acontece. Com `false`, o Flyway usa o advisory lock de sessão (`pg_try_advisory_lock`/`pg_advisory_unlock`); as demais migrations continuam rodando cada uma em sua própria transação. A propriedade está em `application-local.yml` (único perfil da aplicação) e no `application.yml` de testes; um novo perfil precisa repeti-la, e o lock de sessão exige que o Flyway não passe por pooler em modo transação.
 
 ---
 
@@ -203,6 +204,7 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 - `idx_auth_sessions_user_id`: Acelera busca e invalidação em lote de sessões por usuário.
 - `idx_auth_sessions_expires_at`: Acelera rotinas de limpeza de refresh tokens expirados.
 - `idx_auth_sessions_revoked_at`: Acelera filtragem de sessões válidas vs revogadas.
+- `idx_auth_sessions_replaced_by_session_id` (V16, parcial `WHERE replaced_by_session_id IS NOT NULL`): atende a busca do `ON DELETE SET NULL` a cada sessão removida pelo cleanup (Step 29.3, ADR-011).
 
 ---
 
