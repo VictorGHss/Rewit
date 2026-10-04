@@ -146,6 +146,7 @@ Renova o par de tokens através de rotação determinística do Refresh Token.
 1. O token antigo é imediatamente revogado (`revoked_at = now()`).
 2. Uma nova sessão é persistida com o hash do novo refresh token e ligada via `replaced_by_session_id`.
 3. **Detecção de Reúso (Token Reuse Detection)**: Se um token já revogado for reutilizado fora da janela de 10 segundos após a sua rotação (inclusive um token encerrado por logout), todas as sessões ativas do usuário são revogadas de forma persistente e a requisição retorna `401 Unauthorized` (`REFRESH_TOKEN_REVOKED`); os refresh tokens dessas sessões deixam de funcionar. Dentro da janela de 10 segundos (requisição concorrente legítima do mesmo cliente), a resposta é a mesma, mas nenhuma outra sessão é revogada. Antes do Step 29.1, a revogação em massa era desfeita por rollback e as demais sessões permaneciam ativas.
+4. **Sessões expiradas removidas pelo cleanup (Step 29.3)**: uma sessão expirada sem sucessora pode ser removida pelo job de cleanup. Depois disso, o refresh token correspondente passa a receber `401 Unauthorized` com `INVALID_REFRESH_TOKEN`, em vez de `REFRESH_TOKEN_EXPIRED` (ou de `REFRESH_TOKEN_REVOKED`, se estava revogada). Tokens de cadeias de rotação vivas não são afetados.
 
 ---
 

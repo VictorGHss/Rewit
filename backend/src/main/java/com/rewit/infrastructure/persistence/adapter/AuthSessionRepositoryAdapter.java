@@ -10,6 +10,7 @@ import com.rewit.infrastructure.persistence.repository.UserJpaRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -78,6 +79,28 @@ public class AuthSessionRepositoryAdapter implements AuthSessionRepository {
     public void revokeAllByUserId(UUID userId) {
         if (userId != null) {
             authSessionJpaRepository.revokeAllActiveByUserId(userId);
+        }
+    }
+
+    @Override
+    @Transactional
+    public int clearInactiveMetadata(Instant now, int limit) {
+        Objects.requireNonNull(now, "now must not be null");
+        requirePositive(limit);
+        return authSessionJpaRepository.clearInactiveMetadata(now, limit);
+    }
+
+    @Override
+    @Transactional
+    public int purgeExpiredWithoutSuccessor(Instant now, int limit) {
+        Objects.requireNonNull(now, "now must not be null");
+        requirePositive(limit);
+        return authSessionJpaRepository.purgeExpiredWithoutSuccessor(now, limit);
+    }
+
+    private static void requirePositive(int limit) {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
         }
     }
 

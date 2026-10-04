@@ -14,6 +14,10 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
     validate-on-migrate: true
+    # Lock de sessão: migrations não transacionais (CREATE INDEX CONCURRENTLY, V16) esperariam
+    # a transação do próprio lock transacional do Flyway e nunca terminariam
+    postgresql:
+      transactional-lock: false
 
   jpa:
     open-in-view: false

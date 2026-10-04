@@ -7,6 +7,10 @@ spring:
     password: ${POSTGRES_PASSWORD:rewit_local_password}
   jpa:
     open-in-view: false
+  # Mesmo lock de sessão da aplicação: a V16 usa CREATE INDEX CONCURRENTLY (não transacional)
+  flyway:
+    postgresql:
+      transactional-lock: false
 
 rewit:
   outbox:
@@ -18,6 +22,9 @@ rewit:
     # por relógio pode disputar com cenários que semeiam linhas antigas.
     # O teste da Parte Q invoca o purge diretamente (sem relógio real).
     purge-enabled: false
+  # Cleanup de auth_sessions desligado em TODOS os testes: os testes do Step 29.3 chamam o use case diretamente.
+  auth-session-cleanup:
+    enabled: false
   # GC de storage desligado em TODOS os testes: nenhum ciclo agendado toca o bucket compartilhado.
   # Os testes do Step 28.5 montam o orquestrador diretamente, com objetos próprios.
   storage-gc:

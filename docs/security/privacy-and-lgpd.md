@@ -51,10 +51,20 @@ Toda foto capturada por smartphones modernos embute metadados EXIF detalhados no
 1. **Hashing de Senhas**: Utilização obrigatória de algoritmo moderno de derivação de chaves: **BCrypt** com fator de trabalho (cost) 12 ou **Argon2id**.
 2. **Tokens JWT de Sessão**:
    - Assinatura com algoritmo assimétrico ou chave secreta forte (mínimo 256 bits via variável `JWT_SECRET`).
-   - Tempo de expiração curto para access tokens (ex: 15 a 60 minutos) com mecanismo de refresh token seguro via Redis.
+   - Tempo de expiração curto para access tokens (ex: 15 a 60 minutos) com refresh token opaco, rotacionado a cada uso e persistido no PostgreSQL apenas como hash SHA-256 (tabela `auth_sessions`), com detecção de reúso. Não há estado de sessão em Redis.
 3. **Prevenção de Vazamento em Logs**:
    - É terminantemente proibido registrar em logs de aplicação (SLF4J/Logback):
      - Senhas ou hashes;
      - Cabeçalhos `Authorization`;
      - Coordenadas geográficas residenciais;
      - E-mails não mascarados.
+
+---
+
+## 6. Retenção de Dados de Sessão (`auth_sessions`)
+
+Registro técnico do que o código faz; não é parecer jurídico.
+
+- **Dados de segurança** (`user_id`, `token_hash`, timestamps de emissão, expiração e revogação, `replaced_by_session_id`): mantidos enquanto sustentam o refresh e a detecção de reúso. Uma sessão só é removida quando está expirada e não tem sucessora de rotação (ADR-011). Em cadeias de rotação de usuários ativos, esse histórico permanece enquanto a cadeia estiver viva.
+- **Dados técnicos pessoais** (`ip_address`, `user_agent`): capturados no registro, login e refresh e **não lidos por nenhum código**. O job de cleanup os apaga (`NULL`) assim que a sessão deixa de estar ativa (revogada ou expirada), sem esperar a remoção da linha. Assim, a retenção de segurança da cadeia não implica reter IP e user agent.
+- **Pendente (produto/jurídico)**: a coleta e a retenção de `ip_address` e `user_agent` **enquanto a sessão está ativa** (até o `expires_at`, 30 dias após o último refresh com o TTL padrão). Nenhum uso funcional desses dados existe hoje.

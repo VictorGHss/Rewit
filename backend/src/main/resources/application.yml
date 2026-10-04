@@ -47,6 +47,14 @@ rewit:
       multiplier: ${OUTBOX_RETRY_MULTIPLIER:2.0}
       max-delay: ${OUTBOX_RETRY_MAX_DELAY:PT10M}
       max-attempts: ${OUTBOX_RETRY_MAX_ATTEMPTS:5}
+  # Cleanup de auth_sessions (Step 29.3, ADR-011): limpa IP/user agent de sessões inativas e remove sessões
+  # expiradas sem sucessora de rotação. Sem retenção configurável: a elegibilidade é estrutural.
+  auth-session-cleanup:
+    enabled: ${AUTH_SESSION_CLEANUP_ENABLED:true}
+    interval-ms: ${AUTH_SESSION_CLEANUP_INTERVAL_MS:3600000}
+    initial-delay-ms: ${AUTH_SESSION_CLEANUP_INITIAL_DELAY_MS:60000}
+    batch-size: ${AUTH_SESSION_CLEANUP_BATCH_SIZE:100}
+    max-batches-per-run: ${AUTH_SESSION_CLEANUP_MAX_BATCHES_PER_RUN:1}
   # GC de storage (Step 28.5): desligado por padrão. Ao ligar, defina também, sem defaults:
   # interval-ms, page-size, max-pages, max-candidates, max-deletes, grace-period e max-duration
   # (ex.: REWIT_STORAGE_GC_GRACE_PERIOD). O modo destrutivo exige STORAGE_GC_DRY_RUN=false explícito.

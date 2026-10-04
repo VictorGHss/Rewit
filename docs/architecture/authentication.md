@@ -129,6 +129,27 @@ Se um refresh token já revogado for apresentado:
 
 ---
 
+### 4.5 Ciclo de Vida e Cleanup de `auth_sessions` (Step 29.3, ADR-011)
+
+Um job agendado (`AuthSessionCleanupScheduler` → `CleanupAuthSessionsUseCase`) executa duas fases. Cada lote roda em transação própria, e as linhas são selecionadas com `FOR UPDATE SKIP LOCKED`.
+
+**1. Metadados técnicos.** `ip_address` e `user_agent` são gravados no login, no registro e no refresh, e não são lidos por nenhum código. O job os limpa (`NULL`) em sessões que deixaram de estar ativas: `revoked_at IS NOT NULL OR expires_at < now()`. Nenhum campo de segurança é alterado. Sessões ativas mantêm os metadados; a retenção nesse período é uma decisão de produto/jurídico pendente (ADR-011).
+
+**2. Purge.** Uma sessão só é removida quando `expires_at < now() AND replaced_by_session_id IS NULL`:
+
+| Sessão | Resultado |
+| :--- | :--- |
+| Ativa (não expirada, não revogada) | nunca removida |
+| Revogada ainda dentro do prazo | mantida até `expires_at` |
+| Expirada sem sucessora (inclusive revogada por logout, troca de senha ou reúso) | removida |
+| Expirada com sucessora (antecessora de rotação) | mantida enquanto a sucessora existir |
+
+Uma cadeia de rotação A→B→C→D é preservada inteira enquanto a cauda D estiver viva, e a detecção de reúso de A, B ou C continua funcionando (§4.4). Quando D expira e é removida, o `ON DELETE SET NULL` da FK limpa a referência de C, que fica elegível no lote seguinte. A cadeia é desmontada um elo por lote, sem busca recursiva. O índice parcial `idx_auth_sessions_replaced_by_session_id` (V16) atende a busca que o `SET NULL` faz a cada sessão removida.
+
+**Concorrência.** Instâncias concorrentes processam lotes disjuntos por `SKIP LOCKED`, sem lock global. Uma revogação em massa (`revokeAllByUserId`) que alcança linhas travadas por um lote aguarda o commit desse lote e conclui normalmente. Uma falha num lote (inclusive deadlock detectado pelo PostgreSQL) desfaz apenas aquele lote; o próximo ciclo tenta de novo. Fica aceita uma corrida rara do logout, que lê sem lock: se o purge remover a sessão (já expirada) entre a leitura e o `save`, a linha é recriada já revogada e sai no ciclo seguinte.
+
+**Configuração** (`rewit.auth-session-cleanup`): `enabled` (padrão `true`, como o purge do Outbox; desligado nos testes), `interval-ms`, `initial-delay-ms`, `batch-size`, `max-batches-per-run`. Não há propriedade de retenção: a elegibilidade é estrutural. Não há dry-run nem endpoint. Métricas: `rewit.auth_session_cleanup.metadata_cleared`, `.sessions_purged`, `.failures` e o timer `.duration`. Os logs são agregados, sem token, hash, IP, user agent ou ids de sessão.
+
 ## 5. Endpoints Implementados
 
 | Método | Endpoint | Proteção | Descrição |
