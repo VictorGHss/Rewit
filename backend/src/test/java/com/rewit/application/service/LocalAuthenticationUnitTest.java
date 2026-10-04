@@ -5,6 +5,7 @@ import com.rewit.application.port.AuthSessionRepository;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.common.exception.RefreshTokenReuseDetectedException;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.AuthSession;
 import com.rewit.domain.model.Profile;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -240,8 +242,42 @@ class LocalAuthenticationUnitTest {
         BusinessException exRev = assertThrows(BusinessException.class, () ->
                 authService.refresh(new RefreshCommand(rawToken, "agent", "127.0.0.1")));
         assertEquals("REFRESH_TOKEN_REVOKED", exRev.getErrorCode());
+        // Exceção específica do reúso: a única que commita a revogação (persistência provada em RefreshTokenReuseIntegrationTest)
+        assertInstanceOf(RefreshTokenReuseDetectedException.class, exRev);
         // Deve revogar todas as sessões do usuário por segurança
         verify(authSessionRepository).revokeAllByUserId(userId);
+    }
+
+    @Test
+    @DisplayName("13.1 Rotação concorrente recente (janela de 10 s) é rejeitada sem revogação em massa nem exceção de reúso")
+    void recentConcurrentRotationIsNotTreatedAsReuse() {
+        UUID userId = UUID.randomUUID();
+        String rawToken = "my-token-12345678901234567890";
+        String tokenHash = tokenService.hashRefreshToken(rawToken);
+        AuthSession rotatedNow = AuthSession.rehydrate(
+                UUID.randomUUID(), userId, tokenHash, Instant.now().minusSeconds(60),
+                Instant.now().plusSeconds(3600), Instant.now().minusSeconds(1), UUID.randomUUID(),
+                Instant.now().minusSeconds(60), null, null, null
+        );
+        when(authSessionRepository.findByTokenHashForUpdate(tokenHash)).thenReturn(Optional.of(rotatedNow));
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                authService.refresh(new RefreshCommand(rawToken, "agent", "127.0.0.1")));
+
+        assertEquals("REFRESH_TOKEN_REVOKED", ex.getErrorCode());
+        assertFalse(ex instanceof RefreshTokenReuseDetectedException);
+        verify(authSessionRepository, never()).revokeAllByUserId(any());
+    }
+
+    @Test
+    @DisplayName("13.2 refresh só deixa de fazer rollback para a exceção de reúso, não para BusinessException em geral")
+    void refreshCommitsOnlyForReuseDetection() throws NoSuchMethodException {
+        Transactional transactional = AuthService.class.getMethod("refresh", RefreshCommand.class)
+                .getAnnotation(Transactional.class);
+
+        assertNotNull(transactional);
+        assertArrayEquals(new Class<?>[]{RefreshTokenReuseDetectedException.class}, transactional.noRollbackFor());
+        assertEquals(0, transactional.noRollbackForClassName().length);
     }
 
     @Test

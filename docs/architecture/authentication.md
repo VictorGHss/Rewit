@@ -122,9 +122,10 @@ Para fechar completamente a janela de corrida (*race condition*) na rotação do
 ### 4.4 Detecção de Reutilização de Token (Token Reuse Detection)
 Se um refresh token já revogado for apresentado:
 - Caso o token tenha sido substituído há menos de 10 segundos (janela transitória de concorrência em clientes legítimos), a requisição concorrente duplicada é apenas rejeitada sem invalidar a nova sessão recém-emitida.
-- Caso o token seja reutilizado fora da janela transitória (tentativa de replay de token antigo), a aplicação assume potencial roubo de credencial:
+- Caso o token seja reutilizado fora da janela transitória (tentativa de replay de token antigo, inclusive de token encerrado por logout), a aplicação assume potencial roubo de credencial:
+  - Invalida compulsoriamente **todas as sessões ativas do usuário** (`revokeAllByUserId`).
   - Rejeita com `REFRESH_TOKEN_REVOKED` (`401 Unauthorized`).
-  - Executa mitigação imediata invalidando compulsoriamente **todas as sessões ativas do usuário** (`revokeAllByUserId`).
+- **Persistência da mitigação (Step 29.1)**: a revogação em massa e o erro acontecem na mesma transação de `AuthService.refresh`, que mantém o lock `FOR UPDATE` da sessão apresentada. O erro do reúso é a exceção específica `RefreshTokenReuseDetectedException` (subclasse de `BusinessException`, com a mesma resposta HTTP), e `refresh` declara `noRollbackFor` **somente** para ela: a revogação é commitada antes de o 401 chegar ao cliente. Qualquer outro erro de `refresh` continua fazendo rollback. Até o Step 29.1, o erro era um `BusinessException` comum e o rollback desfazia a revogação em massa: o token reutilizado era rejeitado, mas as demais sessões permaneciam ativas.
 
 ---
 

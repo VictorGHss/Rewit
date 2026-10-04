@@ -7,6 +7,7 @@ import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.TokenService;
 import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.common.exception.RefreshTokenReuseDetectedException;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.AuthSession;
 import com.rewit.domain.model.Profile;
@@ -108,7 +109,8 @@ public class AuthService {
         return createSessionAndGenerateResult(user, profile, cmd.userAgent(), cmd.ipAddress());
     }
 
-    @Transactional
+    // A revogação em massa do reúso precisa ser commitada mesmo com o erro devolvido; demais erros fazem rollback
+    @Transactional(noRollbackFor = RefreshTokenReuseDetectedException.class)
     public AuthResult refresh(RefreshCommand cmd) {
         Objects.requireNonNull(cmd, "RefreshCommand cannot be null");
         if (cmd.refreshToken() == null || cmd.refreshToken().isBlank()) {
@@ -128,6 +130,7 @@ public class AuthService {
 
             if (!isRecentConcurrentRotation) {
                 authSessionRepository.revokeAllByUserId(currentSession.getUserId());
+                throw new RefreshTokenReuseDetectedException();
             }
             throw new BusinessException("Refresh token revogado ou já reutilizado. Todas as sessões foram invalidadas.", HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED");
         }
