@@ -296,5 +296,41 @@ class FrameworkHttpExceptionsIntegrationTest {
         assertNoUnexpectedErrorLogs(output);
         assertPrometheusOutcome(406);
     }
+
+    @Test
+    @DisplayName("8. Rate limit excedido deve retornar 429 com Retry-After e métrica CLIENT_ERROR no Prometheus")
+    void shouldReturn429WithRetryAfterAndClientErrorMetric(CapturedOutput output) throws Exception {
+        String testEmail = "rl-metrics-" + UUID.randomUUID() + "@rewit.test";
+        String body = """
+                {"email":"%s","password":"Password-Wrong"}
+                """.formatted(testEmail);
+
+        HttpResponse<String> lastResponse = null;
+        for (int i = 0; i < 11; i++) {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(api("/api/v1/auth/login")))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            lastResponse = http.send(request, HttpResponse.BodyHandlers.ofString());
+        }
+
+        assertNotNull(lastResponse);
+        assertEquals(429, lastResponse.statusCode());
+        assertTrue(lastResponse.headers().firstValue("Content-Type").orElse("").contains("problem+json"));
+        assertTrue(lastResponse.headers().firstValue("Retry-After").isPresent(), "Cabeçalho Retry-After deve estar presente");
+        String retryAfter = lastResponse.headers().firstValue("Retry-After").get();
+        assertTrue(retryAfter.matches("^[1-9]\\d*$"), "Retry-After deve ser inteiro positivo: " + retryAfter);
+
+        JsonNode json = objectMapper.readTree(lastResponse.body());
+        assertEquals(429, json.get("status").asInt());
+        assertEquals("RATE_LIMIT_EXCEEDED", json.get("code").asText());
+        assertEquals("https://api.rewit.app/errors/rate_limit_exceeded", json.get("type").asText());
+        assertNotNull(json.get("timestamp"));
+        assertNull(json.get("trace"));
+        assertNull(json.get("stackTrace"));
+
+        assertNoUnexpectedErrorLogs(output);
+        assertPrometheusOutcome(429);
+    }
 }
 

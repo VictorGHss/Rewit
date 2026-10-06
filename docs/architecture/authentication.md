@@ -152,18 +152,35 @@ Uma cadeia de rotação A→B→C→D é preservada inteira enquanto a cauda D e
 
 ### 4.6 Rate Limiting e Tempo Uniforme no Login (ADR-013)
 
-Login, refresh e cadastro passam pela porta `RateLimiter` (janela deslizante no Redis, chaves HMAC, sem IP). Acima do limite, a resposta é `429 Too Many Requests` com `RATE_LIMIT_EXCEEDED`, no mesmo formato RFC 7807 dos demais erros.
+Login, refresh e cadastro passam pela porta `RateLimiter` (janela deslizante distribuída no Redis, chaves HMAC, sem IP). Quando o limite é excedido, a resposta é `429 Too Many Requests` com código `RATE_LIMIT_EXCEEDED`, preservando o padrão RFC 7807 (`application/problem+json`) dos demais erros.
 
-| Ação | Sujeito | Padrão | O que conta |
-|---|---|---|---|
-| Login | e-mail normalizado | 10 em 15 min | Tentativas sem sucesso. A tentativa ocupa a janela antes da verificação e é devolvida no sucesso. E-mail inexistente conta igual. |
-| Refresh | usuário da sessão | 30 em 5 min | Rotações. Checado depois da detecção de reúso e da expiração; o 429 faz rollback sem consumir o token. |
-| Cadastro | global | 30 em 1 min | Toda tentativa, inclusive as inválidas. |
+#### 4.6.1 Operações Limitadas e Cabeçalho `Retry-After`
 
+As seguintes operações de autenticação podem retornar `429 Too Many Requests`:
+- `POST /api/v1/auth/login`: limite de tentativas por identidade (e-mail normalizado).
+- `POST /api/v1/auth/refresh`: limite de rotações de sessão por usuário.
+- `POST /api/v1/auth/register`: limite global de cadastros na aplicação.
+
+Toda resposta `429 Too Many Requests` originada por excesso de taxa inclui obrigatoriamente o cabeçalho HTTP padrão:
+```http
+Retry-After: <segundos>
+```
+- **Significado**: inteiro positivo representando a estimativa em segundos até que uma nova tentativa possa ser aceita pelo servidor. Corresponde ao tempo restante para a tentativa mais antiga sair da janela deslizante, com valor mínimo garantido de 1 segundo.
+- **Requisições normais**: requisições bem-sucedidas ou erros com outros códigos HTTP (2xx, 4xx, 5xx) não recebem o cabeçalho `Retry-After`.
+
+| Ação | Endpoint | Sujeito | Padrão | O que conta |
+|---|---|---|---|---|
+| Login | `POST /api/v1/auth/login` | e-mail normalizado | 10 em 15 min | Tentativas sem sucesso. A tentativa ocupa a janela antes da verificação e é devolvida no sucesso. E-mail inexistente conta igual. |
+| Refresh | `POST /api/v1/auth/refresh` | usuário da sessão | 30 em 5 min | Rotações. Checado depois da detecção de reúso e da expiração; o 429 faz rollback sem consumir o token. |
+| Cadastro | `POST /api/v1/auth/register` | global | 30 em 1 min | Toda tentativa, inclusive as inválidas. |
+
+#### 4.6.2 Distribuição e Comportamento Degradado
+
+- **Coordenação Distribuída**: Em operação normal, a contagem e as janelas deslizantes são coordenadas centralmente entre múltiplas instâncias via Redis, garantindo aplicação consistente dos limites em todo o cluster. As chaves usam HMAC-SHA256, sem armazenar ou vazar e-mails, IDs ou dados sensíveis na infraestrutura de cache.
+- **Comportamento Degradado**: Caso o armazenamento distribuído fique temporariamente indisponível, a aplicação entra em modo de contingência local por instância (`LOCAL_FALLBACK`). Nesse modo, cada nó mantém sua própria janela deslizante em memória com os mesmos limites configurados e calcula o cabeçalho `Retry-After` de forma coerente com base nas tentativas locais. A degradação ocorre de forma transparente ao cliente, sem expor detalhes internos da infraestrutura nem interromper a proteção da API.
 - **Tempo uniforme**: sem conta local elegível (inexistente, desativada ou federada), o login executa `PasswordHasher.simulateVerification`, uma verificação Argon2 contra um hash descartável com os mesmos parâmetros. Assim o custo é o mesmo de uma senha errada. Mensagem, status e código continuam `INVALID_CREDENTIALS` (`401`).
 - **Limite e enumeração**: o 429 depende só da contagem por e-mail, nunca da existência da conta.
 - **Bloqueio por terceiros**: sem IP, quem conhece um e-mail pode esgotar o limite de login dessa conta por até uma janela. Esse é o custo aceito enquanto a decisão sobre IP estiver pendente (ADR-011).
-- **Redis indisponível**: limites em memória por instância (`LOCAL_FALLBACK`), com métrica e log de transição. A configuração e as alternativas estão na ADR-013.
 
 **Configuração** (`rewit.rate-limit`): `enabled`, `key-secret` (`RATE_LIMIT_KEY_SECRET`, obrigatório), `backend.failure-mode` (`LOCAL_FALLBACK`|`DENY`|`ALLOW`), `backend.retry-interval`, `backend.local-fallback-max-keys`, `auth.{login,refresh,registration}.{enabled,limit,window}` e `content.{report-creation,discussion-creation,media-upload}.{enabled,limit,window}`.
 
@@ -185,6 +202,7 @@ Login, refresh e cadastro passam pela porta `RateLimiter` (janela deslizante no 
 - **Sem Exposição de Dados Sensíveis**: `password_hash`, `token_hash`, tokens completos ou segredos nunca são retornados em DTOs de resposta nem em logs.
 - **Usuários Desativados (Soft-deleted)**: Usuários com `deleted_at IS NOT NULL` são rejeitados tanto no login quanto no refresh e na consulta ao `/me` (`ACCOUNT_DISABLED`, `403 Forbidden`).
 - **Tratamento de Exceções**: Todas as falhas de autenticação e validação são retornadas em conformidade com o RFC 7807 (`application/problem+json`).
+- **Rate Limiting (`429 Too Many Requests`)**: Requisições de autenticação (`login`, `refresh`, `register`) que excederem as taxas operacionais retornam código `RATE_LIMIT_EXCEEDED` acompanhadas obrigatoriamente do cabeçalho `Retry-After: <segundos>`, informando a duração estimada até a permissão de nova tentativa. Demais respostas ou códigos de status não recebem o cabeçalho.
 
 ---
 

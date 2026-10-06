@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -27,9 +28,11 @@ import org.springframework.web.context.WebApplicationContext;
 
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -81,8 +84,12 @@ class AuthRateLimitIntegrationTest {
         String unknown = "ninguem-" + UUID.randomUUID() + "@rewit.com";
 
         for (int i = 0; i < 3; i++) {
-            login(unknown, PASSWORD).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
-            login(email, "Senha-Errada-1").andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+            login(unknown, PASSWORD).andExpect(status().isUnauthorized())
+                    .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER))
+                    .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+            login(email, "Senha-Errada-1").andExpect(status().isUnauthorized())
+                    .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER))
+                    .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
         }
 
         expectTooManyRequests(login(unknown, PASSWORD), "Muitas tentativas de login. Tente novamente mais tarde.");
@@ -94,28 +101,34 @@ class AuthRateLimitIntegrationTest {
     void successfulLoginsAreNotCountedAndWindowExpires() throws Exception {
         String email = createUser();
         for (int i = 0; i < 5; i++) {
-            login(email, PASSWORD).andExpect(status().isOk());
+            login(email, PASSWORD).andExpect(status().isOk())
+                    .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
         }
         for (int i = 0; i < 3; i++) {
-            login(email, "Senha-Errada-1").andExpect(status().isUnauthorized());
+            login(email, "Senha-Errada-1").andExpect(status().isUnauthorized())
+                    .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
         }
         expectTooManyRequests(login(email, PASSWORD), null);
 
         Thread.sleep(WINDOW_WAIT_MILLIS);
 
-        login(email, PASSWORD).andExpect(status().isOk());
+        login(email, PASSWORD).andExpect(status().isOk())
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
     }
 
     @Test
     @DisplayName("Cadastro: acima do limite global recebe 429; após a janela, aceita novamente")
     void registrationLimitAndWindow() throws Exception {
-        register().andExpect(status().isCreated());
-        register().andExpect(status().isCreated());
+        register().andExpect(status().isCreated())
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
+        register().andExpect(status().isCreated())
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
         expectTooManyRequests(register(), "Muitas tentativas de cadastro. Tente novamente mais tarde.");
 
         Thread.sleep(WINDOW_WAIT_MILLIS);
 
-        register().andExpect(status().isCreated());
+        register().andExpect(status().isCreated())
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
     }
 
     @Test
@@ -124,8 +137,10 @@ class AuthRateLimitIntegrationTest {
         String email = createUser();
         String token = refreshTokenOf(login(email, PASSWORD));
 
-        token = refreshTokenOf(refresh(token).andExpect(status().isOk()));
-        token = refreshTokenOf(refresh(token).andExpect(status().isOk()));
+        token = refreshTokenOf(refresh(token).andExpect(status().isOk())
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER)));
+        token = refreshTokenOf(refresh(token).andExpect(status().isOk())
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER)));
         expectTooManyRequests(refresh(token), "Muitas renovações de sessão. Tente novamente mais tarde.");
 
         AuthSession current = authSessionRepository.findByTokenHash(tokenService.hashRefreshToken(token)).orElseThrow();
@@ -133,7 +148,8 @@ class AuthRateLimitIntegrationTest {
 
         Thread.sleep(WINDOW_WAIT_MILLIS);
 
-        refresh(token).andExpect(status().isOk());
+        refresh(token).andExpect(status().isOk())
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
     }
 
     @Test
@@ -192,6 +208,8 @@ class AuthRateLimitIntegrationTest {
 
     private static void expectTooManyRequests(ResultActions result, String detail) throws Exception {
         result.andExpect(status().isTooManyRequests())
+                .andExpect(header().exists(HttpHeaders.RETRY_AFTER))
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, matchesPattern("^[1-9]\\d*$")))
                 .andExpect(jsonPath("$.status").value(429))
                 .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"))
                 .andExpect(jsonPath("$.type").value("https://api.rewit.app/errors/rate_limit_exceeded"));

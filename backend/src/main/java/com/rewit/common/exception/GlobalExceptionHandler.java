@@ -3,8 +3,10 @@ package com.rewit.common.exception;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.ErrorResponse;
@@ -27,13 +29,19 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BusinessException.class)
-    public ProblemDetail handleBusinessException(BusinessException ex) {
+    public ResponseEntity<ProblemDetail> handleBusinessException(BusinessException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         problem.setTitle("Regra de Negócio Violada");
         problem.setType(URI.create("https://api.rewit.app/errors/" + ex.getErrorCode().toLowerCase()));
         problem.setProperty("code", ex.getErrorCode());
         problem.setProperty("timestamp", Instant.now());
-        return problem;
+
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(ex.getStatus());
+        if (ex.getRetryAfter() != null) {
+            long seconds = Math.max(1, ex.getRetryAfter().toSeconds());
+            builder.header(HttpHeaders.RETRY_AFTER, String.valueOf(seconds));
+        }
+        return builder.body(problem);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

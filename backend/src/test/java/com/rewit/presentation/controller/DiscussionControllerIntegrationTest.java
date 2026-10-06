@@ -25,6 +25,7 @@ import org.springframework.web.context.WebApplicationContext;
 import java.time.Instant;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -478,7 +479,8 @@ class DiscussionControllerIntegrationTest {
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.accessToken())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(new CreateDiscussionRequest("Comentário " + i, null))))
-                    .andExpect(status().isCreated());
+                    .andExpect(status().isCreated())
+                    .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
         }
 
         // 16ª tentativa dentro da janela deslizante estoura o rate limit
@@ -487,6 +489,8 @@ class DiscussionControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new CreateDiscussionRequest("Comentário 16", null))))
                 .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists(HttpHeaders.RETRY_AFTER))
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, matchesPattern("^[1-9]\\d*$")))
                 .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
     }
 

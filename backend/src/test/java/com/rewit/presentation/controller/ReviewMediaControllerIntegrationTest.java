@@ -459,6 +459,8 @@ class ReviewMediaControllerIntegrationTest {
                         .file(file)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.token()))
                 .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists(HttpHeaders.RETRY_AFTER))
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, matchesPattern("^[1-9]\\d*$")))
                 .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
     }
 

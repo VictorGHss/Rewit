@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,7 +57,7 @@ class ResilientRateLimiterTest {
     }
 
     @Test
-    @DisplayName("acquireOrThrow rejeita com 429 RATE_LIMIT_EXCEEDED e a mensagem da ação")
+    @DisplayName("acquireOrThrow rejeita com 429 RATE_LIMIT_EXCEEDED, mensagem da ação e Retry-After positivo")
     void acquireOrThrowMapsToTooManyRequests() {
         ResilientRateLimiter limiter = limiter(loginLimit(1));
         limiter.acquireOrThrow(RateLimitedAction.LOGIN, IDENTITY);
@@ -66,6 +67,38 @@ class ResilientRateLimiterTest {
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatus());
         assertEquals("RATE_LIMIT_EXCEEDED", ex.getErrorCode());
         assertEquals(RateLimitedAction.LOGIN.exceededMessage(), ex.getMessage());
+        assertNotNull(ex.getRetryAfter());
+        assertTrue(ex.getRetryAfter().toSeconds() >= 1);
+    }
+
+    @Test
+    @DisplayName("acquireOrThrow com LOCAL_FALLBACK inclui Retry-After coerente calculado em memória")
+    void acquireOrThrowWithLocalFallbackIncludesRetryAfter() {
+        ResilientRateLimiter limiter = limiter(loginLimit(1));
+        backend.down.set(true);
+
+        limiter.acquireOrThrow(RateLimitedAction.LOGIN, IDENTITY);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> limiter.acquireOrThrow(RateLimitedAction.LOGIN, IDENTITY));
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatus());
+        assertNotNull(ex.getRetryAfter());
+        assertTrue(ex.getRetryAfter().toSeconds() >= 1);
+    }
+
+    @Test
+    @DisplayName("acquireOrThrow com DENY inclui Retry-After baseado na janela da política")
+    void acquireOrThrowWithDenyIncludesRetryAfter() {
+        RateLimitProperties props = loginLimit(5);
+        props.getBackend().setFailureMode(RateLimitBackendFailureMode.DENY);
+        ResilientRateLimiter limiter = limiter(props);
+        backend.down.set(true);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> limiter.acquireOrThrow(RateLimitedAction.LOGIN, IDENTITY));
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatus());
+        assertNotNull(ex.getRetryAfter());
+        assertEquals(props.policyFor(RateLimitedAction.LOGIN).getWindow().toSeconds(), ex.getRetryAfter().toSeconds());
     }
 
     @Test
@@ -265,10 +298,15 @@ class ResilientRateLimiterTest {
         }
 
         @Override
-        public Optional<String> tryAcquire(String key, int limit, Duration window) {
+        public RateLimitStoreResult acquire(String key, int limit, Duration window) {
             acquireCalls.incrementAndGet();
             failIfDown();
-            return delegate.tryAcquire(key, limit, window);
+            return delegate.acquire(key, limit, window);
+        }
+
+        @Override
+        public Optional<String> tryAcquire(String key, int limit, Duration window) {
+            return acquire(key, limit, window).memberOptional();
         }
 
         @Override

@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,6 +74,22 @@ class RedisRateLimitStoreIntegrationTest {
         assertTrue(storeA.tryAcquire(key, 3, WINDOW).isEmpty());
         assertTtlWithinWindow();
         assertEquals(3L, instanceA.opsForZSet().zCard(key));
+    }
+
+    @Test
+    @DisplayName("acquire calcula retry-after positivo baseado no tempo restante da janela deslizante no Redis")
+    void acquireCalculatesRetryAfterInRedis() {
+        RateLimitStoreResult r1 = storeA.acquire(key, 2, WINDOW);
+        assertTrue(r1.isGranted());
+
+        RateLimitStoreResult r2 = storeB.acquire(key, 2, WINDOW);
+        assertTrue(r2.isGranted());
+
+        RateLimitStoreResult rejected = storeA.acquire(key, 2, WINDOW);
+        assertFalse(rejected.isGranted());
+        assertNotNull(rejected.retryAfter());
+        long seconds = rejected.retryAfter().toSeconds();
+        assertTrue(seconds >= 1 && seconds <= WINDOW.toSeconds(), "retryAfter deve ser positivo e <= janela: " + seconds);
     }
 
     @Test

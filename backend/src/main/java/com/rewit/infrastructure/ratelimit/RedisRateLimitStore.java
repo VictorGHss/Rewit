@@ -29,11 +29,23 @@ class RedisRateLimitStore implements RateLimitStore {
             local windowStart = now - tonumber(ARGV[2])
             redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. string.format('%.0f', windowStart))
             if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[1]) then
-                return false
+                local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+                local retryAfterMs = tonumber(ARGV[2])
+                if #oldest >= 2 then
+                    local oldestScore = tonumber(oldest[2])
+                    local remainingMs = (oldestScore + tonumber(ARGV[2])) - now
+                    if remainingMs > 0 then
+                        retryAfterMs = remainingMs
+                    else
+                        retryAfterMs = 1
+                    end
+                end
+                local retryAfterSec = math.max(1, math.ceil(retryAfterMs / 1000))
+                return 'RETRY:' .. string.format('%.0f', retryAfterSec)
             end
             redis.call('ZADD', KEYS[1], string.format('%.0f', now), ARGV[3])
             redis.call('PEXPIRE', KEYS[1], ARGV[2])
-            return ARGV[3]
+            return 'OK:' .. ARGV[3]
             """, String.class);
 
     private final StringRedisTemplate redisTemplate;
@@ -43,15 +55,28 @@ class RedisRateLimitStore implements RateLimitStore {
     }
 
     @Override
-    public Optional<String> tryAcquire(String key, int limit, Duration window) {
+    public RateLimitStoreResult acquire(String key, int limit, Duration window) {
         String member = UUID.randomUUID().toString();
         try {
-            String granted = redisTemplate.execute(ACQUIRE, List.of(key),
+            String result = redisTemplate.execute(ACQUIRE, List.of(key),
                     Integer.toString(limit), Long.toString(window.toMillis()), member);
-            return Optional.ofNullable(granted);
+            if (result != null && result.startsWith("OK:")) {
+                return RateLimitStoreResult.granted(result.substring(3));
+            }
+            if (result != null && result.startsWith("RETRY:")) {
+                long seconds = Math.max(1, Long.parseLong(result.substring(6)));
+                return RateLimitStoreResult.rejected(Duration.ofSeconds(seconds));
+            }
+            long windowSeconds = Math.max(1, window.toSeconds());
+            return RateLimitStoreResult.rejected(Duration.ofSeconds(windowSeconds));
         } catch (DataAccessException e) {
             throw new RateLimitBackendException(e);
         }
+    }
+
+    @Override
+    public Optional<String> tryAcquire(String key, int limit, Duration window) {
+        return acquire(key, limit, window).memberOptional();
     }
 
     @Override

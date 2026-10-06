@@ -37,27 +37,42 @@ class LocalRateLimitStore implements RateLimitStore {
     }
 
     @Override
-    public Optional<String> tryAcquire(String key, int limit, Duration window) {
+    public RateLimitStoreResult acquire(String key, int limit, Duration window) {
         long now = clock.millis();
         long windowMillis = window.toMillis();
         purgeIfDue(now);
         if (!windows.containsKey(key) && windows.size() >= maxKeys) {
             purge(now);
             if (windows.size() >= maxKeys) {
-                return Optional.empty();
+                long retryAfterSec = Math.max(1, (long) Math.ceil(windowMillis / 1000.0));
+                return RateLimitStoreResult.rejected(Duration.ofSeconds(retryAfterSec));
             }
         }
-        String[] granted = new String[1];
+        RateLimitStoreResult[] result = new RateLimitStoreResult[1];
         windows.compute(key, (k, current) -> {
             Window target = current != null ? current : new Window(windowMillis);
             target.prune(now);
             if (target.size() < limit) {
-                granted[0] = Long.toString(sequence.incrementAndGet());
-                target.add(now, granted[0]);
+                String member = Long.toString(sequence.incrementAndGet());
+                target.add(now, member);
+                result[0] = RateLimitStoreResult.granted(member);
+            } else {
+                long oldestAt = target.oldestAttemptMillis();
+                long remainingMs = oldestAt >= 0 ? (oldestAt + windowMillis) - now : windowMillis;
+                if (remainingMs <= 0) {
+                    remainingMs = 1;
+                }
+                long retryAfterSec = Math.max(1, (long) Math.ceil(remainingMs / 1000.0));
+                result[0] = RateLimitStoreResult.rejected(Duration.ofSeconds(retryAfterSec));
             }
             return target.isEmpty() ? null : target;
         });
-        return Optional.ofNullable(granted[0]);
+        return result[0];
+    }
+
+    @Override
+    public Optional<String> tryAcquire(String key, int limit, Duration window) {
+        return acquire(key, limit, window).memberOptional();
     }
 
     @Override
@@ -119,6 +134,11 @@ class LocalRateLimitStore implements RateLimitStore {
 
         boolean isEmpty() {
             return attempts.isEmpty();
+        }
+
+        long oldestAttemptMillis() {
+            Attempt oldest = attempts.peekFirst();
+            return oldest != null ? oldest.at() : -1L;
         }
     }
 

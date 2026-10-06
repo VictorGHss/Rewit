@@ -4,12 +4,15 @@ import com.rewit.application.port.RateLimiter;
 import com.rewit.application.ratelimit.RateLimitPermit;
 import com.rewit.application.ratelimit.RateLimitSubject;
 import com.rewit.application.ratelimit.RateLimitedAction;
+import com.rewit.common.exception.BusinessException;
 import com.rewit.infrastructure.ratelimit.RateLimitMetrics.Operation;
 import com.rewit.infrastructure.ratelimit.RateLimitMetrics.Source;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -62,24 +65,17 @@ public class ResilientRateLimiter implements RateLimiter {
 
     @Override
     public Optional<RateLimitPermit> tryAcquire(RateLimitedAction action, RateLimitSubject subject) {
-        Objects.requireNonNull(action, "action must not be null");
-        Objects.requireNonNull(subject, "subject must not be null");
-        RateLimitProperties.Policy policy = properties.policyFor(action);
-        if (!properties.isEnabled() || !policy.isEnabled()) {
-            return Optional.of(UNTRACKED);
-        }
+        Acquisition acquisition = attemptAcquire(action, subject);
+        return Optional.ofNullable(acquisition.permit());
+    }
 
-        String key = keyDeriver.derive(action, subject);
-        if (shouldUseBackend()) {
-            try {
-                Optional<String> member = backendStore.tryAcquire(key, policy.getLimit(), policy.getWindow());
-                markBackendAvailable();
-                return decide(action, Source.REDIS, member.map(m -> new StorePermit(key, m, false)));
-            } catch (RateLimitBackendException e) {
-                markBackendUnavailable(Operation.ACQUIRE, e);
-            }
+    @Override
+    public RateLimitPermit acquireOrThrow(RateLimitedAction action, RateLimitSubject subject) {
+        Acquisition acquisition = attemptAcquire(action, subject);
+        if (acquisition.isGranted()) {
+            return acquisition.permit();
         }
-        return decideDegraded(action, key, policy);
+        throw new BusinessException(action.exceededMessage(), HttpStatus.TOO_MANY_REQUESTS, ERROR_CODE, acquisition.retryAfter());
     }
 
     @Override
@@ -103,21 +99,56 @@ public class ResilientRateLimiter implements RateLimiter {
         return backendRetryAtMillis.get() == 0;
     }
 
-    private Optional<RateLimitPermit> decideDegraded(RateLimitedAction action, String key,
-                                                     RateLimitProperties.Policy policy) {
-        return switch (properties.getBackend().getFailureMode()) {
-            case LOCAL_FALLBACK -> decide(action, Source.LOCAL_FALLBACK,
-                    fallbackStore.tryAcquire(key, policy.getLimit(), policy.getWindow())
-                            .map(m -> new StorePermit(key, m, true)));
-            case DENY -> decide(action, Source.FAILURE_POLICY, Optional.empty());
-            case ALLOW -> decide(action, Source.FAILURE_POLICY, Optional.of(UNTRACKED));
-        };
+    private Acquisition attemptAcquire(RateLimitedAction action, RateLimitSubject subject) {
+        Objects.requireNonNull(action, "action must not be null");
+        Objects.requireNonNull(subject, "subject must not be null");
+        RateLimitProperties.Policy policy = properties.policyFor(action);
+        if (!properties.isEnabled() || !policy.isEnabled()) {
+            return Acquisition.granted(UNTRACKED);
+        }
+
+        String key = keyDeriver.derive(action, subject);
+        if (shouldUseBackend()) {
+            try {
+                RateLimitStoreResult result = backendStore.acquire(key, policy.getLimit(), policy.getWindow());
+                markBackendAvailable();
+                if (result.isGranted()) {
+                    metrics.recordDecision(action, true, Source.REDIS);
+                    return Acquisition.granted(new StorePermit(key, result.member(), false));
+                } else {
+                    metrics.recordDecision(action, false, Source.REDIS);
+                    return Acquisition.rejected(result.retryAfter());
+                }
+            } catch (RateLimitBackendException e) {
+                markBackendUnavailable(Operation.ACQUIRE, e);
+            }
+        }
+        return decideDegraded(action, key, policy);
     }
 
-    private Optional<RateLimitPermit> decide(RateLimitedAction action, Source source,
-                                             Optional<? extends RateLimitPermit> permit) {
-        metrics.recordDecision(action, permit.isPresent(), source);
-        return permit.map(RateLimitPermit.class::cast);
+    private Acquisition decideDegraded(RateLimitedAction action, String key,
+                                       RateLimitProperties.Policy policy) {
+        return switch (properties.getBackend().getFailureMode()) {
+            case LOCAL_FALLBACK -> {
+                RateLimitStoreResult result = fallbackStore.acquire(key, policy.getLimit(), policy.getWindow());
+                if (result.isGranted()) {
+                    metrics.recordDecision(action, true, Source.LOCAL_FALLBACK);
+                    yield Acquisition.granted(new StorePermit(key, result.member(), true));
+                } else {
+                    metrics.recordDecision(action, false, Source.LOCAL_FALLBACK);
+                    yield Acquisition.rejected(result.retryAfter());
+                }
+            }
+            case DENY -> {
+                metrics.recordDecision(action, false, Source.FAILURE_POLICY);
+                long fallbackSeconds = Math.max(1, policy.getWindow().toSeconds());
+                yield Acquisition.rejected(Duration.ofSeconds(fallbackSeconds));
+            }
+            case ALLOW -> {
+                metrics.recordDecision(action, true, Source.FAILURE_POLICY);
+                yield Acquisition.granted(UNTRACKED);
+            }
+        };
     }
 
     private boolean shouldUseBackend() {
@@ -156,6 +187,20 @@ public class ResilientRateLimiter implements RateLimiter {
         @Override
         public String toString() {
             return "RateLimitPermit[tracked]";
+        }
+    }
+
+    private record Acquisition(RateLimitPermit permit, Duration retryAfter) {
+        boolean isGranted() {
+            return permit != null;
+        }
+
+        static Acquisition granted(RateLimitPermit permit) {
+            return new Acquisition(permit, null);
+        }
+
+        static Acquisition rejected(Duration retryAfter) {
+            return new Acquisition(null, retryAfter);
         }
     }
 }

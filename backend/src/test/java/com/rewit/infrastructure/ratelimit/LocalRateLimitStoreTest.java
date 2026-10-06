@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("Rate limiting: janela deslizante em memória (fallback)")
@@ -53,6 +54,29 @@ class LocalRateLimitStoreTest {
         clock.advance(Duration.ofMillis(1));
         assertTrue(store.tryAcquire("k", 2, WINDOW).isPresent(), "a primeira tentativa saiu da janela");
         assertTrue(store.tryAcquire("k", 2, WINDOW).isEmpty());
+    }
+
+    @Test
+    @DisplayName("acquire calcula retry-after positivo baseado no tempo restante da tentativa mais antiga")
+    void acquireCalculatesRetryAfterFromOldestAttempt() {
+        RateLimitStoreResult r1 = store.acquire("k-retry", 2, WINDOW);
+        assertTrue(r1.isGranted());
+
+        clock.advance(Duration.ofSeconds(15));
+        RateLimitStoreResult r2 = store.acquire("k-retry", 2, WINDOW);
+        assertTrue(r2.isGranted());
+
+        // Limite atingido: a tentativa mais antiga (r1) foi feita há 15s em uma janela de 60s. Restam 45s.
+        RateLimitStoreResult rejected = store.acquire("k-retry", 2, WINDOW);
+        assertFalse(rejected.isGranted());
+        assertNotNull(rejected.retryAfter());
+        assertEquals(45, rejected.retryAfter().toSeconds());
+
+        // Avança mais 20s. A tentativa mais antiga agora foi há 35s. Restam 25s.
+        clock.advance(Duration.ofSeconds(20));
+        RateLimitStoreResult rejectedLater = store.acquire("k-retry", 2, WINDOW);
+        assertFalse(rejectedLater.isGranted());
+        assertEquals(25, rejectedLater.retryAfter().toSeconds());
     }
 
     @Test

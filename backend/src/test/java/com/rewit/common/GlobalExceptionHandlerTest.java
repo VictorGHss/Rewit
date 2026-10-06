@@ -9,11 +9,14 @@ import com.rewit.common.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,18 +27,66 @@ class GlobalExceptionHandlerTest {
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 
     @Test
-    @DisplayName("BusinessException deve gerar ProblemDetail formatado segundo RFC 7807")
+    @DisplayName("BusinessException deve gerar ProblemDetail formatado segundo RFC 7807 sem Retry-After")
     void shouldFormatBusinessExceptionProblemDetail() {
         BusinessException ex = new BusinessException("Nota fora do intervalo permitido", HttpStatus.UNPROCESSABLE_CONTENT, "INVALID_RATING_RANGE");
 
-        ProblemDetail problem = handler.handleBusinessException(ex);
+        ResponseEntity<ProblemDetail> response = handler.handleBusinessException(ex);
 
+        assertNotNull(response);
+        assertEquals(422, response.getStatusCode().value());
+        assertNull(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER), "erros comuns de negócio não têm Retry-After");
+
+        ProblemDetail problem = response.getBody();
         assertNotNull(problem);
         assertEquals(422, problem.getStatus());
         assertEquals("Nota fora do intervalo permitido", problem.getDetail());
         assertEquals("Regra de Negócio Violada", problem.getTitle());
         assertEquals("INVALID_RATING_RANGE", problem.getProperties().get("code"));
         assertNotNull(problem.getProperties().get("timestamp"));
+    }
+
+    @Test
+    @DisplayName("BusinessException com retryAfter deve incluir cabeçalho Retry-After com segundos e manter RFC 7807")
+    void shouldIncludeRetryAfterHeaderWhenPresent() {
+        BusinessException ex = new BusinessException(
+                "Muitas tentativas de login. Tente novamente mais tarde.",
+                HttpStatus.TOO_MANY_REQUESTS,
+                "RATE_LIMIT_EXCEEDED",
+                Duration.ofSeconds(45)
+        );
+
+        ResponseEntity<ProblemDetail> response = handler.handleBusinessException(ex);
+
+        assertNotNull(response);
+        assertEquals(429, response.getStatusCode().value());
+        assertEquals("45", response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
+
+        ProblemDetail problem = response.getBody();
+        assertNotNull(problem);
+        assertEquals(429, problem.getStatus());
+        assertEquals("Muitas tentativas de login. Tente novamente mais tarde.", problem.getDetail());
+        assertEquals("Regra de Negócio Violada", problem.getTitle());
+        assertEquals("RATE_LIMIT_EXCEEDED", problem.getProperties().get("code"));
+        assertEquals("https://api.rewit.app/errors/rate_limit_exceeded", String.valueOf(problem.getType()));
+        assertNotNull(problem.getProperties().get("timestamp"));
+    }
+
+    @Test
+    @DisplayName("BusinessException com retryAfter subsegundo deve garantir Retry-After positivo de no mínimo 1")
+    void shouldClampSubsecondRetryAfterToOneSecond() {
+        BusinessException ex = new BusinessException(
+                "Limite excedido",
+                HttpStatus.TOO_MANY_REQUESTS,
+                "RATE_LIMIT_EXCEEDED",
+                Duration.ofMillis(300)
+        );
+
+        ResponseEntity<ProblemDetail> response = handler.handleBusinessException(ex);
+
+        assertNotNull(response);
+        assertEquals(429, response.getStatusCode().value());
+        assertEquals("1", response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
     }
 
     @Test
