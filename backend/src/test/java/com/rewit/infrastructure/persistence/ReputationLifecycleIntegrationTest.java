@@ -348,6 +348,45 @@ class ReputationLifecycleIntegrationTest {
             "Nenhum snapshot deve ser persistido para usuário inexistente");
     }
 
+    @Test
+    @DisplayName("Usuário soft-deleted existente: recalculateAndSave retorna null sem gerar snapshot e getReputation lança 404")
+    void softDeletedExistingUser_recalculateReturnsNullAndGetReputationThrowsNotFound() {
+        User user = createUser("lc_sd_user");
+        user.softDelete();
+        userRepository.save(user);
+
+        UserReputation snapshot = reputationService.recalculateAndSave(user.getId());
+        assertNull(snapshot, "Snapshot não deve ser gerado para usuário soft-deleted");
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> reputationService.getReputation(user.getId()));
+        assertEquals("USER_NOT_FOUND", ex.getErrorCode());
+
+        assertTrue(reputationRepository.findByUserId(user.getId()).isEmpty(),
+            "Nenhum snapshot deve ser persistido para usuário inativo");
+    }
+
+    @Test
+    @DisplayName("Usuário desativado (isActive=false) existente: recalculateAndSave retorna null e getReputation lança 404")
+    void inactiveExistingUser_recalculateReturnsNullAndGetReputationThrowsNotFound() {
+        User user = createUser("lc_in_user");
+        User inactive = User.rehydrate(
+            user.getId(), user.getEmail(), user.getPasswordHash(),
+            user.getAuthProvider(), user.getProviderUserId(),
+            false, user.isVerified(), user.getRole(),
+            null, user.getCreatedAt(), user.getUpdatedAt()
+        );
+        userRepository.save(inactive);
+
+        UserReputation snapshot = reputationService.recalculateAndSave(user.getId());
+        assertNull(snapshot, "Snapshot não deve ser gerado para usuário inativo");
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> reputationService.getReputation(user.getId()));
+        assertEquals("USER_NOT_FOUND", ex.getErrorCode());
+
+        assertTrue(reputationRepository.findByUserId(user.getId()).isEmpty(),
+            "Nenhum snapshot deve ser persistido para usuário inativo");
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================

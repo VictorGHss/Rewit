@@ -10,6 +10,7 @@ import com.rewit.application.dto.report.ReportDtos.ModerateReviewCommand;
 import com.rewit.application.dto.report.ReportDtos.ModerateReviewResult;
 import com.rewit.application.dto.report.ReportDtos.QueryAdminReportsFilter;
 import com.rewit.application.port.RateableTargetRepository;
+import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.ReportService;
 import com.rewit.application.service.ReviewService;
@@ -23,6 +24,7 @@ import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.Role;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.RateableTarget;
+import com.rewit.domain.model.Review;
 import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.entity.ModerationAuditLogJpaEntity;
 import com.rewit.infrastructure.persistence.entity.ReportJpaEntity;
@@ -71,6 +73,9 @@ class ModerateReviewIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private ReviewRepository reviewRepository;
 
     @Autowired
     private RateableTargetRepository rateableTargetRepository;
@@ -345,5 +350,96 @@ class ModerateReviewIntegrationTest {
         assertEquals(0, reviewService.getTargetStats(target.getId()).reviewsCount());
 
         executor.shutdown();
+    }
+
+    @Test
+    @DisplayName("Moderação: Remoção de avaliação cujo autor está inativo/soft-deleted deve concluir com sucesso")
+    void shouldRemoveReviewWhenAuthorIsInactive() {
+        User author = createActiveUser(Role.USER);
+        User moderator = createActiveUser(Role.MODERATOR);
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView review = reviewService.createReview(new CreateReviewCommand(
+                author.getId(),
+                null,
+                "Avaliação de autor que será desativado",
+                false,
+                "PUBLIC",
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.0"), "Bom"))
+        ));
+
+        // Desativa o autor da avaliação
+        author.softDelete();
+        userRepository.save(author);
+
+        // Moderador remove a avaliação
+        ModerateReviewCommand cmd = new ModerateReviewCommand(
+                review.id(),
+                moderator.getId(),
+                ModerationAction.REMOVE_REVIEW,
+                "SPAM_COMMERCIAL",
+                "Conteúdo violou as diretrizes de moderação do sistema.",
+                Instant.now()
+        );
+
+        ModerateReviewResult result = moderateReviewUseCase.execute(cmd);
+
+        assertNotNull(result);
+        assertEquals(ReviewStatus.REMOVED, result.review().getStatus());
+
+        ReviewJpaEntity dbReview = reviewJpaRepository.findById(review.id()).orElseThrow();
+        assertEquals("REMOVED", dbReview.getStatus());
+
+        List<ModerationAuditLogJpaEntity> logs = moderationAuditLogJpaRepository.findByReviewIdOrderByCreatedAtDesc(review.id());
+        assertFalse(logs.isEmpty());
+        assertEquals(ModerationDecision.ACCEPTED.name(), logs.get(0).getDecision());
+    }
+
+    @Test
+    @DisplayName("Moderação: Restauração de avaliação UNDER_REVIEW cujo autor está inativo deve concluir com sucesso")
+    void shouldRestoreReviewWhenAuthorIsInactive() {
+        User author = createActiveUser(Role.USER);
+        User moderator = createActiveUser(Role.MODERATOR);
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView review = reviewService.createReview(new CreateReviewCommand(
+                author.getId(),
+                null,
+                "Avaliação colocada sob moderação preventiva",
+                false,
+                "PUBLIC",
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.0"), "Bom"))
+        ));
+
+        // Coloca a avaliação em UNDER_REVIEW
+        Review domainReview = reviewRepository.findById(review.id()).orElseThrow();
+        domainReview.markUnderReview();
+        reviewRepository.save(domainReview);
+
+        // Desativa o autor
+        author.softDelete();
+        userRepository.save(author);
+
+        // Moderador restaura a avaliação
+        ModerateReviewCommand cmd = new ModerateReviewCommand(
+                review.id(),
+                moderator.getId(),
+                ModerationAction.RESTORE_REVIEW,
+                "NO_VIOLATION",
+                "Avaliação revisada e liberada por não violar nenhuma diretriz.",
+                Instant.now()
+        );
+
+        ModerateReviewResult result = moderateReviewUseCase.execute(cmd);
+
+        assertNotNull(result);
+        assertEquals(ReviewStatus.ACTIVE, result.review().getStatus());
+
+        ReviewJpaEntity dbReview = reviewJpaRepository.findById(review.id()).orElseThrow();
+        assertEquals("ACTIVE", dbReview.getStatus());
+
+        List<ModerationAuditLogJpaEntity> logs = moderationAuditLogJpaRepository.findByReviewIdOrderByCreatedAtDesc(review.id());
+        assertFalse(logs.isEmpty());
+        assertEquals(ModerationDecision.REJECTED.name(), logs.get(0).getDecision());
     }
 }

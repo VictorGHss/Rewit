@@ -427,4 +427,98 @@ class ReviewLifecycleIntegrationTest {
 
         executor.shutdown();
     }
+
+    @Test
+    @DisplayName("Caso 7: Edição de avaliação de autor inativo/soft-deleted deve concluir com sucesso")
+    void shouldUpdateReviewWhenAuthorIsInactive() {
+        User author = createActiveUser();
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView created = reviewService.createReview(new CreateReviewCommand(
+                author.getId(),
+                null,
+                "Avaliação inicial de autor que será desativado",
+                false,
+                "PUBLIC",
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("3.5"), "Normal"))
+        ));
+
+        // Desativa o autor da avaliação
+        author.softDelete();
+        userRepository.save(author);
+
+        // Autor atualiza a avaliação alterando o anonimato (o que dispara recalculateAndSave)
+        Instant editTime = Instant.now().plusSeconds(600).truncatedTo(ChronoUnit.MICROS);
+        UpdateReviewCommand updateCmd = new UpdateReviewCommand(
+                "Texto atualizado após desativação da conta do autor",
+                null,
+                true, // altera anonimato para true, disparando recálculo
+                "PUBLIC",
+                editTime
+        );
+
+        assertDoesNotThrow(() -> updateReviewUseCase.execute(created.id(), author.getId(), updateCmd));
+
+        ReviewJpaEntity dbReview = reviewJpaRepository.findById(created.id()).orElseThrow();
+        assertEquals("Texto atualizado após desativação da conta do autor", dbReview.getExperienceText());
+        assertTrue(dbReview.isAnonymous());
+    }
+
+    @Test
+    @DisplayName("Caso 8: Marcar e desmarcar Helpful em avaliação de autor inativo deve concluir com sucesso")
+    void shouldAddAndRemoveHelpfulOnReviewWhenAuthorIsInactive() {
+        User author = createActiveUser();
+        User voter = createActiveUser();
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView created = reviewService.createReview(new CreateReviewCommand(
+                author.getId(),
+                null,
+                "Avaliação de alta qualidade de autor que será inativado",
+                false,
+                "PUBLIC",
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("5.0"), "Excelente"))
+        ));
+
+        // Desativa o autor da avaliação
+        author.softDelete();
+        userRepository.save(author);
+
+        // Votante adiciona Helpful (dispara recalculateAndSave para o autor inativo)
+        ReviewHelpfulService.HelpfulResult addResult = reviewHelpfulService.addHelpful(created.id(), voter.getId());
+        assertTrue(addResult.helpful());
+        assertEquals(1, addResult.helpfulCount());
+
+        // Votante remove Helpful (dispara recalculateAndSave para o autor inativo)
+        ReviewHelpfulService.HelpfulResult removeResult = reviewHelpfulService.removeHelpful(created.id(), voter.getId());
+        assertFalse(removeResult.helpful());
+        assertEquals(0, removeResult.helpfulCount());
+    }
+
+    @Test
+    @DisplayName("Caso 9: Exclusão lógica de avaliação pelo autor quando este está inativo deve concluir com sucesso")
+    void shouldDeleteReviewWhenAuthorIsInactive() {
+        User author = createActiveUser();
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        ReviewDetailView created = reviewService.createReview(new CreateReviewCommand(
+                author.getId(),
+                null,
+                "Avaliação a ser removida por autor inativo",
+                false,
+                "PUBLIC",
+                List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.0"), "Bom"))
+        ));
+
+        // Desativa o autor da avaliação
+        author.softDelete();
+        userRepository.save(author);
+
+        // Autor exclui a avaliação (dispara recalculateAndSave para o autor inativo)
+        Instant deleteTime = Instant.now().plusSeconds(600).truncatedTo(ChronoUnit.MICROS);
+        assertDoesNotThrow(() -> deleteReviewUseCase.execute(created.id(), author.getId(), deleteTime));
+
+        ReviewJpaEntity dbReview = reviewJpaRepository.findById(created.id()).orElseThrow();
+        assertEquals("REMOVED", dbReview.getStatus());
+    }
 }

@@ -50,18 +50,24 @@ public class ReputationService {
      * Recalcula os sinais de reputação e atualiza o snapshot persistido.
      * Executa dentro da transação corrente sob lock pessimista para serializar concorrência.
      *
+     * <p>Caso o usuário não exista no sistema, lança 404 (USER_NOT_FOUND).
+     * Caso o usuário exista, mas esteja inativo ou excluído (soft-deleted), a operação é tratada
+     * de acordo com a semântica do modelo: reputação para usuário inativo é sem significado prático
+     * (não possui presença pública nem gera snapshot conforme ADR-008), retornando {@code null}
+     * sem lançar exceção nem bloquear operações legítimas sobre avaliações existentes de sua autoria.
+     *
      * @param targetUserId UUID do usuário cujo snapshot será recalculado
-     * @return snapshot atualizado
+     * @return snapshot atualizado, ou {@code null} caso o usuário esteja inativo/excluído
      */
     @Transactional
     public UserReputation recalculateAndSave(UUID targetUserId) {
         Objects.requireNonNull(targetUserId, "targetUserId cannot be null");
 
-        User user = userRepository.findById(targetUserId)
+        User user = userRepository.findByIdIncludingDeleted(targetUserId)
             .orElseThrow(() -> new BusinessException("Usuario nao encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
 
         if (!user.isActive() || user.isDeleted()) {
-            throw new BusinessException("Usuario nao encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND");
+            return null;
         }
 
         // 1. Garante que a linha exista previamente no banco (idempotente)
@@ -92,7 +98,7 @@ public class ReputationService {
     public ReputationDtos.ReputationView getReputation(UUID targetUserId) {
         Objects.requireNonNull(targetUserId, "targetUserId cannot be null");
 
-        User user = userRepository.findById(targetUserId)
+        User user = userRepository.findByIdIncludingDeleted(targetUserId)
             .orElseThrow(() -> new BusinessException(
                 "Usuario nao encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
 

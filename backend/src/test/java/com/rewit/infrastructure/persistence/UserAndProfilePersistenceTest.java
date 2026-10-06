@@ -159,6 +159,13 @@ class UserAndProfilePersistenceTest {
         // Porém o e-mail permanece reservado no sistema
         assertTrue(userRepository.existsByEmail(email), "existsByEmail deve retornar true para e-mail reservado");
 
+        // Porém findByIdIncludingDeleted e existsById devem encontrar o usuário soft-deleted
+        Optional<User> anyUserById = userRepository.findByIdIncludingDeleted(user.getId());
+        assertTrue(anyUserById.isPresent(), "Usuário soft-deleted deve ser retornado por findByIdIncludingDeleted");
+        assertTrue(anyUserById.get().isDeleted(), "isDeleted deve ser true");
+        assertTrue(userRepository.existsById(user.getId()), "existsById deve retornar true para usuário soft-deleted");
+        assertFalse(userRepository.existsById(UUID.randomUUID()), "existsById deve retornar false para ID inexistente");
+
         // Tentativa de cadastrar novo usuário com o mesmo e-mail deve falhar no banco (regra de MVP)
         User impostor = new User(null, email, "nova_senha", AuthProvider.LOCAL, null);
         assertThrows(Exception.class, () -> {

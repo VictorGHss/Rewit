@@ -49,6 +49,22 @@ public class UserRepositoryAdapter implements UserRepository {
     }
 
     @Override
+    public Optional<User> findByIdIncludingDeleted(UUID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return userJpaRepository.findById(id).map(UserRepositoryAdapter::toDomain);
+    }
+
+    @Override
+    public boolean existsById(UUID id) {
+        if (id == null) {
+            return false;
+        }
+        return userJpaRepository.existsById(id);
+    }
+
+    @Override
     public Optional<User> findByEmail(String email) {
         if (email == null || email.isBlank()) {
             return Optional.empty();
