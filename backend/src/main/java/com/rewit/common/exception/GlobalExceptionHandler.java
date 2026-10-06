@@ -103,6 +103,7 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Parâmetros da requisição inválidos");
         problem.setTitle("Erro de Validação de Dados");
         problem.setType(URI.create("https://api.rewit.app/errors/validation-error"));
+        problem.setProperty("code", "VALIDATION_ERROR");
 
         Map<String, String> fieldErrors = new HashMap<>();
         ex.getBindingResult().getFieldErrors().forEach(error ->
@@ -123,12 +124,85 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ProblemDetail handleHttpRequestMethodNotSupported(org.springframework.web.HttpRequestMethodNotSupportedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.METHOD_NOT_ALLOWED, "Método HTTP não suportado para este recurso");
+        problem.setTitle("Método Não Permitido");
+        problem.setType(URI.create("https://api.rewit.app/errors/method-not-allowed"));
+        problem.setProperty("code", "METHOD_NOT_ALLOWED");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    public ProblemDetail handleHttpMediaTypeNotSupported(org.springframework.web.HttpMediaTypeNotSupportedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Tipo de mídia da requisição não suportado");
+        problem.setTitle("Tipo de Mídia Não Suportado");
+        problem.setType(URI.create("https://api.rewit.app/errors/unsupported-media-type"));
+        problem.setProperty("code", "UNSUPPORTED_MEDIA_TYPE");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotAcceptableException.class)
+    public org.springframework.http.ResponseEntity<ProblemDetail> handleHttpMediaTypeNotAcceptable(org.springframework.web.HttpMediaTypeNotAcceptableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_ACCEPTABLE, "Nenhuma representação aceitável encontrada para o cabeçalho Accept solicitado");
+        problem.setTitle("Não Aceitável");
+        problem.setType(URI.create("https://api.rewit.app/errors/not-acceptable"));
+        problem.setProperty("code", "NOT_ACCEPTABLE");
+        problem.setProperty("timestamp", Instant.now());
+        return org.springframework.http.ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE)
+                .contentType(org.springframework.http.MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(org.springframework.web.bind.MissingServletRequestParameterException.class)
+    public ProblemDetail handleMissingServletRequestParameter(org.springframework.web.bind.MissingServletRequestParameterException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Parâmetro obrigatório da requisição não informado: " + ex.getParameterName());
+        problem.setTitle("Parâmetro Ausente");
+        problem.setType(URI.create("https://api.rewit.app/errors/missing-parameter"));
+        problem.setProperty("code", "MISSING_PARAMETER");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public ProblemDetail handleMethodArgumentTypeMismatch(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
+        String paramName = ex.getName() != null ? ex.getName() : "parâmetro";
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Parâmetro da requisição com tipo ou formato inválido: " + paramName);
+        problem.setTitle("Tipo de Parâmetro Inválido");
+        problem.setType(URI.create("https://api.rewit.app/errors/type-mismatch"));
+        problem.setProperty("code", "TYPE_MISMATCH");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.support.MissingServletRequestPartException.class)
+    public ProblemDetail handleMissingServletRequestPart(org.springframework.web.multipart.support.MissingServletRequestPartException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Parte obrigatória da requisição não informada: " + ex.getRequestPartName());
+        problem.setTitle("Parte da Requisição Ausente");
+        problem.setType(URI.create("https://api.rewit.app/errors/missing-request-part"));
+        problem.setProperty("code", "MISSING_REQUEST_PART");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ProblemDetail handleMaxUploadSizeExceeded(org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.PAYLOAD_TOO_LARGE, "O tamanho do arquivo excede o limite máximo permitido");
+        problem.setTitle("Arquivo Muito Grande");
+        problem.setType(URI.create("https://api.rewit.app/errors/payload-too-large"));
+        problem.setProperty("code", "PAYLOAD_TOO_LARGE");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
     /**
      * Rota sem handler nem recurso estático (inclui /actuator/* na porta da API, onde não existe).
      * É erro do cliente: 404, sem log de erro, e não pode cair no handler genérico (500).
      */
-    @ExceptionHandler(NoResourceFoundException.class)
-    public ProblemDetail handleNoResourceFound(NoResourceFoundException ex) {
+    @ExceptionHandler({NoResourceFoundException.class, org.springframework.web.servlet.NoHandlerFoundException.class})
+    public ProblemDetail handleNoResourceFound(Exception ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "Recurso não encontrado");
         problem.setTitle("Recurso Não Encontrado");
         problem.setType(URI.create("https://api.rewit.app/errors/resource-not-found"));
@@ -143,12 +217,19 @@ public class GlobalExceptionHandler {
         if (ex instanceof AccessDeniedException || ex instanceof AuthenticationException) {
             throw ex;
         }
-        // Erro inesperado: só a classe na mensagem (ADR-012). Sem path, headers, corpo ou mensagem da exceção;
-        // o stack trace dos logs JSON sai sem mensagens. Exceções do framework que já são 4xx (rota inexistente,
-        // método não suportado) não são erros do servidor e não geram ERROR.
-        if (!(ex instanceof ErrorResponse errorResponse && errorResponse.getStatusCode().is4xxClientError())) {
-            log.error("Erro interno inesperado ao processar a requisição (erro={})", ex.getClass().getName(), ex);
+        // Fallback defensivo para qualquer outra exceção 4xx do framework que implemente ErrorResponse
+        if (ex instanceof ErrorResponse errorResponse && errorResponse.getStatusCode().is4xxClientError()) {
+            HttpStatus resolved = HttpStatus.resolve(errorResponse.getStatusCode().value());
+            HttpStatus status = resolved != null ? resolved : HttpStatus.BAD_REQUEST;
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, "Requisição inválida");
+            problem.setTitle("Requisição Inválida");
+            problem.setType(URI.create("https://api.rewit.app/errors/client-error"));
+            problem.setProperty("code", "CLIENT_ERROR");
+            problem.setProperty("timestamp", Instant.now());
+            return problem;
         }
+
+        log.error("Erro interno inesperado ao processar a requisição (erro={})", ex.getClass().getName(), ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "Ocorreu um erro interno inesperado no servidor.");
         problem.setTitle("Erro Interno do Servidor");
         problem.setType(URI.create("https://api.rewit.app/errors/internal-server-error"));
