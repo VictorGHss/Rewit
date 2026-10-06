@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -21,6 +22,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -60,6 +62,9 @@ class FeedV2ControllerIntegrationTest {
 
     @Autowired
     private RateableTargetRepository rateableTargetRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -502,6 +507,28 @@ class FeedV2ControllerIntegrationTest {
     // 6. Cold Start / Descoberta para Usuários Sem Seguidos (Step 24.5.1)
     // =========================================================================
 
+    private Instant resolveFutureDiscoveryReviewTimestamp() {
+        Timestamp maxTimestamp = jdbcTemplate.queryForObject(
+                "SELECT MAX(created_at) FROM reviews WHERE status = 'ACTIVE' AND visibility = 'PUBLIC'",
+                Timestamp.class
+        );
+        Instant now = Instant.now();
+        if (maxTimestamp != null) {
+            Instant maxInstant = maxTimestamp.toInstant();
+            if (maxInstant.isAfter(now)) {
+                return maxInstant.plusSeconds(60);
+            }
+        }
+        return now.plus(java.time.Duration.ofDays(5));
+    }
+
+    private void cleanupReview(UUID reviewId) {
+        if (reviewId != null) {
+            jdbcTemplate.update("DELETE FROM review_targets WHERE review_id = ?", reviewId);
+            jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", reviewId);
+        }
+    }
+
     @Test
     @DisplayName("6.1. Cold Start: Usuário sem seguidos recebe reviews públicas de terceiros com envelope e sem campos internos")
     void shouldReturnDiscoveryCandidatesWhenRequesterHasNoFollows() throws Exception {
@@ -511,25 +538,30 @@ class FeedV2ControllerIntegrationTest {
         Place place = createPlace();
         RateableTarget target = createTarget(TargetType.PLACE);
 
-        // Requester NÃO segue otherAuthor. otherAuthor cria review PUBLIC + ACTIVE recente no topo
-        Review discoveryReview = createReview(otherAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().plus(java.time.Duration.ofDays(5)));
+        // Requester NÃO segue otherAuthor. otherAuthor cria review PUBLIC + ACTIVE com timestamp no topo da janela
+        Instant topCreatedAt = resolveFutureDiscoveryReviewTimestamp();
+        Review discoveryReview = createReview(otherAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, topCreatedAt);
 
-        mockMvc.perform(get("/api/v2/feed")
-                        .param("size", "50")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items", not(empty())))
-                .andExpect(jsonPath("$.items[*].id", hasItem(discoveryReview.getId().toString())))
-                .andExpect(jsonPath("$.page").value(0))
-                .andExpect(jsonPath("$.size").value(50))
-                .andExpect(jsonPath("$.windowSize", greaterThanOrEqualTo(1)))
-                .andExpect(jsonPath("$.totalPages", greaterThanOrEqualTo(1)))
-                // Validação de que nenhum campo interno de ranking/pipeline vaza
-                .andExpect(jsonPath("$.items[0].score").doesNotExist())
-                .andExpect(jsonPath("$.items[0].isDirectFollow").doesNotExist())
-                .andExpect(jsonPath("$.items[0].rankingMode").doesNotExist())
-                .andExpect(jsonPath("$.items[0].coldStart").doesNotExist())
-                .andExpect(jsonPath("$.items[0].discovery").doesNotExist());
+        try {
+            mockMvc.perform(get("/api/v2/feed")
+                            .param("size", "50")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items", not(empty())))
+                    .andExpect(jsonPath("$.items[*].id", hasItem(discoveryReview.getId().toString())))
+                    .andExpect(jsonPath("$.page").value(0))
+                    .andExpect(jsonPath("$.size").value(50))
+                    .andExpect(jsonPath("$.windowSize", greaterThanOrEqualTo(1)))
+                    .andExpect(jsonPath("$.totalPages", greaterThanOrEqualTo(1)))
+                    // Validação de que nenhum campo interno de ranking/pipeline vaza
+                    .andExpect(jsonPath("$.items[0].score").doesNotExist())
+                    .andExpect(jsonPath("$.items[0].isDirectFollow").doesNotExist())
+                    .andExpect(jsonPath("$.items[0].rankingMode").doesNotExist())
+                    .andExpect(jsonPath("$.items[0].coldStart").doesNotExist())
+                    .andExpect(jsonPath("$.items[0].discovery").doesNotExist());
+        } finally {
+            cleanupReview(discoveryReview.getId());
+        }
     }
 
     @Test
