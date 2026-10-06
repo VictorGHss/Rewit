@@ -429,8 +429,8 @@ class ReviewLifecycleIntegrationTest {
     }
 
     @Test
-    @DisplayName("Caso 7: Edição de avaliação de autor inativo/soft-deleted deve concluir com sucesso")
-    void shouldUpdateReviewWhenAuthorIsInactive() {
+    @DisplayName("Caso 7: Autor soft-deleted não edita a própria avaliação (401 ACCOUNT_DISABLED) e a avaliação fica intacta")
+    void shouldRejectUpdateByInactiveAuthor() {
         User author = createActiveUser();
         RateableTarget target = createRateableTarget(TargetType.PLACE);
 
@@ -447,21 +447,24 @@ class ReviewLifecycleIntegrationTest {
         author.softDelete();
         userRepository.save(author);
 
-        // Autor atualiza a avaliação alterando o anonimato (o que dispara recalculateAndSave)
+        // A conta não opera mais: a edição é recusada antes do lock da review (C2 Fase 1). Operações de terceiros
+        // sobre o conteúdo do autor inativo seguem permitidas (Caso 8 e testes de moderação).
         Instant editTime = Instant.now().plusSeconds(600).truncatedTo(ChronoUnit.MICROS);
         UpdateReviewCommand updateCmd = new UpdateReviewCommand(
                 "Texto atualizado após desativação da conta do autor",
                 null,
-                true, // altera anonimato para true, disparando recálculo
+                true,
                 "PUBLIC",
                 editTime
         );
 
-        assertDoesNotThrow(() -> updateReviewUseCase.execute(created.id(), author.getId(), updateCmd));
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> updateReviewUseCase.execute(created.id(), author.getId(), updateCmd));
+        assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
 
         ReviewJpaEntity dbReview = reviewJpaRepository.findById(created.id()).orElseThrow();
-        assertEquals("Texto atualizado após desativação da conta do autor", dbReview.getExperienceText());
-        assertTrue(dbReview.isAnonymous());
+        assertEquals("Avaliação inicial de autor que será desativado", dbReview.getExperienceText());
+        assertFalse(dbReview.isAnonymous());
     }
 
     @Test
@@ -496,8 +499,8 @@ class ReviewLifecycleIntegrationTest {
     }
 
     @Test
-    @DisplayName("Caso 9: Exclusão lógica de avaliação pelo autor quando este está inativo deve concluir com sucesso")
-    void shouldDeleteReviewWhenAuthorIsInactive() {
+    @DisplayName("Caso 9: Autor soft-deleted não exclui a própria avaliação (401 ACCOUNT_DISABLED) e ela segue ACTIVE")
+    void shouldRejectDeleteByInactiveAuthor() {
         User author = createActiveUser();
         RateableTarget target = createRateableTarget(TargetType.PLACE);
 
@@ -514,11 +517,14 @@ class ReviewLifecycleIntegrationTest {
         author.softDelete();
         userRepository.save(author);
 
-        // Autor exclui a avaliação (dispara recalculateAndSave para o autor inativo)
+        // A conta não opera mais: a exclusão é recusada antes do lock da review (C2 Fase 1); o destino do
+        // conteúdo de contas excluídas depende das decisões de produto do ciclo de vida da conta.
         Instant deleteTime = Instant.now().plusSeconds(600).truncatedTo(ChronoUnit.MICROS);
-        assertDoesNotThrow(() -> deleteReviewUseCase.execute(created.id(), author.getId(), deleteTime));
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> deleteReviewUseCase.execute(created.id(), author.getId(), deleteTime));
+        assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
 
         ReviewJpaEntity dbReview = reviewJpaRepository.findById(created.id()).orElseThrow();
-        assertEquals("REMOVED", dbReview.getStatus());
+        assertEquals("ACTIVE", dbReview.getStatus());
     }
 }

@@ -32,6 +32,7 @@ public class ReportService {
 
     private final ReportRepository reportRepository;
     private final ReviewRepository reviewRepository;
+    private final AccountStatusPolicy accountStatusPolicy;
     private final UserFollowRepository userFollowRepository;
     private final RateLimiter rateLimiter;
     private final ReputationService reputationService;
@@ -40,12 +41,14 @@ public class ReportService {
     public ReportService(
             ReportRepository reportRepository,
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             UserFollowRepository userFollowRepository,
             RateLimiter rateLimiter,
             @org.springframework.beans.factory.annotation.Autowired(required = false) ReputationService reputationService
     ) {
         this.reportRepository = Objects.requireNonNull(reportRepository, "ReportRepository must not be null");
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
         this.userFollowRepository = Objects.requireNonNull(userFollowRepository, "UserFollowRepository must not be null");
         this.rateLimiter = Objects.requireNonNull(rateLimiter, "RateLimiter must not be null");
         this.reputationService = reputationService;
@@ -54,10 +57,11 @@ public class ReportService {
     public ReportService(
             ReportRepository reportRepository,
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             UserFollowRepository userFollowRepository,
             RateLimiter rateLimiter
     ) {
-        this(reportRepository, reviewRepository, userFollowRepository, rateLimiter, null);
+        this(reportRepository, reviewRepository, accountStatusPolicy, userFollowRepository, rateLimiter, null);
     }
 
     public record CreateReportResult(Report report, boolean newlyCreated) {}
@@ -74,6 +78,8 @@ public class ReportService {
         if (cmd.reviewId() == null) {
             throw new BusinessException("A avaliação denunciada é obrigatória", HttpStatus.BAD_REQUEST, "MISSING_REVIEW_ID");
         }
+
+        accountStatusPolicy.requireOperational(cmd.reporterUserId());
 
         // 1. Rate limiting defensivo contra abuso
         rateLimiter.acquireOrThrow(RateLimitedAction.REPORT_CREATION, RateLimitSubject.ofUser(cmd.reporterUserId()));

@@ -27,6 +27,9 @@ import static org.mockito.Mockito.*;
 class ReviewHelpfulUnitTest {
 
     @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
     private ReviewReactionRepository reviewReactionRepository;
 
     @Mock
@@ -48,6 +51,7 @@ class ReviewHelpfulUnitTest {
         reviewHelpfulService = new ReviewHelpfulService(
                 reviewReactionRepository,
                 reviewRepository,
+                accountStatusPolicy,
                 userFollowRepository
         );
     }

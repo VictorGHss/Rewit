@@ -33,6 +33,9 @@ import static org.mockito.Mockito.*;
 class UserFollowUnitTest {
 
     @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
     private UserFollowRepository userFollowRepository;
 
     @Mock
@@ -49,7 +52,7 @@ class UserFollowUnitTest {
 
     @BeforeEach
     void setUp() {
-        userFollowService = new UserFollowService(userFollowRepository, userRepository, profileRepository);
+        userFollowService = new UserFollowService(userFollowRepository, userRepository, accountStatusPolicy, profileRepository);
         followerUserId = UUID.randomUUID();
         targetUserId = UUID.randomUUID();
         targetUser = new User(targetUserId, "target@rewit.com", "hash", AuthProvider.LOCAL, null);

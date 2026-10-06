@@ -5,6 +5,7 @@ import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
+import com.rewit.application.service.AccountStatusPolicy;
 import com.rewit.application.service.ReputationService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewStatus;
@@ -41,6 +42,7 @@ import java.util.UUID;
 public class UpdateReviewUseCase {
 
     private final ReviewRepository reviewRepository;
+    private final AccountStatusPolicy accountStatusPolicy;
     private final ReviewTargetRepository reviewTargetRepository;
     private final ReviewReactionRepository reviewReactionRepository;
     private final RateableTargetStatsRepository rateableTargetStatsRepository;
@@ -48,12 +50,14 @@ public class UpdateReviewUseCase {
 
     public UpdateReviewUseCase(
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             ReviewTargetRepository reviewTargetRepository,
             ReviewReactionRepository reviewReactionRepository,
             RateableTargetStatsRepository rateableTargetStatsRepository,
             ReputationService reputationService
     ) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "accountStatusPolicy must not be null");
         this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository must not be null");
         this.reviewReactionRepository = Objects.requireNonNull(reviewReactionRepository, "reviewReactionRepository must not be null");
         this.rateableTargetStatsRepository = Objects.requireNonNull(rateableTargetStatsRepository, "rateableTargetStatsRepository must not be null");
@@ -74,6 +78,9 @@ public class UpdateReviewUseCase {
         if (command.now() == null) {
             throw new BusinessException("O timestamp de atualização é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_UPDATE_TIMESTAMP");
         }
+
+        // Estado atual da conta antes de qualquer lock: o JWT pode ser anterior à desativação
+        accountStatusPolicy.requireOperational(requesterId);
 
         // 1. Carregamento transacional da Review com Lock Pessimista de Escrita
         Review review = reviewRepository.findByIdForUpdate(reviewId)

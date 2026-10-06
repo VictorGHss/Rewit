@@ -21,6 +21,7 @@ public class ReviewHelpfulService {
 
     private final ReviewReactionRepository reviewReactionRepository;
     private final ReviewRepository reviewRepository;
+    private final AccountStatusPolicy accountStatusPolicy;
     private final UserFollowRepository userFollowRepository;
     private final NotificationService notificationService;
     private final ReputationService reputationService;
@@ -29,12 +30,14 @@ public class ReviewHelpfulService {
     public ReviewHelpfulService(
             ReviewReactionRepository reviewReactionRepository,
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             UserFollowRepository userFollowRepository,
             NotificationService notificationService,
             @org.springframework.beans.factory.annotation.Autowired(required = false) ReputationService reputationService
     ) {
         this.reviewReactionRepository = Objects.requireNonNull(reviewReactionRepository, "reviewReactionRepository must not be null");
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "accountStatusPolicy must not be null");
         this.userFollowRepository = userFollowRepository;
         this.notificationService = notificationService;
         this.reputationService = reputationService;
@@ -43,18 +46,20 @@ public class ReviewHelpfulService {
     public ReviewHelpfulService(
             ReviewReactionRepository reviewReactionRepository,
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             UserFollowRepository userFollowRepository,
             NotificationService notificationService
     ) {
-        this(reviewReactionRepository, reviewRepository, userFollowRepository, notificationService, null);
+        this(reviewReactionRepository, reviewRepository, accountStatusPolicy, userFollowRepository, notificationService, null);
     }
 
     public ReviewHelpfulService(
             ReviewReactionRepository reviewReactionRepository,
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             UserFollowRepository userFollowRepository
     ) {
-        this(reviewReactionRepository, reviewRepository, userFollowRepository, null, null);
+        this(reviewReactionRepository, reviewRepository, accountStatusPolicy, userFollowRepository, null, null);
     }
 
     public record HelpfulResult(boolean helpful, long helpfulCount) {}
@@ -97,6 +102,8 @@ public class ReviewHelpfulService {
         if (reviewId == null) {
             throw new BusinessException("Identificador de avaliação obrigatório", HttpStatus.BAD_REQUEST, "MISSING_REVIEW_ID");
         }
+
+        accountStatusPolicy.requireOperational(requesterUserId);
 
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND"));

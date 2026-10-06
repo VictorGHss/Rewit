@@ -7,6 +7,7 @@ import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.service.AccountStatusPolicy;
 import com.rewit.application.service.ReputationService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ModerationAction;
@@ -47,6 +48,7 @@ import java.util.UUID;
 public class ModerateReviewUseCase {
 
     private final ReviewRepository reviewRepository;
+    private final AccountStatusPolicy accountStatusPolicy;
     private final ReportRepository reportRepository;
     private final ModerationAuditLogRepository moderationAuditLogRepository;
     private final RateableTargetStatsRepository rateableTargetStatsRepository;
@@ -56,6 +58,7 @@ public class ModerateReviewUseCase {
     @Autowired
     public ModerateReviewUseCase(
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             ReportRepository reportRepository,
             ModerationAuditLogRepository moderationAuditLogRepository,
             RateableTargetStatsRepository rateableTargetStatsRepository,
@@ -63,6 +66,7 @@ public class ModerateReviewUseCase {
             @Autowired(required = false) ReviewMediaRepository reviewMediaRepository
     ) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "accountStatusPolicy must not be null");
         this.reportRepository = Objects.requireNonNull(reportRepository, "reportRepository must not be null");
         this.moderationAuditLogRepository = Objects.requireNonNull(moderationAuditLogRepository, "moderationAuditLogRepository must not be null");
         this.rateableTargetStatsRepository = Objects.requireNonNull(rateableTargetStatsRepository, "rateableTargetStatsRepository must not be null");
@@ -72,12 +76,13 @@ public class ModerateReviewUseCase {
 
     public ModerateReviewUseCase(
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             ReportRepository reportRepository,
             ModerationAuditLogRepository moderationAuditLogRepository,
             RateableTargetStatsRepository rateableTargetStatsRepository,
             ReputationService reputationService
     ) {
-        this(reviewRepository, reportRepository, moderationAuditLogRepository, rateableTargetStatsRepository, reputationService, null);
+        this(reviewRepository, accountStatusPolicy, reportRepository, moderationAuditLogRepository, rateableTargetStatsRepository, reputationService, null);
     }
 
     @Transactional
@@ -125,6 +130,9 @@ public class ModerateReviewUseCase {
         }
 
         Instant now = command.now() != null ? command.now() : Instant.now();
+
+        // Estado atual da conta do moderador antes de qualquer lock: o JWT, e a role nele, pode ser anterior à desativação
+        accountStatusPolicy.requireOperational(command.moderatorUserId());
 
         // 1. Carregamento transacional da Review com Lock Pessimista de Escrita
         Review review = reviewRepository.findByIdForUpdate(command.reviewId())

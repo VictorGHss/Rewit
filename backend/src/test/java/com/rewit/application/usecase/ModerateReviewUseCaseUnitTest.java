@@ -7,6 +7,7 @@ import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.service.AccountStatusPolicy;
 import com.rewit.application.service.ReputationService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ModerationAction;
@@ -43,6 +44,9 @@ import static org.mockito.Mockito.*;
 class ModerateReviewUseCaseUnitTest {
 
     @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
     private ReviewRepository reviewRepository;
 
     @Mock
@@ -73,6 +77,7 @@ class ModerateReviewUseCaseUnitTest {
     void setUp() {
         moderateReviewUseCase = new ModerateReviewUseCase(
                 reviewRepository,
+                accountStatusPolicy,
                 reportRepository,
                 moderationAuditLogRepository,
                 rateableTargetStatsRepository,

@@ -3,6 +3,7 @@ package com.rewit.application.usecase;
 import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.service.AccountStatusPolicy;
 import com.rewit.application.service.ReputationService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewStatus;
@@ -34,6 +35,7 @@ import java.util.UUID;
 public class DeleteReviewUseCase {
 
     private final ReviewRepository reviewRepository;
+    private final AccountStatusPolicy accountStatusPolicy;
     private final RateableTargetStatsRepository rateableTargetStatsRepository;
     private final ReputationService reputationService;
     private final ReviewMediaRepository reviewMediaRepository;
@@ -41,11 +43,13 @@ public class DeleteReviewUseCase {
     @Autowired
     public DeleteReviewUseCase(
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             RateableTargetStatsRepository rateableTargetStatsRepository,
             ReputationService reputationService,
             @Autowired(required = false) ReviewMediaRepository reviewMediaRepository
     ) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "accountStatusPolicy must not be null");
         this.rateableTargetStatsRepository = Objects.requireNonNull(rateableTargetStatsRepository, "rateableTargetStatsRepository must not be null");
         this.reputationService = Objects.requireNonNull(reputationService, "reputationService must not be null");
         this.reviewMediaRepository = reviewMediaRepository;
@@ -53,10 +57,11 @@ public class DeleteReviewUseCase {
 
     public DeleteReviewUseCase(
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             RateableTargetStatsRepository rateableTargetStatsRepository,
             ReputationService reputationService
     ) {
-        this(reviewRepository, rateableTargetStatsRepository, reputationService, null);
+        this(reviewRepository, accountStatusPolicy, rateableTargetStatsRepository, reputationService, null);
     }
 
     @Transactional
@@ -70,6 +75,9 @@ public class DeleteReviewUseCase {
         if (now == null) {
             throw new BusinessException("O timestamp de atualização é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_UPDATE_TIMESTAMP");
         }
+
+        // Estado atual da conta antes de qualquer lock: o JWT pode ser anterior à desativação
+        accountStatusPolicy.requireOperational(requesterId);
 
         // 1. Carregamento transacional da Review com Lock Pessimista de Escrita
         Review review = reviewRepository.findByIdForUpdate(reviewId)

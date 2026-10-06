@@ -35,6 +35,9 @@ import static org.mockito.Mockito.*;
 class ReportServiceUnitTest {
 
     @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
     private ReportRepository reportRepository;
 
     @Mock
@@ -57,6 +60,7 @@ class ReportServiceUnitTest {
         reportService = new ReportService(
                 reportRepository,
                 reviewRepository,
+                accountStatusPolicy,
                 userFollowRepository,
                 rateLimiter
         );

@@ -5,6 +5,7 @@ import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
+import com.rewit.application.service.AccountStatusPolicy;
 import com.rewit.application.service.ReputationService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewStatus;
@@ -34,6 +35,9 @@ import static org.mockito.Mockito.*;
 class UpdateReviewUseCaseUnitTest {
 
     @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
     private ReviewRepository reviewRepository;
 
     @Mock
@@ -60,6 +64,7 @@ class UpdateReviewUseCaseUnitTest {
     void setUp() {
         updateReviewUseCase = new UpdateReviewUseCase(
                 reviewRepository,
+                accountStatusPolicy,
                 reviewTargetRepository,
                 reviewReactionRepository,
                 rateableTargetStatsRepository,

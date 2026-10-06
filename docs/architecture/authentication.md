@@ -184,6 +184,16 @@ Retry-After: <segundos>
 
 **Configuração** (`rewit.rate-limit`): `enabled`, `key-secret` (`RATE_LIMIT_KEY_SECRET`, obrigatório), `backend.failure-mode` (`LOCAL_FALLBACK`|`DENY`|`ALLOW`), `backend.retry-interval`, `backend.local-fallback-max-keys`, `auth.{login,refresh,registration}.{enabled,limit,window}` e `content.{report-creation,discussion-creation,media-upload}.{enabled,limit,window}`.
 
+### 4.7 Estado da Conta nas Mutações
+
+O access token é validado só pelas claims, sem consulta ao banco, e pode ter sido emitido antes de a conta ficar inativa ou ser excluída. Por isso as mutações de autoria leem o estado atual da conta (`AccountStatusPolicy`, porta `UserRepository`) no início da própria transação, depois da validação dos argumentos e antes de rate limiting, locks e escritas.
+
+- **Regra**: a conta opera se `is_active = TRUE` e `deleted_at IS NULL` (`User.isOperational()`). Caso contrário, `401 ACCOUNT_DISABLED` ("Conta de usuário inativa ou inexistente"), o mesmo contrato de refresh, `/auth/me` e `/me`. Inativa, excluída e inexistente são indistinguíveis.
+- **Mutações protegidas**: editar e excluir review, marcar e desmarcar helpful, criar e excluir comentário, denunciar, enviar e excluir mídia, seguir e deixar de seguir, e moderar review (estado do moderador). A criação de review já checava o autor e mantém o seu contrato (`403 USER_INACTIVE`, `404 USER_NOT_FOUND`); perfil e senha já usavam `ACCOUNT_DISABLED`.
+- **Fora da regra**: leituras (feed, listagens, perfis) não consultam o estado da conta; o logout continua permitido; notificações e o conteúdo histórico da conta não mudam.
+- **Concorrência**: a leitura do estado não usa lock. Uma desativação que confirme depois dela é ordenada após a mutação; inserts filhos pegam só `FOR KEY SHARE` na linha de `users`, compatível com o `UPDATE` da desativação, então nenhuma das duas espera a outra.
+- **Schema**: `chk_users_active_not_deleted` (V17) impede `is_active = TRUE` com `deleted_at` preenchido.
+
 ## 5. Endpoints Implementados
 
 | Método | Endpoint | Proteção | Descrição |
@@ -200,7 +210,7 @@ Retry-After: <segundos>
 
 - **Mensagens Genéricas de Login**: A API não revela se o e-mail não existe, se o usuário é federado ou se a senha está errada. Todos retornam `INVALID_CREDENTIALS` (`401 Unauthorized`).
 - **Sem Exposição de Dados Sensíveis**: `password_hash`, `token_hash`, tokens completos ou segredos nunca são retornados em DTOs de resposta nem em logs.
-- **Usuários Desativados (Soft-deleted)**: Usuários com `deleted_at IS NOT NULL` são rejeitados tanto no login quanto no refresh e na consulta ao `/me` (`ACCOUNT_DISABLED`, `403 Forbidden`).
+- **Usuários Desativados (Soft-deleted)**: Usuários com `deleted_at IS NOT NULL` são rejeitados tanto no login quanto no refresh e na consulta ao `/me` (`ACCOUNT_DISABLED`, `401 Unauthorized`); o login responde `INVALID_CREDENTIALS`. Mutações de autoria com token emitido antes da desativação também recebem `ACCOUNT_DISABLED` (§4.7).
 - **Tratamento de Exceções**: Todas as falhas de autenticação e validação são retornadas em conformidade com o RFC 7807 (`application/problem+json`).
 - **Rate Limiting (`429 Too Many Requests`)**: Requisições de autenticação (`login`, `refresh`, `register`) que excederem as taxas operacionais retornam código `RATE_LIMIT_EXCEEDED` acompanhadas obrigatoriamente do cabeçalho `Retry-After: <segundos>`, informando a duração estimada até a permissão de nova tentativa. Demais respostas ou códigos de status não recebem o cabeçalho.
 

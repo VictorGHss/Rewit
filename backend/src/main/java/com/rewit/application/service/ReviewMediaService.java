@@ -37,6 +37,7 @@ public class ReviewMediaService {
     private static final Logger log = LoggerFactory.getLogger(ReviewMediaService.class);
 
     private final ReviewRepository reviewRepository;
+    private final AccountStatusPolicy accountStatusPolicy;
     private final ReviewMediaRepository reviewMediaRepository;
     private final ObjectStoragePort objectStoragePort;
     private final ReviewVisibilityPolicy reviewVisibilityPolicy;
@@ -44,12 +45,14 @@ public class ReviewMediaService {
     private final RateLimiter rateLimiter;
 
     public ReviewMediaService(ReviewRepository reviewRepository,
+                              AccountStatusPolicy accountStatusPolicy,
                               ReviewMediaRepository reviewMediaRepository,
                               ObjectStoragePort objectStoragePort,
                               ReviewVisibilityPolicy reviewVisibilityPolicy,
                               ImageSanitizer imageSanitizer,
                               RateLimiter rateLimiter) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
         this.reviewMediaRepository = Objects.requireNonNull(reviewMediaRepository, "ReviewMediaRepository must not be null");
         this.objectStoragePort = Objects.requireNonNull(objectStoragePort, "ObjectStoragePort must not be null");
         this.reviewVisibilityPolicy = Objects.requireNonNull(reviewVisibilityPolicy, "ReviewVisibilityPolicy must not be null");
@@ -78,6 +81,8 @@ public class ReviewMediaService {
         if (cmd.fileBytes() == null || cmd.fileBytes().length == 0) {
             throw new BusinessException("O arquivo de mídia não pode ser vazio", HttpStatus.BAD_REQUEST, "EMPTY_MEDIA_FILE");
         }
+
+        accountStatusPolicy.requireOperational(cmd.authenticatedUserId());
 
         // 1. Rate Limiting por usuário
         rateLimiter.acquireOrThrow(RateLimitedAction.MEDIA_UPLOAD, RateLimitSubject.ofUser(cmd.authenticatedUserId()));
@@ -219,6 +224,8 @@ public class ReviewMediaService {
         if (reviewId == null || mediaId == null) {
             throw new BusinessException("Identificadores inválidos", HttpStatus.BAD_REQUEST, "INVALID_IDENTIFIERS");
         }
+
+        accountStatusPolicy.requireOperational(authenticatedUserId);
 
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND"));

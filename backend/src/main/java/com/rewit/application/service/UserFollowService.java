@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -28,6 +29,7 @@ public class UserFollowService {
 
     private final UserFollowRepository userFollowRepository;
     private final UserRepository userRepository;
+    private final AccountStatusPolicy accountStatusPolicy;
     private final ProfileRepository profileRepository;
     private final NotificationService notificationService;
 
@@ -35,10 +37,12 @@ public class UserFollowService {
     public UserFollowService(
             UserFollowRepository userFollowRepository,
             UserRepository userRepository,
+            AccountStatusPolicy accountStatusPolicy,
             ProfileRepository profileRepository,
             NotificationService notificationService) {
         this.userFollowRepository = userFollowRepository;
         this.userRepository = userRepository;
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
         this.profileRepository = profileRepository;
         this.notificationService = notificationService;
     }
@@ -46,8 +50,9 @@ public class UserFollowService {
     public UserFollowService(
             UserFollowRepository userFollowRepository,
             UserRepository userRepository,
+            AccountStatusPolicy accountStatusPolicy,
             ProfileRepository profileRepository) {
-        this(userFollowRepository, userRepository, profileRepository, null);
+        this(userFollowRepository, userRepository, accountStatusPolicy, profileRepository, null);
     }
 
     /**
@@ -67,6 +72,8 @@ public class UserFollowService {
             throw new BusinessException("Um usuário não pode seguir a si mesmo", HttpStatus.BAD_REQUEST,
                     "SELF_FOLLOW_FORBIDDEN");
         }
+
+        accountStatusPolicy.requireOperational(followerUserId);
 
         User targetUser = userRepository.findById(targetUserId)
                 .orElseThrow(
@@ -100,6 +107,8 @@ public class UserFollowService {
             throw new BusinessException("Um usuário não pode deixar de seguir a si mesmo", HttpStatus.BAD_REQUEST,
                     "SELF_FOLLOW_FORBIDDEN");
         }
+
+        accountStatusPolicy.requireOperational(followerUserId);
 
         userRepository.findById(targetUserId)
                 .orElseThrow(

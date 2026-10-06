@@ -35,6 +35,9 @@ import static org.mockito.Mockito.*;
 class DiscussionServiceUnitTest {
 
     @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
     private DiscussionRepository discussionRepository;
 
     @Mock
@@ -59,6 +62,7 @@ class DiscussionServiceUnitTest {
         discussionService = new DiscussionService(
                 discussionRepository,
                 reviewRepository,
+                accountStatusPolicy,
                 reviewVisibilityPolicy,
                 rateLimiter
         );

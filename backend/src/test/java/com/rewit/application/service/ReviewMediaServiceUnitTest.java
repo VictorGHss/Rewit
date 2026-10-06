@@ -43,6 +43,9 @@ import static org.mockito.Mockito.*;
 class ReviewMediaServiceUnitTest {
 
     @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
     private ReviewRepository reviewRepository;
 
     @Mock
@@ -73,6 +76,7 @@ class ReviewMediaServiceUnitTest {
 
         reviewMediaService = new ReviewMediaService(
                 reviewRepository,
+                accountStatusPolicy,
                 reviewMediaRepository,
                 objectStoragePort,
                 reviewVisibilityPolicy,
@@ -221,7 +225,7 @@ class ReviewMediaServiceUnitTest {
     void testImageDimensionsExceeded() throws IOException {
         ImageSanitizer sanitizerMock = mock(ImageSanitizer.class);
         ReviewMediaService serviceWithMockSanitizer = new ReviewMediaService(
-                reviewRepository, reviewMediaRepository, objectStoragePort, reviewVisibilityPolicy, sanitizerMock, rateLimiter
+                reviewRepository, accountStatusPolicy, reviewMediaRepository, objectStoragePort, reviewVisibilityPolicy, sanitizerMock, rateLimiter
         );
 
         Review review = createReview(reviewId, authorUserId, "PUBLIC", ReviewStatus.ACTIVE, false);

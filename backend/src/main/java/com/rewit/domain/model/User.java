@@ -102,6 +102,14 @@ public class User {
         return this.deletedAt != null;
     }
 
+    /**
+     * Conta apta a operar: ativa e não excluída. Uma conta excluída nunca é ativa (constraint
+     * {@code chk_users_active_not_deleted}, V17), mas a regra não depende disso.
+     */
+    public boolean isOperational() {
+        return this.isActive && this.deletedAt == null;
+    }
+
     public UUID getId() {
         return id;
     }

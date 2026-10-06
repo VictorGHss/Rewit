@@ -28,6 +28,7 @@ public class DiscussionService {
 
     private final DiscussionRepository discussionRepository;
     private final ReviewRepository reviewRepository;
+    private final AccountStatusPolicy accountStatusPolicy;
     private final ReviewVisibilityPolicy reviewVisibilityPolicy;
     private final RateLimiter rateLimiter;
     private final NotificationService notificationService;
@@ -36,12 +37,14 @@ public class DiscussionService {
     public DiscussionService(
             DiscussionRepository discussionRepository,
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             ReviewVisibilityPolicy reviewVisibilityPolicy,
             RateLimiter rateLimiter,
             NotificationService notificationService
     ) {
         this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
         this.reviewVisibilityPolicy = Objects.requireNonNull(reviewVisibilityPolicy, "ReviewVisibilityPolicy must not be null");
         this.rateLimiter = Objects.requireNonNull(rateLimiter, "RateLimiter must not be null");
         this.notificationService = notificationService;
@@ -50,10 +53,11 @@ public class DiscussionService {
     public DiscussionService(
             DiscussionRepository discussionRepository,
             ReviewRepository reviewRepository,
+            AccountStatusPolicy accountStatusPolicy,
             ReviewVisibilityPolicy reviewVisibilityPolicy,
             RateLimiter rateLimiter
     ) {
-        this(discussionRepository, reviewRepository, reviewVisibilityPolicy, rateLimiter, null);
+        this(discussionRepository, reviewRepository, accountStatusPolicy, reviewVisibilityPolicy, rateLimiter, null);
     }
 
     /**
@@ -68,6 +72,8 @@ public class DiscussionService {
         if (cmd.reviewId() == null) {
             throw new BusinessException("A avaliação é obrigatória", HttpStatus.BAD_REQUEST, "MISSING_REVIEW_ID");
         }
+
+        accountStatusPolicy.requireOperational(cmd.authorUserId());
 
         // 1. Rate limiting defensivo contra spam de comentários
         rateLimiter.acquireOrThrow(RateLimitedAction.DISCUSSION_CREATION, RateLimitSubject.ofUser(cmd.authorUserId()));
@@ -169,6 +175,8 @@ public class DiscussionService {
         if (requesterUserId == null) {
             throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
         }
+
+        accountStatusPolicy.requireOperational(requesterUserId);
 
         ReviewDiscussion discussion = discussionRepository.findById(discussionId)
                 .orElseThrow(() -> new BusinessException("Comentário não encontrado", HttpStatus.NOT_FOUND, "DISCUSSION_NOT_FOUND"));

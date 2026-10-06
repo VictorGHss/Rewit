@@ -4,7 +4,7 @@
 > **Status do Repositório**: Verde e Estabilizado\
 > **Checkpoint Atual (HEAD)**: commit `feat: implementar observabilidade v1` (sobre `364b856`)\
 > **Branch**: `main` (ahead do origin em commits consolidados)\
-> **Total de Testes Automatizados**: `1349` (0 failures, 0 errors, 0 skipped)\
+> **Total de Testes Automatizados**: `1402` (0 failures, 0 errors, 0 skipped)\
 > **Working Tree**: `Limpo`\
 > **Próximo Trabalho**: decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (pendência do STEP 29; ADR-011 Proposto). Prontidão de produção (backup/restore, testes de carga) segue como frente separada; rate limiting distribuído concluído (ADR-013 Proposto)
 
@@ -23,11 +23,11 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1349, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`. A suíte usa PostgreSQL, SeaweedFS e Redis reais.
+*Resultado esperado*: `Tests run: 1402, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`. A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
-2. **Schema Controlado via Flyway**: `spring.jpa.hibernate.ddl-auto=validate`. Nunca utilizar `update` ou `create`. Toda alteração estrutural exige migração incremental (`V1` a `V16` consolidadas).
+2. **Schema Controlado via Flyway**: `spring.jpa.hibernate.ddl-auto=validate`. Nunca utilizar `update` ou `create`. Toda alteração estrutural exige migração incremental (`V1` a `V17` consolidadas).
 3. **Isolamento de Camadas (DDD / Clean Architecture)**:
    - `domain`: Modelos puros, enums e Value Objects livres de anotações Spring/JPA.
    - `application`: Casos de uso, orquestradores e portas (`application/port`).
@@ -56,7 +56,7 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | Área / Subsistema | Status | Evidência no Código | Próximo Passo |
 | :--- | :---: | :--- | :--- |
 | **Fundação, Runtime & Config** | ✅ CONCLUÍDO | Java 25, Spring Boot 4.1.1, Virtual Threads ativadas, Actuator e Swagger UI integrados. | Manter configurações e compatibilidade. |
-| **Banco de Dados & Migrations** | ✅ CONCLUÍDO | Flyway `V1` a `V16` ativas; PostGIS espacial; [V11](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V11__governance_roles_and_audit.sql) consolida roles em `users` e tabela append-only `moderation_audit_logs`; [V12](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V12__outbox_messages.sql) cria a fila transacional `outbox_messages` (STEP 27.1); [V13](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V13__outbox_dispatcher_indexes.sql) cria o índice parcial de lease do dispatcher do Outbox (STEP 27.2); V14 adiciona o índice de idade de `PENDING` (STEP 27.4); V15 cria `storage_object_quarantine` (STEP 28); V16 cria, com `CONCURRENTLY`, o índice parcial `idx_auth_sessions_replaced_by_session_id` (STEP 29.3). | Manter validação estrita de integridade referencial. |
+| **Banco de Dados & Migrations** | ✅ CONCLUÍDO | Flyway `V1` a `V17` ativas; PostGIS espacial; [V11](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V11__governance_roles_and_audit.sql) consolida roles em `users` e tabela append-only `moderation_audit_logs`; [V12](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V12__outbox_messages.sql) cria a fila transacional `outbox_messages` (STEP 27.1); [V13](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V13__outbox_dispatcher_indexes.sql) cria o índice parcial de lease do dispatcher do Outbox (STEP 27.2); V14 adiciona o índice de idade de `PENDING` (STEP 27.4); V15 cria `storage_object_quarantine` (STEP 28); V16 cria, com `CONCURRENTLY`, o índice parcial `idx_auth_sessions_replaced_by_session_id` (STEP 29.3); V17 adiciona `chk_users_active_not_deleted` (C2 Fase 1). | Manter validação estrita de integridade referencial. |
 | **Autenticação, JWT & Sessões** | ✅ CONCLUÍDO | [AuthController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/AuthController.java), Argon2id, JWT assinado com claim `role`, authorities `ROLE_USER`/`MODERATOR`/`ADMIN` via [RewitUserPrincipal.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/infrastructure/security/RewitUserPrincipal.java), `@EnableMethodSecurity`. | Manter bloqueio estrito de IDOR e propagação da role persistida. |
 | **Catálogo Base & Alvos Avaliáveis** | ✅ CONCLUÍDO | [PlaceController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/PlaceController.java), [ProductController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ProductController.java), raiz polimórfica `RateableTarget` e cálculo de estatísticas. | Expandir endpoints de catálogo sob demanda do app mobile. |
 | **Integração Google Places** | ✅ CONCLUÍDO | [PlaceDiscoveryController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/PlaceDiscoveryController.java), isolamento via ACL, deduplicação por `place_external_references`. | Monitorar quotas e latência externa. |
@@ -79,6 +79,7 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Cleanup de Sessões Expiradas** | ✅ TECNICAMENTE CONCLUÍDO — STEP 29 (decisão de produto/jurídico pendente) | Job `@Scheduled` ligado por padrão: limpa IP/User-Agent de sessões inativas e expurga sessões expiradas sem sucessora (`expires_at < now AND replaced_by_session_id IS NULL`), em lotes `FOR UPDATE SKIP LOCKED`, sem recursão; índice `V16`; métricas `rewit.auth_session_cleanup.*`. Ver [authentication.md §4.5](../architecture/authentication.md) e [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) (Proposto). | Decisão de produto/jurídico sobre a coleta de IP/User-Agent durante a sessão ativa. |
 | **Observabilidade V1** | ✅ CONCLUÍDO | Métricas por scrape Prometheus (`/actuator/prometheus`), logs JSON no stdout, tracing HTTP (servidor e Google Places) via OTLP desligado sem endpoint, Actuator em porta de management própria. Ver [observability.md](../architecture/observability.md) e [ADR-012](../decisions/ADR-012-observability.md) (Proposto). | Definir collector OTLP e Prometheus no deploy; não publicar a porta de management. |
 | **Rate Limiting Distribuído** | ✅ CONCLUÍDO (ADR-013 Proposto) | Porta `RateLimiter`, janela deslizante no Redis por script Lua atômico, chaves HMAC sem IP, `LOCAL_FALLBACK` com o Redis indisponível, métricas `rewit.rate_limit.*`. Login (falhas por e-mail, tempo uniforme), refresh (por usuário, depois da detecção de reúso) e cadastro (global) limitados; denúncias, comentários e uploads migrados com os mesmos limites. Ver [authentication.md §4.6](../architecture/authentication.md). | Limite por IP depende da decisão pendente da ADR-011. |
+| **Estado da Conta nas Mutações (C2 Fase 1)** | ✅ CONCLUÍDO | `AccountStatusPolicy` lê o estado atual da conta no início das mutações de autoria (token emitido antes da desativação não opera; `401 ACCOUNT_DISABLED`); `chk_users_active_not_deleted` (V17). Ver [authentication.md §4.7](../architecture/authentication.md). | Desativação, exclusão e efeitos sobre conteúdo dependem das decisões D1–D4 do discovery do C2. |
 | **Prontidão de Produção** | ⏳ PENDENTE | Sem backup/restore documentado, sem testes de carga. | Backup/restore e testes de carga (itens separados, sem decisão tomada). |
 | **Cache Distribuído em Redis** | 🔮 FUTURO ADIADO | Redis conectado mas sem cache de queries complexas. | Introduzir apenas sob saturação medida do PostgreSQL. |
 | **Machine Learning & Embeddings** | 🔮 FUTURO ADIADO | Arquitetura determinística prioritária; sem ML. | Avaliar apenas após escala de dezenas de milhares de reviews. |
@@ -1067,7 +1068,7 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
 
 ## 12. Estado Atual da Suíte de Testes
 
-* **Total de Testes**: `1349`
+* **Total de Testes**: `1402`
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`
@@ -1084,6 +1085,7 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
   - Testes da Observabilidade V1: `ActuatorManagementPortIntegrationTest` (7, servidor real com API e management em portas aleatórias), `ObservabilityTracingLoggingIntegrationTest` (5, exportador de spans em memória e stub do Google), `ObservabilityConfigurationTest` (4), `SanitizedStackTracePrinterTest` (2), `MockEmailAdapterTest` (1), `MinioStorageAdapterErrorLoggingTest` (2) e um caso novo em `GooglePlacesAdapterTest`.
   - Testes do Cleanup de Sessões (STEP 29.3): [CleanupAuthSessionsUseCaseTest.java](../../backend/src/test/java/com/rewit/application/usecase/CleanupAuthSessionsUseCaseTest.java) (5), scheduler (2), configuração (3) e [AuthSessionCleanupIntegrationTest.java](../../backend/src/test/java/com/rewit/infrastructure/authsession/AuthSessionCleanupIntegrationTest.java) (8) no PostgreSQL real: elegibilidade, cadeia A→B→C→D, metadados, reúso, SKIP LOCKED, rollback, espera do `revokeAllByUserId` e índice `V16`.
   - Testes do Rate Limiting Distribuído (ADR-013): propriedades, chaves HMAC, janela em memória, orquestração e modo degradado (unitários); janela no Redis real com duas instâncias, 64 requisições concorrentes, expiração, TTL e Redis inacessível; `AuthServiceAbuseProtectionTest` (login, tempo uniforme com Argon2 real, cadastro e refresh) e `AuthRateLimitIntegrationTest` (HTTP com Redis real, 429 RFC 7807, rotação e detecção de reúso preservadas).
+  - Testes do Estado da Conta nas Mutações (C2 Fase 1): `AccountStatusPolicyTest` (5), `AccountStatusMutationIntegrationTest` (6, PostgreSQL real: todas as mutações de autoria com conta inativa e soft-deleted, contrato da criação de review, desativação concorrente não confirmada e constraint V17) e `StaleTokenMutationIntegrationTest` (2, HTTP com token emitido antes da desativação). Os casos 7 e 9 de `ReviewLifecycleIntegrationTest` passaram a exigir `ACCOUNT_DISABLED` para o autor inativo.
 
 ---
 

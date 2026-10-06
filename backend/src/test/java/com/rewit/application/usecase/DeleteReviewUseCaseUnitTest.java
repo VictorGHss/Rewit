@@ -3,6 +3,7 @@ package com.rewit.application.usecase;
 import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.service.AccountStatusPolicy;
 import com.rewit.application.service.ReputationService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewMediaType;
@@ -34,6 +35,9 @@ import static org.mockito.Mockito.*;
 class DeleteReviewUseCaseUnitTest {
 
     @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
     private ReviewRepository reviewRepository;
 
     @Mock
@@ -57,6 +61,7 @@ class DeleteReviewUseCaseUnitTest {
     void setUp() {
         deleteReviewUseCase = new DeleteReviewUseCase(
                 reviewRepository,
+                accountStatusPolicy,
                 rateableTargetStatsRepository,
                 reputationService,
                 reviewMediaRepository
