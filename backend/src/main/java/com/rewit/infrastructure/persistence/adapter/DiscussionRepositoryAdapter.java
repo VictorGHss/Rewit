@@ -2,6 +2,7 @@ package com.rewit.infrastructure.persistence.adapter;
 
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.DiscussionRepository;
+import com.rewit.domain.enums.DiscussionStatus;
 import com.rewit.domain.model.ReviewDiscussion;
 import com.rewit.infrastructure.persistence.entity.DiscussionJpaEntity;
 import com.rewit.infrastructure.persistence.repository.DiscussionJpaRepository;
@@ -18,7 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Adaptador de persistência para discussões e comentários de avaliações (Step 20.0).
+ * Adaptador de persistência para discussões e comentários de avaliações (Step 20.0 / Step 32.0).
  */
 @Component
 public class DiscussionRepositoryAdapter implements DiscussionRepository {
@@ -49,6 +50,16 @@ public class DiscussionRepositoryAdapter implements DiscussionRepository {
     }
 
     @Override
+    @Transactional
+    public Optional<ReviewDiscussion> findByIdForUpdate(UUID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return discussionJpaRepository.findByIdForUpdate(id)
+                .map(entity -> entity.toDomain());
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public PageResult<ReviewDiscussion> findActiveByReviewId(UUID reviewId, int page, int size) {
         if (reviewId == null) {
@@ -56,7 +67,7 @@ public class DiscussionRepositoryAdapter implements DiscussionRepository {
         }
 
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Order.asc("createdAt"), Sort.Order.asc("id")));
-        Page<DiscussionJpaEntity> paged = discussionJpaRepository.findByReviewIdAndStatus(reviewId, "ACTIVE", pageable);
+        Page<DiscussionJpaEntity> paged = discussionJpaRepository.findByReviewIdAndStatus(reviewId, DiscussionStatus.ACTIVE, pageable);
 
         List<ReviewDiscussion> domainList = paged.getContent().stream()
                 .map(entity -> entity.toDomain())

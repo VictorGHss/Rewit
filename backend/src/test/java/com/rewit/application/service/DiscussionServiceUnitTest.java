@@ -8,6 +8,7 @@ import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserFollowRepository;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.DiscussionStatus;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewDiscussion;
@@ -416,7 +417,7 @@ class DiscussionServiceUnitTest {
 
         discussionService.deleteDiscussion(discussionId, otherUserId);
 
-        assertEquals("REMOVED", discussion.getStatus());
+        assertEquals(DiscussionStatus.REMOVED, discussion.getStatus());
         assertFalse(discussion.isActive());
         verify(discussionRepository).save(discussion);
     }
@@ -435,7 +436,7 @@ class DiscussionServiceUnitTest {
 
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
         assertEquals("FORBIDDEN", ex.getErrorCode());
-        assertEquals("ACTIVE", discussion.getStatus());
+        assertEquals(DiscussionStatus.ACTIVE, discussion.getStatus());
         verify(discussionRepository, never()).save(any());
     }
 

@@ -7,7 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Porta de persistência para discussões e comentários de avaliações (Step 20.0).
+ * Porta de persistência para discussões e comentários de avaliações (Step 20.0 / Step 32.0).
  */
 public interface DiscussionRepository {
 
@@ -20,6 +20,11 @@ public interface DiscussionRepository {
      * Busca uma discussão por seu identificador único.
      */
     Optional<ReviewDiscussion> findById(UUID id);
+
+    /**
+     * Busca uma discussão por seu identificador único adquirindo lock pessimista de escrita (FOR UPDATE).
+     */
+    Optional<ReviewDiscussion> findByIdForUpdate(UUID id);
 
     /**
      * Busca discussões ativas (status = 'ACTIVE') de uma avaliação com paginação e ordenação determinística.

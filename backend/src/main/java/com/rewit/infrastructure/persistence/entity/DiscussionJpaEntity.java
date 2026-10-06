@@ -1,8 +1,11 @@
 package com.rewit.infrastructure.persistence.entity;
 
+import com.rewit.domain.enums.DiscussionStatus;
 import com.rewit.domain.model.ReviewDiscussion;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
@@ -11,7 +14,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Entidade JPA mapeando a tabela review_discussions no PostgreSQL (Step 20.0).
+ * Entidade JPA mapeando a tabela review_discussions no PostgreSQL (Step 20.0 / Step 32.0).
  */
 @Entity
 @Table(name = "review_discussions")
@@ -36,8 +39,9 @@ public class DiscussionJpaEntity {
     @Column(name = "is_from_owner", nullable = false)
     private boolean isFromOwner;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32)
-    private String status;
+    private DiscussionStatus status = DiscussionStatus.ACTIVE;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -48,7 +52,7 @@ public class DiscussionJpaEntity {
     public DiscussionJpaEntity() {}
 
     public DiscussionJpaEntity(UUID id, UUID reviewId, UUID userId, UUID parentId,
-                               String content, boolean isFromOwner, String status,
+                               String content, boolean isFromOwner, DiscussionStatus status,
                                Instant createdAt, Instant updatedAt) {
         this.id = id != null ? id : UUID.randomUUID();
         this.reviewId = reviewId;
@@ -56,9 +60,17 @@ public class DiscussionJpaEntity {
         this.parentId = parentId;
         this.content = content;
         this.isFromOwner = isFromOwner;
-        this.status = status != null ? status : "ACTIVE";
+        this.status = status != null ? status : DiscussionStatus.ACTIVE;
         this.createdAt = createdAt != null ? createdAt : Instant.now();
         this.updatedAt = updatedAt != null ? updatedAt : Instant.now();
+    }
+
+    public DiscussionJpaEntity(UUID id, UUID reviewId, UUID userId, UUID parentId,
+                               String content, boolean isFromOwner, String status,
+                               Instant createdAt, Instant updatedAt) {
+        this(id, reviewId, userId, parentId, content, isFromOwner,
+             status != null ? DiscussionStatus.valueOf(status.trim().toUpperCase(java.util.Locale.ROOT)) : DiscussionStatus.ACTIVE,
+             createdAt, updatedAt);
     }
 
     public static DiscussionJpaEntity fromDomain(ReviewDiscussion domain) {
@@ -140,12 +152,16 @@ public class DiscussionJpaEntity {
         isFromOwner = fromOwner;
     }
 
-    public String getStatus() {
+    public DiscussionStatus getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(DiscussionStatus status) {
         this.status = status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status != null ? DiscussionStatus.valueOf(status.trim().toUpperCase(java.util.Locale.ROOT)) : DiscussionStatus.ACTIVE;
     }
 
     public Instant getCreatedAt() {

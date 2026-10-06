@@ -11,6 +11,7 @@ import com.rewit.application.service.DiscussionService;
 import com.rewit.application.service.ReviewService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.enums.DiscussionStatus;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.*;
 import com.rewit.infrastructure.persistence.entity.DiscussionJpaEntity;
@@ -21,7 +22,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -61,6 +64,12 @@ class DiscussionPersistenceIntegrationTest {
 
     @Autowired
     private RateableTargetRepository targetRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     private User createTestUser(String prefix) {
         String unique = prefix + "_" + UUID.randomUUID().toString().substring(0, 8);
@@ -162,7 +171,7 @@ class DiscussionPersistenceIntegrationTest {
         // Validação direta via JPA Entity e Adapter
         Optional<ReviewDiscussion> retrieved = discussionRepository.findById(view.id());
         assertTrue(retrieved.isPresent());
-        assertEquals("ACTIVE", retrieved.get().getStatus());
+        assertEquals(DiscussionStatus.ACTIVE, retrieved.get().getStatus());
         assertEquals(commenter.getId(), retrieved.get().getUserId());
     }
 
@@ -288,7 +297,7 @@ class DiscussionPersistenceIntegrationTest {
         // No banco de dados, o registro persiste fisicamente com status REMOVED
         Optional<DiscussionJpaEntity> jpaOpt = discussionJpaRepository.findById(created.id());
         assertTrue(jpaOpt.isPresent());
-        assertEquals("REMOVED", jpaOpt.get().getStatus());
+        assertEquals(DiscussionStatus.REMOVED, jpaOpt.get().getStatus());
     }
 
     @Test
@@ -315,5 +324,83 @@ class DiscussionPersistenceIntegrationTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         assertEquals("INVALID_PARENT_DISCUSSION", ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("7. Status UNDER_REVIEW: persiste e recupera com sucesso mas é excluído da listagem ativa")
+    void shouldPersistAndFilterUnderReviewDiscussion() {
+        User author = createTestUser("under_author");
+        User commenter = createTestUser("under_commenter");
+        Place place = createTestPlace();
+        Review review = createTestReview(author, place, "PUBLIC");
+
+        ReviewDiscussion underReview = new ReviewDiscussion(
+                null,
+                review.getId(),
+                commenter.getId(),
+                null,
+                "Comentário em moderação preventiva",
+                false,
+                DiscussionStatus.UNDER_REVIEW,
+                java.time.Instant.now(),
+                java.time.Instant.now()
+        );
+        ReviewDiscussion saved = discussionRepository.save(underReview);
+
+        Optional<ReviewDiscussion> retrieved = discussionRepository.findById(saved.getId());
+        assertTrue(retrieved.isPresent());
+        assertEquals(DiscussionStatus.UNDER_REVIEW, retrieved.get().getStatus());
+        assertTrue(retrieved.get().isUnderReview());
+
+        // Deve ser excluído da listagem pública ativa
+        PageResult<DiscussionView> activeList = discussionService.findDiscussionsByReviewId(review.getId(), commenter.getId(), 0, 10);
+        assertTrue(activeList.content().stream().noneMatch(d -> d.id().equals(saved.getId())));
+    }
+
+    @Test
+    @DisplayName("8. findByIdForUpdate: recupera registro com lock pessimista em transação ativa")
+    void shouldRetrieveDiscussionWithLockPessimistic() {
+        User author = createTestUser("lock_author");
+        User commenter = createTestUser("lock_commenter");
+        Place place = createTestPlace();
+        Review review = createTestReview(author, place, "PUBLIC");
+
+        DiscussionView created = discussionService.createDiscussion(new CreateDiscussionCommand(
+                review.getId(), commenter.getId(), null, "Comentário para lock pessimista"));
+
+        transactionTemplate.execute(status -> {
+            Optional<ReviewDiscussion> locked = discussionRepository.findByIdForUpdate(created.id());
+            assertTrue(locked.isPresent());
+            assertEquals(DiscussionStatus.ACTIVE, locked.get().getStatus());
+            return null;
+        });
+
+        // Caso ID inexistente
+        transactionTemplate.execute(status -> {
+            Optional<ReviewDiscussion> notFound = discussionRepository.findByIdForUpdate(UUID.randomUUID());
+            assertTrue(notFound.isEmpty());
+            return null;
+        });
+    }
+
+    @Test
+    @DisplayName("9. Constraint de integridade chk_review_discussions_status: PostgreSQL rejeita status inválido")
+    void shouldRejectInvalidStatusByCheckConstraint() {
+        User author = createTestUser("chk_author");
+        Place place = createTestPlace();
+        Review review = createTestReview(author, place, "PUBLIC");
+
+        assertThrows(DataIntegrityViolationException.class, () -> {
+            jdbcTemplate.update(
+                    "INSERT INTO review_discussions (id, review_id, user_id, content, is_from_owner, status, created_at, updated_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())",
+                    UUID.randomUUID(),
+                    review.getId(),
+                    author.getId(),
+                    "Comentário com status inválido",
+                    false,
+                    "INVALID_STATUS"
+            );
+        });
     }
 }

@@ -55,7 +55,7 @@ public final class DiscussionDtos {
                     domain.getParentId(),
                     domain.getContent(),
                     domain.isFromOwner(),
-                    domain.getStatus(),
+                    domain.getStatus() != null ? domain.getStatus().name() : "ACTIVE",
                     domain.getCreatedAt(),
                     domain.getUpdatedAt()
             );

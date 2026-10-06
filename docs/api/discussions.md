@@ -21,10 +21,11 @@ DiscussionController (presentation)
                   -> review_discussions (PostgreSQL 18.6)
 ```
 
-### 1.1 Premissas e Escopo do Step 20.0
+### 1.1 Premissas e Escopo
 * Discussões pertencem **exclusivamente a uma Review**.
 * **Não implementado neste incremento**: comentários sem Review (Place/Product/Service avulsos), chat privado, menções, hashtags, reações/likes em comentários, edição de comentários, denúncias ou moderação administrativa de comentários, notificações push ou rankings algorítmicos.
-* O PostgreSQL é o **source of truth** relacional, utilizando a tabela `review_discussions` nativa do schema V1 (sem migrations adicionais).
+* O PostgreSQL é o **source of truth** relacional, utilizando a tabela `review_discussions` com integridade de status tipada via enum `DiscussionStatus` (`ACTIVE`, `UNDER_REVIEW`, `REMOVED`), constraint de validação `chk_review_discussions_status` e índice parcial `idx_review_discussions_active_listing` adicionados na migration `V18__discussion_status_integrity.sql`.
+* O estado `UNDER_REVIEW` está modelado no domínio e no schema para suportar a futura moderação (C3), sem alteração de visibilidade pública atual (apenas comentários `ACTIVE` são listados publicamente).
 
 ---
 
