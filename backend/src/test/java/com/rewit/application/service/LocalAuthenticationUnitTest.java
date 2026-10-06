@@ -10,6 +10,7 @@ import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.AuthSession;
 import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.User;
+import com.rewit.infrastructure.ratelimit.RateLimitTestSupport;
 import com.rewit.infrastructure.security.Argon2PasswordHasher;
 import com.rewit.infrastructure.security.JwtTokenService;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,7 +54,8 @@ class LocalAuthenticationUnitTest {
                 profileRepository,
                 authSessionRepository,
                 passwordHasher,
-                tokenService
+                tokenService,
+                RateLimitTestSupport.inMemory()
         );
     }
 

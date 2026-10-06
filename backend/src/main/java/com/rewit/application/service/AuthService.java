@@ -4,8 +4,12 @@ import com.rewit.application.dto.auth.AuthDtos.*;
 import com.rewit.application.port.AuthSessionRepository;
 import com.rewit.application.port.PasswordHasher;
 import com.rewit.application.port.ProfileRepository;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.TokenService;
 import com.rewit.application.port.UserRepository;
+import com.rewit.application.ratelimit.RateLimitPermit;
+import com.rewit.application.ratelimit.RateLimitSubject;
+import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.common.exception.RefreshTokenReuseDetectedException;
 import com.rewit.domain.enums.AuthProvider;
@@ -23,6 +27,11 @@ import java.util.UUID;
 /**
  * Serviço de aplicação para orquestração de autenticação local, registro, sessões e tokens.
  * Mantém fronteiras transacionais estritas e desacoplamento do domínio em relação a frameworks.
+ *
+ * <p>Proteção contra abuso: o cadastro é limitado globalmente, o login por identidade (só tentativas sem sucesso
+ * permanecem contadas) e o refresh por usuário, sempre depois da detecção de reúso. O login executa uma
+ * verificação de senha com custo equivalente mesmo quando não há conta local, para que o tempo de resposta não
+ * revele se o e-mail está cadastrado.
  */
 @Service
 public class AuthService {
@@ -32,24 +41,30 @@ public class AuthService {
     private final AuthSessionRepository authSessionRepository;
     private final PasswordHasher passwordHasher;
     private final TokenService tokenService;
+    private final RateLimiter rateLimiter;
 
     public AuthService(
             UserRepository userRepository,
             ProfileRepository profileRepository,
             AuthSessionRepository authSessionRepository,
             PasswordHasher passwordHasher,
-            TokenService tokenService
+            TokenService tokenService,
+            RateLimiter rateLimiter
     ) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.profileRepository = Objects.requireNonNull(profileRepository, "profileRepository must not be null");
         this.authSessionRepository = Objects.requireNonNull(authSessionRepository, "authSessionRepository must not be null");
         this.passwordHasher = Objects.requireNonNull(passwordHasher, "passwordHasher must not be null");
         this.tokenService = Objects.requireNonNull(tokenService, "tokenService must not be null");
+        this.rateLimiter = Objects.requireNonNull(rateLimiter, "rateLimiter must not be null");
     }
 
     @Transactional
     public AuthResult register(RegisterCommand cmd) {
         Objects.requireNonNull(cmd, "RegisterCommand cannot be null");
+
+        // Toda tentativa conta, inclusive as inválidas: sem IP, o limite é a soma de todos os clientes
+        rateLimiter.acquireOrThrow(RateLimitedAction.REGISTRATION, RateLimitSubject.global());
 
         String normalizedEmail = User.normalizeEmail(cmd.email());
         String normalizedHandle = Profile.normalizeHandle(cmd.handle());
@@ -88,20 +103,22 @@ public class AuthService {
 
         String normalizedEmail = cmd.email().trim().toLowerCase();
 
-        User user = userRepository.findByEmail(normalizedEmail)
-                .orElseThrow(() -> new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS"));
+        // A tentativa ocupa a janela antes da verificação, inclusive para e-mail inexistente; só o sucesso a devolve
+        RateLimitPermit attempt = rateLimiter.acquireOrThrow(RateLimitedAction.LOGIN, RateLimitSubject.ofIdentity(normalizedEmail));
 
-        if (user.isDeleted() || !user.isActive()) {
-            throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
-        }
+        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
 
-        if (user.getAuthProvider() != AuthProvider.LOCAL || user.getPasswordHash() == null) {
+        if (user == null || user.isDeleted() || !user.isActive()
+                || user.getAuthProvider() != AuthProvider.LOCAL || user.getPasswordHash() == null) {
+            passwordHasher.simulateVerification(cmd.password());
             throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
         }
 
         if (!passwordHasher.matches(cmd.password(), user.getPasswordHash())) {
             throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
         }
+
+        rateLimiter.release(attempt);
 
         Profile profile = profileRepository.findByUserId(user.getId())
                 .orElseThrow(() -> new BusinessException("Perfil não encontrado para o usuário", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
@@ -138,6 +155,9 @@ public class AuthService {
         if (currentSession.isExpired()) {
             throw new BusinessException("Refresh token expirado", HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_EXPIRED");
         }
+
+        // Depois da detecção de reúso, que nunca é bloqueada pelo limite; o 429 faz rollback sem consumir o token
+        rateLimiter.acquireOrThrow(RateLimitedAction.REFRESH, RateLimitSubject.ofUser(currentSession.getUserId()));
 
         User user = userRepository.findById(currentSession.getUserId())
                 .orElseThrow(() -> new BusinessException("Conta desativada ou inexistente", HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED"));

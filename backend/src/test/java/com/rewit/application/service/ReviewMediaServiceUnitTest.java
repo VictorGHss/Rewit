@@ -3,6 +3,7 @@ package com.rewit.application.service;
 import com.rewit.application.dto.media.MediaDtos.ReviewMediaView;
 import com.rewit.application.dto.media.MediaDtos.UploadMediaCommand;
 import com.rewit.application.port.ObjectStoragePort;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserFollowRepository;
@@ -13,7 +14,7 @@ import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewMedia;
 import com.rewit.domain.model.ReviewMediaObjectKey;
-import com.rewit.infrastructure.security.MediaRateLimiter;
+import com.rewit.infrastructure.ratelimit.RateLimitTestSupport;
 import com.rewit.infrastructure.storage.ImageSanitizer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -55,7 +56,7 @@ class ReviewMediaServiceUnitTest {
 
     private ReviewVisibilityPolicy reviewVisibilityPolicy;
     private ImageSanitizer imageSanitizer;
-    private MediaRateLimiter mediaRateLimiter;
+    private RateLimiter rateLimiter;
     private ReviewMediaService reviewMediaService;
 
     private UUID authorUserId;
@@ -68,8 +69,7 @@ class ReviewMediaServiceUnitTest {
     void setUp() throws IOException {
         reviewVisibilityPolicy = new ReviewVisibilityPolicy(userFollowRepository);
         imageSanitizer = new ImageSanitizer();
-        mediaRateLimiter = new MediaRateLimiter();
-        mediaRateLimiter.reset();
+        rateLimiter = RateLimitTestSupport.inMemory();
 
         reviewMediaService = new ReviewMediaService(
                 reviewRepository,
@@ -77,7 +77,7 @@ class ReviewMediaServiceUnitTest {
                 objectStoragePort,
                 reviewVisibilityPolicy,
                 imageSanitizer,
-                mediaRateLimiter
+                rateLimiter
         );
 
         authorUserId = UUID.randomUUID();
@@ -221,7 +221,7 @@ class ReviewMediaServiceUnitTest {
     void testImageDimensionsExceeded() throws IOException {
         ImageSanitizer sanitizerMock = mock(ImageSanitizer.class);
         ReviewMediaService serviceWithMockSanitizer = new ReviewMediaService(
-                reviewRepository, reviewMediaRepository, objectStoragePort, reviewVisibilityPolicy, sanitizerMock, mediaRateLimiter
+                reviewRepository, reviewMediaRepository, objectStoragePort, reviewVisibilityPolicy, sanitizerMock, rateLimiter
         );
 
         Review review = createReview(reviewId, authorUserId, "PUBLIC", ReviewStatus.ACTIVE, false);

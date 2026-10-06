@@ -38,6 +38,8 @@ management:
       '[tasks.scheduled.execution]': false
       # Spans do Spring Security ficam fora do escopo: tracing só de HTTP servidor e cliente
       '[spring.security]': false
+      # Comandos Redis do rate limiting (ADR-013) ficam fora do escopo de tracing do ADR-012: sem spans nem métricas
+      '[lettuce]': false
   tracing:
     sampling:
       probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
@@ -85,6 +87,39 @@ rewit:
     initial-delay-ms: ${AUTH_SESSION_CLEANUP_INITIAL_DELAY_MS:60000}
     batch-size: ${AUTH_SESSION_CLEANUP_BATCH_SIZE:100}
     max-batches-per-run: ${AUTH_SESSION_CLEANUP_MAX_BATCHES_PER_RUN:1}
+  # Rate limiting distribuído (ADR-013): janela deslizante no Redis, chaves derivadas por HMAC, sem limite por IP.
+  # RATE_LIMIT_KEY_SECRET é obrigatório com o rate limiting ligado (mínimo 32 bytes) e igual em todas as instâncias.
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    key-secret: ${RATE_LIMIT_KEY_SECRET:}
+    backend:
+      # LOCAL_FALLBACK (limites em memória por instância), DENY ou ALLOW enquanto o Redis estiver indisponível
+      failure-mode: ${RATE_LIMIT_BACKEND_FAILURE_MODE:LOCAL_FALLBACK}
+      retry-interval: ${RATE_LIMIT_BACKEND_RETRY_INTERVAL:PT10S}
+      local-fallback-max-keys: ${RATE_LIMIT_LOCAL_FALLBACK_MAX_KEYS:100000}
+    auth:
+      # Tentativas sem sucesso por e-mail normalizado
+      login:
+        limit: ${RATE_LIMIT_LOGIN_LIMIT:10}
+        window: ${RATE_LIMIT_LOGIN_WINDOW:PT15M}
+      # Rotações de refresh token por usuário
+      refresh:
+        limit: ${RATE_LIMIT_REFRESH_LIMIT:30}
+        window: ${RATE_LIMIT_REFRESH_WINDOW:PT5M}
+      # Tentativas de cadastro somadas de todos os clientes
+      registration:
+        limit: ${RATE_LIMIT_REGISTRATION_LIMIT:30}
+        window: ${RATE_LIMIT_REGISTRATION_WINDOW:PT1M}
+    content:
+      report-creation:
+        limit: 10
+        window: PT60S
+      discussion-creation:
+        limit: 15
+        window: PT60S
+      media-upload:
+        limit: 10
+        window: PT60S
   # GC de storage (Step 28.5): desligado por padrão. Ao ligar, defina também, sem defaults:
   # interval-ms, page-size, max-pages, max-candidates, max-deletes, grace-period e max-duration
   # (ex.: REWIT_STORAGE_GC_GRACE_PERIOD). O modo destrutivo exige STORAGE_GC_DRY_RUN=false explícito.

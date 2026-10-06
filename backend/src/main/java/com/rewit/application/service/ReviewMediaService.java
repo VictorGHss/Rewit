@@ -4,13 +4,15 @@ import com.rewit.application.dto.media.MediaDtos.MediaDownloadResult;
 import com.rewit.application.dto.media.MediaDtos.ReviewMediaView;
 import com.rewit.application.dto.media.MediaDtos.UploadMediaCommand;
 import com.rewit.application.port.ObjectStoragePort;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.ratelimit.RateLimitSubject;
+import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewMedia;
-import com.rewit.infrastructure.security.MediaRateLimiter;
 import com.rewit.infrastructure.storage.ImageSanitizer;
 import com.rewit.infrastructure.storage.ImageSanitizer.SanitizedImage;
 import org.slf4j.Logger;
@@ -39,20 +41,20 @@ public class ReviewMediaService {
     private final ObjectStoragePort objectStoragePort;
     private final ReviewVisibilityPolicy reviewVisibilityPolicy;
     private final ImageSanitizer imageSanitizer;
-    private final MediaRateLimiter mediaRateLimiter;
+    private final RateLimiter rateLimiter;
 
     public ReviewMediaService(ReviewRepository reviewRepository,
                               ReviewMediaRepository reviewMediaRepository,
                               ObjectStoragePort objectStoragePort,
                               ReviewVisibilityPolicy reviewVisibilityPolicy,
                               ImageSanitizer imageSanitizer,
-                              MediaRateLimiter mediaRateLimiter) {
+                              RateLimiter rateLimiter) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
         this.reviewMediaRepository = Objects.requireNonNull(reviewMediaRepository, "ReviewMediaRepository must not be null");
         this.objectStoragePort = Objects.requireNonNull(objectStoragePort, "ObjectStoragePort must not be null");
         this.reviewVisibilityPolicy = Objects.requireNonNull(reviewVisibilityPolicy, "ReviewVisibilityPolicy must not be null");
         this.imageSanitizer = Objects.requireNonNull(imageSanitizer, "ImageSanitizer must not be null");
-        this.mediaRateLimiter = Objects.requireNonNull(mediaRateLimiter, "MediaRateLimiter must not be null");
+        this.rateLimiter = Objects.requireNonNull(rateLimiter, "RateLimiter must not be null");
     }
 
     /**
@@ -78,7 +80,7 @@ public class ReviewMediaService {
         }
 
         // 1. Rate Limiting por usuário
-        mediaRateLimiter.checkRateLimit(cmd.authenticatedUserId());
+        rateLimiter.acquireOrThrow(RateLimitedAction.MEDIA_UPLOAD, RateLimitSubject.ofUser(cmd.authenticatedUserId()));
 
         // 2. Lock pessimista na Review e validação de existência e status
         Review review = reviewRepository.findByIdForUpdate(cmd.reviewId())

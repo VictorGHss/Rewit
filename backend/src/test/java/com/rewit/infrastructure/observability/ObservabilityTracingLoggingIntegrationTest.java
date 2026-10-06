@@ -62,6 +62,7 @@ import static org.junit.jupiter.api.Assertions.*;
                 "management.opentelemetry.tracing.export.schedule-delay=50ms",
                 "management.observations.enable[tasks.scheduled.execution]=false",
                 "management.observations.enable[spring.security]=false",
+                "management.observations.enable[lettuce]=false",
                 "logging.structured.format.console=logstash",
                 "logging.structured.json.stacktrace.printer=com.rewit.infrastructure.observability.SanitizedStackTracePrinter",
                 "logging.structured.json.stacktrace.max-length=8192",

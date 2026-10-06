@@ -4,13 +4,14 @@ import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.discussion.DiscussionDtos.CreateDiscussionCommand;
 import com.rewit.application.dto.discussion.DiscussionDtos.DiscussionView;
 import com.rewit.application.port.DiscussionRepository;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserFollowRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewDiscussion;
-import com.rewit.infrastructure.security.DiscussionRateLimiter;
+import com.rewit.infrastructure.ratelimit.RateLimitTestSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -42,7 +43,7 @@ class DiscussionServiceUnitTest {
     @Mock
     private UserFollowRepository userFollowRepository;
 
-    private DiscussionRateLimiter discussionRateLimiter;
+    private RateLimiter rateLimiter;
     private ReviewVisibilityPolicy reviewVisibilityPolicy;
     private DiscussionService discussionService;
 
@@ -53,13 +54,13 @@ class DiscussionServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        discussionRateLimiter = new DiscussionRateLimiter();
+        rateLimiter = RateLimitTestSupport.inMemory();
         reviewVisibilityPolicy = new ReviewVisibilityPolicy(userFollowRepository);
         discussionService = new DiscussionService(
                 discussionRepository,
                 reviewRepository,
                 reviewVisibilityPolicy,
-                discussionRateLimiter
+                rateLimiter
         );
     }
 

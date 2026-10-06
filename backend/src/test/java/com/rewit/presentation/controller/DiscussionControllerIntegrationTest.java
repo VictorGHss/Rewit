@@ -7,7 +7,6 @@ import com.rewit.application.port.ReviewRepository;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Review;
-import com.rewit.infrastructure.security.DiscussionRateLimiter;
 import com.rewit.presentation.dto.auth.RegisterRequest;
 import com.rewit.presentation.dto.discussion.CreateDiscussionRequest;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,9 +44,6 @@ class DiscussionControllerIntegrationTest {
     @Autowired
     private PlaceRepository placeRepository;
 
-    @Autowired
-    private DiscussionRateLimiter discussionRateLimiter;
-
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -56,7 +52,6 @@ class DiscussionControllerIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .apply(springSecurity())
                 .build();
-        discussionRateLimiter.reset();
     }
 
     private record TestUser(String accessToken, UUID userId, String handle) {}

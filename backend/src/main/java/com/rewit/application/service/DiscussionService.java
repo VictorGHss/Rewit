@@ -4,11 +4,13 @@ import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.discussion.DiscussionDtos.CreateDiscussionCommand;
 import com.rewit.application.dto.discussion.DiscussionDtos.DiscussionView;
 import com.rewit.application.port.DiscussionRepository;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.ratelimit.RateLimitSubject;
+import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewDiscussion;
-import com.rewit.infrastructure.security.DiscussionRateLimiter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -27,7 +29,7 @@ public class DiscussionService {
     private final DiscussionRepository discussionRepository;
     private final ReviewRepository reviewRepository;
     private final ReviewVisibilityPolicy reviewVisibilityPolicy;
-    private final DiscussionRateLimiter discussionRateLimiter;
+    private final RateLimiter rateLimiter;
     private final NotificationService notificationService;
 
     @Autowired
@@ -35,13 +37,13 @@ public class DiscussionService {
             DiscussionRepository discussionRepository,
             ReviewRepository reviewRepository,
             ReviewVisibilityPolicy reviewVisibilityPolicy,
-            DiscussionRateLimiter discussionRateLimiter,
+            RateLimiter rateLimiter,
             NotificationService notificationService
     ) {
         this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
         this.reviewVisibilityPolicy = Objects.requireNonNull(reviewVisibilityPolicy, "ReviewVisibilityPolicy must not be null");
-        this.discussionRateLimiter = Objects.requireNonNull(discussionRateLimiter, "DiscussionRateLimiter must not be null");
+        this.rateLimiter = Objects.requireNonNull(rateLimiter, "RateLimiter must not be null");
         this.notificationService = notificationService;
     }
 
@@ -49,9 +51,9 @@ public class DiscussionService {
             DiscussionRepository discussionRepository,
             ReviewRepository reviewRepository,
             ReviewVisibilityPolicy reviewVisibilityPolicy,
-            DiscussionRateLimiter discussionRateLimiter
+            RateLimiter rateLimiter
     ) {
-        this(discussionRepository, reviewRepository, reviewVisibilityPolicy, discussionRateLimiter, null);
+        this(discussionRepository, reviewRepository, reviewVisibilityPolicy, rateLimiter, null);
     }
 
     /**
@@ -67,8 +69,8 @@ public class DiscussionService {
             throw new BusinessException("A avaliação é obrigatória", HttpStatus.BAD_REQUEST, "MISSING_REVIEW_ID");
         }
 
-        // 1. Rate limiting defensivo contra spam de comentários (process-local)
-        discussionRateLimiter.checkRateLimit(cmd.authorUserId());
+        // 1. Rate limiting defensivo contra spam de comentários
+        rateLimiter.acquireOrThrow(RateLimitedAction.DISCUSSION_CREATION, RateLimitSubject.ofUser(cmd.authorUserId()));
 
         // 2. Busca a Review e valida status e visibilidade
         Review review = reviewRepository.findById(cmd.reviewId())

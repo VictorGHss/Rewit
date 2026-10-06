@@ -119,7 +119,7 @@ class ActuatorManagementPortIntegrationTest {
         String body = get(management("/actuator/prometheus"), null).body();
 
         for (String series : new String[]{"rewit_outbox_pending", "rewit_outbox_failed", "rewit_outbox_oldest_pending_age",
-                "rewit_storage_gc_quarantine_observed", "rewit_storage_gc_quarantine_confirmed",
+                "rewit_storage_gc_quarantine_observed", "rewit_storage_gc_quarantine_confirmed", "rewit_rate_limit_backend_available",
                 "http_server_requests_seconds_count", "jvm_threads_live_threads", "process_cpu_usage"}) {
             assertTrue(body.contains(series), "série ausente: " + series);
         }

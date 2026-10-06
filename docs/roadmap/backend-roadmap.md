@@ -4,9 +4,9 @@
 > **Status do Repositório**: Verde e Estabilizado\
 > **Checkpoint Atual (HEAD)**: commit `feat: implementar observabilidade v1` (sobre `364b856`)\
 > **Branch**: `main` (ahead do origin em commits consolidados)\
-> **Total de Testes Automatizados**: `1293` (0 failures, 0 errors, 0 skipped)\
+> **Total de Testes Automatizados**: `1349` (0 failures, 0 errors, 0 skipped)\
 > **Working Tree**: `Limpo`\
-> **Próximo Trabalho**: decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (pendência do STEP 29; ADR-011 Proposto). Prontidão de produção (rate limiting distribuído, backup/restore, testes de carga) segue como frente separada
+> **Próximo Trabalho**: decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (pendência do STEP 29; ADR-011 Proposto). Prontidão de produção (backup/restore, testes de carga) segue como frente separada; rate limiting distribuído concluído (ADR-013 Proposto)
 
 ---
 
@@ -23,7 +23,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1293, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`.
+*Resultado esperado*: `Tests run: 1349, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`. A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -64,7 +64,7 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Rede Social (Seguidores & Conexões)**| ✅ CONCLUÍDO | [UserFollowController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/UserFollowController.java), `user_follows`, bloqueio de auto-follow, integridade relacional. | Base consolidada para Feed V1 e Feed V2. |
 | **Reações de Utilidade (Helpful)** | ✅ CONCLUÍDO | [ReviewHelpfulController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewHelpfulController.java), `review_reactions`, contagem e batching sem N+1. | Atua como trava de alteração de ratings no lifecycle. |
 | **Perfil Público & Estatísticas** | ✅ CONCLUÍDO | [MeController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/MeController.java), [UserController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/UserController.java), agregação factual de reviews e seguidores. | Manter consistência de dados públicos. |
-| **Denúncias & Moderação Preventiva** | ✅ CONCLUÍDO | [ReportController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReportController.java), rate limiting in-memory, quarentena preventiva (`UNDER_REVIEW`), mutações de resolução (`resolveAsAccepted`, `resolveAsRejected`) no domínio de [Report.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/Report.java). | Resolução transacional em lote via use case no STEP 26.2. |
+| **Denúncias & Moderação Preventiva** | ✅ CONCLUÍDO | [ReportController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReportController.java), rate limiting distribuído (ADR-013), quarentena preventiva (`UNDER_REVIEW`), mutações de resolução (`resolveAsAccepted`, `resolveAsRejected`) no domínio de [Report.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/domain/model/Report.java). | Resolução transacional em lote via use case no STEP 26.2. |
 | **Discussões & Comentários** | ✅ CONCLUÍDO | [DiscussionController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/DiscussionController.java), respostas hierárquicas, soft delete por autor, notificações. | Manter isolamento e integridade. |
 | **Mídia de Avaliações (Imagens)** | ✅ CONCLUÍDO | [ReviewMediaController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/ReviewMediaController.java), SeaweedFS/S3, higienização EXIF/GPS, limite de 5 imagens. | GC de objetos sem referência concluído no STEP 28 (desligado por padrão). Retenção de blobs de mídias `REMOVED` permanece decisão separada. |
 | **Notificações In-App** | ✅ CONCLUÍDO | [NotificationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/NotificationController.java), eventos acionados em follow, helpful, discussão e resposta; API pública intocada no STEP 27.3 — o único novo comportamento é o enqueue de push na Outbox no momento da criação da `Notification`. | Notificações in-app permanecem **síncronas** (decisão do STEP 27.0); o efeito externo de push tornou-se assíncrono via Outbox (STEP 27.3), com provider ainda mock. |
@@ -78,7 +78,8 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Storage GC (Reconciliação de Mídia)** | ✅ CONCLUÍDO — STEP 28 | Contrato de listagem paginada, quarentena persistente (`V15`), grace period configurável, rechecagem sob lock, exclusão física idempotente, dry-run, scheduler desligado por padrão e métricas `rewit.storage_gc.*`. Ver [storage-reconciliation.md](../architecture/storage-reconciliation.md) e [ADR-010](../decisions/ADR-010-storage-garbage-collection.md). | Ativação operacional conforme o rollout seguro documentado (dry-run primeiro). |
 | **Cleanup de Sessões Expiradas** | ✅ TECNICAMENTE CONCLUÍDO — STEP 29 (decisão de produto/jurídico pendente) | Job `@Scheduled` ligado por padrão: limpa IP/User-Agent de sessões inativas e expurga sessões expiradas sem sucessora (`expires_at < now AND replaced_by_session_id IS NULL`), em lotes `FOR UPDATE SKIP LOCKED`, sem recursão; índice `V16`; métricas `rewit.auth_session_cleanup.*`. Ver [authentication.md §4.5](../architecture/authentication.md) e [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) (Proposto). | Decisão de produto/jurídico sobre a coleta de IP/User-Agent durante a sessão ativa. |
 | **Observabilidade V1** | ✅ CONCLUÍDO | Métricas por scrape Prometheus (`/actuator/prometheus`), logs JSON no stdout, tracing HTTP (servidor e Google Places) via OTLP desligado sem endpoint, Actuator em porta de management própria. Ver [observability.md](../architecture/observability.md) e [ADR-012](../decisions/ADR-012-observability.md) (Proposto). | Definir collector OTLP e Prometheus no deploy; não publicar a porta de management. |
-| **Prontidão de Produção** | ⏳ PENDENTE | Rate limiting em memória, sem backup/restore documentado, sem testes de carga. | Rate limiting distribuído, backup/restore e testes de carga (itens separados, sem decisão tomada). |
+| **Rate Limiting Distribuído** | ✅ CONCLUÍDO (ADR-013 Proposto) | Porta `RateLimiter`, janela deslizante no Redis por script Lua atômico, chaves HMAC sem IP, `LOCAL_FALLBACK` com o Redis indisponível, métricas `rewit.rate_limit.*`. Login (falhas por e-mail, tempo uniforme), refresh (por usuário, depois da detecção de reúso) e cadastro (global) limitados; denúncias, comentários e uploads migrados com os mesmos limites. Ver [authentication.md §4.6](../architecture/authentication.md). | Limite por IP depende da decisão pendente da ADR-011. |
+| **Prontidão de Produção** | ⏳ PENDENTE | Sem backup/restore documentado, sem testes de carga. | Backup/restore e testes de carga (itens separados, sem decisão tomada). |
 | **Cache Distribuído em Redis** | 🔮 FUTURO ADIADO | Redis conectado mas sem cache de queries complexas. | Introduzir apenas sob saturação medida do PostgreSQL. |
 | **Machine Learning & Embeddings** | 🔮 FUTURO ADIADO | Arquitetura determinística prioritária; sem ML. | Avaliar apenas após escala de dezenas de milhares de reviews. |
 
@@ -935,7 +936,7 @@ Pendente: decisão de produto/jurídico sobre a coleta de IP/User-Agent enquanto
 - **Observabilidade V1** ([observability.md](../architecture/observability.md), [ADR-012](../decisions/ADR-012-observability.md)): Actuator só na porta de management (`MANAGEMENT_SERVER_PORT`, padrão `8081`) com `health`, `info` e `prometheus`; 41 métricas `rewit.*` (Outbox, Storage GC, cleanup de sessões) mais as automáticas de JVM, Hikari e HTTP, exportadas por scrape; logs JSON (formato `logstash` nativo do Spring Boot) com `traceId`/`spanId`; tracing OpenTelemetry de HTTP servidor e do cliente do Google Places, exportado por OTLP só com endpoint configurado; sampling por variável. Sem `userId` em logs, spans ou métricas; sem tracing de JDBC nem de `@Scheduled`.
 - **Spring Boot Actuator**: antes `/actuator/metrics` ficava na porta da API e era legível por qualquer usuário autenticado; deixou de ser exposto.
 - **Hikari Connection Pool**: Configurado com limite de 10 conexões locais e timeouts defensivos.
-- **Rate Limiting In-Memory**: Proteção contra flood de denúncias via `ReportRateLimiter`.
+- **Rate Limiting Distribuído** ([ADR-013](../decisions/ADR-013-distributed-rate-limiting.md)): login, refresh, cadastro, denúncias, comentários e uploads limitados por janela deslizante no Redis, com fallback em memória por instância se o Redis cair.
 - **Flyway Validation**: Validação rigorosa dos checksums das migrações no startup da aplicação.
 - **Java Virtual Threads**: Ativadas nativamente (`spring.threads.virtual.enabled: true`) para alto throughput de I/O bloqueante.
 
@@ -944,7 +945,6 @@ Logs JSON, métricas Prometheus e tracing HTTP foram entregues na Observabilidad
 
 - **Métricas de negócio novas**: latência do Feed V2 e contagem de check-ins rejeitados (a "taxa de cache hits" saiu do escopo: o cache está adiado, §10).
 - **Tracing além do HTTP**: JDBC e jobs `@Scheduled` foram deliberadamente deixados de fora (ADR-012).
-- **Rate Limiting Distribuído**: Migração do rate limiter in-memory para Redis (Token Bucket com scripts Lua) para suportar múltiplas instâncias da API.
 - **Políticas de Backup e Restore**: Rotinas documentadas de backup contínuo (WAL archiving e pg_dump) para o PostgreSQL com PostGIS.
 - **Testes de Carga Automatizados**: Scripts de teste de stress (k6 ou Gatling) simulando centenas de usuários navegando no feed simultaneamente.
 
@@ -1067,7 +1067,7 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
 
 ## 12. Estado Atual da Suíte de Testes
 
-* **Total de Testes**: `1293`
+* **Total de Testes**: `1349`
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`
@@ -1083,6 +1083,7 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
   - Testes do Storage GC (STEP 28): unitários de reconciliação, quarentena, rechecagem, exclusão, orquestração, configuração, métricas e scheduler; integração com PostgreSQL e SeaweedFS reais (lock da review, advisory lock, janela de queda, ciclo dry-run e destrutivo) e testes de fronteira arquitetural.
   - Testes da Observabilidade V1: `ActuatorManagementPortIntegrationTest` (7, servidor real com API e management em portas aleatórias), `ObservabilityTracingLoggingIntegrationTest` (5, exportador de spans em memória e stub do Google), `ObservabilityConfigurationTest` (4), `SanitizedStackTracePrinterTest` (2), `MockEmailAdapterTest` (1), `MinioStorageAdapterErrorLoggingTest` (2) e um caso novo em `GooglePlacesAdapterTest`.
   - Testes do Cleanup de Sessões (STEP 29.3): [CleanupAuthSessionsUseCaseTest.java](../../backend/src/test/java/com/rewit/application/usecase/CleanupAuthSessionsUseCaseTest.java) (5), scheduler (2), configuração (3) e [AuthSessionCleanupIntegrationTest.java](../../backend/src/test/java/com/rewit/infrastructure/authsession/AuthSessionCleanupIntegrationTest.java) (8) no PostgreSQL real: elegibilidade, cadeia A→B→C→D, metadados, reúso, SKIP LOCKED, rollback, espera do `revokeAllByUserId` e índice `V16`.
+  - Testes do Rate Limiting Distribuído (ADR-013): propriedades, chaves HMAC, janela em memória, orquestração e modo degradado (unitários); janela no Redis real com duas instâncias, 64 requisições concorrentes, expiração, TTL e Redis inacessível; `AuthServiceAbuseProtectionTest` (login, tempo uniforme com Argon2 real, cadastro e refresh) e `AuthRateLimitIntegrationTest` (HTTP com Redis real, 429 RFC 7807, rotação e detecção de reúso preservadas).
 
 ---
 
@@ -1099,7 +1100,7 @@ O STEP 29 está tecnicamente concluído (§8.12). Resta uma pendência que não 
 
 As seguintes frentes encontram-se pendentes e podem ser iniciadas a qualquer momento, de acordo com as prioridades do produto:
 
-1. **Prontidão de Produção** (§9.2): rate limiting distribuído, backup/restore e testes de carga, cada um sujeito ao seu próprio decision gate. A Observabilidade V1 já foi entregue (§9.1).
+1. **Prontidão de Produção** (§9.2): backup/restore e testes de carga, cada um sujeito ao seu próprio decision gate. O rate limiting distribuído foi entregue (ADR-013). A Observabilidade V1 já foi entregue (§9.1).
 
 > [!NOTE]
 > O subsistema de Moderação Administrativa está 100% operacional. Qualquer backoffice ou painel administrativo pode consumir diretamente os endpoints `/api/v1/admin/**` com tokens JWT de MODERATOR ou ADMIN. O Outbox (STEPS 27.1 a 27.4) processa mensagens `PUSH_NOTIFICATION` com entrega at-least-once à porta `NotificationProvider` — **ainda o `MockNotificationAdapter` local, sem push real externo**: nenhum fluxo de negócio deve assumir entrega real de push para dispositivos. A Notification in-app permanece síncrona e transacional.

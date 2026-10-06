@@ -82,3 +82,13 @@ Registro técnico do que o código faz; não é parecer jurídico. Arquitetura e
 - **Permitido com restrição**: `objectKey` de mídia (`reviews/{reviewId}/{mediaId}/...`) somente nos logs de falha de upload e remoção que já existiam; ids técnicos do Outbox (`messageId`, workerId).
 - **Tracing**: só requisições HTTP recebidas e chamadas ao Google Places. Atributos: método, rota normalizada, status, resultado, classe da exceção e o path da requisição (`http.url`, sem query string, podendo conter UUIDs). Sem tracing de banco de dados. A exportação só ocorre para um endpoint OTLP configurado explicitamente no deploy; o acesso ao backend de traces deve ser restrito.
 - **Métricas**: agregadas, sem identificadores, servidas só na porta de management interna; usuários da API não têm acesso.
+
+---
+
+## 8. Rate Limiting (ADR-013)
+
+Registro técnico do que o código faz; não é parecer jurídico.
+
+- **Sem IP e sem User-Agent**: os limites usam e-mail normalizado (login), id de usuário (refresh, denúncias, comentários, uploads) ou um contador global (cadastro).
+- **Pseudonimização**: o Redis guarda só o HMAC-SHA256 do sujeito, com um segredo de configuração (`RATE_LIMIT_KEY_SECRET`), e os instantes das tentativas da janela. A chave expira sozinha uma janela após a última tentativa (no máximo 15 minutos com os padrões).
+- **Nunca em logs, métricas ou chaves em claro**: e-mail, id de usuário, chave derivada ou o hash. As métricas têm apenas ação, resultado e origem da decisão.

@@ -1,14 +1,16 @@
 package com.rewit.application.service;
 
 import com.rewit.application.dto.report.ReportDtos.CreateReportCommand;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserFollowRepository;
+import com.rewit.application.ratelimit.RateLimitSubject;
+import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Report;
 import com.rewit.domain.model.Review;
-import com.rewit.infrastructure.security.ReportRateLimiter;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -31,7 +33,7 @@ public class ReportService {
     private final ReportRepository reportRepository;
     private final ReviewRepository reviewRepository;
     private final UserFollowRepository userFollowRepository;
-    private final ReportRateLimiter reportRateLimiter;
+    private final RateLimiter rateLimiter;
     private final ReputationService reputationService;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -39,13 +41,13 @@ public class ReportService {
             ReportRepository reportRepository,
             ReviewRepository reviewRepository,
             UserFollowRepository userFollowRepository,
-            ReportRateLimiter reportRateLimiter,
+            RateLimiter rateLimiter,
             @org.springframework.beans.factory.annotation.Autowired(required = false) ReputationService reputationService
     ) {
         this.reportRepository = Objects.requireNonNull(reportRepository, "ReportRepository must not be null");
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
         this.userFollowRepository = Objects.requireNonNull(userFollowRepository, "UserFollowRepository must not be null");
-        this.reportRateLimiter = Objects.requireNonNull(reportRateLimiter, "ReportRateLimiter must not be null");
+        this.rateLimiter = Objects.requireNonNull(rateLimiter, "RateLimiter must not be null");
         this.reputationService = reputationService;
     }
 
@@ -53,9 +55,9 @@ public class ReportService {
             ReportRepository reportRepository,
             ReviewRepository reviewRepository,
             UserFollowRepository userFollowRepository,
-            ReportRateLimiter reportRateLimiter
+            RateLimiter rateLimiter
     ) {
-        this(reportRepository, reviewRepository, userFollowRepository, reportRateLimiter, null);
+        this(reportRepository, reviewRepository, userFollowRepository, rateLimiter, null);
     }
 
     public record CreateReportResult(Report report, boolean newlyCreated) {}
@@ -74,7 +76,7 @@ public class ReportService {
         }
 
         // 1. Rate limiting defensivo contra abuso
-        reportRateLimiter.checkRateLimit(cmd.reporterUserId());
+        rateLimiter.acquireOrThrow(RateLimitedAction.REPORT_CREATION, RateLimitSubject.ofUser(cmd.reporterUserId()));
 
         // 2. Trava a linha da Review para garantir atomicidade sob concorrência
         Review review = reviewRepository.findByIdForUpdate(cmd.reviewId())

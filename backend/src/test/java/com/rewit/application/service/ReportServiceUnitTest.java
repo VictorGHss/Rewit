@@ -1,6 +1,7 @@
 package com.rewit.application.service;
 
 import com.rewit.application.dto.report.ReportDtos.CreateReportCommand;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserFollowRepository;
@@ -11,7 +12,7 @@ import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Report;
 import com.rewit.domain.model.Review;
-import com.rewit.infrastructure.security.ReportRateLimiter;
+import com.rewit.infrastructure.ratelimit.RateLimitTestSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -42,7 +43,7 @@ class ReportServiceUnitTest {
     @Mock
     private UserFollowRepository userFollowRepository;
 
-    private ReportRateLimiter reportRateLimiter;
+    private RateLimiter rateLimiter;
     private ReportService reportService;
 
     private final UUID authorUserId = UUID.randomUUID();
@@ -52,12 +53,12 @@ class ReportServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        reportRateLimiter = new ReportRateLimiter();
+        rateLimiter = RateLimitTestSupport.inMemory();
         reportService = new ReportService(
                 reportRepository,
                 reviewRepository,
                 userFollowRepository,
-                reportRateLimiter
+                rateLimiter
         );
     }
 
@@ -289,17 +290,21 @@ class ReportServiceUnitTest {
     @DisplayName("17. Rate Limiter: 10 denúncias aceitas, a 11ª requisição estritamente acima lança 429 RATE_LIMIT_EXCEEDED")
     void createReport_exceedingRateLimit_shouldThrowTooManyRequests() {
         UUID spammerId = UUID.randomUUID();
+        UUID reviewId = UUID.randomUUID();
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.empty());
+        CreateReportCommand cmd = new CreateReportCommand(spammerId, reviewId, ReportReason.SPAM, null);
 
-        // 10 requisições permitidas (no limite da janela de 60s)
+        // 10 requisições passam pelo limite (no limite da janela de 60s) e seguem até a busca da review
         for (int i = 0; i < 10; i++) {
-            assertDoesNotThrow(() -> reportRateLimiter.checkRateLimit(spammerId));
+            BusinessException notFound = assertThrows(BusinessException.class, () -> reportService.createReport(cmd));
+            assertEquals("REVIEW_NOT_FOUND", notFound.getErrorCode());
         }
 
-        // 11ª requisição deve estourar imediatamente acima
-        BusinessException ex = assertThrows(BusinessException.class, () ->
-                reportRateLimiter.checkRateLimit(spammerId)
-        );
+        // 11ª requisição deve estourar imediatamente acima, antes de tocar o repositório
+        BusinessException ex = assertThrows(BusinessException.class, () -> reportService.createReport(cmd));
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatus());
         assertEquals("RATE_LIMIT_EXCEEDED", ex.getErrorCode());
+        assertEquals("Limite de denúncias excedido. Tente novamente mais tarde.", ex.getMessage());
+        verify(reviewRepository, times(10)).findByIdForUpdate(reviewId);
     }
 }

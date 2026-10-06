@@ -3,11 +3,13 @@ package com.rewit.presentation.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.port.PlaceRepository;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.ratelimit.RateLimitSubject;
+import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Review;
-import com.rewit.infrastructure.security.MediaRateLimiter;
 import com.rewit.presentation.dto.auth.RegisterRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,7 +53,7 @@ class ReviewMediaControllerIntegrationTest {
     private PlaceRepository placeRepository;
 
     @Autowired
-    private MediaRateLimiter mediaRateLimiter;
+    private RateLimiter rateLimiter;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -64,8 +66,6 @@ class ReviewMediaControllerIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .apply(springSecurity())
                 .build();
-        mediaRateLimiter.reset();
-
         BufferedImage img = new BufferedImage(80, 80, BufferedImage.TYPE_INT_RGB);
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(img, "jpg", baos);
@@ -451,7 +451,7 @@ class ReviewMediaControllerIntegrationTest {
 
         // Dispara 10 uploads (limite por janela de 60s)
         for (int i = 0; i < 10; i++) {
-            mediaRateLimiter.checkRateLimit(user.userId());
+            rateLimiter.acquireOrThrow(RateLimitedAction.MEDIA_UPLOAD, RateLimitSubject.ofUser(user.userId()));
         }
 
         // 11º upload via endpoint deve resultar em 429

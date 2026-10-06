@@ -24,14 +24,15 @@ Não há métricas nem logs via OTLP, endpoint HTTP próprio de observabilidade 
 
 Exportadas pelo `micrometer-registry-prometheus`; os instrumentos existentes não mudaram.
 
-- **Customizadas** (41 instrumentos, sem tags dinâmicas):
+- **Customizadas** (44 instrumentos, sem tags dinâmicas):
   - `rewit.outbox.*` (12): 8 counters, 1 timer e 3 gauges (`pending`, `failed`, `oldest_pending_age`);
   - `rewit.storage_gc.*` (25, só com `rewit.storage-gc.enabled=true`): 22 counters, 1 timer com a tag `mode=dry_run|destructive` e 2 gauges de quarentena;
-  - `rewit.auth_session_cleanup.*` (4): 3 counters e 1 timer.
+  - `rewit.auth_session_cleanup.*` (4): 3 counters e 1 timer;
+  - `rewit.rate_limit.*` (3, ADR-013): `decisions` (tags `action`, `outcome=allowed|denied`, `source=redis|local_fallback|failure_policy`), `backend_errors` (tag `operation=acquire|release`) e o gauge `backend_available` (1 com o Redis em uso, 0 em modo degradado).
 - Counters e timers registrados sob demanda aparecem no endpoint após o primeiro incremento (ex.: `rewit_auth_session_cleanup_sessions_purged_total` depois do primeiro ciclo).
 - **Automáticas do Spring Boot**: `http_server_requests_*`, `jvm_*`, `process_*`, `system_*`, `hikaricp_*`, `tomcat_*`, `logback_events_*`, `application_*`, entre outras.
 - **Custo dos gauges**: os 3 gauges do Outbox e os 2 do Storage GC consultam o PostgreSQL a cada leitura, ou seja, a cada scrape. Com o intervalo de scrape padrão (15 s ou mais) o custo é de poucas consultas por minuto. Não há cache: o intervalo de scrape é configuração do Prometheus.
-- **Observações desligadas**: `tasks.scheduled.execution` (os quatro jobs já têm métricas `rewit.*`; também elimina spans de `@Scheduled`) e `spring.security` (spans e métricas do Spring Security), via `management.observations.enable`.
+- **Observações desligadas**: `tasks.scheduled.execution` (os quatro jobs já têm métricas `rewit.*`; também elimina spans de `@Scheduled`) `spring.security` (spans e métricas do Spring Security) e `lettuce` (comandos Redis do rate limiting, ADR-013), via `management.observations.enable`.
 
 ### Cardinalidade
 

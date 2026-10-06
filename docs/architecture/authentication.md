@@ -150,6 +150,23 @@ Uma cadeia de rotação A→B→C→D é preservada inteira enquanto a cauda D e
 
 **Configuração** (`rewit.auth-session-cleanup`): `enabled` (padrão `true`, como o purge do Outbox; desligado nos testes), `interval-ms`, `initial-delay-ms`, `batch-size`, `max-batches-per-run`. Não há propriedade de retenção: a elegibilidade é estrutural. Não há dry-run nem endpoint. Métricas: `rewit.auth_session_cleanup.metadata_cleared`, `.sessions_purged`, `.failures` e o timer `.duration`. Os logs são agregados, sem token, hash, IP, user agent ou ids de sessão.
 
+### 4.6 Rate Limiting e Tempo Uniforme no Login (ADR-013)
+
+Login, refresh e cadastro passam pela porta `RateLimiter` (janela deslizante no Redis, chaves HMAC, sem IP). Acima do limite, a resposta é `429 Too Many Requests` com `RATE_LIMIT_EXCEEDED`, no mesmo formato RFC 7807 dos demais erros.
+
+| Ação | Sujeito | Padrão | O que conta |
+|---|---|---|---|
+| Login | e-mail normalizado | 10 em 15 min | Tentativas sem sucesso. A tentativa ocupa a janela antes da verificação e é devolvida no sucesso. E-mail inexistente conta igual. |
+| Refresh | usuário da sessão | 30 em 5 min | Rotações. Checado depois da detecção de reúso e da expiração; o 429 faz rollback sem consumir o token. |
+| Cadastro | global | 30 em 1 min | Toda tentativa, inclusive as inválidas. |
+
+- **Tempo uniforme**: sem conta local elegível (inexistente, desativada ou federada), o login executa `PasswordHasher.simulateVerification`, uma verificação Argon2 contra um hash descartável com os mesmos parâmetros. Assim o custo é o mesmo de uma senha errada. Mensagem, status e código continuam `INVALID_CREDENTIALS` (`401`).
+- **Limite e enumeração**: o 429 depende só da contagem por e-mail, nunca da existência da conta.
+- **Bloqueio por terceiros**: sem IP, quem conhece um e-mail pode esgotar o limite de login dessa conta por até uma janela. Esse é o custo aceito enquanto a decisão sobre IP estiver pendente (ADR-011).
+- **Redis indisponível**: limites em memória por instância (`LOCAL_FALLBACK`), com métrica e log de transição. A configuração e as alternativas estão na ADR-013.
+
+**Configuração** (`rewit.rate-limit`): `enabled`, `key-secret` (`RATE_LIMIT_KEY_SECRET`, obrigatório), `backend.failure-mode` (`LOCAL_FALLBACK`|`DENY`|`ALLOW`), `backend.retry-interval`, `backend.local-fallback-max-keys`, `auth.{login,refresh,registration}.{enabled,limit,window}` e `content.{report-creation,discussion-creation,media-upload}.{enabled,limit,window}`.
+
 ## 5. Endpoints Implementados
 
 | Método | Endpoint | Proteção | Descrição |
@@ -180,4 +197,4 @@ Uma cadeia de rotação A→B→C→D é preservada inteira enquanto a cauda D e
    - Para manter a arquitetura stateless, os access tokens possuem vida útil curta (15 minutos). O logout revoga imediatamente o refresh token no banco de dados.
 3. **Limites do Escopo**:
    - Provedores externos (Google OAuth, Apple OAuth) permanecem estritamente fora do escopo deste Step.
-   - Recursos como verificação de e-mail, recuperação de senha, MFA e rate-limiting distribuído com Redis serão incorporados nas etapas subsequentes.
+   - Recursos como verificação de e-mail, recuperação de senha e MFA serão incorporados nas etapas subsequentes. O rate limiting distribuído está na seção 4.6.

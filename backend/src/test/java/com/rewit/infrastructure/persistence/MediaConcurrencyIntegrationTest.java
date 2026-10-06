@@ -17,7 +17,6 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.RateableTarget;
 import com.rewit.domain.model.User;
-import com.rewit.infrastructure.security.MediaRateLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -62,15 +61,10 @@ class MediaConcurrencyIntegrationTest {
     @Autowired
     private RateableTargetRepository targetRepository;
 
-    @Autowired
-    private MediaRateLimiter mediaRateLimiter;
-
     private byte[] validJpegBytes;
 
     @BeforeEach
     void setUp() throws IOException {
-        mediaRateLimiter.reset();
-
         BufferedImage img = new BufferedImage(50, 50, BufferedImage.TYPE_INT_RGB);
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(img, "jpg", baos);
