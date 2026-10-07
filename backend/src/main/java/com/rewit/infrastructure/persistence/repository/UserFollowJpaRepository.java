@@ -10,7 +10,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -19,8 +18,6 @@ import java.util.UUID;
 public interface UserFollowJpaRepository extends JpaRepository<UserFollowJpaEntity, UUID> {
 
     boolean existsByFollowerUserIdAndFollowedUserId(UUID followerUserId, UUID followedUserId);
-
-    Optional<UserFollowJpaEntity> findByFollowerUserIdAndFollowedUserId(UUID followerUserId, UUID followedUserId);
 
     void deleteByFollowerUserIdAndFollowedUserId(UUID followerUserId, UUID followedUserId);
 
@@ -64,6 +61,10 @@ public interface UserFollowJpaRepository extends JpaRepository<UserFollowJpaEnti
         """)
     Page<UserFollowJpaEntity> findVisibleFollowers(@Param("followedUserId") UUID followedUserId,
                                                    @Param("deleted") AccountStatus deleted, Pageable pageable);
+
+    @Modifying
+    @Query("DELETE FROM UserFollowJpaEntity f WHERE f.followerUserId = :followerUserId AND f.followedUserId = :followedUserId")
+    int deleteFollow(@Param("followerUserId") UUID followerUserId, @Param("followedUserId") UUID followedUserId);
 
     @Modifying
     @Query(value = """

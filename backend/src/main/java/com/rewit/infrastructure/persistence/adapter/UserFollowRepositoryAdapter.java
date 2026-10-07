@@ -51,13 +51,9 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
             return false;
         }
 
-        return userFollowJpaRepository.findByFollowerUserIdAndFollowedUserId(followerUserId, followedUserId)
-                .map(entity -> {
-                    userFollowJpaRepository.delete(entity);
-                    userFollowJpaRepository.flush();
-                    return true;
-                })
-                .orElse(false);
+        // DELETE direto no banco: com dois unfollows simultâneos o segundo afeta 0 linhas e responde false. Carregar e
+        // remover a entidade falharia na segunda transação (linha já removida pela primeira)
+        return userFollowJpaRepository.deleteFollow(followerUserId, followedUserId) > 0;
     }
 
     @Override

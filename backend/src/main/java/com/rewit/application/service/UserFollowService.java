@@ -75,13 +75,7 @@ public class UserFollowService {
 
         accountStatusPolicy.requireOperational(followerUserId);
 
-        User targetUser = userRepository.findById(targetUserId)
-                .orElseThrow(
-                        () -> new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
-
-        if (!targetUser.isActive() || targetUser.getDeletedAt() != null) {
-            throw new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND");
-        }
+        requireVisibleUser(targetUserId);
 
         boolean created = userFollowRepository.follow(followerUserId, targetUserId);
         if (created && notificationService != null) {
@@ -134,9 +128,7 @@ public class UserFollowService {
             return false;
         }
 
-        userRepository.findById(targetUserId)
-                .orElseThrow(
-                        () -> new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
+        requireVisibleUser(targetUserId);
 
         return userFollowRepository.isFollowing(followerUserId, targetUserId);
     }
@@ -237,9 +229,18 @@ public class UserFollowService {
                     "PAGE_SIZE_EXCEEDED");
         }
 
-        userRepository.findById(userId)
-                .orElseThrow(
-                        () -> new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
+        requireVisibleUser(userId);
+    }
+
+    /**
+     * Conta que pode ser alvo de leitura social ou de follow: a mesma regra do perfil público
+     * ({@code UserService.getPublicProfile}). Inexistente, desativada, suspensa ou excluída respondem igual
+     * ({@code 404 USER_NOT_FOUND}), sem revelar qual é o caso.
+     */
+    private User requireVisibleUser(UUID userId) {
+        return userRepository.findById(userId)
+                .filter(User::isOperational)
+                .orElseThrow(() -> new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
     }
 
     private Map<UUID, Profile> resolveProfiles(Set<UUID> userIds) {

@@ -51,8 +51,12 @@ Este documento especifica os contratos da API RESTful para o subsistema de conex
 
 #### Erros Comuns:
 * `400 Bad Request` (`SELF_FOLLOW_FORBIDDEN`): Tentativa de deixar de seguir o próprio perfil.
-* `401 Unauthorized`: Requisição sem JWT válido.
-* `404 Not Found` (`USER_NOT_FOUND`): Usuário `{id}` não encontrado.
+* `401 Unauthorized`: Requisição sem JWT válido; `ACCOUNT_DISABLED` se a conta de quem deixa de seguir não opera.
+* `404 Not Found` (`USER_NOT_FOUND`): Usuário `{id}` não encontrado ou excluído (`DELETED`).
+
+#### Regras:
+* **Idempotente, também sob concorrência**: o vínculo é removido por um `DELETE` direto no banco; repetido ou simultâneo, responde `200` com `following: false`.
+* **Conta desativada ou suspensa**: deixar de seguir continua permitido, para o usuário limpar o próprio grafo.
 
 ---
 
@@ -67,6 +71,11 @@ Este documento especifica os contratos da API RESTful para o subsistema de conex
   "following": true
 }
 ```
+
+#### Regras:
+* Para o próprio `{id}`, sempre `following: false`.
+* `404 Not Found` (`USER_NOT_FOUND`) para usuário inexistente, desativado, suspenso ou excluído, como no perfil público.
+* O perfil público (`GET /api/v1/users/{id}`) já traz `isFollowing`, com uma consulta indexada; este endpoint não precisa ser chamado junto.
 
 ---
 
@@ -120,6 +129,8 @@ Este documento especifica os contratos da API RESTful para o subsistema de conex
 * **Método**: `GET`
 * **Rota**: `/api/v1/users/{id}/following`
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Paginação**: `page` (padrão `0`) e `size` (padrão `10`, máximo `50`); mesmo envelope de `/api/v1/me/following`. A filtragem é feita no banco, então `totalElements` e `totalPages` já excluem as contas ocultas.
+* **Erros**: `404 Not Found` (`USER_NOT_FOUND`) para `{id}` inexistente, desativado, suspenso ou excluído.
 
 ---
 
@@ -127,6 +138,7 @@ Este documento especifica os contratos da API RESTful para o subsistema de conex
 * **Método**: `GET`
 * **Rota**: `/api/v1/users/{id}/followers`
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Paginação e erros**: iguais a §2.6.
 
 ---
 
@@ -148,7 +160,7 @@ Com a introdução do subsistema social no Step 15.0:
 ## 4. Política de Usuários Inativos e Exclusão (Soft-Delete)
 
 * **Seguir Usuário Inativo / Excluído**: O sistema rejeita o seguimento de usuários inativos (`isActive = false`) ou excluídos por soft-delete (`deletedAt != null`), retornando `404 Not Found` (`USER_NOT_FOUND`).
-* **Consulta de Listagens de Usuários Inativos**: Ao requisitar seguidores ou quem um usuário segue (`/api/v1/users/{id}/followers` ou `/following`), a existência de usuário ativo é validada. Usuários inexistentes ou inativos resultam em `404 Not Found`.
+* **Consulta de Listagens de Usuários Inativos**: Ao requisitar seguidores ou quem um usuário segue (`/api/v1/users/{id}/followers` ou `/following`) ou o estado de conexão (`GET /api/v1/users/{id}/follow`), a conta `{id}` precisa estar operacional, a mesma regra do perfil público: inexistente, desativada, suspensa ou excluída resultam no mesmo `404 Not Found` (`USER_NOT_FOUND`). Contas desativadas ou suspensas continuam aparecendo **dentro** das listas de outros usuários; só contas excluídas somem delas.
 * **Integridade Referencial no Banco de Dados**: A tabela relacional `user_follows` possui integridade física com `ON DELETE CASCADE` para `follower_user_id` e `followed_user_id`, garantindo que eventuais deleções físicas limpem automaticamente as associações órfãs.
 * **Conta excluída (`DELETED`, C2)**: os vínculos continuam no banco até o purge físico, mas não aparecem nas listas de seguidores e seguidos de ninguém nem entram em `followersCount`/`followingCount`. As listas da própria conta excluída respondem `404 USER_NOT_FOUND`, como as de um identificador inexistente.
 

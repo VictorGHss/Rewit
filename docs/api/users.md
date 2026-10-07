@@ -77,7 +77,7 @@ Este documento especifica o contrato da API RESTful para a consulta do **perfil 
 As respostas de erro seguem o padrão RFC 7807 (`application/problem+json`).
 
 ### 4.1 Usuário Não Encontrado ou Inativo (`404 Not Found`)
-Retornado quando o `{id}` não existe, pertence a um usuário inativo (`isActive = false`) ou com soft-delete (`deletedAt IS NOT NULL`), protegendo a privacidade e prevenindo enumeração de contas inativas. Para uma conta excluída (`DELETED`), o corpo é idêntico ao de um identificador que nunca existiu.
+Retornado quando o `{id}` não existe, pertence a um usuário inativo (`isActive = false`) ou com soft-delete (`deletedAt IS NOT NULL`), protegendo a privacidade e prevenindo enumeração de contas inativas. Para uma conta excluída (`DELETED`), o corpo é idêntico ao de um identificador que nunca existiu. As listas de seguidores e seguidos e o estado de conexão do mesmo `{id}` seguem a mesma regra (`social.md` §4).
 ```json
 {
   "type": "about:blank",
