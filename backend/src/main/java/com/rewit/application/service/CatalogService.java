@@ -49,6 +49,7 @@ public class CatalogService {
     private final ProductPresenceRepository productPresenceRepository;
     private final PlaceExternalReferenceRepository placeExternalReferenceRepository;
     private final TransactionOperations transactionOperations;
+    private final AccountStatusPolicy accountStatusPolicy;
 
     @Autowired
     public CatalogService(PlaceRepository placeRepository,
@@ -56,14 +57,16 @@ public class CatalogService {
                           ProductIdentifierRepository productIdentifierRepository,
                           ProductPresenceRepository productPresenceRepository,
                           PlaceExternalReferenceRepository placeExternalReferenceRepository,
-                          PlatformTransactionManager transactionManager) {
+                          PlatformTransactionManager transactionManager,
+                          AccountStatusPolicy accountStatusPolicy) {
         this(
                 placeRepository,
                 productRepository,
                 productIdentifierRepository,
                 productPresenceRepository,
                 placeExternalReferenceRepository,
-                createTransactionOperations(transactionManager)
+                createTransactionOperations(transactionManager),
+                accountStatusPolicy
         );
     }
 
@@ -81,35 +84,83 @@ public class CatalogService {
                           ProductIdentifierRepository productIdentifierRepository,
                           ProductPresenceRepository productPresenceRepository,
                           PlaceExternalReferenceRepository placeExternalReferenceRepository,
-                          TransactionOperations transactionOperations) {
+                          TransactionOperations transactionOperations,
+                          AccountStatusPolicy accountStatusPolicy) {
         this.placeRepository = Objects.requireNonNull(placeRepository, "placeRepository must not be null");
         this.productRepository = Objects.requireNonNull(productRepository, "productRepository must not be null");
         this.productIdentifierRepository = Objects.requireNonNull(productIdentifierRepository, "productIdentifierRepository must not be null");
         this.productPresenceRepository = Objects.requireNonNull(productPresenceRepository, "productPresenceRepository must not be null");
         this.placeExternalReferenceRepository = Objects.requireNonNull(placeExternalReferenceRepository, "placeExternalReferenceRepository must not be null");
         this.transactionOperations = transactionOperations != null ? transactionOperations : TransactionOperations.withoutTransaction();
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "accountStatusPolicy must not be null");
     }
 
     public CatalogService(PlaceRepository placeRepository,
                           ProductRepository productRepository,
                           ProductIdentifierRepository productIdentifierRepository,
                           ProductPresenceRepository productPresenceRepository,
-                          PlaceExternalReferenceRepository placeExternalReferenceRepository) {
+                          PlaceExternalReferenceRepository placeExternalReferenceRepository,
+                          AccountStatusPolicy accountStatusPolicy) {
         this(
                 placeRepository,
                 productRepository,
                 productIdentifierRepository,
                 productPresenceRepository,
                 placeExternalReferenceRepository,
-                TransactionOperations.withoutTransaction()
+                TransactionOperations.withoutTransaction(),
+                accountStatusPolicy
         );
     }
 
-    public Place createPlace(CreatePlaceCommand cmd) {
+    // ---------------------------------------------------------------------------------------------------------
+    // Mutações iniciadas por um usuário. A conta do ator precisa estar operacional (C2): o access token é stateless
+    // e pode ser anterior a uma desativação, suspensão ou exclusão. As variantes sem ator são o núcleo dessas
+    // operações e ficam package-private, para que nenhuma camada externa as chame sem essa verificação.
+    // ---------------------------------------------------------------------------------------------------------
+
+    public Place createPlace(UUID actorUserId, CreatePlaceCommand cmd) {
+        requireOperationalActor(actorUserId);
+        return createPlace(cmd);
+    }
+
+    /** A adoção controla as próprias transações (REQUIRES_NEW por tentativa); a verificação vem antes de todas. */
+    public PlaceAdoptionResult adoptPlace(UUID actorUserId, CreatePlaceCommand cmd) {
+        requireOperationalActor(actorUserId);
+        return adoptPlace(cmd);
+    }
+
+    @Transactional
+    public Product createProduct(UUID actorUserId, CreateProductCommand cmd) {
+        requireOperationalActor(actorUserId);
+        return createProduct(cmd);
+    }
+
+    @Transactional
+    public ProductIdentifier addProductIdentifier(UUID actorUserId, AddProductIdentifierCommand cmd) {
+        requireOperationalActor(actorUserId);
+        return addProductIdentifier(cmd);
+    }
+
+    /** A presença é atribuída sempre ao ator, nunca a um usuário informado no comando. */
+    @Transactional
+    public ProductPresence associateProductToPlace(UUID actorUserId, AssociateProductPresenceCommand cmd) {
+        requireOperationalActor(actorUserId);
+        Objects.requireNonNull(cmd, "AssociateProductPresenceCommand cannot be null");
+        return associateProductToPlace(new AssociateProductPresenceCommand(cmd.productId(), cmd.placeId(), actorUserId));
+    }
+
+    private void requireOperationalActor(UUID actorUserId) {
+        if (actorUserId == null) {
+            throw AccountStatusPolicy.accountDisabled();
+        }
+        accountStatusPolicy.requireOperational(actorUserId);
+    }
+
+    Place createPlace(CreatePlaceCommand cmd) {
         return adoptPlace(cmd).place();
     }
 
-    public PlaceAdoptionResult adoptPlace(CreatePlaceCommand cmd) {
+    PlaceAdoptionResult adoptPlace(CreatePlaceCommand cmd) {
         Objects.requireNonNull(cmd, "CreatePlaceCommand cannot be null");
 
         if (cmd.name() == null || cmd.name().isBlank()) {
@@ -367,7 +418,7 @@ public class CatalogService {
     }
 
     @Transactional
-    public Product createProduct(CreateProductCommand cmd) {
+    Product createProduct(CreateProductCommand cmd) {
         Objects.requireNonNull(cmd, "CreateProductCommand cannot be null");
 
         Product product = new Product(
@@ -394,7 +445,7 @@ public class CatalogService {
     }
 
     @Transactional
-    public ProductIdentifier addProductIdentifier(AddProductIdentifierCommand cmd) {
+    ProductIdentifier addProductIdentifier(AddProductIdentifierCommand cmd) {
         Objects.requireNonNull(cmd, "AddProductIdentifierCommand cannot be null");
 
         // Verifica existência do produto
@@ -429,7 +480,7 @@ public class CatalogService {
     }
 
     @Transactional
-    public ProductPresence associateProductToPlace(AssociateProductPresenceCommand cmd) {
+    ProductPresence associateProductToPlace(AssociateProductPresenceCommand cmd) {
         Objects.requireNonNull(cmd, "AssociateProductPresenceCommand cannot be null");
 
         if (!productRepository.findById(cmd.productId()).isPresent()) {

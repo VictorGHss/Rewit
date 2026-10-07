@@ -4,6 +4,7 @@ import com.rewit.application.dto.catalog.CatalogDtos.AddProductIdentifierCommand
 import com.rewit.application.dto.catalog.CatalogDtos.AssociateProductPresenceCommand;
 import com.rewit.application.dto.catalog.CatalogDtos.CreateProductCommand;
 import com.rewit.application.service.CatalogService;
+import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.Product;
 import com.rewit.domain.model.ProductIdentifier;
 import com.rewit.domain.model.ProductPresence;
@@ -31,7 +32,11 @@ public class ProductController {
     }
 
     @PostMapping
-    public ResponseEntity<ProductResponse> createProduct(@Valid @RequestBody CreateProductRequest request) {
+    public ResponseEntity<ProductResponse> createProduct(
+            @Valid @RequestBody CreateProductRequest request,
+            Authentication authentication
+    ) {
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
         CreateProductCommand cmd = new CreateProductCommand(
                 request.name(),
                 request.brand(),
@@ -41,7 +46,7 @@ public class ProductController {
                 request.imageUrl()
         );
 
-        Product created = catalogService.createProduct(cmd);
+        Product created = catalogService.createProduct(actorUserId, cmd);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
     }
 
@@ -54,15 +59,17 @@ public class ProductController {
     @PostMapping("/{id}/identifiers")
     public ResponseEntity<ProductIdentifierResponse> addProductIdentifier(
             @PathVariable UUID id,
-            @Valid @RequestBody AddProductIdentifierRequest request
+            @Valid @RequestBody AddProductIdentifierRequest request,
+            Authentication authentication
     ) {
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
         AddProductIdentifierCommand cmd = new AddProductIdentifierCommand(
                 id,
                 request.identifierType(),
                 request.identifierValue()
         );
 
-        ProductIdentifier identifier = catalogService.addProductIdentifier(cmd);
+        ProductIdentifier identifier = catalogService.addProductIdentifier(actorUserId, cmd);
         return ResponseEntity.status(HttpStatus.CREATED).body(new ProductIdentifierResponse(
                 identifier.getId(),
                 identifier.getProductId(),
@@ -77,20 +84,15 @@ public class ProductController {
             @Valid @RequestBody AssociateProductPresenceRequest request,
             Authentication authentication
     ) {
-        UUID currentUserId = null;
-        if (authentication != null && authentication.getName() != null) {
-            try {
-                currentUserId = UUID.fromString(authentication.getName());
-            } catch (IllegalArgumentException ignored) {}
-        }
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
 
         AssociateProductPresenceCommand cmd = new AssociateProductPresenceCommand(
                 id,
                 request.placeId(),
-                currentUserId
+                actorUserId
         );
 
-        ProductPresence presence = catalogService.associateProductToPlace(cmd);
+        ProductPresence presence = catalogService.associateProductToPlace(actorUserId, cmd);
         return ResponseEntity.status(HttpStatus.CREATED).body(new ProductPresenceResponse(
                 presence.getId(),
                 presence.getProductId(),
@@ -112,5 +114,12 @@ public class ProductController {
                 product.getImageUrl(),
                 product.getStatus()
         );
+    }
+
+    private UUID extractAuthenticatedUserId(Authentication authentication) {
+        if (authentication == null || authentication.getName() == null) {
+            throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+        }
+        return UUID.fromString(authentication.getName());
     }
 }

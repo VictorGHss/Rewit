@@ -54,6 +54,9 @@ class CatalogServiceUnitTest {
     @Mock
     private PlaceExternalReferenceRepository placeExternalReferenceRepository;
 
+    @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
     private CatalogService catalogService;
 
     @BeforeEach
@@ -63,7 +66,8 @@ class CatalogServiceUnitTest {
                 productRepository,
                 productIdentifierRepository,
                 productPresenceRepository,
-                placeExternalReferenceRepository
+                placeExternalReferenceRepository,
+                accountStatusPolicy
         );
     }
 

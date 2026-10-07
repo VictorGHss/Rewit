@@ -31,20 +31,24 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
+    private final AccountStatusPolicy accountStatusPolicy;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public NotificationService(NotificationRepository notificationRepository, OutboxRepository outboxRepository) {
-        this(notificationRepository, outboxRepository, new ObjectMapper());
+    public NotificationService(NotificationRepository notificationRepository, OutboxRepository outboxRepository,
+                               AccountStatusPolicy accountStatusPolicy) {
+        this(notificationRepository, outboxRepository, new ObjectMapper(), accountStatusPolicy);
     }
 
     public NotificationService(
             NotificationRepository notificationRepository,
             OutboxRepository outboxRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AccountStatusPolicy accountStatusPolicy
     ) {
         this.notificationRepository = Objects.requireNonNull(notificationRepository, "NotificationRepository must not be null");
         this.outboxRepository = Objects.requireNonNull(outboxRepository, "OutboxRepository must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "ObjectMapper must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
     }
 
     /**
@@ -217,6 +221,9 @@ public class NotificationService {
             throw new BusinessException("Identificador de notificação obrigatório", HttpStatus.BAD_REQUEST, "MISSING_NOTIFICATION_ID");
         }
 
+        // Mutação do próprio usuário: o access token pode ser anterior a uma mudança de estado da conta (C2)
+        accountStatusPolicy.requireOperational(userId);
+
         Notification notification = notificationRepository.findByIdAndUserId(notificationId, userId)
                 .orElseThrow(() -> new BusinessException("Notificação não encontrada", HttpStatus.NOT_FOUND, "NOTIFICATION_NOT_FOUND"));
 
@@ -234,6 +241,7 @@ public class NotificationService {
         if (userId == null) {
             throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
         }
+        accountStatusPolicy.requireOperational(userId);
         notificationRepository.markAllAsReadByUserId(userId);
     }
 

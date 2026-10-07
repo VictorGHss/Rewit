@@ -95,7 +95,7 @@ class PlaceControllerUnitTest {
         Place place = createSamplePlace(placeId, "Café das Flores", "cafe-das-flores");
         PlaceAdoptionResult adoptionResult = new PlaceAdoptionResult(place, true);
 
-        when(catalogService.adoptPlace(any(CreatePlaceCommand.class))).thenReturn(adoptionResult);
+        when(catalogService.adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(adoptionResult);
 
         AdoptPlaceRequest request = new AdoptPlaceRequest(
                 "Café das Flores",
@@ -126,7 +126,7 @@ class PlaceControllerUnitTest {
                 .andExpect(jsonPath("$.origin").value("USER"))
                 .andExpect(jsonPath("$.status").value("ACTIVE"));
 
-        verify(catalogService).adoptPlace(any(CreatePlaceCommand.class));
+        verify(catalogService).adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class));
     }
 
     @Test
@@ -155,7 +155,7 @@ class PlaceControllerUnitTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
 
-        verify(catalogService, never()).adoptPlace(any());
+        verify(catalogService, never()).adoptPlace(any(), any());
     }
 
     @Test
@@ -163,7 +163,7 @@ class PlaceControllerUnitTest {
     void shouldIgnoreUserIdInPayload() throws Exception {
         UUID placeId = UUID.randomUUID();
         Place place = createSamplePlace(placeId, "Local A", "local-a");
-        when(catalogService.adoptPlace(any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(place, true));
+        when(catalogService.adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(place, true));
 
         // Envia JSON com campo espúrio "userId"
         Map<String, Object> payloadWithUserId = Map.of(
@@ -184,7 +184,7 @@ class PlaceControllerUnitTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<CreatePlaceCommand> captor = ArgumentCaptor.forClass(CreatePlaceCommand.class);
-        verify(catalogService).adoptPlace(captor.capture());
+        verify(catalogService).adoptPlace(eq(authenticatedUserId), captor.capture());
         CreatePlaceCommand cmd = captor.getValue();
         assertEquals("Local A", cmd.name());
         assertEquals("local-a", cmd.slug());
@@ -195,7 +195,7 @@ class PlaceControllerUnitTest {
     void shouldAdoptWithExternalReferenceSuccessfully() throws Exception {
         UUID placeId = UUID.randomUUID();
         Place place = createSamplePlace(placeId, "Local Com Ref", "local-com-ref");
-        when(catalogService.adoptPlace(any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(place, true));
+        when(catalogService.adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(place, true));
 
         AdoptPlaceRequest request = new AdoptPlaceRequest(
                 "Local Com Ref",
@@ -221,7 +221,7 @@ class PlaceControllerUnitTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<CreatePlaceCommand> captor = ArgumentCaptor.forClass(CreatePlaceCommand.class);
-        verify(catalogService).adoptPlace(captor.capture());
+        verify(catalogService).adoptPlace(eq(authenticatedUserId), captor.capture());
         CreatePlaceCommand cmd = captor.getValue();
         assertNotNull(cmd.externalReference());
         assertEquals("GOOGLE", cmd.externalReference().provider());
@@ -236,7 +236,7 @@ class PlaceControllerUnitTest {
         // newlyCreated = false -> Idempotência
         PlaceAdoptionResult adoptionResult = new PlaceAdoptionResult(existingPlace, false);
 
-        when(catalogService.adoptPlace(any(CreatePlaceCommand.class))).thenReturn(adoptionResult);
+        when(catalogService.adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(adoptionResult);
 
         AdoptPlaceRequest request = new AdoptPlaceRequest(
                 "Tentativa com Outro Nome",
@@ -270,7 +270,7 @@ class PlaceControllerUnitTest {
     void shouldNotAlterExistingPlaceOnSecondAdoption() throws Exception {
         UUID placeId = UUID.randomUUID();
         Place originalPlace = createSamplePlace(placeId, "Nome Imutável", "slug-imutavel");
-        when(catalogService.adoptPlace(any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(originalPlace, false));
+        when(catalogService.adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(originalPlace, false));
 
         AdoptPlaceRequest secondRequest = new AdoptPlaceRequest(
                 "Nome Alterado Pelo Cliente",
@@ -303,7 +303,7 @@ class PlaceControllerUnitTest {
     @Test
     @DisplayName("7. POST /api/v1/places/adopt: Slug explícito duplicado retorna 409 Conflict")
     void shouldReturnConflictWhenExplicitSlugAlreadyExists() throws Exception {
-        when(catalogService.adoptPlace(any(CreatePlaceCommand.class)))
+        when(catalogService.adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class)))
                 .thenThrow(new BusinessException("Slug do local já está em uso", HttpStatus.CONFLICT, "PLACE_SLUG_ALREADY_EXISTS"));
 
         AdoptPlaceRequest request = new AdoptPlaceRequest(
@@ -336,7 +336,7 @@ class PlaceControllerUnitTest {
     void shouldNotAllowPayloadToOverrideOrigin() throws Exception {
         UUID placeId = UUID.randomUUID();
         Place place = createSamplePlace(placeId, "Lugar", "lugar");
-        when(catalogService.adoptPlace(any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(place, true));
+        when(catalogService.adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(place, true));
 
         Map<String, Object> payloadWithOrigin = Map.of(
                 "name", "Lugar",
@@ -355,7 +355,7 @@ class PlaceControllerUnitTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<CreatePlaceCommand> captor = ArgumentCaptor.forClass(CreatePlaceCommand.class);
-        verify(catalogService).adoptPlace(captor.capture());
+        verify(catalogService).adoptPlace(eq(authenticatedUserId), captor.capture());
         assertEquals("USER", captor.getValue().origin(), "Origin deve ser sempre forçado como USER");
     }
 
@@ -364,7 +364,7 @@ class PlaceControllerUnitTest {
     void shouldNotSendGoogleMetadataToService() throws Exception {
         UUID placeId = UUID.randomUUID();
         Place place = createSamplePlace(placeId, "Lugar Zero-Store", "lugar-zero-store");
-        when(catalogService.adoptPlace(any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(place, true));
+        when(catalogService.adoptPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(new PlaceAdoptionResult(place, true));
 
         Map<String, Object> payloadWithGoogleData = Map.ofEntries(
                 Map.entry("name", "Lugar Zero-Store"),
@@ -391,7 +391,7 @@ class PlaceControllerUnitTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<CreatePlaceCommand> captor = ArgumentCaptor.forClass(CreatePlaceCommand.class);
-        verify(catalogService).adoptPlace(captor.capture());
+        verify(catalogService).adoptPlace(eq(authenticatedUserId), captor.capture());
         CreatePlaceCommand cmd = captor.getValue();
         assertEquals("Lugar Zero-Store", cmd.name());
         assertEquals("ChIJ_CLEAN_123", cmd.externalReference().externalId());

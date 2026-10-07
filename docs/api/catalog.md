@@ -317,5 +317,6 @@ Mesmo quando nenhum local for encontrado dentro do raio solicitado, a API retorn
   * Raio inválido para busca nearby (`INVALID_NEARBY_RADIUS`).
   * Limite inválido para busca nearby (`INVALID_NEARBY_LIMIT`).
 * `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
+* `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido. A presença de produto é sempre atribuída ao usuário autenticado.
 * `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`).
 * `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`).

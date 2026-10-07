@@ -40,6 +40,9 @@ class NotificationServiceUnitTest {
     @Mock
     private OutboxRepository outboxRepository;
 
+    @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private NotificationService notificationService;
 
@@ -50,7 +53,7 @@ class NotificationServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        notificationService = new NotificationService(notificationRepository, outboxRepository, objectMapper);
+        notificationService = new NotificationService(notificationRepository, outboxRepository, objectMapper, accountStatusPolicy);
     }
 
     @Nested

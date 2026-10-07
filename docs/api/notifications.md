@@ -135,6 +135,7 @@ Executa atualização atômica em lote em uma única instrução SQL (`UPDATE no
 | `400 Bad Request` | `PAGE_SIZE_EXCEEDED` | O tamanho da página ultrapassa o limite máximo permitido de 50 itens (`size > 50`). |
 | `400 Bad Request` | `MISSING_NOTIFICATION_ID` | Identificador UUID da notificação ausente ou mal formatado. |
 | `401 Unauthorized` | `UNAUTHORIZED` | Token JWT ausente, expirado ou inválido. |
+| `401 Unauthorized` | `ACCOUNT_DISABLED` | Marcar como lida (uma ou todas) com a conta não operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido. As leituras não verificam o estado da conta. |
 | `404 Not Found` | `NOTIFICATION_NOT_FOUND` | Notificação inexistente ou pertencente a outro usuário (defesa anti-IDOR). |
 
 ---

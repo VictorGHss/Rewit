@@ -37,7 +37,11 @@ public class PlaceController {
     }
 
     @PostMapping
-    public ResponseEntity<PlaceResponse> createPlace(@Valid @RequestBody CreatePlaceRequest request) {
+    public ResponseEntity<PlaceResponse> createPlace(
+            @Valid @RequestBody CreatePlaceRequest request,
+            Authentication authentication
+    ) {
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
         CreatePlaceCommand cmd = new CreatePlaceCommand(
                 request.name(),
                 request.slug(),
@@ -56,7 +60,7 @@ public class PlaceController {
                 null
         );
 
-        Place created = catalogService.createPlace(cmd);
+        Place created = catalogService.createPlace(actorUserId, cmd);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
     }
 
@@ -65,9 +69,7 @@ public class PlaceController {
             @Valid @RequestBody AdoptPlaceRequest request,
             Authentication authentication
     ) {
-        if (authentication == null || authentication.getName() == null) {
-            throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
-        }
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
 
         ExternalReferenceInput extInput = null;
         if (request.externalReference() != null) {
@@ -96,7 +98,7 @@ public class PlaceController {
                 extInput
         );
 
-        PlaceAdoptionResult result = catalogService.adoptPlace(cmd);
+        PlaceAdoptionResult result = catalogService.adoptPlace(actorUserId, cmd);
         PlaceResponse response = toResponse(result.place());
 
         if (result.newlyCreated()) {
@@ -183,5 +185,12 @@ public class PlaceController {
                 place.isVerified(),
                 place.getStatus()
         );
+    }
+
+    private UUID extractAuthenticatedUserId(Authentication authentication) {
+        if (authentication == null || authentication.getName() == null) {
+            throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+        }
+        return UUID.fromString(authentication.getName());
     }
 }
