@@ -43,6 +43,7 @@ import com.rewit.application.dto.catalog.CatalogDtos;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.CheckInRepository;
 import com.rewit.domain.enums.CheckInStatus;
+import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.VerificationMethod;
 import com.rewit.domain.model.CheckIn;
 
@@ -367,6 +368,14 @@ public class ReviewService {
 
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND"));
+
+        // Review inativa (UNDER_REVIEW/REMOVED) só é visível ao próprio autor; para terceiros é indistinguível de
+        // inexistente, como nas demais leituras (ReviewVisibilityPolicy). Checado antes da visibilidade para não
+        // revelar, via 403, que a review existe
+        boolean requesterIsAuthor = requesterUserId != null && requesterUserId.equals(review.getUserId());
+        if (review.getStatus() != ReviewStatus.ACTIVE && !requesterIsAuthor) {
+            throw new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND");
+        }
 
         // Validação de visibilidade
         String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";

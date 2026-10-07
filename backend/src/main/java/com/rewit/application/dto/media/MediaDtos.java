@@ -48,8 +48,13 @@ public final class MediaDtos {
         }
     }
 
+    /**
+     * @param publiclyCacheable a avaliação é {@code PUBLIC}: a mídia pode ser guardada por caches compartilhados.
+     *                          {@code PRIVATE}/{@code FOLLOWERS} dependem do leitor e nunca podem ser
+     */
     public record MediaDownloadResult(
             byte[] bytes,
-            String mimeType
+            String mimeType,
+            boolean publiclyCacheable
     ) {}
 }

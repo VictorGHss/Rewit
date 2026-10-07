@@ -557,6 +557,55 @@ class ReviewLifecycleControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("13.1 GET /api/v1/reviews/{id} inativa (REMOVED/UNDER_REVIEW): 404 para terceiros, sem vazar conteúdo; autor continua vendo")
+    void inactiveReviewDetailIsHiddenFromThirdParties() throws Exception {
+        TestUser author = registerUser("inactive_author");
+        TestUser stranger = registerUser("inactive_stranger");
+        Place place = createPlace();
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+
+        UUID removedId = createReviewViaHttp(author, place.getId(),
+                List.of(new CreateReviewTargetRequest(target.getId(), new BigDecimal("2.0"), "Comentario removido")),
+                "Texto que foi removido", false, "PUBLIC");
+        mockMvc.perform(delete("/api/v1/reviews/" + removedId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + author.accessToken()))
+                .andExpect(status().isNoContent());
+
+        UUID quarantinedId = createReviewViaHttp(author, place.getId(),
+                List.of(new CreateReviewTargetRequest(target.getId(), new BigDecimal("3.0"), "Comentario em analise")),
+                "Texto em quarentena", false, "PUBLIC");
+        // Privada e removida: terceiros recebem 404 (e não 403), sem confirmar que a review existe
+        UUID privateRemovedId = createReviewViaHttp(author, place.getId(),
+                List.of(new CreateReviewTargetRequest(target.getId(), new BigDecimal("4.0"), "Comentario privado")),
+                "Texto privado removido", false, "PRIVATE");
+        new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
+            ReviewJpaEntity quarantined = reviewJpaRepository.findById(quarantinedId).orElseThrow();
+            quarantined.setStatus("UNDER_REVIEW");
+            reviewJpaRepository.save(quarantined);
+            ReviewJpaEntity privateRemoved = reviewJpaRepository.findById(privateRemovedId).orElseThrow();
+            privateRemoved.setStatus("REMOVED");
+            reviewJpaRepository.save(privateRemoved);
+        });
+
+        for (UUID hiddenId : List.of(removedId, quarantinedId, privateRemovedId)) {
+            mockMvc.perform(get("/api/v1/reviews/" + hiddenId)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + stranger.accessToken()))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("REVIEW_NOT_FOUND"))
+                    .andExpect(jsonPath("$.experienceText").doesNotExist())
+                    .andExpect(jsonPath("$.targets").doesNotExist())
+                    .andExpect(jsonPath("$.author").doesNotExist());
+        }
+
+        // O autor mantém o acesso à própria review inativa
+        mockMvc.perform(get("/api/v1/reviews/" + quarantinedId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + author.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNDER_REVIEW"))
+                .andExpect(jsonPath("$.experienceText").value("Texto em quarentena"));
+    }
+
+    @Test
     @DisplayName("14. DELETE /api/v1/reviews/{id} a partir de UNDER_REVIEW é permitido ao autor para retirar do ar")
     void shouldAllowDeleteFromUnderReview() throws Exception {
         TestUser author = registerUser("del_under_rev");

@@ -102,10 +102,14 @@ public class ReviewMediaController {
         UUID authenticatedUserId = extractOptionalUserId(authentication);
         MediaDownloadResult result = reviewMediaService.downloadMedia(reviewId, mediaId, authenticatedUserId);
 
+        // Só mídia de avaliação PUBLIC pode ir para cache compartilhado; PRIVATE/FOLLOWERS dependem de quem lê,
+        // e "public" anularia a proteção que o HTTP dá por padrão a respostas de requisições com Authorization
+        String cacheControl = result.publiclyCacheable() ? "public, max-age=86400" : "private, no-store";
+
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(result.mimeType()))
                 .contentLength(result.bytes().length)
-                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=86400")
+                .header(HttpHeaders.CACHE_CONTROL, cacheControl)
                 .body(result.bytes());
     }
 

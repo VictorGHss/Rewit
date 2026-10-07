@@ -190,6 +190,7 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 Retorna a representação pública da avaliação com alvos, notas, comentários, identificação do autor e o status `isVerifiedOnSite` (sem expor coordenadas do usuário).
 
 #### Políticas de Visibilidade e Autorização (Step 15.0):
+* **Status inativo (`UNDER_REVIEW` / `REMOVED`)**: Somente o autor continua recebendo a avaliação (`200 OK`, com o `status` correspondente). Para terceiros ela é indistinguível de inexistente: `404 Not Found` (`REVIEW_NOT_FOUND`), avaliado antes da visibilidade, de modo que uma avaliação `PRIVATE` removida também responde `404` (e não `403`).
 * **`PUBLIC`**: Visível para qualquer usuário autenticado.
 * **`PRIVATE`**: Visível exclusivamente para o autor da avaliação. Terceiros (mesmo seguidores) recebem `403 Forbidden` (`FORBIDDEN`).
 * **`FOLLOWERS`**: O acesso a publicações com visibilidade `FOLLOWERS` depende do relacionamento persistido entre requester e autor da Review (`user_follows`):

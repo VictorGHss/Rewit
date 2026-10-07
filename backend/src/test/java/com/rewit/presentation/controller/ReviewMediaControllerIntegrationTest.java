@@ -496,4 +496,62 @@ class ReviewMediaControllerIntegrationTest {
         assertFalse(listResponseBody.contains(author.userId().toString()));
         assertFalse(listResponseBody.contains(author.handle()));
     }
+
+    // 17-19. Cache-Control do download conforme a visibilidade da avaliação
+    @Test
+    @DisplayName("17. Mídia de avaliação PUBLIC continua publicamente cacheável")
+    void publicReviewMediaIsPubliclyCacheable() throws Exception {
+        TestUser author = createAuthenticatedUser("med_cache_pub");
+        TestUser viewer = createAuthenticatedUser("med_cache_pub_v");
+        Review review = createReview(author.userId(), createPlace(), "PUBLIC", ReviewStatus.ACTIVE, false);
+        UUID mediaId = uploadJpeg(review, author);
+
+        mockMvc.perform(get("/api/v1/reviews/{reviewId}/media/{mediaId}", review.getId(), mediaId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + viewer.token()))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "public, max-age=86400"));
+    }
+
+    @Test
+    @DisplayName("18. Mídia de avaliação PRIVATE nunca é publicamente cacheável (nem para o autor)")
+    void privateReviewMediaIsNotPubliclyCacheable() throws Exception {
+        TestUser author = createAuthenticatedUser("med_cache_priv");
+        Review review = createReview(author.userId(), createPlace(), "PRIVATE", ReviewStatus.ACTIVE, false);
+        UUID mediaId = uploadJpeg(review, author);
+
+        mockMvc.perform(get("/api/v1/reviews/{reviewId}/media/{mediaId}", review.getId(), mediaId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + author.token()))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
+    }
+
+    @Test
+    @DisplayName("19. Mídia de avaliação FOLLOWERS nunca é publicamente cacheável (seguidor e autor)")
+    void followersReviewMediaIsNotPubliclyCacheable() throws Exception {
+        TestUser author = createAuthenticatedUser("med_cache_fol");
+        TestUser follower = createAuthenticatedUser("med_cache_fol_f");
+        Review review = createReview(author.userId(), createPlace(), "FOLLOWERS", ReviewStatus.ACTIVE, false);
+        UUID mediaId = uploadJpeg(review, author);
+
+        mockMvc.perform(post("/api/v1/users/{id}/follow", author.userId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + follower.token()))
+                .andExpect(status().isOk());
+
+        for (TestUser reader : new TestUser[]{follower, author}) {
+            mockMvc.perform(get("/api/v1/reviews/{reviewId}/media/{mediaId}", review.getId(), mediaId)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + reader.token()))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
+        }
+    }
+
+    private UUID uploadJpeg(Review review, TestUser author) throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "cache.jpg", "image/jpeg", validJpegBytes);
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/v1/reviews/{reviewId}/media", review.getId())
+                        .file(file)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + author.token()))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return UUID.fromString(objectMapper.readTree(uploadResult.getResponse().getContentAsString()).get("id").asText());
+    }
 }

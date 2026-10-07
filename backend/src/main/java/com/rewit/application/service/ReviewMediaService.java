@@ -200,7 +200,8 @@ public class ReviewMediaService {
 
         // Acesso ao storage somente após autorização completa
         byte[] data = objectStoragePort.get(media.getObjectKey());
-        return new MediaDownloadResult(data, media.getMimeType());
+        boolean publiclyCacheable = review.getVisibility() == null || "PUBLIC".equalsIgnoreCase(review.getVisibility());
+        return new MediaDownloadResult(data, media.getMimeType(), publiclyCacheable);
     }
 
     /**

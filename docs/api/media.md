@@ -135,7 +135,9 @@ Recupera o stream binário da imagem sanitizada para exibição na interface web
 #### Cabeçalhos de Resposta:
 * `Content-Type`: `image/jpeg` ou `image/png`
 * `Content-Length`: `<tamanho-em-bytes>`
-* `Cache-Control`: `public, max-age=86400`
+* `Cache-Control`: depende da visibilidade da avaliação:
+  * `PUBLIC`: `public, max-age=86400`;
+  * `PRIVATE` e `FOLLOWERS`: `private, no-store`. O acesso depende de quem lê, então a mídia nunca pode ser guardada por cache compartilhado (proxy/CDN).
 
 #### Prevenção Anti-IDOR:
 Caso a `mediaId` exista no sistema mas pertença a uma avaliação distinta daquela presente no path (`reviewId`), o backend retorna imediatamente `404 Not Found` (`MEDIA_NOT_FOUND`), impedindo a inferência ou correlação de identificadores entre avaliações.
