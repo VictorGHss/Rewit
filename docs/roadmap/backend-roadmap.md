@@ -4,7 +4,7 @@
 > **Status do Repositório**: Verde e Estabilizado\
 > **Checkpoint Atual (HEAD)**: commit `feat: implementar observabilidade v1` (sobre `364b856`)\
 > **Branch**: `main` (ahead do origin em commits consolidados)\
-> **Total de Testes Automatizados**: `1459` (0 failures, 0 errors, 0 skipped)\
+> **Total de Testes Automatizados**: `1462` (0 failures, 0 errors, 0 skipped)\
 > **Working Tree**: `Limpo`\
 > **Próximo Trabalho**: decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (pendência do STEP 29; ADR-011 Proposto). Prontidão de produção (backup/restore, testes de carga) segue como frente separada; rate limiting distribuído concluído (ADR-013 Proposto)
 
@@ -23,7 +23,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1459, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`. A suíte usa PostgreSQL, SeaweedFS e Redis reais.
+*Resultado esperado*: `Tests run: 1462, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`. A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -564,7 +564,7 @@ A camada de apresentação HTTP foi implementada no commit `b1b7871`, expondo os
   - Parâmetros: `page`, `size`, `status`, `reason`, `reviewId`, `reporterUserId`, `sort` (asc/desc) — padrões: `page=0`, `size=20`, `sort=asc`.
   - Resposta: envelope `PagedResponse<AdminReportResponse>` (via `PagedResponse.of(...)` sobre o `PageResult` da aplicação), reutilizando o contrato de paginação já consolidado no projeto.
 * **`POST /api/v1/admin/reviews/{reviewId}/moderate`** — Execução de decisão administrativa via `ModerateReviewUseCase`.
-  - Payload: `ModerateReviewRequest` com campos `action` (`REMOVE_REVIEW` | `RESTORE_REVIEW`), `reasonCode` e `justification` (15–1000 chars).
+  - Payload: `ModerateReviewRequest` com campos `action` (`REMOVE_REVIEW` | `RESTORE_REVIEW`), `reasonCode` (até 64 chars, o tamanho da coluna `reason_code`) e `justification` (15–1000 chars).
   - Resposta: `ModerateReviewResponse` com dados do `ModerationAuditLog` gerado e status anterior/novo da review.
 
 #### 2. Segurança e Autorização
@@ -1069,7 +1069,7 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
 
 ## 12. Estado Atual da Suíte de Testes
 
-* **Total de Testes**: `1459`
+* **Total de Testes**: `1462`
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`

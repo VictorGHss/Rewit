@@ -14,6 +14,9 @@ import java.util.UUID;
  */
 public class ModerationAuditLog {
 
+    /** Tamanho de {@code moderation_audit_logs.reason_code} (V11): validação e persistência usam o mesmo limite. */
+    public static final int MAX_REASON_CODE_LENGTH = 64;
+
     private final UUID id;
     private final UUID reviewId;
     private final UUID moderatorUserId;
@@ -42,6 +45,9 @@ public class ModerationAuditLog {
         }
         if (decision == null) {
             throw new BusinessException("A decisão regulatória é obrigatória", "MISSING_MODERATION_DECISION");
+        }
+        if (reasonCode != null && reasonCode.trim().length() > MAX_REASON_CODE_LENGTH) {
+            throw new BusinessException("O código do motivo não pode exceder 64 caracteres", "INVALID_REASON_CODE_LENGTH");
         }
         if (reasonCode == null || reasonCode.isBlank()) {
             throw new BusinessException("O código do motivo da decisão é obrigatório", "MISSING_REASON_CODE");

@@ -4,6 +4,7 @@ import com.rewit.domain.enums.ModerationAction;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewStatus;
+import com.rewit.domain.model.ModerationAuditLog;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -28,7 +29,7 @@ public final class AdminModerationDtos {
             ModerationAction action,
 
             @NotBlank(message = "O código do motivo da decisão é obrigatório")
-            @Size(max = 100, message = "O reasonCode não pode exceder 100 caracteres")
+            @Size(max = ModerationAuditLog.MAX_REASON_CODE_LENGTH, message = "O reasonCode não pode exceder 64 caracteres")
             String reasonCode,
 
             @NotBlank(message = "A justificativa da decisão é obrigatória")

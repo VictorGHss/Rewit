@@ -250,6 +250,21 @@ class ModerateReviewUseCaseUnitTest {
     }
 
     @Test
+    @DisplayName("reasonCode acima de 64 caracteres (tamanho da coluna) é rejeitado antes de qualquer lock ou escrita")
+    void shouldRejectReasonCodeLongerThanColumnBeforePersistence() {
+        ModerateReviewCommand command = new ModerateReviewCommand(
+                reviewId, moderatorUserId, ModerationAction.REMOVE_REVIEW, "R".repeat(65),
+                "Justificativa suficientemente longa", now
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> moderateReviewUseCase.execute(command));
+
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("INVALID_REASON_CODE_LENGTH", ex.getErrorCode());
+        verifyNoInteractions(reviewRepository, moderationAuditLogRepository, accountStatusPolicy);
+    }
+
+    @Test
     @DisplayName("7. Justificativa menor que 15 caracteres é rejeitada")
     void shouldRejectJustificationShorterThan15Chars() {
         ModerateReviewCommand command = new ModerateReviewCommand(

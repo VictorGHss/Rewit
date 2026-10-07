@@ -166,4 +166,21 @@ class ModerationAuditLogTest {
 
         assertEquals("INVALID_REPORTS_COUNT", ex.getErrorCode());
     }
+
+    @Test
+    @DisplayName("reasonCode: 64 caracteres aceitos, 65 rejeitados (tamanho de moderation_audit_logs.reason_code)")
+    void reasonCodeLengthMatchesColumn() {
+        UUID reviewId = UUID.randomUUID();
+        UUID moderatorId = UUID.randomUUID();
+
+        ModerationAuditLog accepted = new ModerationAuditLog(UUID.randomUUID(), reviewId, moderatorId,
+                ModerationAction.REMOVE_REVIEW, ModerationDecision.ACCEPTED, "C".repeat(64),
+                "Justificativa suficiente para o registro", ReviewStatus.UNDER_REVIEW, ReviewStatus.REMOVED, 1, Instant.now());
+        assertEquals(64, accepted.getReasonCode().length());
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> new ModerationAuditLog(UUID.randomUUID(),
+                reviewId, moderatorId, ModerationAction.REMOVE_REVIEW, ModerationDecision.ACCEPTED, "C".repeat(65),
+                "Justificativa suficiente para o registro", ReviewStatus.UNDER_REVIEW, ReviewStatus.REMOVED, 1, Instant.now()));
+        assertEquals("INVALID_REASON_CODE_LENGTH", ex.getErrorCode());
+    }
 }

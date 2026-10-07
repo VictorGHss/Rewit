@@ -324,6 +324,43 @@ class AdminModerationControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("reasonCode: 64 caracteres persistidos; 65 e 100 rejeitados com 400 antes da persistência, sem falha de banco")
+    void moderateReview_reasonCodeLimitMatchesColumn() throws Exception {
+        TestUser authorUser = registerUser("rc_author");
+        TestUser reporterUser = registerUser("rc_reporter");
+        TestUser moderator = promoteToModerator(registerUser("rc_moderator"));
+        RateableTarget target = createRateableTarget();
+        UUID reviewId = createReview(authorUser.userId(), target);
+        createReport(reporterUser.userId(), reviewId);
+
+        for (int length : new int[]{65, 100}) {
+            mockMvc.perform(post("/api/v1/admin/reviews/" + reviewId + "/moderate")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + moderator.accessToken())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new ModerateReviewRequest(
+                                    ModerationAction.REMOVE_REVIEW, "R".repeat(length),
+                                    "Avaliação verificada como conteúdo de spam com padrão repetitivo."))))
+                    .andExpect(status().isBadRequest());
+        }
+        assertEquals(0L, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM moderation_audit_logs WHERE review_id = ?", Long.class, reviewId));
+        assertEquals("ACTIVE", jdbcTemplate.queryForObject(
+                "SELECT status FROM reviews WHERE id = ?", String.class, reviewId));
+
+        String reasonCode = "R".repeat(64);
+        mockMvc.perform(post("/api/v1/admin/reviews/" + reviewId + "/moderate")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + moderator.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ModerateReviewRequest(
+                                ModerationAction.REMOVE_REVIEW, reasonCode,
+                                "Avaliação verificada como conteúdo de spam com padrão repetitivo."))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reasonCode").value(reasonCode));
+        assertEquals(reasonCode, jdbcTemplate.queryForObject(
+                "SELECT reason_code FROM moderation_audit_logs WHERE review_id = ?", String.class, reviewId));
+    }
+
+    @Test
     @DisplayName("9. POST moderate com ADMIN remove avaliação com sucesso (autorização ADMIN aceita)")
     void moderateReview_asAdmin_removeReview_returns200() throws Exception {
         TestUser authorUser = registerUser("admin_remove_author");

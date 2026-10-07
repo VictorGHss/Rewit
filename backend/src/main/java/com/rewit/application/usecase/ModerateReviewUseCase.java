@@ -114,6 +114,10 @@ public class ModerateReviewUseCase {
         if (command.reasonCode() == null || command.reasonCode().isBlank()) {
             throw new BusinessException("O código do motivo da decisão é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_REASON_CODE");
         }
+        // Mesmo limite da coluna reason_code: rejeitado antes de qualquer lock ou escrita
+        if (command.reasonCode().trim().length() > ModerationAuditLog.MAX_REASON_CODE_LENGTH) {
+            throw new BusinessException("O código do motivo não pode exceder 64 caracteres", HttpStatus.BAD_REQUEST, "INVALID_REASON_CODE_LENGTH");
+        }
         if (command.justification() == null) {
             throw new BusinessException("A justificativa da decisão é obrigatória", HttpStatus.BAD_REQUEST, "MISSING_JUSTIFICATION");
         }
