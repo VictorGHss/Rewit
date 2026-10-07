@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_placeholder_screen.dart';
+import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 
@@ -16,10 +20,17 @@ class AppRouter {
   static const String search = '/search';
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
+  static const String reviewDetail = '/review/detail';
 
   final AuthNotifier authNotifier;
+  final FeedNotifier? feedNotifier;
+  final FeedRepository? feedRepository;
 
-  const AppRouter({required this.authNotifier});
+  const AppRouter({
+    required this.authNotifier,
+    this.feedNotifier,
+    this.feedRepository,
+  });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -35,7 +46,10 @@ class AppRouter {
                 );
               }
               if (state is Authenticated) {
-                return HomeScreen(authNotifier: authNotifier);
+                return HomeScreen(
+                  authNotifier: authNotifier,
+                  feedNotifier: feedNotifier,
+                );
               }
               return LoginScreen(authNotifier: authNotifier);
             },
@@ -51,7 +65,37 @@ class AppRouter {
 
       case home:
         return MaterialPageRoute(
-          builder: (context) => HomeScreen(authNotifier: authNotifier),
+          builder: (context) => HomeScreen(
+            authNotifier: authNotifier,
+            feedNotifier: feedNotifier,
+          ),
+          settings: settings,
+        );
+
+      case reviewDetail:
+        final args = settings.arguments;
+        if (args is FeedReview) {
+          return MaterialPageRoute(
+            builder: (context) => ReviewDetailScreen(
+              reviewId: args.id,
+              initialReview: args,
+              feedRepository: feedRepository,
+            ),
+            settings: settings,
+          );
+        } else if (args is String) {
+          return MaterialPageRoute(
+            builder: (context) => ReviewDetailScreen(
+              reviewId: args,
+              feedRepository: feedRepository,
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => const Scaffold(
+            body: Center(child: Text('Identificador de avaliação ausente.')),
+          ),
           settings: settings,
         );
 

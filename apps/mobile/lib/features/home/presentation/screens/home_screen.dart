@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_placeholder_screen.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
@@ -8,10 +11,12 @@ import 'package:rewit_mobile/features/search/presentation/screens/search_placeho
 /// Tela principal autenticada do aplicativo Rewit.
 class HomeScreen extends StatefulWidget {
   final AuthNotifier authNotifier;
+  final FeedNotifier? feedNotifier;
 
   const HomeScreen({
     super.key,
     required this.authNotifier,
+    this.feedNotifier,
   });
 
   @override
@@ -48,8 +53,106 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Widget _buildFeedView(BuildContext context, Authenticated auth) {
+  Widget _buildUserHeaderCard(BuildContext context, Authenticated auth) {
     final user = auth.user;
+    final theme = Theme.of(context);
+
+    return Card(
+      elevation: 0.5,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: theme.colorScheme.primary.withAlpha(30),
+              child: Text(
+                user.displayName.isNotEmpty ? user.displayName[0].toUpperCase() : 'U',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          user.displayName,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (user.isVerified) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.verified,
+                          size: 14,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    '@${user.handle}',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withAlpha(160),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Row(
+              children: [
+                Icon(Icons.star, size: 14, color: Colors.amber[700]),
+                const SizedBox(width: 4),
+                Text(
+                  'Reputação: ${user.reputationScore}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurface.withAlpha(200),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFeedView(BuildContext context, Authenticated auth) {
+    if (widget.feedNotifier != null) {
+      return Column(
+        children: [
+          _buildUserHeaderCard(context, auth),
+          Expanded(
+            child: FeedView(
+              feedNotifier: widget.feedNotifier!,
+              onReviewTap: (review) {
+                Navigator.of(context).pushNamed(
+                  AppRouter.reviewDetail,
+                  arguments: review,
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
     final theme = Theme.of(context);
 
     return SingleChildScrollView(
@@ -57,82 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Card de identificação do usuário autenticado (/api/v1/auth/me)
-          Card(
-            elevation: 1,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundColor: theme.colorScheme.primary.withAlpha(30),
-                    child: Text(
-                      user.displayName.isNotEmpty ? user.displayName[0].toUpperCase() : 'U',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                user.displayName,
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (user.isVerified) ...[
-                              const SizedBox(width: 4),
-                              Icon(
-                                Icons.verified,
-                                size: 16,
-                                color: theme.colorScheme.primary,
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '@${user.handle}',
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurface.withAlpha(160),
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(Icons.star, size: 14, color: Colors.amber[700]),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Reputação: ${user.reputationScore}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: theme.colorScheme.onSurface.withAlpha(200),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildUserHeaderCard(context, auth),
           const SizedBox(height: 24),
 
           // Seção de Feed Inicial

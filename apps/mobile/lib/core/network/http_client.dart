@@ -165,7 +165,7 @@ class RewitHttpClient {
           throw UnsupportedError('Método HTTP $method não suportado.');
       }
 
-      return _handleResponse(response);
+      return _handleResponse(response, requiresAuth: requiresAuth);
     } on TimeoutException {
       throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
     } on http.ClientException catch (e) {
@@ -217,7 +217,7 @@ class RewitHttpClient {
     return headers;
   }
 
-  http.Response _handleResponse(http.Response response) {
+  http.Response _handleResponse(http.Response response, {required bool requiresAuth}) {
     final statusCode = response.statusCode;
 
     // Respostas de sucesso (2xx)
@@ -235,8 +235,8 @@ class RewitHttpClient {
     // Parsing estruturado de erro RFC 7807
     final problem = ProblemDetail.fromResponseBody(response.body, statusCode);
 
-    // Se a sessão expirou / 401 não autorizado
-    if (statusCode == 401) {
+    // Se a sessão expirou em requisição autenticada (401 não autorizado)
+    if (statusCode == 401 && requiresAuth) {
       onSessionExpired?.call();
     }
 
