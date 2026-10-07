@@ -75,7 +75,19 @@ A permissão para criar ou visualizar discussões deriva estritamente da visibil
 
 ---
 
-### 2.8 Denúncias e Auto-quarentena (C3 D1)
+### 2.8 Thread por Leitor: Quarentena e Tombstone (C3 D2)
+
+| Status interno | Terceiros | Próprio autor |
+|---|---|---|
+| `ACTIVE` | `VISIBLE` | `VISIBLE` |
+| `UNDER_REVIEW` (raiz) | a conversa inteira some, inclusive as respostas | `PENDING_REVIEW`, sem respostas |
+| `UNDER_REVIEW` (resposta) | some | `PENDING_REVIEW` dentro da raiz |
+| `REMOVED` (raiz) | tombstone `REMOVED` sem conteúdo nem autor, **apenas se houver resposta visível**; as respostas ativas permanecem | igual a terceiros |
+
+* O status interno de moderação (`ACTIVE`, `UNDER_REVIEW`, `REMOVED`) não é exposto na listagem; o tombstone nunca indica se a remoção foi do autor ou da moderação.
+* Respostas não aparecem isoladas: a resposta de uma raiz em quarentena some junto com ela.
+
+### 2.9 Denúncias e Auto-quarentena (C3 D1)
 
 * Denúncias de discussões ficam em `discussion_reports` (V19), separadas das denúncias de avaliação: uma por usuário por discussão (`uq_discussion_report_reporter`), status `PENDING`, `ACCEPTED` ou `REJECTED`.
 * A **terceira denúncia `PENDING` de usuários distintos** leva o comentário de `ACTIVE` para `UNDER_REVIEW` na mesma transação. A linha da discussão é travada (`FOR UPDATE`) antes de inserir e contar, então denúncias concorrentes são serializadas e a quarentena acontece exatamente uma vez.
@@ -123,14 +135,15 @@ Para responder a um comentário existente:
 
 ---
 
-### 3.2 Listar Comentários de uma Avaliação
+### 3.2 Listar a Thread de Comentários de uma Avaliação
 * **Método**: `GET`
 * **Rota**: `/api/v1/reviews/{reviewId}/discussions`
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
 * **Parâmetros de Consulta**:
-  * `page` (opcional, default `0`, min `0`): número da página.
-  * `size` (opcional, default `20`, min `1`, max `50`): quantidade de elementos por página.
-* **Ordenação**: Determinística e estritamente cronológica (`created_at ASC, id ASC`).
+  * `page` (opcional, default `0`, min `0`): página de **comentários raiz**.
+  * `size` (opcional, default `20`, min `1`, max `50`): raízes por página.
+* **Ordenação**: determinística e cronológica (`created_at ASC, id ASC`), para raízes e respostas.
+* **Estrutura**: o servidor monta a thread em dois níveis. Cada raiz traz as **3 primeiras respostas visíveis** em `replies`; `replyCount` é o total visível ao leitor e `hasMoreReplies` indica que o restante deve ser buscado em §3.4. O cliente não precisa reconstruir a árvore nem conhecer o status de moderação (§2.8).
 
 #### Resposta de Sucesso (`200 OK`)
 ```json
@@ -139,22 +152,50 @@ Para responder a um comentário existente:
     {
       "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "reviewId": "b1e9c520-22c6-4d7a-b5e0-82a945d8bfa7",
-      "authorId": "a8a088fc-a3bc-4edc-90aa-190e5a3b2b9b",
       "parentId": null,
-      "content": "Excelente análise! Você saberia me dizer se há opções vegetarianas no cardápio?",
+      "state": "VISIBLE",
+      "content": "Excelente análise! Há opções vegetarianas no cardápio?",
+      "author": {
+        "id": "a8a088fc-a3bc-4edc-90aa-190e5a3b2b9b",
+        "handle": "maria",
+        "displayName": "Maria",
+        "avatarUrl": null
+      },
       "isFromOwner": false,
-      "status": "ACTIVE",
-      "createdAt": "2026-09-30T11:50:00Z"
+      "createdAt": "2026-09-30T11:50:00Z",
+      "canReply": true,
+      "canDelete": false,
+      "replies": [
+        {
+          "id": "e7b0e271-bf31-48e0-a7d9-3617be349b1a",
+          "reviewId": "b1e9c520-22c6-4d7a-b5e0-82a945d8bfa7",
+          "parentId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "state": "VISIBLE",
+          "content": "Sim! Várias massas e risotos vegetarianos.",
+          "author": null,
+          "isFromOwner": true,
+          "createdAt": "2026-09-30T12:00:00Z",
+          "canReply": false,
+          "canDelete": false
+        }
+      ],
+      "replyCount": 1,
+      "hasMoreReplies": false
     },
     {
-      "id": "e7b0e271-bf31-48e0-a7d9-3617be349b1a",
+      "id": "0b9d2a10-6a1c-4c6e-9d7e-4b2f1f0c9a11",
       "reviewId": "b1e9c520-22c6-4d7a-b5e0-82a945d8bfa7",
-      "authorId": "123e4567-e89b-12d3-a456-426614174000",
-      "parentId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "content": "Sim! Eles têm várias opções de massas e risotos vegetarianos excelentes.",
-      "isFromOwner": true,
-      "status": "ACTIVE",
-      "createdAt": "2026-09-30T12:00:00Z"
+      "parentId": null,
+      "state": "REMOVED",
+      "content": null,
+      "author": null,
+      "isFromOwner": false,
+      "createdAt": "2026-09-30T12:10:00Z",
+      "canReply": false,
+      "canDelete": false,
+      "replies": [ { "...": "respostas visíveis preservadas" } ],
+      "replyCount": 2,
+      "hasMoreReplies": false
     }
   ],
   "pageNumber": 0,
@@ -165,12 +206,16 @@ Para responder a um comentário existente:
 }
 ```
 
-*Nota de Performance e Execução*:
-* A listagem de discussões utiliza um **número constante de queries por requisição** (exatamente 1 consulta paginada de dados e 1 consulta agregada de `count`), eliminando qualquer risco de N+1 para resolução de autores.
-* A ordenação determinística (`created_at ASC, id ASC`) e a paginação são delegadas diretamente ao motor do PostgreSQL.
-* O tempo de resposta efetivo é determinado pelo plano de execução gerado pelo PostgreSQL, pela cardinalidade de comentários por avaliação e pelos índices disponíveis.
-* **Auditoria de Índices**: Os índices `idx_review_discussions_review` (em `review_id`) e `idx_review_discussions_parent` (em `parent_id`) da V1 atendem com folga às operações do MVP. Como evolução futura para avaliações com dezenas de milhares de comentários, pode-se avaliar um índice composto `(review_id, status, created_at, id)`.
-* **Privacidade e Anonimato**: Se a Review for anônima (`isAnonymous = true`) e o comentário for publicado pelo autor da avaliação (`isFromOwner = true`), o campo `authorId` retornado na resposta pública é mascarado para `null`. O campo `isFromOwner` permanece `true` para preservar a semântica de resposta do proprietário da avaliação sem revelar sua identidade.
+| Campo | Regra |
+|---|---|
+| `state` | `VISIBLE`, `REMOVED` (tombstone) ou `PENDING_REVIEW` (somente para o próprio autor) |
+| `content` | `null` em `REMOVED` |
+| `author` | `null` em `REMOVED` e quando o anonimato da avaliação mascara o dono (`isFromOwner = true` em avaliação anônima) |
+| `isFromOwner` | `false` em `REMOVED` (o tombstone não revela que era do dono da avaliação) |
+| `canReply` | `true` somente em raiz `VISIBLE` (um nível de resposta) |
+| `canDelete` | `true` quando o leitor é o autor e o item não está `REMOVED` |
+
+*Execução*: número constante de consultas por página (raízes paginadas, primeiras respostas por raiz com `ROW_NUMBER()`, contagem agrupada e perfis em lote), sem N+1.
 
 ---
 
@@ -187,7 +232,15 @@ Para responder a um comentário existente:
 #### Resposta de Sucesso:
 `204 No Content` (corpo vazio).
 
-### 3.4 Denunciar Comentário ou Resposta
+### 3.4 Listar Respostas de um Comentário Raiz
+* **Método**: `GET`
+* **Rota**: `/api/v1/discussions/{discussionId}/replies`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Parâmetros**: `page` (default `0`) e `size` (default `20`, max `50`).
+* **Resposta**: página de itens no mesmo formato de `replies` em §3.2, com as mesmas regras de visibilidade.
+* Raiz inexistente, que seja uma resposta ou que esteja em quarentena: `404 DISCUSSION_NOT_FOUND` (inclusive para o autor). Raiz removida continua listando as respostas visíveis.
+
+### 3.5 Denunciar Comentário ou Resposta
 * **Método**: `POST`
 * **Rota**: `/api/v1/discussions/{discussionId}/reports`
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)

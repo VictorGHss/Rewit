@@ -13,7 +13,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -74,5 +77,58 @@ public class DiscussionRepositoryAdapter implements DiscussionRepository {
                 .toList();
 
         return PageResult.of(domainList, page, size, paged.getTotalElements());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<ReviewDiscussion> findThreadRootsVisibleTo(UUID reviewId, UUID viewerId, int page, int size) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(viewerId, "viewerId must not be null");
+        Page<DiscussionJpaEntity> paged = discussionJpaRepository.findThreadRootsVisibleTo(reviewId, viewerId,
+                DiscussionStatus.ACTIVE, DiscussionStatus.UNDER_REVIEW, DiscussionStatus.REMOVED, chronological(page, size));
+        return PageResult.of(toDomain(paged.getContent()), page, size, paged.getTotalElements());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReviewDiscussion> findFirstRepliesVisibleTo(Collection<UUID> rootIds, UUID viewerId, int limitPerRoot) {
+        Objects.requireNonNull(viewerId, "viewerId must not be null");
+        if (rootIds == null || rootIds.isEmpty() || limitPerRoot <= 0) {
+            return List.of();
+        }
+        return toDomain(discussionJpaRepository.findFirstRepliesVisibleTo(rootIds, viewerId, limitPerRoot));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, Long> countRepliesVisibleTo(Collection<UUID> rootIds, UUID viewerId) {
+        Objects.requireNonNull(viewerId, "viewerId must not be null");
+        if (rootIds == null || rootIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Long> counts = new HashMap<>();
+        for (Object[] row : discussionJpaRepository.countRepliesVisibleTo(rootIds, viewerId,
+                DiscussionStatus.ACTIVE, DiscussionStatus.UNDER_REVIEW)) {
+            counts.put((UUID) row[0], ((Number) row[1]).longValue());
+        }
+        return counts;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<ReviewDiscussion> findRepliesVisibleTo(UUID rootId, UUID viewerId, int page, int size) {
+        Objects.requireNonNull(rootId, "rootId must not be null");
+        Objects.requireNonNull(viewerId, "viewerId must not be null");
+        Page<DiscussionJpaEntity> paged = discussionJpaRepository.findRepliesVisibleTo(rootId, viewerId,
+                DiscussionStatus.ACTIVE, DiscussionStatus.UNDER_REVIEW, chronological(page, size));
+        return PageResult.of(toDomain(paged.getContent()), page, size, paged.getTotalElements());
+    }
+
+    private static Pageable chronological(int page, int size) {
+        return PageRequest.of(page, size, Sort.by(Sort.Order.asc("createdAt"), Sort.Order.asc("id")));
+    }
+
+    private static List<ReviewDiscussion> toDomain(List<DiscussionJpaEntity> entities) {
+        return entities.stream().map(DiscussionJpaEntity::toDomain).toList();
     }
 }

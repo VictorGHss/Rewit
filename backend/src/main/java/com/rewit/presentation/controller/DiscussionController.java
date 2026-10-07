@@ -4,13 +4,18 @@ import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.discussion.DiscussionDtos.CreateDiscussionCommand;
 import com.rewit.application.dto.discussion.DiscussionDtos.DiscussionView;
 import com.rewit.application.dto.discussion.DiscussionReportDtos.ReportDiscussionCommand;
+import com.rewit.application.dto.discussion.DiscussionThreadDtos.DiscussionItemView;
+import com.rewit.application.dto.discussion.DiscussionThreadDtos.DiscussionThreadView;
 import com.rewit.application.service.DiscussionService;
+import com.rewit.application.service.DiscussionThreadQueryService;
 import com.rewit.application.usecase.ReportDiscussionUseCase;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.presentation.dto.common.PagedResponse;
 import com.rewit.presentation.dto.discussion.CreateDiscussionRequest;
 import com.rewit.presentation.dto.discussion.DiscussionReportReceiptResponse;
+import com.rewit.presentation.dto.discussion.DiscussionItemResponse;
 import com.rewit.presentation.dto.discussion.DiscussionResponse;
+import com.rewit.presentation.dto.discussion.DiscussionThreadResponse;
 import com.rewit.presentation.dto.discussion.ReportDiscussionRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -36,10 +41,14 @@ public class DiscussionController {
 
     private final DiscussionService discussionService;
     private final ReportDiscussionUseCase reportDiscussionUseCase;
+    private final DiscussionThreadQueryService discussionThreadQueryService;
 
-    public DiscussionController(DiscussionService discussionService, ReportDiscussionUseCase reportDiscussionUseCase) {
+    public DiscussionController(DiscussionService discussionService,
+                                ReportDiscussionUseCase reportDiscussionUseCase,
+                                DiscussionThreadQueryService discussionThreadQueryService) {
         this.discussionService = Objects.requireNonNull(discussionService, "DiscussionService must not be null");
         this.reportDiscussionUseCase = Objects.requireNonNull(reportDiscussionUseCase, "ReportDiscussionUseCase must not be null");
+        this.discussionThreadQueryService = Objects.requireNonNull(discussionThreadQueryService, "DiscussionThreadQueryService must not be null");
     }
 
     @PostMapping("/reviews/{reviewId}/discussions")
@@ -63,23 +72,41 @@ public class DiscussionController {
     }
 
     @GetMapping("/reviews/{reviewId}/discussions")
-    @Operation(summary = "Listar comentários de uma avaliação de forma cronológica", security = @SecurityRequirement(name = "bearerAuth"))
-    public ResponseEntity<PagedResponse<DiscussionResponse>> getDiscussions(
+    @Operation(summary = "Listar a thread de comentários de uma avaliação (raízes paginadas com respostas)",
+            security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<PagedResponse<DiscussionThreadResponse>> getDiscussions(
             @PathVariable("reviewId") UUID reviewId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             Authentication authentication
     ) {
         UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
-
-        PageResult<DiscussionView> pageResult = discussionService.findDiscussionsByReviewId(reviewId, authenticatedUserId, page, size);
-
-        List<DiscussionResponse> responseList = pageResult.content().stream()
-                .map(DiscussionResponse::fromView)
+        PageResult<DiscussionThreadView> pageResult =
+                discussionThreadQueryService.getThread(reviewId, authenticatedUserId, page, size);
+        List<DiscussionThreadResponse> responseList = pageResult.content().stream()
+                .map(DiscussionThreadResponse::fromView)
                 .toList();
-
         return ResponseEntity.ok(PagedResponse.of(
                 responseList,
+                pageResult.pageNumber(),
+                pageResult.pageSize(),
+                pageResult.totalElements()
+        ));
+    }
+
+    @GetMapping("/discussions/{discussionId}/replies")
+    @Operation(summary = "Listar respostas de um comentário raiz (paginado)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<PagedResponse<DiscussionItemResponse>> getReplies(
+            @PathVariable("discussionId") UUID discussionId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication
+    ) {
+        UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
+        PageResult<DiscussionItemView> pageResult =
+                discussionThreadQueryService.getReplies(discussionId, authenticatedUserId, page, size);
+        return ResponseEntity.ok(PagedResponse.of(
+                pageResult.content().stream().map(DiscussionItemResponse::fromView).toList(),
                 pageResult.pageNumber(),
                 pageResult.pageSize(),
                 pageResult.totalElements()

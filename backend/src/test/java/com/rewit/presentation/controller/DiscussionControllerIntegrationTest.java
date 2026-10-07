@@ -583,10 +583,10 @@ class DiscussionControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].id").value(ownerDiscId.toString()))
                 .andExpect(jsonPath("$.content[0].isFromOwner").value(true))
-                .andExpect(jsonPath("$.content[0].authorId").isEmpty())
+                .andExpect(jsonPath("$.content[0].author").isEmpty())
                 .andExpect(jsonPath("$.content[1].id").value(thirdDiscId.toString()))
                 .andExpect(jsonPath("$.content[1].isFromOwner").value(false))
-                .andExpect(jsonPath("$.content[1].authorId").value(thirdParty.userId().toString()));
+                .andExpect(jsonPath("$.content[1].author.id").value(thirdParty.userId().toString()));
     }
 
     // 18. Auditoria de Anonimato: Review não anônima mantém authorId normalmente
