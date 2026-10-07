@@ -75,6 +75,15 @@ A permissão para criar ou visualizar discussões deriva estritamente da visibil
 
 ---
 
+### 2.8 Denúncias e Auto-quarentena (C3 D1)
+
+* Denúncias de discussões ficam em `discussion_reports` (V19), separadas das denúncias de avaliação: uma por usuário por discussão (`uq_discussion_report_reporter`), status `PENDING`, `ACCEPTED` ou `REJECTED`.
+* A **terceira denúncia `PENDING` de usuários distintos** leva o comentário de `ACTIVE` para `UNDER_REVIEW` na mesma transação. A linha da discussão é travada (`FOR UPDATE`) antes de inserir e contar, então denúncias concorrentes são serializadas e a quarentena acontece exatamente uma vez.
+* `UNDER_REVIEW` não sofre nova transição automática e `REMOVED` nunca volta para `UNDER_REVIEW`. A quarentena não altera reputação nem estatísticas, não gera punição nem notificação.
+* O autor não denuncia o próprio comentário. Só comentários publicamente visíveis podem ser denunciados: `ACTIVE` e fora de uma conversa em quarentena (resposta a um comentário removido continua denunciável).
+* Quem denuncia recebe sempre a mesma confirmação genérica, inclusive na denúncia repetida e na que coloca o comentário em análise. Um comentário indisponível responde `404 DISCUSSION_NOT_FOUND`, sem indicar o motivo.
+* Limite de taxa: o mesmo das denúncias de avaliação (`REPORT_CREATION`, 10 por minuto por usuário). A conta precisa estar ativa (`401 ACCOUNT_DISABLED`).
+
 ## 3. Endpoints da API
 
 ### 3.1 Criar Comentário ou Resposta
@@ -178,6 +187,29 @@ Para responder a um comentário existente:
 #### Resposta de Sucesso:
 `204 No Content` (corpo vazio).
 
+### 3.4 Denunciar Comentário ou Resposta
+* **Método**: `POST`
+* **Rota**: `/api/v1/discussions/{discussionId}/reports`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+
+#### Payload de Requisição
+```json
+{
+  "reason": "HARASSMENT",
+  "detail": "Texto opcional, até 500 caracteres"
+}
+```
+`reason`: `SPAM`, `HARASSMENT`, `HATE_SPEECH`, `MISINFORMATION`, `INAPPROPRIATE_CONTENT` ou `FRAUD`.
+
+#### Resposta de Sucesso (`202 Accepted`)
+Idêntica para denúncia nova, repetida ou que coloca o comentário em análise:
+```json
+{
+  "status": "RECEIVED",
+  "message": "Denúncia recebida. Obrigado por ajudar a manter a comunidade segura."
+}
+```
+
 ---
 
 ## 4. Tabela de Códigos de Erro (RFC 7807)
@@ -188,6 +220,7 @@ Para responder a um comentário existente:
 | `400 Bad Request` | `INVALID_CONTENT_LENGTH` | Conteúdo excedendo o limite de 2000 caracteres |
 | `400 Bad Request` | `DISCUSSION_NESTING_LIMIT_EXCEEDED` | Tentativa de criar encadeamento de 2º nível (resposta a uma resposta) |
 | `400 Bad Request` | `INVALID_PARENT_DISCUSSION` | O `parentId` informado pertence a outra Review |
+| `400 Bad Request` | `SELF_REPORT_FORBIDDEN` | Autor tentando denunciar o próprio comentário |
 | `400 Bad Request` | `INVALID_PAGE` / `INVALID_PAGE_SIZE` | Paginação com página negativa ou tamanho fora do intervalo [1, 50] |
 | `401 Unauthorized` | `UNAUTHORIZED` | Ausência ou token JWT inválido/expirado |
 | `403 Forbidden` | `FORBIDDEN` | Tentativa de comentar em Review `PRIVATE` de terceiro, Review `FOLLOWERS` sem ser seguidor, ou excluir comentário de outro usuário |

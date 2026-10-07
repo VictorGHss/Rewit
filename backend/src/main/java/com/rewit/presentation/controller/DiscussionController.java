@@ -3,11 +3,15 @@ package com.rewit.presentation.controller;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.discussion.DiscussionDtos.CreateDiscussionCommand;
 import com.rewit.application.dto.discussion.DiscussionDtos.DiscussionView;
+import com.rewit.application.dto.discussion.DiscussionReportDtos.ReportDiscussionCommand;
 import com.rewit.application.service.DiscussionService;
+import com.rewit.application.usecase.ReportDiscussionUseCase;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.presentation.dto.common.PagedResponse;
 import com.rewit.presentation.dto.discussion.CreateDiscussionRequest;
+import com.rewit.presentation.dto.discussion.DiscussionReportReceiptResponse;
 import com.rewit.presentation.dto.discussion.DiscussionResponse;
+import com.rewit.presentation.dto.discussion.ReportDiscussionRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,9 +35,11 @@ import java.util.UUID;
 public class DiscussionController {
 
     private final DiscussionService discussionService;
+    private final ReportDiscussionUseCase reportDiscussionUseCase;
 
-    public DiscussionController(DiscussionService discussionService) {
+    public DiscussionController(DiscussionService discussionService, ReportDiscussionUseCase reportDiscussionUseCase) {
         this.discussionService = Objects.requireNonNull(discussionService, "DiscussionService must not be null");
+        this.reportDiscussionUseCase = Objects.requireNonNull(reportDiscussionUseCase, "ReportDiscussionUseCase must not be null");
     }
 
     @PostMapping("/reviews/{reviewId}/discussions")
@@ -91,6 +97,20 @@ public class DiscussionController {
 
         discussionService.deleteDiscussion(discussionId, authenticatedUserId);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/discussions/{discussionId}/reports")
+    @Operation(summary = "Denunciar comentário ou resposta", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<DiscussionReportReceiptResponse> reportDiscussion(
+            @PathVariable("discussionId") UUID discussionId,
+            @Valid @RequestBody ReportDiscussionRequest request,
+            Authentication authentication
+    ) {
+        UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
+        reportDiscussionUseCase.execute(new ReportDiscussionCommand(
+                authenticatedUserId, discussionId, request.reason(), request.detail()));
+        // Mesma resposta para denúncia nova, repetida ou que coloca o comentário em análise
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(DiscussionReportReceiptResponse.received());
     }
 
     private UUID extractAuthenticatedUserId(Authentication authentication) {

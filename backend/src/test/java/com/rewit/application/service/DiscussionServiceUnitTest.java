@@ -413,7 +413,7 @@ class DiscussionServiceUnitTest {
         ReviewDiscussion discussion = new ReviewDiscussion(
                 discussionId, reviewId, otherUserId, null, "Comentário que será deletado", false
         );
-        when(discussionRepository.findById(discussionId)).thenReturn(Optional.of(discussion));
+        when(discussionRepository.findByIdForUpdate(discussionId)).thenReturn(Optional.of(discussion));
 
         discussionService.deleteDiscussion(discussionId, otherUserId);
 
@@ -430,7 +430,7 @@ class DiscussionServiceUnitTest {
         ReviewDiscussion discussion = new ReviewDiscussion(
                 discussionId, reviewId, otherUserId, null, "Comentário alheio", false
         );
-        when(discussionRepository.findById(discussionId)).thenReturn(Optional.of(discussion));
+        when(discussionRepository.findByIdForUpdate(discussionId)).thenReturn(Optional.of(discussion));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> discussionService.deleteDiscussion(discussionId, thirdUserId));
 
@@ -449,7 +449,7 @@ class DiscussionServiceUnitTest {
                 discussionId, reviewId, otherUserId, null, "Já deletado", false,
                 "REMOVED", Instant.now(), Instant.now()
         );
-        when(discussionRepository.findById(discussionId)).thenReturn(Optional.of(discussion));
+        when(discussionRepository.findByIdForUpdate(discussionId)).thenReturn(Optional.of(discussion));
 
         assertDoesNotThrow(() -> discussionService.deleteDiscussion(discussionId, otherUserId));
         verify(discussionRepository, never()).save(any());

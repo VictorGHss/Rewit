@@ -178,7 +178,8 @@ public class DiscussionService {
 
         accountStatusPolicy.requireOperational(requesterUserId);
 
-        ReviewDiscussion discussion = discussionRepository.findById(discussionId)
+        // Lock da discussão: serializa a exclusão com a auto-quarentena e com a moderação do mesmo comentário
+        ReviewDiscussion discussion = discussionRepository.findByIdForUpdate(discussionId)
                 .orElseThrow(() -> new BusinessException("Comentário não encontrado", HttpStatus.NOT_FOUND, "DISCUSSION_NOT_FOUND"));
 
         if (!discussion.getUserId().equals(requesterUserId)) {
