@@ -14,6 +14,7 @@ import com.rewit.application.usecase.PurgeEligibleAccountsUseCase.AccountPurgeRu
 import com.rewit.infrastructure.account.HmacEmailReservation;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,12 +36,12 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -55,9 +56,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Passada do job de purge (C2.3) com PostgreSQL real: a orquestração é montada diretamente (o agendamento está
  * desligado nos testes), com o caso de uso de purge real, transacional por conta.
  *
- * <p>Isolamento: cada teste usa um "agora" numa janela aleatória do passado distante, e as contas do cenário recebem
- * {@code deleted_at} relativo a ele; o corte de 30 dias só alcança contas criadas por estes testes, nunca as de outras
- * suítes. As verificações são feitas por conta.
+ * <p>Isolamento: a consulta de candidatas é global (todas as {@code DELETED} elegíveis), então o banco compartilhado
+ * precisa estar sob controle:
+ * <ul>
+ *   <li>todos os testes usam o mesmo "agora" fixo ({@link #REFERENCE_NOW}), no passado distante; as contas do cenário
+ *   recebem {@code deleted_at} relativo a ele, e o corte de 30 dias nunca alcança contas de outras suítes, excluídas
+ *   com o relógio real;</li>
+ *   <li>as contas desta classe têm e-mail marcado ({@link #FIXTURE_EMAIL_PREFIX}); antes de cada teste, sobras
+ *   {@code DELETED} ainda não purgadas (por exemplo de uma execução interrompida antes do teardown) são removidas;
+ *   depois de cada teste, as contas criadas por ele são removidas.</li>
+ * </ul>
  */
 @SpringBootTest
 @ActiveProfiles("local")
@@ -73,8 +81,15 @@ class AccountPurgeJobIntegrationTest {
     @Autowired private PurgeDeletedAccountUseCase purgeDeletedAccountUseCase;
     @Autowired private Environment environment;
 
+    /** "Agora" fixo de todos os testes: nenhuma conta excluída pelo relógio real tem deleted_at tão antigo. */
+    private static final Instant REFERENCE_NOW = Instant.parse("2000-01-15T12:00:00Z");
+    /** Marca as contas criadas por esta classe, para a limpeza nunca alcançar dados de outras suítes. */
+    private static final String FIXTURE_EMAIL_PREFIX = "purgejob.";
+    private static final String FIXTURE_EMAIL_PATTERN = FIXTURE_EMAIL_PREFIX + "%@rewit.test";
+
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final List<UUID> createdUsers = new ArrayList<>();
 
     private record TestUser(UUID id, String email, String password, String accessToken) {}
 
@@ -108,12 +123,20 @@ class AccountPurgeJobIntegrationTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).apply(springSecurity()).build();
+        jdbcTemplate.update("DELETE FROM users WHERE account_status = 'DELETED' AND email LIKE ?", FIXTURE_EMAIL_PATTERN);
+    }
+
+    @AfterEach
+    void tearDown() {
+        for (UUID id : createdUsers) {
+            jdbcTemplate.update("DELETE FROM users WHERE id = ?", id);
+        }
     }
 
     @Test
     @DisplayName("Passada: só DELETED fora do prazo vai ao purge; 29 dias ignorada, 30 e 31 purgadas; outros estados nunca")
     void runPurgesOnlyEligibleDeletedAccounts() throws Exception {
-        Instant now = referenceNow();
+        Instant now = REFERENCE_NOW;
         TestUser days29 = deletedAt(register("job29"), now.minus(Duration.ofDays(29)));
         TestUser days30 = deletedAt(register("job30"), now.minus(Duration.ofDays(30)));
         TestUser days31 = deletedAt(register("job31"), now.minus(Duration.ofDays(31)));
@@ -140,7 +163,7 @@ class AccountPurgeJobIntegrationTest {
     @Test
     @DisplayName("Isolamento: A sucesso, B falha, C sucesso; a falha de B não desfaz A nem impede C")
     void failureOfOneAccountDoesNotAffectOthers() throws Exception {
-        Instant now = referenceNow();
+        Instant now = REFERENCE_NOW;
         TestUser a = deletedAt(register("job_a"), now.minus(Duration.ofDays(40)));
         TestUser b = deletedAt(register("job_b"), now.minus(Duration.ofDays(39)));
         TestUser c = deletedAt(register("job_c"), now.minus(Duration.ofDays(38)));
@@ -156,14 +179,14 @@ class AccountPurgeJobIntegrationTest {
         assertEquals(b.email(), email(b));
         assertEquals(1, count("SELECT count(*) FROM auth_sessions WHERE user_id = ?", b.id()), "nada de B foi removido");
         assertTrue(isMinimized(c), "C foi purgada depois da falha de B");
-        assertTrue(result.failed() >= 1);
+        assertEquals(1, result.failed());
         assertEquals(1, result.failuresByType().get("DataAccessResourceFailureException"));
     }
 
     @Test
     @DisplayName("Idempotência: a segunda passada não altera as contas já minimizadas")
     void secondRunDoesNotChangePurgedAccounts() throws Exception {
-        Instant now = referenceNow();
+        Instant now = REFERENCE_NOW;
         TestUser account = deletedAt(register("job_idem"), now.minus(Duration.ofDays(31)));
 
         job(recording(Set.of())).run(now);
@@ -186,7 +209,7 @@ class AccountPurgeJobIntegrationTest {
     @Test
     @DisplayName("Sem segredo: com conta elegível a passada é bloqueada, nada muda e o log não traz e-mail nem segredo")
     void missingSecretBlocksRunWithoutChanges() throws Exception {
-        Instant now = referenceNow();
+        Instant now = REFERENCE_NOW;
         TestUser eligible = deletedAt(register("job_sem_segredo"), now.minus(Duration.ofDays(31)));
         HmacEmailReservation withoutSecret = new HmacEmailReservation("");
         PurgeDeletedAccountUseCase purgeWithoutSecret =
@@ -203,7 +226,7 @@ class AccountPurgeJobIntegrationTest {
         }
 
         assertTrue(result.secretMissing());
-        assertTrue(result.candidates() >= 1);
+        assertEquals(1, result.candidates(), "só a conta deste teste é candidata");
         assertEquals(0, result.purged());
         assertTrue(purge.calls.isEmpty(), "nenhuma conta foi enviada ao purge");
         assertEquals(eligible.email(), email(eligible));
@@ -224,8 +247,10 @@ class AccountPurgeJobIntegrationTest {
     @Test
     @DisplayName("Sem segredo e sem conta elegível: a passada não falha, porque nada é candidato")
     void missingSecretWithoutEligibleAccountsIsNotAFailure() throws Exception {
-        Instant now = referenceNow();
+        Instant now = REFERENCE_NOW;
         TestUser withinGrace = deletedAt(register("job_prazo"), now.minus(Duration.ofDays(29)));
+        assertEquals(List.of(), userRepository.findDeletedUserIdsPendingPurge(now.minus(Duration.ofDays(30)), 1),
+                "pré-condição: nenhuma conta elegível no corte deste teste");
         HmacEmailReservation withoutSecret = new HmacEmailReservation("");
         RecordingPurge purge = new RecordingPurge(purgeDeletedAccountUseCase, Set.of(), userRepository, profileRepository,
                 accountPurgeRepository, withoutSecret);
@@ -234,18 +259,13 @@ class AccountPurgeJobIntegrationTest {
                 .run(now);
 
         assertFalse(result.secretMissing());
+        assertEquals(0, result.candidates());
         assertEquals(0, result.failed());
-        assertFalse(purge.calls.contains(withinGrace.id()));
+        assertTrue(purge.calls.isEmpty());
         assertEquals(withinGrace.email(), email(withinGrace));
     }
 
     // ---------------------------------------------------------------------------------------------------------
-
-    /** Um "agora" numa janela aleatória entre 2000 e 2010: nenhuma conta real tem deleted_at tão antigo. */
-    private static Instant referenceNow() {
-        long offsetSeconds = ThreadLocalRandom.current().nextLong(0, Duration.ofDays(3650).toSeconds());
-        return Instant.parse("2000-01-01T00:00:00Z").plusSeconds(offsetSeconds);
-    }
 
     private PurgeEligibleAccountsUseCase job(PurgeDeletedAccountUseCase purge) {
         return new PurgeEligibleAccountsUseCase(userRepository, purge, emailReservation, 100, 10);
@@ -292,7 +312,7 @@ class AccountPurgeJobIntegrationTest {
 
     private TestUser register(String prefix) throws Exception {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
-        String email = prefix + "." + suffix + "@rewit.test";
+        String email = FIXTURE_EMAIL_PREFIX + prefix + "." + suffix + "@rewit.test";
         String password = "Senha@" + suffix;
         MvcResult result = mockMvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
@@ -300,8 +320,9 @@ class AccountPurgeJobIntegrationTest {
                 .andExpect(status().isCreated())
                 .andReturn();
         JsonNode node = objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
-        return new TestUser(UUID.fromString(node.get("user").get("id").asText()), email, password,
-                node.get("accessToken").asText());
+        UUID id = UUID.fromString(node.get("user").get("id").asText());
+        createdUsers.add(id);
+        return new TestUser(id, email, password, node.get("accessToken").asText());
     }
 
     private TestUser admin() throws Exception {
