@@ -1,6 +1,7 @@
 package com.rewit.application.dto;
 
 import com.rewit.domain.enums.TargetType;
+import com.rewit.domain.model.Profile;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -96,7 +97,7 @@ public final class ReviewDto {
             boolean isAnonymous
     ) {
         /** Nome exibido no lugar do autor de uma conta excluída, em toda leitura pública. */
-        public static final String DELETED_DISPLAY_NAME = "Usuário excluído";
+        public static final String DELETED_DISPLAY_NAME = Profile.DELETED_DISPLAY_NAME;
 
         public static PublicAuthorView anonymous() {
             return new PublicAuthorView(null, null, "Anônimo", null, true);

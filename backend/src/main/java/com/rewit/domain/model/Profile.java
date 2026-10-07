@@ -56,6 +56,45 @@ public class Profile {
     /**
      * Normaliza e valida o nome de usuário (@handle): trim, lowercase e remoção de arroba inicial.
      */
+    /** Nome exibido no lugar de uma conta excluída: projeções públicas (C2.2) e perfil após o purge (C2.3). */
+    public static final String DELETED_DISPLAY_NAME = "Usuário excluído";
+
+    /** Prefixo do handle reservado de conta excluída; com o hífen, nenhum handle aceito pela API tem essa forma. */
+    public static final String DELETED_HANDLE_PREFIX = "excluido-";
+
+    /**
+     * Handle que substitui o pessoal no purge: derivado do id interno, portanto único e determinístico; 41 caracteres,
+     * dentro da coluna (64), fora do padrão aceito no cadastro e na edição (3 a 30, letras, números e sublinhado).
+     * Nunca é exposto: perfil, follows e projeções de uma conta excluída não o devolvem.
+     */
+    public static String deletedHandleFor(UUID userId) {
+        return DELETED_HANDLE_PREFIX + userId.toString().replace("-", "");
+    }
+
+    /**
+     * Minimização do perfil de uma conta excluída (purge, C2.3), idempotente: handle reservado, nome neutro, sem bio,
+     * avatar nem reputação. A linha permanece, sem identidade.
+     *
+     * @return {@code true} se algo mudou
+     */
+    public boolean anonymizeForDeletedAccount() {
+        String reservedHandle = deletedHandleFor(this.userId);
+        boolean changed = !reservedHandle.equals(this.handle)
+                || !DELETED_DISPLAY_NAME.equals(this.displayName)
+                || this.bio != null
+                || this.avatarUrl != null
+                || this.reputationScore != 0;
+        if (changed) {
+            this.handle = reservedHandle;
+            this.displayName = DELETED_DISPLAY_NAME;
+            this.bio = null;
+            this.avatarUrl = null;
+            this.reputationScore = 0;
+            this.updatedAt = Instant.now();
+        }
+        return changed;
+    }
+
     public static String normalizeHandle(String handle) {
         if (handle == null || handle.isBlank()) {
             throw new BusinessException("O nome de usuário (@handle) é obrigatório", "INVALID_HANDLE");

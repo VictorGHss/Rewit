@@ -6,8 +6,12 @@ import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.Role;
 import org.springframework.http.HttpStatus;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -18,10 +22,10 @@ import java.util.UUID;
 public class User {
 
     private final UUID id;
-    private final String email;
+    private String email;
     private String passwordHash;
     private final AuthProvider authProvider;
-    private final String providerUserId;
+    private String providerUserId;
     private AccountStatus status;
     private boolean isVerified;
     private Role role;
@@ -57,6 +61,31 @@ public class User {
         this.deletedAt = deletedAt;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+    }
+
+    /**
+     * Domínio reservado (RFC 2606) dos e-mails de contas excluídas após o purge. O registro o rejeita, então nenhum
+     * usuário consegue ocupar de antemão o valor reservado de uma conta.
+     */
+    public static final String RESERVED_EMAIL_DOMAIN = "deleted.invalid";
+
+    /**
+     * Valor que substitui o e-mail de uma conta excluída no purge (C2.3): o SHA-256 do e-mail normalizado no domínio
+     * reservado. O endereço pessoal sai do banco e o e-mail continua reservado (decisão do MVP: sem reuso após a
+     * exclusão), porque o registro também procura esse valor. Determinístico e único por e-mail.
+     */
+    public static String reservedEmailFor(String email) {
+        String normalized = normalizeEmail(email);
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(normalized.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest) + "@" + RESERVED_EMAIL_DOMAIN;
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 indisponível", e);
+        }
+    }
+
+    public static boolean isReservedEmail(String email) {
+        return email != null && email.trim().toLowerCase().endsWith("@" + RESERVED_EMAIL_DOMAIN);
     }
 
     /**
@@ -164,6 +193,38 @@ public class User {
         this.status = target;
         this.updatedAt = Instant.now();
         return true;
+    }
+
+    /**
+     * Minimização dos dados pessoais de uma conta excluída (purge, C2.3), idempotente: o e-mail vira o valor reservado,
+     * a credencial e o identificador do provedor externo saem. A linha permanece: avaliações, comentários, denúncias e
+     * auditoria a referenciam.
+     *
+     * @return {@code true} se algo mudou; {@code false} se a conta já estava minimizada
+     * @throws BusinessException 409 {@code ACCOUNT_NOT_DELETED} se a conta não estiver {@code DELETED}
+     */
+    public boolean purgePersonalData() {
+        if (this.status != AccountStatus.DELETED) {
+            throw new BusinessException("Somente uma conta excluída pode ter os dados pessoais removidos",
+                    HttpStatus.CONFLICT, "ACCOUNT_NOT_DELETED");
+        }
+        boolean changed = false;
+        if (!isReservedEmail(this.email)) {
+            this.email = reservedEmailFor(this.email);
+            changed = true;
+        }
+        if (this.passwordHash != null) {
+            this.passwordHash = null;
+            changed = true;
+        }
+        if (this.providerUserId != null) {
+            this.providerUserId = null;
+            changed = true;
+        }
+        if (changed) {
+            this.updatedAt = Instant.now();
+        }
+        return changed;
     }
 
     public AccountStatus getStatus() {

@@ -72,6 +72,21 @@ Registro técnico do que o código faz; não é parecer jurídico.
 
 ---
 
+## 6.1 Conta Excluída (`DELETED`) e Purge (C2.3)
+
+Registro técnico do que o código faz; não é parecer jurídico.
+
+- **Leitura pública (C2.2)**: a identidade de uma conta excluída não aparece em nenhuma projeção pública; perfil, follows e reputação respondem como um identificador inexistente.
+- **Purge (`PurgeDeletedAccountUseCase`)**, idempotente e restrito a contas `DELETED`:
+  - **Removido**: sessões, follows (nos dois sentidos), itens salvos, interesses, atividades, notificações da conta e snapshot de reputação.
+  - **Minimizado**: e-mail (valor reservado, sem o endereço; ver `architecture/persistence.md`), senha e id do provedor externo; perfil (handle reservado, nome "Usuário excluído", sem bio, avatar e reputação); coordenadas informadas nas avaliações (`reviews.user_coordinates`, `location_accuracy_meters`); o ator excluído nas notificações de outros usuários e o autor de presenças de produto.
+  - **Preservado**: a linha de `users` (com `account_status = DELETED` e `deleted_at`), avaliações, notas, helpful, comentários, mídia, denúncias e auditoria de moderação.
+- **Pendente (produto/jurídico)**:
+  - `check_ins.coordinates` é `NOT NULL` e o check-in sustenta `is_verified_on_site` da avaliação: removê-lo altera o histórico verificado, e anular a coordenada exige mudança de schema. Os check-ins permanecem.
+  - `business_accounts` (razão social e documento fiscal) não tem fluxo de transferência nem política de encerramento; permanece.
+  - Objetos de mídia continuam no storage enquanto as avaliações existirem; a remoção física depende de política de retenção (ADR-010).
+  - Backups (PITR) mantêm os dados anteriores ao purge pelo período de retenção, sem procedimento de reaplicação após restore.
+
 ## 7. Observabilidade: Logs, Traces e Métricas (ADR-012)
 
 Registro técnico do que o código faz; não é parecer jurídico. Arquitetura em [observability.md](../architecture/observability.md).

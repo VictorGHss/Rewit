@@ -53,6 +53,8 @@ Cria uma conta de usuário com credenciais locais (`auth_provider = LOCAL`) e o 
 - `201 Created`: Usuário e perfil criados com sucesso. Sessão iniciada.
 - `400 Bad Request`: Payload malformado ou campos obrigatórios ausentes.
 - `422 Unprocessable Entity`: E-mail ou handle já em uso (`EMAIL_ALREADY_EXISTS`, `HANDLE_ALREADY_EXISTS`), ou senha inválida (`INVALID_PASSWORD_POLICY`).
+  - O e-mail de uma conta excluída continua em uso também depois do purge (guardado como valor reservado, sem o endereço).
+  - Endereços no domínio reservado `deleted.invalid` são recusados (`INVALID_EMAIL`).
 
 ---
 

@@ -72,7 +72,14 @@ public class AuthService {
 
         validatePasswordPolicy(cmd.password());
 
-        if (userRepository.existsByEmail(normalizedEmail)) {
+        // Domínio dos e-mails reservados de contas excluídas (purge): nunca um endereço de cadastro
+        if (User.isReservedEmail(normalizedEmail)) {
+            throw new BusinessException("E-mail inválido ou ausente", "INVALID_EMAIL");
+        }
+
+        // Após o purge, o e-mail de uma conta excluída continua reservado na forma de User.reservedEmailFor
+        if (userRepository.existsByEmail(normalizedEmail)
+                || userRepository.existsByEmail(User.reservedEmailFor(normalizedEmail))) {
             throw new BusinessException("E-mail já cadastrado na plataforma", "EMAIL_ALREADY_EXISTS");
         }
 
