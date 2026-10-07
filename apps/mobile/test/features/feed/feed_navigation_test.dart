@@ -6,11 +6,16 @@ import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
+import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/feed/presentation/widgets/review_card.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
+
 
 class MockAuthRepo implements AuthRepository {
   @override
@@ -79,12 +84,70 @@ class MockFeedRepo implements FeedRepository {
   Future<FeedReview> getReviewById(String reviewId) async {
     return sampleReview;
   }
+
+  @override
+  Future<HelpfulResult> toggleHelpful(String reviewId, {required bool currentlyHelpful}) async {
+    return HelpfulResult(helpful: !currentlyHelpful, helpfulCount: currentlyHelpful ? 6 : 8);
+  }
+
+  @override
+  Future<List<ReviewMediaItem>> getReviewMedia(String reviewId) async {
+    return [];
+  }
+}
+
+class MockDiscussionRepo implements DiscussionRepository {
+  @override
+  Future<DiscussionPage> getDiscussions(String reviewId, {int page = 0, int size = 20}) async {
+    return const DiscussionPage(
+      content: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    );
+  }
+
+  @override
+  Future<DiscussionRepliesPage> getReplies(String discussionId, {int page = 0, int size = 20}) async {
+    return const DiscussionRepliesPage(
+      content: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    );
+  }
+
+  @override
+  Future<DiscussionItem> createDiscussion({
+    required String reviewId,
+    required String content,
+    String? parentId,
+  }) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> deleteDiscussion(String discussionId) async {}
+
+  @override
+  Future<String> reportDiscussion({
+    required String discussionId,
+    required ReportReason reason,
+    String? detail,
+  }) async {
+    return 'Denúncia recebida. Obrigado por ajudar a manter a comunidade segura.';
+  }
 }
 
 void main() {
   group('Feed Navigation to Detail Tests', () {
     late MockAuthRepo authRepo;
     late MockFeedRepo feedRepo;
+    late MockDiscussionRepo discussionRepo;
     late AuthNotifier authNotifier;
     late FeedNotifier feedNotifier;
     late AppRouter router;
@@ -92,6 +155,7 @@ void main() {
     setUp(() async {
       authRepo = MockAuthRepo();
       feedRepo = MockFeedRepo();
+      discussionRepo = MockDiscussionRepo();
       authNotifier = AuthNotifier(authRepository: authRepo);
       feedNotifier = FeedNotifier(feedRepository: feedRepo);
       await authNotifier.checkAuthStatus();
@@ -100,6 +164,7 @@ void main() {
         authNotifier: authNotifier,
         feedNotifier: feedNotifier,
         feedRepository: feedRepo,
+        discussionRepository: discussionRepo,
       );
     });
 
@@ -125,13 +190,12 @@ void main() {
       await tester.tap(find.byType(ReviewCard));
       await tester.pumpAndSettle();
 
-      // Confirma que navegou para a tela ReviewDetailScreen
+      // Confirma que navegou para a tela ReviewDetailScreen com seções completas
       expect(find.byType(ReviewDetailScreen), findsOneWidget);
       expect(find.text('Alvos da Avaliação'), findsOneWidget);
       expect(find.text('Carne no ponto perfeito'), findsOneWidget);
       expect(find.text('7 pessoas acharam útil'), findsOneWidget);
-      expect(find.text('Fotos e anexos de mídia serão exibidos aqui.'), findsOneWidget);
-      expect(find.text('Discussões e comentários comunitários em preparação.'), findsOneWidget);
+      expect(find.text('Comentários da Comunidade'), findsOneWidget);
     });
   });
 }

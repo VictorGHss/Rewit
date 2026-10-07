@@ -69,6 +69,37 @@ class FeedReview {
     this.isHelpfulByMe = false,
   });
 
+  FeedReview copyWith({
+    FeedAuthor? author,
+    String? contextPlaceId,
+    String? experienceText,
+    bool? isAnonymous,
+    bool? isVerifiedOnSite,
+    String? visibility,
+    String? status,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    List<FeedTarget>? targets,
+    int? helpfulCount,
+    bool? isHelpfulByMe,
+  }) {
+    return FeedReview(
+      id: id,
+      author: author ?? this.author,
+      contextPlaceId: contextPlaceId ?? this.contextPlaceId,
+      experienceText: experienceText ?? this.experienceText,
+      isAnonymous: isAnonymous ?? this.isAnonymous,
+      isVerifiedOnSite: isVerifiedOnSite ?? this.isVerifiedOnSite,
+      visibility: visibility ?? this.visibility,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      targets: targets ?? this.targets,
+      helpfulCount: helpfulCount ?? this.helpfulCount,
+      isHelpfulByMe: isHelpfulByMe ?? this.isHelpfulByMe,
+    );
+  }
+
   /// Média das notas dos alvos vinculados a esta avaliação.
   double? get averageRating {
     if (targets.isEmpty) return null;
@@ -76,6 +107,7 @@ class FeedReview {
     return sum / targets.length;
   }
 }
+
 
 /// Página de feed ranqueada devolvida pelo backend.
 class FeedPage {

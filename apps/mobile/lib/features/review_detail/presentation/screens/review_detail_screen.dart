@@ -1,26 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
+import 'package:rewit_mobile/features/discussions/presentation/state/discussion_notifier.dart';
+import 'package:rewit_mobile/features/discussions/presentation/widgets/discussions_section.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 
-/// Tela de detalhe de uma avaliação específica.
-///
-/// Preparada para receber futuramente:
-/// - Módulo de discussões e comentários comunitários;
-/// - Mídia e fotos anexadas;
-/// - Interação em tempo real com helpful;
-/// - Edição e exclusão pelo autor.
+/// Tela de detalhe completo de uma avaliação com suporte a mídia, Helpful e discussões comunitárias.
 class ReviewDetailScreen extends StatefulWidget {
   final String reviewId;
   final FeedReview? initialReview;
   final FeedRepository? feedRepository;
+  final DiscussionRepository? discussionRepository;
+  final DiscussionNotifier? discussionNotifier;
 
   const ReviewDetailScreen({
     super.key,
     required this.reviewId,
     this.initialReview,
     this.feedRepository,
+    this.discussionRepository,
+    this.discussionNotifier,
   });
 
   @override
@@ -32,13 +34,42 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
+  // Mídias da avaliação
+  List<ReviewMediaItem> _mediaItems = [];
+  bool _isLoadingMedia = false;
+
+  // Interação com Helpful
+  bool _isTogglingHelpful = false;
+
+  // Notifier de Discussões
+  DiscussionNotifier? _discussionNotifier;
+  bool _ownsNotifier = false;
+
   @override
   void initState() {
     super.initState();
     _review = widget.initialReview;
+
+    if (widget.discussionNotifier != null) {
+      _discussionNotifier = widget.discussionNotifier;
+    } else if (widget.discussionRepository != null) {
+      _discussionNotifier = DiscussionNotifier(repository: widget.discussionRepository!);
+      _ownsNotifier = true;
+    }
+
     if (_review == null && widget.feedRepository != null) {
       _loadReview();
+    } else if (_review != null) {
+      _loadMedia();
     }
+  }
+
+  @override
+  void dispose() {
+    if (_ownsNotifier) {
+      _discussionNotifier?.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _loadReview() async {
@@ -55,6 +86,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           _review = review;
           _isLoading = false;
         });
+        _loadMedia();
       }
     } catch (e) {
       if (mounted) {
@@ -62,6 +94,64 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           _errorMessage = 'Não foi possível carregar os detalhes da avaliação.';
           _isLoading = false;
         });
+      }
+    }
+  }
+
+  Future<void> _loadMedia() async {
+    if (widget.feedRepository == null) return;
+    setState(() {
+      _isLoadingMedia = true;
+    });
+
+    try {
+      final media = await widget.feedRepository!.getReviewMedia(widget.reviewId);
+      if (mounted) {
+        setState(() {
+          _mediaItems = media;
+          _isLoadingMedia = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingMedia = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleToggleHelpful() async {
+    final review = _review;
+    if (review == null || widget.feedRepository == null || _isTogglingHelpful) return;
+
+    setState(() {
+      _isTogglingHelpful = true;
+    });
+
+    try {
+      final result = await widget.feedRepository!.toggleHelpful(
+        review.id,
+        currentlyHelpful: review.isHelpfulByMe,
+      );
+
+      if (mounted) {
+        setState(() {
+          _review = review.copyWith(
+            isHelpfulByMe: result.helpful,
+            helpfulCount: result.helpfulCount,
+          );
+          _isTogglingHelpful = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isTogglingHelpful = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Falha ao atualizar voto útil. Tente novamente.')),
+        );
       }
     }
   }
@@ -119,7 +209,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cabeçalho do Autor
+            // 1. Cabeçalho do Autor
             Row(
               children: [
                 CircleAvatar(
@@ -197,7 +287,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Badge de Check-in
+            // 2. Badge de Check-in (Verificação Presencial)
             if (review.isVerifiedOnSite) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -211,12 +301,14 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
                   children: [
                     Icon(Icons.check_circle, size: 16, color: Colors.green.shade700),
                     const SizedBox(width: 6),
-                    Text(
-                      'Presença confirmada no estabelecimento (Check-in validado)',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.green.shade800,
+                    Flexible(
+                      child: Text(
+                        'Presença confirmada no estabelecimento (Check-in validado)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.green.shade800,
+                        ),
                       ),
                     ),
                   ],
@@ -225,7 +317,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
               const SizedBox(height: 16),
             ],
 
-            // Alvos avaliados
+            // 3. Alvos da Avaliação e Notas
             if (review.targets.isNotEmpty) ...[
               Text(
                 'Alvos da Avaliação',
@@ -290,7 +382,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
               const SizedBox(height: 16),
             ],
 
-            // Texto completo da experiência
+            // 4. Texto completo da experiência
             if (review.experienceText != null && review.experienceText!.isNotEmpty) ...[
               Text(
                 'Experiência',
@@ -308,7 +400,60 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
               const SizedBox(height: 20),
             ],
 
-            // Seção Helpful
+            // 5. Mídia quando disponível
+            if (_isLoadingMedia) ...[
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: LoadingIndicator(message: 'Carregando mídias...'),
+                ),
+              ),
+            ] else if (_mediaItems.isNotEmpty) ...[
+              Text(
+                'Fotos e Anexos (${_mediaItems.length})',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 110,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _mediaItems.length,
+                  separatorBuilder: (context, _) => const SizedBox(width: 10),
+                  itemBuilder: (context, index) {
+                    final item = _mediaItems[index];
+                    return Container(
+                      width: 120,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.image, size: 40, color: theme.colorScheme.primary),
+                          const SizedBox(height: 4),
+                          Text(
+                            item.mimeType.split('/').last.toUpperCase(),
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            '${(item.sizeBytes / 1024).toStringAsFixed(0)} KB',
+                            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+
+            // 6. Seção Helpful Interativa
             Card(
               elevation: 0,
               color: theme.colorScheme.surface,
@@ -341,15 +486,18 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
                       ],
                     ),
                     OutlinedButton.icon(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Voto útil interativo será habilitado em breve.'),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.thumb_up_outlined, size: 16),
-                      label: const Text('Útil'),
+                      onPressed: _isTogglingHelpful ? null : _handleToggleHelpful,
+                      icon: _isTogglingHelpful
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              review.isHelpfulByMe ? Icons.thumb_up : Icons.thumb_up_outlined,
+                              size: 16,
+                            ),
+                      label: Text(review.isHelpfulByMe ? 'Útil' : 'Votar útil'),
                     ),
                   ],
                 ),
@@ -357,54 +505,36 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Seção de Mídia (Placeholder preparado)
-            Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: BorderSide(color: Colors.grey.withAlpha(60)),
+            // 7. Seção de Discussões Comunitárias
+            if (_discussionNotifier != null) ...[
+              DiscussionsSection(
+                reviewId: widget.reviewId,
+                notifier: _discussionNotifier!,
               ),
-              child: const Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Row(
-                  children: [
-                    Icon(Icons.photo_library_outlined, color: Colors.grey),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Fotos e anexos de mídia serão exibidos aqui.',
-                        style: TextStyle(color: Colors.grey, fontSize: 13),
+            ] else ...[
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: BorderSide(color: Colors.grey.withAlpha(60)),
+                ),
+                child: const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.forum_outlined, color: Colors.grey),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Conexão de discussões indisponível.',
+                          style: TextStyle(color: Colors.grey, fontSize: 13),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-
-            // Seção de Discussões (Placeholder preparado - sem implementar discussions antes da finalização pelo Core)
-            Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: BorderSide(color: Colors.grey.withAlpha(60)),
-              ),
-              child: const Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Row(
-                  children: [
-                    Icon(Icons.forum_outlined, color: Colors.grey),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Discussões e comentários comunitários em preparação.',
-                        style: TextStyle(color: Colors.grey, fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            ],
           ],
         ),
       ),

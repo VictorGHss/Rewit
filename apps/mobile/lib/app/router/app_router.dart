@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
@@ -25,11 +26,13 @@ class AppRouter {
   final AuthNotifier authNotifier;
   final FeedNotifier? feedNotifier;
   final FeedRepository? feedRepository;
+  final DiscussionRepository? discussionRepository;
 
   const AppRouter({
     required this.authNotifier,
     this.feedNotifier,
     this.feedRepository,
+    this.discussionRepository,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -80,6 +83,7 @@ class AppRouter {
               reviewId: args.id,
               initialReview: args,
               feedRepository: feedRepository,
+              discussionRepository: discussionRepository,
             ),
             settings: settings,
           );
@@ -88,10 +92,12 @@ class AppRouter {
             builder: (context) => ReviewDetailScreen(
               reviewId: args,
               feedRepository: feedRepository,
+              discussionRepository: discussionRepository,
             ),
             settings: settings,
           );
         }
+
         return MaterialPageRoute(
           builder: (context) => const Scaffold(
             body: Center(child: Text('Identificador de avaliação ausente.')),

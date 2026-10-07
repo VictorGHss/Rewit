@@ -1,4 +1,6 @@
-import '../entities/feed_entities.dart';
+import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 
 /// Contrato para recuperação de feed social e consultas de avaliações.
 abstract class FeedRepository {
@@ -7,4 +9,10 @@ abstract class FeedRepository {
 
   /// Consulta detalhes públicos de uma avaliação específica pelo seu ID.
   Future<FeedReview> getReviewById(String reviewId);
+
+  /// Alterna o voto útil (helpful) de uma avaliação.
+  Future<HelpfulResult> toggleHelpful(String reviewId, {required bool currentlyHelpful});
+
+  /// Obtém a lista de mídias ativas de uma avaliação.
+  Future<List<ReviewMediaItem>> getReviewMedia(String reviewId);
 }

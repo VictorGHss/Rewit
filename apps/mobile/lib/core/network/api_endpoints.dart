@@ -15,6 +15,16 @@ class ApiEndpoints {
   static const String reviews = '/api/v1/reviews';
   static String reviewDetail(String id) => '/api/v1/reviews/$id';
   static String reviewMedia(String id) => '/api/v1/reviews/$id/media';
+  static String reviewHelpful(String id) => '/api/v1/reviews/$id/helpful';
   static const String users = '/api/v1/users';
   static const String places = '/api/v1/places';
+
+  // Discussões e Comentários Comunitários
+  static String reviewDiscussions(String reviewId, {int page = 0, int size = 20}) =>
+      '/api/v1/reviews/$reviewId/discussions?page=$page&size=$size';
+  static String createDiscussion(String reviewId) => '/api/v1/reviews/$reviewId/discussions';
+  static String discussionReplies(String discussionId, {int page = 0, int size = 20}) =>
+      '/api/v1/discussions/$discussionId/replies?page=$page&size=$size';
+  static String discussionDetail(String discussionId) => '/api/v1/discussions/$discussionId';
+  static String reportDiscussion(String discussionId) => '/api/v1/discussions/$discussionId/reports';
 }

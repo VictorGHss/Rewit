@@ -4,6 +4,9 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_state.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+
 
 class FakeFeedRepository implements FeedRepository {
   FeedPage? page0Response;
@@ -60,7 +63,18 @@ class FakeFeedRepository implements FeedRepository {
   Future<FeedReview> getReviewById(String reviewId) async {
     return _makeReview(reviewId);
   }
+
+  @override
+  Future<HelpfulResult> toggleHelpful(String reviewId, {required bool currentlyHelpful}) async {
+    return HelpfulResult(helpful: !currentlyHelpful, helpfulCount: currentlyHelpful ? 0 : 1);
+  }
+
+  @override
+  Future<List<ReviewMediaItem>> getReviewMedia(String reviewId) async {
+    return [];
+  }
 }
+
 
 void main() {
   group('FeedNotifier', () {
