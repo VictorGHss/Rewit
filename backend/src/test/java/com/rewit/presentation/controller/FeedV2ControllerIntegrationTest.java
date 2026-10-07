@@ -573,35 +573,47 @@ class FeedV2ControllerIntegrationTest {
         Place place = createPlace();
         RateableTarget target = createTarget(TargetType.PLACE);
 
-        // Requester NÃO segue anonAuthor. Avaliação pública anônima no topo
-        Review anonDiscoveryReview = createReview(anonAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, true, Instant.now().plus(java.time.Duration.ofDays(6)));
+        // Requester NÃO segue anonAuthor. Avaliação pública anônima ancorada após qualquer review existente, para
+        // estar na janela de descoberta mesmo com dados residuais no banco compartilhado
+        Review anonDiscoveryReview = createReview(anonAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, true, resolveFutureDiscoveryReviewTimestamp());
 
-        MvcResult result = mockMvc.perform(get("/api/v2/feed")
-                        .param("size", "50")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[*].id", hasItem(anonDiscoveryReview.getId().toString())))
-                .andReturn();
+        try {
+            JsonNode targetItem = findInDiscoveryWindow(requester, anonDiscoveryReview.getId());
 
-        JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
-        JsonNode items = json.get("items");
-        JsonNode targetItem = null;
-        for (JsonNode item : items) {
-            if (anonDiscoveryReview.getId().toString().equals(item.get("id").asText())) {
-                targetItem = item;
-                break;
+            org.junit.jupiter.api.Assertions.assertNotNull(targetItem, "Review anônima de descoberta deve estar presente");
+            org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("isAnonymous").asBoolean());
+            org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("id") == null || targetItem.get("author").get("id").isNull());
+            org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("handle") == null || targetItem.get("author").get("handle").isNull());
+            org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("avatarUrl") == null || targetItem.get("author").get("avatarUrl").isNull());
+            org.junit.jupiter.api.Assertions.assertEquals("Anônimo", targetItem.get("author").get("displayName").asText());
+            org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("isAnonymous").asBoolean());
+            org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("score") == null || targetItem.get("score").isNull());
+            org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("isDirectFollow") == null || targetItem.get("isDirectFollow").isNull());
+        } finally {
+            cleanupReview(anonDiscoveryReview.getId());
+        }
+    }
+
+    /**
+     * Procura a review nas páginas 0 e 1 de tamanho 50, que cobrem toda a janela de descoberta
+     * ({@link com.rewit.application.port.FeedCandidateRepository#CANDIDATE_WINDOW} = 100). Com a review na janela,
+     * a busca não depende da posição que o ranking lhe atribui entre as demais candidatas.
+     */
+    private JsonNode findInDiscoveryWindow(TestUser requester, UUID reviewId) throws Exception {
+        for (int page = 0; page < 2; page++) {
+            MvcResult result = mockMvc.perform(get("/api/v2/feed")
+                            .param("page", String.valueOf(page))
+                            .param("size", "50")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            for (JsonNode item : objectMapper.readTree(result.getResponse().getContentAsString()).get("items")) {
+                if (reviewId.toString().equals(item.get("id").asText())) {
+                    return item;
+                }
             }
         }
-
-        org.junit.jupiter.api.Assertions.assertNotNull(targetItem, "Review anônima de descoberta deve estar presente");
-        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("isAnonymous").asBoolean());
-        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("id") == null || targetItem.get("author").get("id").isNull());
-        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("handle") == null || targetItem.get("author").get("handle").isNull());
-        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("avatarUrl") == null || targetItem.get("author").get("avatarUrl").isNull());
-        org.junit.jupiter.api.Assertions.assertEquals("Anônimo", targetItem.get("author").get("displayName").asText());
-        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("author").get("isAnonymous").asBoolean());
-        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("score") == null || targetItem.get("score").isNull());
-        org.junit.jupiter.api.Assertions.assertTrue(targetItem.get("isDirectFollow") == null || targetItem.get("isDirectFollow").isNull());
+        return null;
     }
 
     @Test
@@ -621,12 +633,18 @@ class FeedV2ControllerIntegrationTest {
         Review socialReview = createReview(followedAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().plus(java.time.Duration.ofDays(7)));
         Review strangerReview = createReview(unfollowedAuthor.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().plus(java.time.Duration.ofDays(8)));
 
-        mockMvc.perform(get("/api/v2/feed")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items", hasSize(1)))
-                .andExpect(jsonPath("$.items[0].id").value(socialReview.getId().toString()))
-                .andExpect(jsonPath("$.items[*].id", not(hasItem(strangerReview.getId().toString()))))
-                .andExpect(jsonPath("$.windowSize").value(1));
+        try {
+            mockMvc.perform(get("/api/v2/feed")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items", hasSize(1)))
+                    .andExpect(jsonPath("$.items[0].id").value(socialReview.getId().toString()))
+                    .andExpect(jsonPath("$.items[*].id", not(hasItem(strangerReview.getId().toString()))))
+                    .andExpect(jsonPath("$.windowSize").value(1));
+        } finally {
+            // Datadas dias no futuro: sem remoção, deslocariam a janela de descoberta de outros cenários
+            cleanupReview(socialReview.getId());
+            cleanupReview(strangerReview.getId());
+        }
     }
 }

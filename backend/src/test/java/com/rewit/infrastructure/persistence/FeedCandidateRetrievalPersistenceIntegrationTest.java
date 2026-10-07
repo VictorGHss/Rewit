@@ -19,14 +19,20 @@ import com.rewit.domain.model.RateableTarget;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewTarget;
 import com.rewit.domain.model.User;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -69,6 +75,33 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
 
     @Autowired
     private ReviewReactionRepository reviewReactionRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    /** Reviews criadas pelo teste corrente, removidas ao final para não deixar resíduo no banco compartilhado. */
+    private final List<UUID> createdReviewIds = new ArrayList<>();
+
+    @AfterEach
+    void removeCreatedReviews() {
+        // ON DELETE CASCADE remove alvos e reações das reviews do teste
+        createdReviewIds.forEach(id -> jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", id));
+        createdReviewIds.clear();
+    }
+
+    /**
+     * Instante posterior a qualquer review pública ativa já existente. A descoberta é uma janela global das reviews
+     * mais recentes; ancorar as datas do teste aqui garante que as reviews do cenário estejam na janela, mesmo com
+     * dados residuais de outras execuções no banco compartilhado. Os deslocamentos relativos dos cenários são
+     * preservados a partir desta base.
+     */
+    private Instant discoveryBase() {
+        Timestamp latest = jdbcTemplate.queryForObject(
+                "SELECT MAX(created_at) FROM reviews WHERE status = 'ACTIVE' AND visibility = 'PUBLIC'", Timestamp.class);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant floor = latest != null && latest.toInstant().isAfter(now) ? latest.toInstant() : now;
+        return floor.plus(Duration.ofHours(1));
+    }
 
     // ------------------------------------------------------------------
     // Helpers de criação de dados
@@ -114,6 +147,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         review.addTarget(rt);
         Review saved = reviewRepository.save(review);
         reviewTargetRepository.save(rt);
+        createdReviewIds.add(saved.getId());
         return saved;
     }
 
@@ -538,7 +572,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         Place place = createPlace();
         RateableTarget target = createTarget();
 
-        Instant baseTime = Instant.now().plusSeconds(1000);
+        Instant baseTime = discoveryBase();
 
         // 1. ACTIVE + PUBLIC (outro autor) -> ELEGÍVEL
         Review rActivePublic = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, baseTime.minusSeconds(10));
@@ -580,8 +614,8 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         Place place = createPlace();
         RateableTarget target = createTarget();
 
-        Instant sharedTimestamp = Instant.now().plusSeconds(600);
-        Instant olderTimestamp  = Instant.now().plusSeconds(500);
+        Instant sharedTimestamp = discoveryBase();
+        Instant olderTimestamp  = sharedTimestamp.minusSeconds(100);
 
         Review r1 = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, sharedTimestamp);
         Review r2 = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, sharedTimestamp);
@@ -614,7 +648,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         Place place = createPlace();
         RateableTarget target = createTarget();
 
-        Instant base = Instant.now().plusSeconds(800);
+        Instant base = discoveryBase();
         for (int i = 0; i < 5; i++) {
             createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, base.minusSeconds(i * 10));
         }
@@ -632,7 +666,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         Place place = createPlace();
         RateableTarget target = createTarget();
 
-        Review review = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().plusSeconds(500));
+        Review review = createReview(otherAuthor, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, discoveryBase());
         reviewReactionRepository.addHelpful(review.getId(), requester.getId());
 
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveDiscoveryCandidates(
