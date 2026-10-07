@@ -202,5 +202,39 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets('exibe erros de campo específicos do backend (fieldErrors) no banner de erro', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      repository.exceptionToThrow = const ApiException(
+        ProblemDetail(
+          type: 'https://api.rewit.app/errors/validation-error',
+          title: 'Erro de Validação de Dados',
+          status: 400,
+          detail: 'Parâmetros da requisição inválidos',
+          code: 'VALIDATION_ERROR',
+          fieldErrors: {
+            'targets[0].rating': 'A nota deve ser no mínimo 1.0',
+          },
+        ),
+      );
+
+      await tester.pumpWidget(buildSubject(repository: repository));
+
+      // Preenche ID do alvo
+      final targetField = find.widgetWithText(TextFormField, 'Identificador do Alvo (UUID) *');
+      await tester.enterText(targetField, validTargetId);
+
+      // Clica em Publicar
+      await tester.tap(find.text('Publicar Avaliação'));
+      await tester.pumpAndSettle();
+
+      // Verifica exibição da mensagem genérica inalterada e do erro de campo
+      expect(find.text('Parâmetros da requisição inválidos'), findsOneWidget);
+      expect(find.text('VALIDATION_ERROR'), findsOneWidget);
+      expect(find.text('• targets[0].rating: A nota deve ser no mínimo 1.0'), findsOneWidget);
+    });
   });
 }

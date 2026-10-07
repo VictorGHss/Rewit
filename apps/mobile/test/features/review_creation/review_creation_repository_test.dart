@@ -216,5 +216,53 @@ void main() {
         ),
       );
     });
+
+    test('createReview propaga ApiException com fieldErrors quando backend responde 400', () async {
+      final mockClient = MockHttpClient((request) async {
+        final problem = {
+          'type': 'https://api.rewit.app/errors/validation-error',
+          'title': 'Erro de Validação de Dados',
+          'status': 400,
+          'detail': 'Parâmetros da requisição inválidos',
+          'code': 'VALIDATION_ERROR',
+          'fieldErrors': {
+            'targets': 'A publicação deve conter pelo menos um alvo avaliado',
+          },
+        };
+
+        return http.Response(
+          jsonEncode(problem),
+          400,
+          headers: {'content-type': 'application/problem+json; charset=utf-8'},
+        );
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.com',
+        client: mockClient,
+      );
+      final repository = ReviewCreationRepositoryImpl(httpClient: httpClient);
+
+      const input = CreateReviewInput(
+        targets: [
+          CreateReviewTargetInput(rateableTargetId: validTargetId, rating: 5.0),
+        ],
+      );
+
+      expect(
+        () => repository.createReview(input),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 400)
+              .having((e) => e.errorCode, 'errorCode', 'VALIDATION_ERROR')
+              .having((e) => e.hasFieldErrors, 'hasFieldErrors', isTrue)
+              .having(
+                (e) => e.getFieldError('targets'),
+                'getFieldError(targets)',
+                'A publicação deve conter pelo menos um alvo avaliado',
+              ),
+        ),
+      );
+    });
   });
 }

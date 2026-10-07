@@ -46,4 +46,9 @@ class ReviewCreateError extends ReviewCreateState {
 
   bool get isRateLimited => statusCode == 429;
   bool get isValidationError => statusCode == 400 || statusCode == 422;
+
+  bool get hasFieldErrors => problemDetail?.hasFieldErrors ?? false;
+  Map<String, String> get fieldErrors => problemDetail?.allFieldErrors ?? const {};
+  String? getFieldError(String fieldName) => problemDetail?.getFieldError(fieldName);
+  bool hasFieldError(String fieldName) => problemDetail?.hasFieldError(fieldName) ?? false;
 }

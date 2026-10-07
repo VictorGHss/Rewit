@@ -169,6 +169,22 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                                     color: theme.colorScheme.onErrorContainer,
                                   ),
                                 ),
+                                if (state.hasFieldErrors) ...[
+                                  const SizedBox(height: 6),
+                                  ...state.fieldErrors.entries.map(
+                                    (e) => Padding(
+                                      padding: const EdgeInsets.only(top: 2.0),
+                                      child: Text(
+                                        '• ${e.key}: ${e.value}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: theme.colorScheme.onErrorContainer,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 if (state.retryAfterSeconds != null) ...[
                                   const SizedBox(height: 4),
                                   Text(

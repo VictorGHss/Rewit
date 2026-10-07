@@ -9,6 +9,7 @@ class ProblemDetail {
   final String? instance;
   final String? code;
   final DateTime? timestamp;
+  final Map<String, String>? fieldErrors;
   final Map<String, dynamic>? invalidParams;
 
   const ProblemDetail({
@@ -19,6 +20,7 @@ class ProblemDetail {
     this.instance,
     this.code,
     this.timestamp,
+    this.fieldErrors,
     this.invalidParams,
   });
 
@@ -33,6 +35,22 @@ class ProblemDetail {
       }
     }
 
+    Map<String, String>? parsedFieldErrors;
+    final rawFieldErrors = json['fieldErrors'];
+    if (rawFieldErrors is Map) {
+      parsedFieldErrors = rawFieldErrors.map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      );
+    }
+
+    Map<String, dynamic>? parsedInvalidParams;
+    final rawInvalidParams = json['invalidParams'];
+    if (rawInvalidParams is Map<String, dynamic>) {
+      parsedInvalidParams = rawInvalidParams;
+    } else if (rawInvalidParams is Map) {
+      parsedInvalidParams = Map<String, dynamic>.from(rawInvalidParams);
+    }
+
     return ProblemDetail(
       type: json['type'] as String? ?? 'about:blank',
       title: json['title'] as String? ?? 'Erro na requisição',
@@ -41,7 +59,8 @@ class ProblemDetail {
       instance: json['instance'] as String?,
       code: json['code'] as String?,
       timestamp: parsedTimestamp,
-      invalidParams: json['invalidParams'] as Map<String, dynamic>?,
+      fieldErrors: parsedFieldErrors,
+      invalidParams: parsedInvalidParams,
     );
   }
 
@@ -99,6 +118,40 @@ class ProblemDetail {
     }
   }
 
+  /// Indica se há algum erro de validação em campos ou parâmetros.
+  bool get hasFieldErrors =>
+      (fieldErrors != null && fieldErrors!.isNotEmpty) ||
+      (invalidParams != null && invalidParams!.isNotEmpty);
+
+  /// Retorna o mapa consolidado de erros de campo, priorizando `fieldErrors`
+  /// e caindo para `invalidParams` (suporte legado).
+  Map<String, String> get allFieldErrors {
+    if (fieldErrors != null && fieldErrors!.isNotEmpty) {
+      return fieldErrors!;
+    }
+    if (invalidParams != null && invalidParams!.isNotEmpty) {
+      return invalidParams!.map((key, value) => MapEntry(key, value.toString()));
+    }
+    return const {};
+  }
+
+  /// Retorna a mensagem de erro associada a um determinado campo, ou null se não houver.
+  String? getFieldError(String fieldName) {
+    if (fieldErrors != null && fieldErrors!.containsKey(fieldName)) {
+      return fieldErrors![fieldName];
+    }
+    if (invalidParams != null && invalidParams!.containsKey(fieldName)) {
+      return invalidParams![fieldName]?.toString();
+    }
+    return null;
+  }
+
+  /// Verifica se há erro registrado para o campo informado.
+  bool hasFieldError(String fieldName) {
+    return (fieldErrors != null && fieldErrors!.containsKey(fieldName)) ||
+        (invalidParams != null && invalidParams!.containsKey(fieldName));
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'type': type,
@@ -108,6 +161,7 @@ class ProblemDetail {
       if (instance != null) 'instance': instance,
       if (code != null) 'code': code,
       if (timestamp != null) 'timestamp': timestamp!.toIso8601String(),
+      if (fieldErrors != null) 'fieldErrors': fieldErrors,
       if (invalidParams != null) 'invalidParams': invalidParams,
     };
   }
@@ -129,6 +183,13 @@ class ApiException implements Exception {
   String get title => problemDetail.title;
   String get detail => problemDetail.detail;
   String? get errorCode => problemDetail.code;
+
+  Map<String, String>? get fieldErrors => problemDetail.fieldErrors;
+  Map<String, dynamic>? get invalidParams => problemDetail.invalidParams;
+  bool get hasFieldErrors => problemDetail.hasFieldErrors;
+  Map<String, String> get allFieldErrors => problemDetail.allFieldErrors;
+  String? getFieldError(String fieldName) => problemDetail.getFieldError(fieldName);
+  bool hasFieldError(String fieldName) => problemDetail.hasFieldError(fieldName);
 
   bool get isUnauthorized => statusCode == 401;
   bool get isForbidden => statusCode == 403;
