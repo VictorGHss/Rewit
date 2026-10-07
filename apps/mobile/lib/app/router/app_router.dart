@@ -8,7 +8,8 @@ import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.d
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
-import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_placeholder_screen.dart';
+import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
+import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
@@ -27,12 +28,14 @@ class AppRouter {
   final FeedNotifier? feedNotifier;
   final FeedRepository? feedRepository;
   final DiscussionRepository? discussionRepository;
+  final ReviewCreationRepository? reviewCreationRepository;
 
   const AppRouter({
     required this.authNotifier,
     this.feedNotifier,
     this.feedRepository,
     this.discussionRepository,
+    this.reviewCreationRepository,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -52,6 +55,7 @@ class AppRouter {
                 return HomeScreen(
                   authNotifier: authNotifier,
                   feedNotifier: feedNotifier,
+                  reviewCreationRepository: reviewCreationRepository,
                 );
               }
               return LoginScreen(authNotifier: authNotifier);
@@ -71,6 +75,7 @@ class AppRouter {
           builder: (context) => HomeScreen(
             authNotifier: authNotifier,
             feedNotifier: feedNotifier,
+            reviewCreationRepository: reviewCreationRepository,
           ),
           settings: settings,
         );
@@ -113,7 +118,16 @@ class AppRouter {
 
       case reviewCreate:
         return MaterialPageRoute(
-          builder: (context) => const ReviewCreatePlaceholderScreen(),
+          builder: (context) => ReviewCreateScreen(
+            repository: reviewCreationRepository,
+            onReviewCreated: (createdReview) {
+              feedNotifier?.refresh();
+              Navigator.of(context).pushReplacementNamed(
+                AppRouter.reviewDetail,
+                arguments: createdReview,
+              );
+            },
+          ),
           settings: settings,
         );
 

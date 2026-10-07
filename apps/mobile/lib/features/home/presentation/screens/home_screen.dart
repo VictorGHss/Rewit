@@ -5,18 +5,21 @@ import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart
 import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
-import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_placeholder_screen.dart';
+import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
+import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
 
 /// Tela principal autenticada do aplicativo Rewit.
 class HomeScreen extends StatefulWidget {
   final AuthNotifier authNotifier;
   final FeedNotifier? feedNotifier;
+  final ReviewCreationRepository? reviewCreationRepository;
 
   const HomeScreen({
     super.key,
     required this.authNotifier,
     this.feedNotifier,
+    this.reviewCreationRepository,
   });
 
   @override
@@ -230,7 +233,16 @@ class _HomeScreenState extends State<HomeScreen> {
         final pages = [
           _buildFeedView(context, state),
           const SearchPlaceholderScreen(),
-          const ReviewCreatePlaceholderScreen(),
+          ReviewCreateScreen(
+            repository: widget.reviewCreationRepository,
+            onReviewCreated: (createdReview) {
+              widget.feedNotifier?.refresh();
+              Navigator.of(context).pushNamed(
+                AppRouter.reviewDetail,
+                arguments: createdReview,
+              );
+            },
+          ),
           const ProfilePlaceholderScreen(),
         ];
 
@@ -245,6 +257,15 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
+          floatingActionButton: _currentIndex == 0
+              ? FloatingActionButton(
+                  tooltip: 'Nova Avaliação',
+                  onPressed: () {
+                    Navigator.of(context).pushNamed(AppRouter.reviewCreate);
+                  },
+                  child: const Icon(Icons.add_comment_outlined),
+                )
+              : null,
           body: IndexedStack(
             index: _currentIndex,
             children: pages,
