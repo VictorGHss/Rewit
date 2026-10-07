@@ -31,10 +31,9 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Desativar Conta'),
         content: const Text(
-          'Tem certeza de que deseja desativar temporariamente sua conta?\n\n'
-          'Suas avaliações e perfil ficarão temporariamente ocultos para outros usuários. '
-          'Esta ação é reversível: basta fazer login novamente com seu e-mail e senha a '
-          'qualquer momento para reativar sua conta.',
+          'Sua conta será desativada e você será desconectado.\n\n'
+          'Enquanto estiver desativada, você não poderá usar normalmente os recursos da conta.\n\n'
+          'Para voltar, use o fluxo "Reativar conta" com seu e-mail e senha.',
         ),
         actions: [
           TextButton(
@@ -66,7 +65,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Sua conta foi desativada com sucesso. Você pode reativá-la a qualquer momento fazendo login.',
+                'Sua conta foi desativada e a sessão encerrada. Para voltar, use o fluxo "Reativar conta".',
               ),
               backgroundColor: Colors.orange,
             ),
@@ -244,17 +243,16 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'Desativação Temporária',
+                      'Desativação de Conta',
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Você pode desativar temporariamente sua conta Rewit. Suas publicações e perfil não '
-                      'ficarão visíveis para outros usuários enquanto a conta estiver desativada. '
-                      'Esta ação é reversível: basta fazer login novamente a qualquer momento para '
-                      'reativar sua conta e retomar o acesso.',
+                      'Sua conta será desativada e você será desconectado. '
+                      'Enquanto estiver desativada, você não poderá usar normalmente os recursos da conta. '
+                      'Para voltar, use o fluxo "Reativar conta" com seu e-mail e senha.',
                       style: TextStyle(
                         fontSize: 13,
                         color: theme.colorScheme.onSurface.withAlpha(160),

@@ -545,7 +545,7 @@ void main() {
       expect(find.text('Desativar minha conta'), findsOneWidget);
     });
 
-    testWidgets('abrir diálogo de desativação exibe mensagem explicativa de ação reversível', (tester) async {
+    testWidgets('abrir diálogo de desativação exibe mensagem explicativa de encerramento e reativação', (tester) async {
       final repo = TestMockAuthRepo();
       final notifier = AuthNotifier(authRepository: repo);
       await notifier.checkAuthStatus();
@@ -559,7 +559,21 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.textContaining('Esta ação é reversível: basta fazer login novamente'),
+          matching: find.textContaining('Sua conta será desativada e você será desconectado.'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('Enquanto estiver desativada, você não poderá usar normalmente os recursos da conta.'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('Para voltar, use o fluxo "Reativar conta" com seu e-mail e senha.'),
         ),
         findsOneWidget,
       );
