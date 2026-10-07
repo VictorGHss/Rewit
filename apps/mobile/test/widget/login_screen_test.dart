@@ -55,6 +55,37 @@ class MockAuthRepo implements AuthRepository {
 
   @override
   Future<void> logout() async {}
+
+  bool reactivateCalled = false;
+
+  @override
+  Future<Authenticated> reactivate({required String email, required String password}) async {
+    reactivateCalled = true;
+    lastEmail = email;
+    lastPassword = password;
+    if (shouldSucceed) {
+      return const Authenticated(
+        user: AuthUserDto(
+          id: '1',
+          email: 'user@test.com',
+          handle: 'testuser',
+          displayName: 'Test',
+        ),
+        tokens: AuthTokens(accessToken: 'a', refreshToken: 'r'),
+      );
+    } else {
+      throw const ApiException(ProblemDetail(
+        type: 'about:blank',
+        title: 'Credenciais inválidas',
+        status: 401,
+        detail: 'Credenciais inválidas.',
+        code: 'INVALID_CREDENTIALS',
+      ));
+    }
+  }
+
+  @override
+  Future<void> deactivateAccount() async {}
 }
 
 void main() {

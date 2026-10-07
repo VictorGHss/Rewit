@@ -35,6 +35,13 @@ class StubAuthRepo implements AuthRepository {
   Future<void> logout() async {
     logoutCalled = true;
   }
+
+  @override
+  Future<Authenticated> reactivate({required String email, required String password}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deactivateAccount() async {}
 }
 
 void main() {

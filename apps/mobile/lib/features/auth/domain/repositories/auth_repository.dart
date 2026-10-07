@@ -9,6 +9,15 @@ abstract class AuthRepository {
     required String password,
   });
 
+  /// Reativa uma conta previamente desativada usando credenciais locais.
+  Future<Authenticated> reactivate({
+    required String email,
+    required String password,
+  });
+
+  /// Desativa a própria conta do usuário autenticado atual via POST /api/v1/me/deactivate.
+  Future<void> deactivateAccount();
+
   /// Renova a sessão usando o Refresh Token armazenado localmente.
   Future<Authenticated> refreshTokens();
 

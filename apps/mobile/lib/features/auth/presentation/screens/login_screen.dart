@@ -54,6 +54,51 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _confirmAndReactivate() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    final email = _emailController.text.trim();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reativar Conta'),
+        content: Text(
+          'Deseja reativar a conta associada ao e-mail "$email"?\n\n'
+          'Ao confirmar, sua conta voltará ao estado ativo e você será conectado ao aplicativo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Reativar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final success = await widget.authNotifier.reactivate(
+        email,
+        _passwordController.text,
+      );
+
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Conta reativada com sucesso! Bem-vindo de volta.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        widget.onLoginSuccess?.call();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -113,24 +158,67 @@ class _LoginScreenState extends State<LoginScreen> {
                                 color: theme.colorScheme.error.withAlpha(100),
                               ),
                             ),
-                            child: Row(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(
-                                  Icons.error_outline,
-                                  color: theme.colorScheme.error,
-                                  size: 20,
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.error_outline,
+                                      color: theme.colorScheme.error,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        errorMessage,
+                                        style: TextStyle(
+                                          color: theme.colorScheme.error,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    errorMessage,
+                                if (state is Unauthenticated && state.retryAfterSeconds != null) ...[
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Por favor, aguarde ${state.retryAfterSeconds} segundos antes de tentar novamente.',
                                     style: TextStyle(
                                       color: theme.colorScheme.error,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                ),
+                                ],
+                                if (state is Unauthenticated && state.isInvalidCredentials) ...[
+                                  const SizedBox(height: 8),
+                                  Divider(height: 1, color: theme.colorScheme.error.withAlpha(60)),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          'Sua conta foi desativada?',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: theme.colorScheme.error,
+                                          ),
+                                        ),
+                                      ),
+                                      TextButton(
+                                        onPressed: isLoading ? null : _confirmAndReactivate,
+                                        style: TextButton.styleFrom(
+                                          visualDensity: VisualDensity.compact,
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        ),
+                                        child: const Text('Reativar Conta', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -195,6 +283,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           label: 'Entrar',
                           isLoading: isLoading,
                           onPressed: isLoading ? null : _submit,
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Link para Reativar Conta Desativada
+                        TextButton.icon(
+                          onPressed: isLoading ? null : _confirmAndReactivate,
+                          icon: const Icon(Icons.settings_backup_restore_rounded, size: 18),
+                          label: const Text('Reativar conta desativada'),
                         ),
                       ],
                     );

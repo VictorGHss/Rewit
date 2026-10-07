@@ -112,6 +112,55 @@ class FakeAuthRepository implements AuthRepository {
     logoutCalled = true;
     storedSession = false;
   }
+
+  bool reactivateCalled = false;
+  bool deactivateCalled = false;
+  bool shouldFailReactivateWithInvalidCredentials = false;
+  bool shouldThrowNetworkOnReactivate = false;
+  bool shouldThrowApiErrorOnDeactivate = false;
+
+  @override
+  Future<Authenticated> reactivate({required String email, required String password}) async {
+    reactivateCalled = true;
+    if (shouldThrowNetworkOnReactivate) {
+      throw const NetworkException('Sem conexão com a internet');
+    }
+    if (shouldFailReactivateWithInvalidCredentials) {
+      throw const ApiException(ProblemDetail(
+        type: 'about:blank',
+        title: 'Credenciais inválidas',
+        status: 401,
+        detail: 'Credenciais inválidas.',
+        code: 'INVALID_CREDENTIALS',
+      ));
+    }
+    return loginResponse ??
+        const Authenticated(
+          user: AuthUserDto(
+            id: '123',
+            email: 'user@test.com',
+            handle: 'testuser',
+            displayName: 'Test User',
+          ),
+          tokens: AuthTokens(
+            accessToken: 'token-reactivated',
+            refreshToken: 'refresh-reactivated',
+          ),
+        );
+  }
+
+  @override
+  Future<void> deactivateAccount() async {
+    deactivateCalled = true;
+    if (shouldThrowApiErrorOnDeactivate) {
+      throw const ApiException(ProblemDetail(
+        type: 'about:blank',
+        title: 'Erro ao desativar',
+        status: 500,
+        detail: 'Falha interna ao desativar conta',
+      ));
+    }
+  }
 }
 
 void main() {

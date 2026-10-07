@@ -7,6 +7,7 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
@@ -24,6 +25,7 @@ class AppRouter {
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
   static const String reviewDetail = '/review/detail';
+  static const String accountSettings = '/settings';
 
   final AuthNotifier authNotifier;
   final FeedNotifier? feedNotifier;
@@ -139,6 +141,14 @@ class AppRouter {
       case profile:
         return MaterialPageRoute(
           builder: (context) => const ProfilePlaceholderScreen(),
+          settings: settings,
+        );
+
+      case accountSettings:
+        return MaterialPageRoute(
+          builder: (context) => AccountSettingsScreen(
+            authNotifier: authNotifier,
+          ),
           settings: settings,
         );
 

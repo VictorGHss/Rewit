@@ -5,9 +5,11 @@ class ApiEndpoints {
   // Autenticação e Perfil do Usuário Autenticado
   static const String authLogin = '/api/v1/auth/login';
   static const String authRegister = '/api/v1/auth/register';
+  static const String authReactivate = '/api/v1/auth/reactivate';
   static const String authRefresh = '/api/v1/auth/refresh';
   static const String authLogout = '/api/v1/auth/logout';
   static const String authMe = '/api/v1/auth/me';
+  static const String meDeactivate = '/api/v1/me/deactivate';
 
   // Feed e Avaliações
   static const String feed = '/api/v1/feed';

@@ -255,6 +255,13 @@ class _HomeScreenState extends State<HomeScreen> {
             title: const Text('Rewit'),
             actions: [
               IconButton(
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Configurações da Conta',
+                onPressed: () {
+                  Navigator.of(context).pushNamed(AppRouter.accountSettings);
+                },
+              ),
+              IconButton(
                 icon: const Icon(Icons.logout),
                 tooltip: 'Sair da Conta',
                 onPressed: _confirmLogout,

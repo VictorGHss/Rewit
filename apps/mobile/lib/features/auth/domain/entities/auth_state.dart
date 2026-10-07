@@ -36,9 +36,17 @@ class Authenticating extends AuthState {
 class Unauthenticated extends AuthState {
   final String? errorMessage;
   final String? errorCode;
+  final int? retryAfterSeconds;
 
-  const Unauthenticated({this.errorMessage, this.errorCode});
+  const Unauthenticated({
+    this.errorMessage,
+    this.errorCode,
+    this.retryAfterSeconds,
+  });
+
+  bool get isRateLimited => retryAfterSeconds != null && retryAfterSeconds! > 0;
+  bool get isInvalidCredentials => errorCode == 'INVALID_CREDENTIALS';
 
   @override
-  String toString() => 'Unauthenticated(error: $errorMessage)';
+  String toString() => 'Unauthenticated(error: $errorMessage, code: $errorCode)';
 }

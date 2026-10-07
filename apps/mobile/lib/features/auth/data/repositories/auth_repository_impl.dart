@@ -46,6 +46,42 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
+  Future<Authenticated> reactivate({
+    required String email,
+    required String password,
+  }) async {
+    final response = await _httpClient.post(
+      ApiEndpoints.authReactivate,
+      body: {
+        'email': email.trim().toLowerCase(),
+        'password': password,
+      },
+      requiresAuth: false,
+    );
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final user = AuthUserDto.fromJson(data['user'] as Map<String, dynamic>);
+    final tokens = AuthTokens.fromJson(data);
+
+    await _tokenStorage.saveTokens(
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    );
+
+    return Authenticated(user: user, tokens: tokens);
+  }
+
+  @override
+  Future<void> deactivateAccount() async {
+    await _httpClient.post(
+      ApiEndpoints.meDeactivate,
+      requiresAuth: true,
+    );
+
+    await _tokenStorage.clearTokens();
+  }
+
+  @override
   Future<Authenticated> refreshTokens() async {
     final currentRefreshToken = await _tokenStorage.getRefreshToken();
     if (currentRefreshToken == null || currentRefreshToken.isEmpty) {

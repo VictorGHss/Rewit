@@ -39,6 +39,13 @@ class MockAuthRepo implements AuthRepository {
 
   @override
   Future<void> logout() async {}
+
+  @override
+  Future<Authenticated> reactivate({required String email, required String password}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deactivateAccount() async {}
 }
 
 class MockFeedRepo implements FeedRepository {

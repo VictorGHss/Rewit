@@ -73,6 +73,8 @@ class AuthNotifier extends ChangeNotifier {
 
   /// Realiza login local com validação de credenciais.
   Future<bool> login(String email, String password) async {
+    if (isLoading) return false;
+
     _state = const Authenticating(statusMessage: 'Entrando...');
     notifyListeners();
 
@@ -88,6 +90,7 @@ class AuthNotifier extends ChangeNotifier {
       _state = Unauthenticated(
         errorMessage: e.detail,
         errorCode: e.errorCode,
+        retryAfterSeconds: e.retryAfterSeconds,
       );
       notifyListeners();
       return false;
@@ -101,6 +104,88 @@ class AuthNotifier extends ChangeNotifier {
       );
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Reativa uma conta desativada com as mesmas credenciais do login.
+  Future<bool> reactivate(String email, String password) async {
+    if (isLoading) return false;
+
+    _state = const Authenticating(statusMessage: 'Reativando conta...');
+    notifyListeners();
+
+    try {
+      final auth = await _authRepository.reactivate(
+        email: email,
+        password: password,
+      );
+      _state = auth;
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _state = Unauthenticated(
+        errorMessage: e.detail,
+        errorCode: e.errorCode,
+        retryAfterSeconds: e.retryAfterSeconds,
+      );
+      notifyListeners();
+      return false;
+    } on NetworkException catch (e) {
+      _state = Unauthenticated(errorMessage: e.message);
+      notifyListeners();
+      return false;
+    } catch (_) {
+      _state = const Unauthenticated(
+        errorMessage: 'Ocorreu um erro inesperado ao reativar a conta.',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Desativa a própria conta do usuário autenticado atual via POST /api/v1/me/deactivate.
+  Future<bool> deactivateAccount() async {
+    if (isLoading) return false;
+
+    final currentUser = _state is Authenticated ? (_state as Authenticated) : null;
+    _state = const Authenticating(statusMessage: 'Desativando conta...');
+    notifyListeners();
+
+    try {
+      await _authRepository.deactivateAccount();
+      _state = const Unauthenticated();
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      if (currentUser != null) {
+        _state = currentUser;
+      } else {
+        _state = Unauthenticated(
+          errorMessage: e.detail,
+          errorCode: e.errorCode,
+          retryAfterSeconds: e.retryAfterSeconds,
+        );
+      }
+      notifyListeners();
+      rethrow;
+    } on NetworkException catch (e) {
+      if (currentUser != null) {
+        _state = currentUser;
+      } else {
+        _state = Unauthenticated(errorMessage: e.message);
+      }
+      notifyListeners();
+      rethrow;
+    } catch (_) {
+      if (currentUser != null) {
+        _state = currentUser;
+      } else {
+        _state = const Unauthenticated(
+          errorMessage: 'Ocorreu um erro inesperado ao desativar a conta.',
+        );
+      }
+      notifyListeners();
+      rethrow;
     }
   }
 
