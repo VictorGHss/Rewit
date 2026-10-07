@@ -1,0 +1,125 @@
+import 'package:flutter/foundation.dart';
+import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
+import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+
+/// Gerenciador reativo de estado de autenticação (ChangeNotifier).
+class AuthNotifier extends ChangeNotifier {
+  final AuthRepository _authRepository;
+  AuthState _state = const AuthInitial();
+
+  AuthNotifier({required AuthRepository authRepository})
+      : _authRepository = authRepository;
+
+  AuthState get state => _state;
+  bool get isAuthenticated => _state is Authenticated;
+  bool get isLoading => _state is Authenticating;
+
+  /// Verifica se há sessão armazenada e valida identidade via /api/v1/auth/me.
+  Future<void> checkAuthStatus() async {
+    final hasSession = await _authRepository.hasStoredSession();
+    if (!hasSession) {
+      _state = const Unauthenticated();
+      notifyListeners();
+      return;
+    }
+
+    _state = const Authenticating(statusMessage: 'Verificando sessão...');
+    notifyListeners();
+
+    try {
+      final user = await _authRepository.getMe();
+      // Sessão válida com o token atual
+      _state = Authenticated(
+        user: user,
+        tokens: const AuthTokens(accessToken: '', refreshToken: ''),
+      );
+      notifyListeners();
+    } on ApiException catch (e) {
+      if (e.isUnauthorized) {
+        // Tentar rotação do refresh token
+        try {
+          final refreshed = await _authRepository.refreshTokens();
+          _state = refreshed;
+          notifyListeners();
+          return;
+        } catch (_) {
+          // Refresh também falhou
+          await _authRepository.logout();
+          _state = const Unauthenticated(
+            errorMessage: 'Sessão expirada. Faça login novamente.',
+            errorCode: 'SESSION_EXPIRED',
+          );
+          notifyListeners();
+          return;
+        }
+      }
+
+      _state = Unauthenticated(
+        errorMessage: e.detail,
+        errorCode: e.errorCode,
+      );
+      notifyListeners();
+    } on NetworkException catch (e) {
+      // Falha de rede: manter estado não autenticado com aviso
+      _state = Unauthenticated(errorMessage: e.message);
+      notifyListeners();
+    } catch (_) {
+      _state = const Unauthenticated(errorMessage: 'Não foi possível restaurar a sessão.');
+      notifyListeners();
+    }
+  }
+
+  /// Realiza login local com validação de credenciais.
+  Future<bool> login(String email, String password) async {
+    _state = const Authenticating(statusMessage: 'Entrando...');
+    notifyListeners();
+
+    try {
+      final auth = await _authRepository.login(
+        email: email,
+        password: password,
+      );
+      _state = auth;
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _state = Unauthenticated(
+        errorMessage: e.detail,
+        errorCode: e.errorCode,
+      );
+      notifyListeners();
+      return false;
+    } on NetworkException catch (e) {
+      _state = Unauthenticated(errorMessage: e.message);
+      notifyListeners();
+      return false;
+    } catch (_) {
+      _state = const Unauthenticated(
+        errorMessage: 'Ocorreu um erro inesperado ao realizar login.',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Encerra a sessão atual local e remotamente.
+  Future<void> logout() async {
+    _state = const Authenticating(statusMessage: 'Encerrando sessão...');
+    notifyListeners();
+
+    await _authRepository.logout();
+    _state = const Unauthenticated();
+    notifyListeners();
+  }
+
+  /// Invocado quando o cliente HTTP detecta resposta 401 não recuperável.
+  void handleSessionExpired() {
+    _state = const Unauthenticated(
+      errorMessage: 'Sua sessão expirou. Faça login novamente.',
+      errorCode: 'SESSION_EXPIRED',
+    );
+    notifyListeners();
+  }
+}
