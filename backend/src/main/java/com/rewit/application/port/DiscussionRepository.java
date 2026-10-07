@@ -50,6 +50,9 @@ public interface DiscussionRepository {
     /** Total de respostas visíveis por raiz; raízes sem respostas visíveis não aparecem no mapa. */
     Map<UUID, Long> countRepliesVisibleTo(Collection<UUID> rootIds, UUID viewerId);
 
+    /** Carga em lote por identificadores, sem filtro de status (uso administrativo). */
+    List<ReviewDiscussion> findAllByIds(Collection<UUID> ids);
+
     /** Respostas visíveis de uma raiz, paginadas. */
     PageResult<ReviewDiscussion> findRepliesVisibleTo(UUID rootId, UUID viewerId, int page, int size);
 }

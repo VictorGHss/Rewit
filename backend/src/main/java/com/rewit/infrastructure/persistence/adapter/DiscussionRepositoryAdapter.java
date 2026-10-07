@@ -124,6 +124,15 @@ public class DiscussionRepositoryAdapter implements DiscussionRepository {
         return PageResult.of(toDomain(paged.getContent()), page, size, paged.getTotalElements());
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReviewDiscussion> findAllByIds(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return toDomain(discussionJpaRepository.findAllById(ids));
+    }
+
     private static Pageable chronological(int page, int size) {
         return PageRequest.of(page, size, Sort.by(Sort.Order.asc("createdAt"), Sort.Order.asc("id")));
     }

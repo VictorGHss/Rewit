@@ -265,7 +265,26 @@ Idêntica para denúncia nova, repetida ou que coloca o comentário em análise:
 
 ---
 
-## 4. Tabela de Códigos de Erro (RFC 7807)
+## 4. Moderação Administrativa (MODERATOR / ADMIN)
+
+Todas as rotas exigem token com role `MODERATOR` ou `ADMIN` (`401` sem token, `403` para `USER`). As visões administrativas expõem o status interno e o conteúdo, inclusive de comentários removidos.
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/api/v1/admin/discussion-reports` | Fila de denúncias. Filtros: `status`, `reason`, `discussionId`; `page`, `size` (máx. 100), `sort` (`asc`/`desc` por `createdAt`). Cada item traz `reviewId`, `parentId`, `discussionAuthorUserId` e `discussionStatus` |
+| `GET` | `/api/v1/admin/discussions/{discussionId}` | Contexto: `discussion` e `parent` (conteúdo e status), `pendingReportCount`, `reports` e `auditHistory` |
+| `POST` | `/api/v1/admin/discussions/{discussionId}/moderate` | `{"action": "REMOVE_DISCUSSION" \| "RESTORE_DISCUSSION", "reasonCode": "...", "justification": "..."}` |
+
+Regras da moderação (`ModerateDiscussionUseCase`, lock pessimista da discussão, transação única):
+* Somente comentários `UNDER_REVIEW`: `REMOVE_DISCUSSION` leva a `REMOVED` e resolve as denúncias pendentes como `ACCEPTED`; `RESTORE_DISCUSSION` leva a `ACTIVE` e as resolve como `REJECTED`. Outro estado responde `409 DISCUSSION_NOT_UNDER_REVIEW`.
+* O autor do comentário não o modera (`403 SELF_MODERATION_FORBIDDEN`) e quem o denunciou também não (`403 REPORTER_CANNOT_MODERATE`). A conta do moderador precisa estar ativa (`401 ACCOUNT_DISABLED`).
+* `reasonCode` de até 64 caracteres; `justification` de 15 a 1000.
+* Cada decisão grava um registro em `discussion_moderation_audit_logs` (V20), append-only: o banco rejeita `UPDATE` (`trg_prevent_discussion_moderation_audit_update`).
+* Não altera reputação nem estatísticas e não gera notificação. Moderações concorrentes do mesmo comentário são serializadas: a segunda recebe `409`.
+
+---
+
+## 5. Tabela de Códigos de Erro (RFC 7807)
 
 | Código HTTP | Código da Aplicação | Motivo / Cenário |
 |---|---|---|

@@ -160,6 +160,7 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 | `promotions` | `chk_promotion_dates` | CHECK | `end_at >= start_at` |
 | `discussion_reports` | `uq_discussion_report_reporter` | UNIQUE | `(discussion_id, reporter_user_id)` (V19) |
 | `discussion_reports` | `chk_discussion_reports_status` | CHECK | `status IN ('PENDING', 'ACCEPTED', 'REJECTED')`; índice parcial `idx_discussion_reports_pending_queue (created_at, id) WHERE status = 'PENDING'` |
+| `discussion_moderation_audit_logs` | `chk_discussion_moderation_audit_action` | CHECK | `action IN ('REMOVE_DISCUSSION', 'RESTORE_DISCUSSION')` (V20); append-only por trigger `trg_prevent_discussion_moderation_audit_update` (rejeita `UPDATE`) |
 | `user_follows` | `chk_no_self_follow` | CHECK | `follower_user_id <> followed_user_id` |
 | `user_follows` | `uq_user_follow` | UNIQUE | `(follower_user_id, followed_user_id)` |
 | `product_identifiers` | `uq_product_identifier` | UNIQUE | `(identifier_type, identifier_value)` |
