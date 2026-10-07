@@ -25,7 +25,9 @@ import org.springframework.web.context.WebApplicationContext;
 import java.time.Instant;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.matchesPattern;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -146,6 +148,26 @@ class DiscussionControllerIntegrationTest {
         // DELETE sem auth
         mockMvc.perform(delete("/api/v1/discussions/{discussionId}", randomDiscussionId))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("1.1 O 401 da camada de segurança é ProblemDetail com o código de negócio em 'code' (sem token e token inválido)")
+    void unauthenticatedProblemDetailExposesCode() throws Exception {
+        // Sem token
+        mockMvc.perform(get("/api/v1/reviews/{reviewId}/discussions", UUID.randomUUID()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"))
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_REQUIRED"))
+                .andExpect(jsonPath("$.timestamp").isString());
+
+        // Token inválido/expirado: mesmo corpo, sem ecoar o token
+        mockMvc.perform(delete("/api/v1/discussions/{discussionId}", UUID.randomUUID())
+                        .header("Authorization", "Bearer token-invalido"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"))
+                .andExpect(content().string(not(containsString("token-invalido"))));
     }
 
     // 2. 201 Created ao criar comentário raiz

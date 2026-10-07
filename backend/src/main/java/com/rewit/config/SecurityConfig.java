@@ -148,6 +148,9 @@ public class SecurityConfig {
             errorBody.put("title", "Não autorizado");
             errorBody.put("status", 401);
             errorBody.put("detail", "Autenticação requerida ou token inválido/expirado");
+            // "code" é a chave do código de negócio em todos os ProblemDetail da API (GlobalExceptionHandler) e a
+            // que os clientes leem; "errorCode" permanece por compatibilidade com consumidores existentes
+            errorBody.put("code", "AUTHENTICATION_REQUIRED");
             errorBody.put("errorCode", "AUTHENTICATION_REQUIRED");
             errorBody.put("timestamp", Instant.now().toString());
 
