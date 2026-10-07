@@ -34,7 +34,7 @@ public final class DiscussionThreadDtos {
      * @param content    {@code null} quando {@code REMOVED}
      * @param author     {@code null} quando {@code REMOVED} ou quando o anonimato da avaliação mascara o autor
      * @param canReply   o leitor pode responder: somente raiz {@code VISIBLE} (um nível de resposta)
-     * @param canDelete  o leitor é o autor e o item não está removido
+     * @param canDelete  o leitor é o autor e o item está {@code VISIBLE} (em análise, só a moderação decide)
      */
     public record DiscussionItemView(
             UUID id,

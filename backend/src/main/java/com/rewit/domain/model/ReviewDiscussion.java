@@ -95,9 +95,13 @@ public class ReviewDiscussion {
 
     /**
      * Marca o comentário como removido pelo próprio autor com timestamp explícito.
+     * Comentário em análise não pode ser removido pelo autor: a quarentena só termina por decisão da moderação.
      */
     public void markRemoved(Instant now) {
         validateTimestamp(now);
+        if (this.status == DiscussionStatus.UNDER_REVIEW) {
+            throw underReviewMutationDenied();
+        }
         this.status = DiscussionStatus.REMOVED;
         this.updatedAt = now;
     }
@@ -169,6 +173,11 @@ public class ReviewDiscussion {
         }
         this.status = DiscussionStatus.REMOVED;
         this.updatedAt = now;
+    }
+
+    public static BusinessException underReviewMutationDenied() {
+        return new BusinessException("O comentário está em análise e não pode ser excluído",
+                HttpStatus.CONFLICT, "DISCUSSION_UNDER_REVIEW_MUTATION_DENIED");
     }
 
     public boolean isActive() {

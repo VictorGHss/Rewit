@@ -11,6 +11,7 @@ import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserRepository;
+import com.rewit.application.service.DiscussionService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.DiscussionModerationAction;
@@ -66,6 +67,7 @@ class ModerateDiscussionIntegrationTest {
     @Autowired private ReportDiscussionUseCase reportDiscussionUseCase;
     @Autowired private QueryAdminDiscussionReportsUseCase queryAdminDiscussionReportsUseCase;
     @Autowired private GetAdminDiscussionContextUseCase getAdminDiscussionContextUseCase;
+    @Autowired private DiscussionService discussionService;
     @Autowired private UserRepository userRepository;
     @Autowired private ProfileRepository profileRepository;
     @Autowired private PlaceRepository placeRepository;
@@ -211,6 +213,63 @@ class ModerateDiscussionIntegrationTest {
         assertEquals(1, context.auditHistory().size());
         assertTrue(queryAdminDiscussionReportsUseCase.execute(0, 50, ReportStatus.PENDING, null, comment.getId(), "asc")
                 .content().isEmpty());
+    }
+
+    @Test
+    @DisplayName("Autor não exclui comentário em análise; as denúncias seguem PENDING e a moderação conclui o ciclo")
+    void authorCannotDeleteUnderReviewAndModerationStillCompletes() {
+        ReviewDiscussion comment = quarantinedComment();
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> discussionService.deleteDiscussion(comment.getId(), commenter.getId()));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        assertEquals("DISCUSSION_UNDER_REVIEW_MUTATION_DENIED", ex.getErrorCode());
+        assertEquals(DiscussionStatus.UNDER_REVIEW, statusOf(comment));
+        assertEquals(3, count("SELECT count(*) FROM discussion_reports WHERE discussion_id = ? AND status = 'PENDING'", comment.getId()));
+        assertEquals(3, queryAdminDiscussionReportsUseCase.execute(0, 50, ReportStatus.PENDING, null, comment.getId(), "asc")
+                .totalElements());
+
+        moderate(comment, moderator, DiscussionModerationAction.RESTORE_DISCUSSION);
+        assertEquals(DiscussionStatus.ACTIVE, statusOf(comment));
+        assertEquals(3, count("SELECT count(*) FROM discussion_reports WHERE discussion_id = ? AND status = 'REJECTED'", comment.getId()));
+
+        // De volta a ACTIVE, o autor pode excluir normalmente
+        discussionService.deleteDiscussion(comment.getId(), commenter.getId());
+        assertEquals(DiscussionStatus.REMOVED, statusOf(comment));
+    }
+
+    @Test
+    @DisplayName("Concorrência: exclusão pelo autor durante a moderação termina consistente em qualquer ordem")
+    void concurrentAuthorDeleteAndModerationStayConsistent() throws Exception {
+        ReviewDiscussion comment = quarantinedComment();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<String> moderation = executor.submit(
+                    () -> attempt(start, comment, moderator, DiscussionModerationAction.REMOVE_DISCUSSION));
+            Future<String> deletion = executor.submit(() -> {
+                start.await();
+                try {
+                    discussionService.deleteDiscussion(comment.getId(), commenter.getId());
+                    return "OK";
+                } catch (BusinessException e) {
+                    return e.getErrorCode();
+                }
+            });
+            start.countDown();
+
+            // A moderação sempre conclui; a exclusão ou chega antes (409, ainda em análise) ou depois (no-op em REMOVED)
+            assertEquals("OK", moderation.get(30, TimeUnit.SECONDS));
+            String deletionOutcome = deletion.get(30, TimeUnit.SECONDS);
+            assertTrue(deletionOutcome.equals("OK") || deletionOutcome.equals("DISCUSSION_UNDER_REVIEW_MUTATION_DENIED"),
+                    deletionOutcome);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertEquals(DiscussionStatus.REMOVED, statusOf(comment));
+        assertEquals(0, count("SELECT count(*) FROM discussion_reports WHERE discussion_id = ? AND status = 'PENDING'", comment.getId()));
+        assertEquals(3, count("SELECT count(*) FROM discussion_reports WHERE discussion_id = ? AND status = 'ACCEPTED'", comment.getId()));
+        assertEquals(1, count("SELECT count(*) FROM discussion_moderation_audit_logs WHERE discussion_id = ?", comment.getId()));
     }
 
     @Test

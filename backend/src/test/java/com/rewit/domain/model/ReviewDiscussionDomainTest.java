@@ -222,6 +222,23 @@ class ReviewDiscussionDomainTest {
     }
 
     @Test
+    @DisplayName("Remoção pelo autor é rejeitada em UNDER_REVIEW: a quarentena só termina pela moderação")
+    void shouldRejectAuthorRemovalUnderReview() {
+        Instant before = Instant.now().minusSeconds(10);
+        ReviewDiscussion discussion = new ReviewDiscussion(
+                UUID.randomUUID(), reviewId, authorId, null, "Texto", false,
+                DiscussionStatus.UNDER_REVIEW, before, before
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> discussion.markRemoved(Instant.now()));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        assertEquals("DISCUSSION_UNDER_REVIEW_MUTATION_DENIED", ex.getErrorCode());
+        assertEquals(DiscussionStatus.UNDER_REVIEW, discussion.getStatus());
+        assertEquals(before, discussion.getUpdatedAt());
+    }
+
+    @Test
     @DisplayName("Deve remover pelo autor (soft delete) com sucesso")
     void shouldMarkRemovedByAuthorFromActive() {
         Instant before = Instant.now().minusSeconds(10);

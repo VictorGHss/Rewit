@@ -72,6 +72,7 @@ A permissão para criar ou visualizar discussões deriva estritamente da visibil
 * Apenas o autor original do comentário tem permissão para excluí-lo (`DELETE /api/v1/discussions/{discussionId}`). Terceiros recebem `403 FORBIDDEN`.
 * A exclusão é um **soft delete**, alterando o `status` para `REMOVED`. A linha física não é removida para preservar a integridade referencial da árvore de `parent_id`.
 * Operação **idempotente**: repetir a exclusão de um comentário já `REMOVED` retorna `204 No Content` com sucesso.
+* Comentário em análise (`UNDER_REVIEW`) não pode ser excluído pelo autor: `409 DISCUSSION_UNDER_REVIEW_MUTATION_DENIED`. A quarentena só termina por decisão da moderação, que resolve as denúncias pendentes.
 
 ---
 
@@ -213,7 +214,7 @@ Para responder a um comentário existente:
 | `author` | `null` em `REMOVED` e quando o anonimato da avaliação mascara o dono (`isFromOwner = true` em avaliação anônima) |
 | `isFromOwner` | `false` em `REMOVED` (o tombstone não revela que era do dono da avaliação) |
 | `canReply` | `true` somente em raiz `VISIBLE` (um nível de resposta) |
-| `canDelete` | `true` quando o leitor é o autor e o item não está `REMOVED` |
+| `canDelete` | `true` quando o leitor é o autor e o item está `VISIBLE` (em análise, só a moderação decide) |
 
 *Execução*: número constante de consultas por página (raízes paginadas, primeiras respostas por raiz com `ROW_NUMBER()`, contagem agrupada e perfis em lote), sem N+1.
 
@@ -228,6 +229,7 @@ Para responder a um comentário existente:
 1. Apenas o autor do comentário pode removê-lo (terceiro recebe `403 FORBIDDEN`).
 2. A operação altera o status para `REMOVED` no banco, mantendo integridade com comentários filhos.
 3. Operação idempotente.
+4. Comentário em análise: `409 DISCUSSION_UNDER_REVIEW_MUTATION_DENIED` (terceiros continuam recebendo `403 FORBIDDEN`).
 
 #### Resposta de Sucesso:
 `204 No Content` (corpo vazio).
@@ -297,5 +299,6 @@ Regras da moderação (`ModerateDiscussionUseCase`, lock pessimista da discussã
 | `401 Unauthorized` | `UNAUTHORIZED` | Ausência ou token JWT inválido/expirado |
 | `403 Forbidden` | `FORBIDDEN` | Tentativa de comentar em Review `PRIVATE` de terceiro, Review `FOLLOWERS` sem ser seguidor, ou excluir comentário de outro usuário |
 | `404 Not Found` | `REVIEW_NOT_FOUND` | Avaliação inexistente ou em status `UNDER_REVIEW` / `REMOVED` |
+| `409 Conflict` | `DISCUSSION_UNDER_REVIEW_MUTATION_DENIED` | Autor tentando excluir o próprio comentário em análise |
 | `404 Not Found` | `DISCUSSION_NOT_FOUND` | Comentário pai (`parentId`) ou comentário a deletar não encontrado ou já indisponível |
 | `429 Too Many Requests` | `RATE_LIMIT_EXCEEDED` | Mais de 15 comentários criados em menos de 60 segundos pelo mesmo usuário |

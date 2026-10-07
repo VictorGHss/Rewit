@@ -56,7 +56,8 @@ public class DiscussionPresentationPolicy {
                 !removed && discussion.isFromOwner(),
                 discussion.getCreatedAt(),
                 isRoot && state == DiscussionViewState.VISIBLE,
-                viewerIsAuthor && !removed
+                // Só comentário publicado pode ser excluído pelo autor; em análise depende da moderação
+                viewerIsAuthor && state == DiscussionViewState.VISIBLE
         );
     }
 

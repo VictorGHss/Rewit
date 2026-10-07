@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -91,7 +92,13 @@ class DiscussionThreadControllerIntegrationTest {
         assertEquals(0, pending.get("replies").size());
         assertEquals(0, pending.get("replyCount").asLong());
         assertFalse(pending.get("canReply").asBoolean());
-        assertTrue(pending.get("canDelete").asBoolean());
+        assertFalse(pending.get("canDelete").asBoolean());
+
+        // O autor não exclui o comentário em análise: 409 estável e o comentário segue em análise
+        mockMvc.perform(delete("/api/v1/discussions/{id}", quarantined.getId()).header(HttpHeaders.AUTHORIZATION, bearer(commenter)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DISCUSSION_UNDER_REVIEW_MUTATION_DENIED"));
+        assertEquals("PENDING_REVIEW", thread(commenter).get(1).get("state").asText());
 
         // Nem a lista de respostas da raiz em análise é acessível, para ninguém
         mockMvc.perform(get("/api/v1/discussions/{id}/replies", quarantined.getId()).header(HttpHeaders.AUTHORIZATION, bearer(commenter)))

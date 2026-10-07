@@ -4,7 +4,7 @@
 > **Status do Repositório**: Verde e Estabilizado\
 > **Checkpoint Atual (HEAD)**: commit `feat: implementar observabilidade v1` (sobre `364b856`)\
 > **Branch**: `main` (ahead do origin em commits consolidados)\
-> **Total de Testes Automatizados**: `1454` (0 failures, 0 errors, 0 skipped)\
+> **Total de Testes Automatizados**: `1459` (0 failures, 0 errors, 0 skipped)\
 > **Working Tree**: `Limpo`\
 > **Próximo Trabalho**: decisão de produto/jurídico sobre IP/User-Agent em sessões ativas (pendência do STEP 29; ADR-011 Proposto). Prontidão de produção (backup/restore, testes de carga) segue como frente separada; rate limiting distribuído concluído (ADR-013 Proposto)
 
@@ -23,7 +23,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1454, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`. A suíte usa PostgreSQL, SeaweedFS e Redis reais.
+*Resultado esperado*: `Tests run: 1459, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`. A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -1069,7 +1069,7 @@ O produtor de Notifications e o `PushNotificationHandler` foram **concluídos co
 
 ## 12. Estado Atual da Suíte de Testes
 
-* **Total de Testes**: `1454`
+* **Total de Testes**: `1459`
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`

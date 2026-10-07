@@ -55,14 +55,14 @@ class DiscussionPresentationPolicyTest {
     }
 
     @Test
-    @DisplayName("UNDER_REVIEW para o autor: PENDING_REVIEW com o próprio conteúdo, pode excluir, não recebe respostas")
+    @DisplayName("UNDER_REVIEW para o autor: PENDING_REVIEW com o próprio conteúdo, sem excluir nem receber respostas")
     void underReviewForAuthorIsPendingReview() {
         DiscussionItemView view = policy.present(discussion(DiscussionStatus.UNDER_REVIEW, null, false), author, false, profiles);
 
         assertEquals(DiscussionViewState.PENDING_REVIEW, view.state());
         assertEquals("Comentário", view.content());
         assertFalse(view.canReply());
-        assertTrue(view.canDelete());
+        assertFalse(view.canDelete(), "a quarentena só termina por decisão da moderação");
     }
 
     @Test

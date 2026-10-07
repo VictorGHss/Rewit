@@ -455,6 +455,42 @@ class DiscussionServiceUnitTest {
         verify(discussionRepository, never()).save(any());
     }
 
+    // Remoção bloqueada em análise
+    @Test
+    @DisplayName("Autor não remove comentário UNDER_REVIEW: 409 DISCUSSION_UNDER_REVIEW_MUTATION_DENIED sem persistir")
+    void shouldRejectRemovalOfDiscussionUnderReview() {
+        UUID discussionId = UUID.randomUUID();
+        ReviewDiscussion discussion = new ReviewDiscussion(
+                discussionId, reviewId, otherUserId, null, "Em análise", false,
+                "UNDER_REVIEW", Instant.now(), Instant.now()
+        );
+        when(discussionRepository.findByIdForUpdate(discussionId)).thenReturn(Optional.of(discussion));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> discussionService.deleteDiscussion(discussionId, otherUserId));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        assertEquals("DISCUSSION_UNDER_REVIEW_MUTATION_DENIED", ex.getErrorCode());
+        assertEquals(DiscussionStatus.UNDER_REVIEW, discussion.getStatus());
+        verify(discussionRepository, never()).save(any());
+    }
+
+    // Terceiro recebe 403 antes da checagem de estado: a quarentena não é revelada a quem não é autor
+    @Test
+    @DisplayName("Terceiro tentando remover comentário UNDER_REVIEW recebe 403, não 409")
+    void shouldNotRevealQuarantineToThirdParty() {
+        UUID discussionId = UUID.randomUUID();
+        ReviewDiscussion discussion = new ReviewDiscussion(
+                discussionId, reviewId, otherUserId, null, "Em análise", false,
+                "UNDER_REVIEW", Instant.now(), Instant.now()
+        );
+        when(discussionRepository.findByIdForUpdate(discussionId)).thenReturn(Optional.of(discussion));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> discussionService.deleteDiscussion(discussionId, thirdUserId));
+
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+        verify(discussionRepository, never()).save(any());
+    }
+
     // Listagem - Ordenação e paginação
     @Test
     @DisplayName("Listagem deve retornar apenas discussões ACTIVE de forma cronológica")

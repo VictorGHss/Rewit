@@ -186,8 +186,13 @@ public class DiscussionService {
             throw new BusinessException("Apenas o autor pode remover o comentário", HttpStatus.FORBIDDEN, "FORBIDDEN");
         }
 
+        // Em análise: só a moderação encerra a quarentena (as denúncias pendentes dependem dessa decisão)
+        if (discussion.isUnderReview()) {
+            throw ReviewDiscussion.underReviewMutationDenied();
+        }
+
         if (!discussion.isActive()) {
-            return; // Idempotente
+            return; // REMOVED: idempotente
         }
 
         discussion.markRemoved();
