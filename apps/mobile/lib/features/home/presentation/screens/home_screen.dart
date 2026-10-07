@@ -4,6 +4,7 @@ import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
+import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
@@ -16,6 +17,7 @@ class HomeScreen extends StatefulWidget {
   final FeedNotifier? feedNotifier;
   final ReviewCreationRepository? reviewCreationRepository;
   final SearchRepository? searchRepository;
+  final UserProfileRepository? userProfileRepository;
 
   const HomeScreen({
     super.key,
@@ -23,6 +25,7 @@ class HomeScreen extends StatefulWidget {
     this.feedNotifier,
     this.reviewCreationRepository,
     this.searchRepository,
+    this.userProfileRepository,
   });
 
   @override
@@ -153,6 +156,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   arguments: review,
                 );
               },
+              onAuthorTap: (authorId) {
+                Navigator.of(context).pushNamed(
+                  AppRouter.profile,
+                  arguments: authorId,
+                );
+              },
             ),
           ),
         ],
@@ -247,7 +256,10 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
           ),
-          const ProfilePlaceholderScreen(),
+          ProfilePlaceholderScreen(
+            authNotifier: widget.authNotifier,
+            userProfileRepository: widget.userProfileRepository,
+          ),
         ];
 
         return Scaffold(

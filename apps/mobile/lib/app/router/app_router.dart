@@ -7,8 +7,10 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
-import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
@@ -24,6 +26,7 @@ class AppRouter {
   static const String search = '/search';
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
+  static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
   static const String accountSettings = '/settings';
 
@@ -33,6 +36,7 @@ class AppRouter {
   final DiscussionRepository? discussionRepository;
   final ReviewCreationRepository? reviewCreationRepository;
   final SearchRepository? searchRepository;
+  final UserProfileRepository? userProfileRepository;
 
   const AppRouter({
     required this.authNotifier,
@@ -41,6 +45,7 @@ class AppRouter {
     this.discussionRepository,
     this.reviewCreationRepository,
     this.searchRepository,
+    this.userProfileRepository,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -62,6 +67,7 @@ class AppRouter {
                   feedNotifier: feedNotifier,
                   reviewCreationRepository: reviewCreationRepository,
                   searchRepository: searchRepository,
+                  userProfileRepository: userProfileRepository,
                 );
               }
               return LoginScreen(authNotifier: authNotifier);
@@ -82,6 +88,8 @@ class AppRouter {
             authNotifier: authNotifier,
             feedNotifier: feedNotifier,
             reviewCreationRepository: reviewCreationRepository,
+            searchRepository: searchRepository,
+            userProfileRepository: userProfileRepository,
           ),
           settings: settings,
         );
@@ -139,8 +147,33 @@ class AppRouter {
         );
 
       case profile:
+        final userId = settings.arguments as String?;
         return MaterialPageRoute(
-          builder: (context) => const ProfilePlaceholderScreen(),
+          builder: (context) => UserProfileScreen(
+            userId: userId,
+            userProfileRepository: userProfileRepository,
+            authNotifier: authNotifier,
+          ),
+          settings: settings,
+        );
+
+      case followList:
+        final args = settings.arguments;
+        if (args is FollowListArgs) {
+          return MaterialPageRoute(
+            builder: (context) => FollowListScreen(
+              userId: args.userId,
+              userName: args.userName,
+              initialTab: args.initialTab,
+              repository: userProfileRepository,
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => const Scaffold(
+            body: Center(child: Text('Argumentos de conexões sociais ausentes.')),
+          ),
           settings: settings,
         );
 

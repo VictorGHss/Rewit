@@ -1,15 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
 
-/// Tela placeholder para Perfil do Usuário (próxima etapa).
+/// Tela para exibição de perfil no fluxo principal, integrando UserProfileScreen com suporte a fallback.
 class ProfilePlaceholderScreen extends StatelessWidget {
-  const ProfilePlaceholderScreen({super.key});
+  final AuthNotifier? authNotifier;
+  final UserProfileRepository? userProfileRepository;
+
+  const ProfilePlaceholderScreen({
+    super.key,
+    this.authNotifier,
+    this.userProfileRepository,
+  });
 
   @override
   Widget build(BuildContext context) {
+    if (authNotifier != null) {
+      return UserProfileScreen(
+        userId: null,
+        userProfileRepository: userProfileRepository,
+        authNotifier: authNotifier!,
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Perfil'),
+        title: const Text('Perfil de Usuário'),
       ),
       body: Center(
         child: Padding(
@@ -22,12 +40,6 @@ class ProfilePlaceholderScreen extends StatelessWidget {
               Text(
                 'Perfil de Usuário',
                 style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Esta funcionalidade será entregue nas próximas etapas da evolução mobile.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
               ),
               const SizedBox(height: 24),
               OutlinedButton.icon(

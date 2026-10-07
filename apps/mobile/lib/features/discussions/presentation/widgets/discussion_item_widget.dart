@@ -8,6 +8,7 @@ class DiscussionItemWidget extends StatelessWidget {
   final VoidCallback? onReply;
   final VoidCallback? onDelete;
   final VoidCallback? onReport;
+  final void Function(String authorId)? onAuthorTap;
 
   const DiscussionItemWidget({
     super.key,
@@ -16,6 +17,7 @@ class DiscussionItemWidget extends StatelessWidget {
     this.onReply,
     this.onDelete,
     this.onReport,
+    this.onAuthorTap,
   });
 
   String _formatDate(DateTime date) {
@@ -58,8 +60,13 @@ class DiscussionItemWidget extends StatelessWidget {
     }
 
     final author = item.author;
+    final authorId = author?.id;
     final displayName = author?.displayName ?? (item.isFromOwner ? 'Autor da Avaliação' : 'Usuário');
     final handle = author?.handle;
+    final canNavigateToAuthor = author != null &&
+        authorId != null &&
+        authorId.isNotEmpty &&
+        displayName != 'Usuário excluído';
 
     return Semantics(
       label: item.isPendingReview
@@ -115,73 +122,77 @@ class DiscussionItemWidget extends StatelessWidget {
             ],
 
             // Cabeçalho do comentário
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                CircleAvatar(
-                  radius: isRoot ? 14 : 11,
-                  backgroundColor: item.isFromOwner
-                      ? theme.colorScheme.primary.withAlpha(30)
-                      : Colors.grey.shade200,
-                  child: Text(
-                    displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
-                    style: TextStyle(
-                      fontSize: isRoot ? 12 : 10,
-                      fontWeight: FontWeight.bold,
-                      color: item.isFromOwner ? theme.colorScheme.primary : Colors.grey.shade800,
+            InkWell(
+              onTap: canNavigateToAuthor ? () => onAuthorTap?.call(authorId) : null,
+              borderRadius: BorderRadius.circular(4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: isRoot ? 14 : 11,
+                    backgroundColor: item.isFromOwner
+                        ? theme.colorScheme.primary.withAlpha(30)
+                        : Colors.grey.shade200,
+                    child: Text(
+                      displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
+                      style: TextStyle(
+                        fontSize: isRoot ? 12 : 10,
+                        fontWeight: FontWeight.bold,
+                        color: item.isFromOwner ? theme.colorScheme.primary : Colors.grey.shade800,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 6,
-                    children: [
-                      Text(
-                        displayName,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: isRoot ? 13 : 12,
-                        ),
-                      ),
-                      if (handle != null && handle.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      children: [
                         Text(
-                          '@$handle',
+                          displayName,
                           style: TextStyle(
-                            color: theme.colorScheme.onSurface.withAlpha(150),
-                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            fontSize: isRoot ? 13 : 12,
                           ),
                         ),
-                      ],
-                      if (item.isFromOwner) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primary.withAlpha(20),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'Autor da avaliação',
+                        if (handle != null && handle.isNotEmpty) ...[
+                          Text(
+                            '@$handle',
                             style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.primary,
+                              color: theme.colorScheme.onSurface.withAlpha(150),
+                              fontSize: 11,
                             ),
                           ),
-                        ),
+                        ],
+                        if (item.isFromOwner) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary.withAlpha(20),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'Autor da avaliação',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                Text(
-                  _formatDate(item.createdAt),
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface.withAlpha(120),
-                    fontSize: 10,
+                  Text(
+                    _formatDate(item.createdAt),
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withAlpha(120),
+                      fontSize: 10,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 6),
 

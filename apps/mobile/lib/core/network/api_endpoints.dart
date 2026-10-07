@@ -21,6 +21,18 @@ class ApiEndpoints {
   static const String users = '/api/v1/users';
   static const String places = '/api/v1/places';
 
+  // Perfil Público e Grafo Social
+  static String userProfile(String userId) => '/api/v1/users/$userId';
+  static String userFollow(String userId) => '/api/v1/users/$userId/follow';
+  static String userFollowers(String userId, {int page = 0, int size = 10}) =>
+      '/api/v1/users/$userId/followers?page=$page&size=$size';
+  static String userFollowing(String userId, {int page = 0, int size = 10}) =>
+      '/api/v1/users/$userId/following?page=$page&size=$size';
+  static String myFollowers({int page = 0, int size = 10}) =>
+      '/api/v1/me/followers?page=$page&size=$size';
+  static String myFollowing({int page = 0, int size = 10}) =>
+      '/api/v1/me/following?page=$page&size=$size';
+
   // Discussões e Comentários Comunitários
   static String reviewDiscussions(String reviewId, {int page = 0, int size = 20}) =>
       '/api/v1/reviews/$reviewId/discussions?page=$page&size=$size';

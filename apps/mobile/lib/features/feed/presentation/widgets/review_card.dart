@@ -5,11 +5,13 @@ import '../../domain/entities/feed_entities.dart';
 class ReviewCard extends StatelessWidget {
   final FeedReview review;
   final VoidCallback? onTap;
+  final void Function(String authorId)? onAuthorTap;
 
   const ReviewCard({
     super.key,
     required this.review,
     this.onTap,
+    this.onAuthorTap,
   });
 
   String _formatDate(DateTime date) {
@@ -21,6 +23,11 @@ class ReviewCard extends StatelessWidget {
     final theme = Theme.of(context);
     final author = review.author;
     final avgRating = review.averageRating;
+    final authorId = author.id;
+    final canNavigateToAuthor = !review.isAnonymous &&
+        authorId != null &&
+        authorId.isNotEmpty &&
+        author.displayName != 'Usuário excluído';
 
     return Card(
       elevation: 0.5,
@@ -41,27 +48,33 @@ class ReviewCard extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Avatar
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: review.isAnonymous
-                        ? Colors.grey.shade300
-                        : theme.colorScheme.primary.withAlpha(30),
-                    child: review.isAnonymous
-                        ? Icon(Icons.person_off_outlined, size: 20, color: Colors.grey.shade700)
-                        : Text(
-                            author.displayName.isNotEmpty
-                                ? author.displayName[0].toUpperCase()
-                                : 'U',
-                            style: TextStyle(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                  ),
-                  const SizedBox(width: 12),
-                  // Informações do Autor
                   Expanded(
+                    child: InkWell(
+                      onTap: canNavigateToAuthor ? () => onAuthorTap?.call(authorId) : null,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Row(
+                        children: [
+                          // Avatar
+                          CircleAvatar(
+                            radius: 20,
+                            backgroundColor: review.isAnonymous
+                                ? Colors.grey.shade300
+                                : theme.colorScheme.primary.withAlpha(30),
+                            child: review.isAnonymous
+                                ? Icon(Icons.person_off_outlined, size: 20, color: Colors.grey.shade700)
+                                : Text(
+                                    author.displayName.isNotEmpty
+                                        ? author.displayName[0].toUpperCase()
+                                        : 'U',
+                                    style: TextStyle(
+                                      color: theme.colorScheme.primary,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                          ),
+                          const SizedBox(width: 12),
+                          // Informações do Autor
+                          Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -107,7 +120,12 @@ class ReviewCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // Timestamp
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Timestamp
                   Text(
                     _formatDate(review.createdAt),
                     style: theme.textTheme.bodySmall?.copyWith(

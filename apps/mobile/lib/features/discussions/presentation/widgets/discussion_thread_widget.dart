@@ -10,6 +10,7 @@ class DiscussionThreadWidget extends StatelessWidget {
   final void Function(DiscussionItem item)? onReport;
   final VoidCallback? onLoadMoreReplies;
   final bool isLoadingReplies;
+  final void Function(String authorId)? onAuthorTap;
 
   const DiscussionThreadWidget({
     super.key,
@@ -19,6 +20,7 @@ class DiscussionThreadWidget extends StatelessWidget {
     this.onReport,
     this.onLoadMoreReplies,
     this.isLoadingReplies = false,
+    this.onAuthorTap,
   });
 
   DiscussionItem _rootAsItem() {
@@ -55,6 +57,7 @@ class DiscussionThreadWidget extends StatelessWidget {
           onReply: thread.canReply && onReply != null ? () => onReply!(thread) : null,
           onDelete: thread.canDelete && onDelete != null ? () => onDelete!(rootItem) : null,
           onReport: thread.isVisible && onReport != null ? () => onReport!(rootItem) : null,
+          onAuthorTap: onAuthorTap,
         ),
 
         // Bloco de respostas aninhadas (1 nível de profundidade)
@@ -83,6 +86,7 @@ class DiscussionThreadWidget extends StatelessWidget {
                       onReply: null,
                       onDelete: reply.canDelete && onDelete != null ? () => onDelete!(reply) : null,
                       onReport: reply.isVisible && onReport != null ? () => onReport!(reply) : null,
+                      onAuthorTap: onAuthorTap,
                     );
                   }),
 

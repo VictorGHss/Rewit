@@ -10,11 +10,13 @@ import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 class FeedView extends StatefulWidget {
   final FeedNotifier feedNotifier;
   final void Function(FeedReview review)? onReviewTap;
+  final void Function(String authorId)? onAuthorTap;
 
   const FeedView({
     super.key,
     required this.feedNotifier,
     this.onReviewTap,
+    this.onAuthorTap,
   });
 
   @override
@@ -142,6 +144,7 @@ class _FeedViewState extends State<FeedView> {
                   return ReviewCard(
                     review: review,
                     onTap: () => widget.onReviewTap?.call(review),
+                    onAuthorTap: widget.onAuthorTap,
                   );
                 }
 

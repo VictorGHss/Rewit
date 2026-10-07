@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/discussions/presentation/state/discussion_notifier.dart';
 import 'package:rewit_mobile/features/discussions/presentation/widgets/discussions_section.dart';
@@ -210,80 +211,92 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 1. Cabeçalho do Autor
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: review.isAnonymous
-                      ? Colors.grey.shade300
-                      : theme.colorScheme.primary.withAlpha(30),
-                  child: review.isAnonymous
-                      ? Icon(Icons.person_off_outlined, color: Colors.grey.shade700)
-                      : Text(
-                          author.displayName.isNotEmpty
-                              ? author.displayName[0].toUpperCase()
-                              : 'U',
-                          style: TextStyle(
-                            fontSize: 20,
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              author.displayName,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
+            InkWell(
+              onTap: !review.isAnonymous &&
+                      author.id != null &&
+                      author.id!.isNotEmpty &&
+                      author.displayName != 'Usuário excluído'
+                  ? () => Navigator.of(context).pushNamed(
+                        AppRouter.profile,
+                        arguments: author.id,
+                      )
+                  : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: review.isAnonymous
+                        ? Colors.grey.shade300
+                        : theme.colorScheme.primary.withAlpha(30),
+                    child: review.isAnonymous
+                        ? Icon(Icons.person_off_outlined, color: Colors.grey.shade700)
+                        : Text(
+                            author.displayName.isNotEmpty
+                                ? author.displayName[0].toUpperCase()
+                                : 'U',
+                            style: TextStyle(
+                              fontSize: 20,
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          if (review.isAnonymous) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade200,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
                               child: Text(
-                                'Anônimo',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey.shade700,
+                                author.displayName,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ),
+                            if (review.isAnonymous) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade200,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'Anônimo',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
+                        ),
+                        if (!review.isAnonymous && author.handle != null) ...[
+                          Text(
+                            '@${author.handle}',
+                            style: TextStyle(
+                              color: theme.colorScheme.onSurface.withAlpha(160),
+                              fontSize: 13,
+                            ),
+                          ),
                         ],
-                      ),
-                      if (!review.isAnonymous && author.handle != null) ...[
                         Text(
-                          '@${author.handle}',
+                          _formatDate(review.createdAt),
                           style: TextStyle(
-                            color: theme.colorScheme.onSurface.withAlpha(160),
-                            fontSize: 13,
+                            color: theme.colorScheme.onSurface.withAlpha(130),
+                            fontSize: 12,
                           ),
                         ),
                       ],
-                      Text(
-                        _formatDate(review.createdAt),
-                        style: TextStyle(
-                          color: theme.colorScheme.onSurface.withAlpha(130),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 16),
 
@@ -510,6 +523,12 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
               DiscussionsSection(
                 reviewId: widget.reviewId,
                 notifier: _discussionNotifier!,
+                onAuthorTap: (authorId) {
+                  Navigator.of(context).pushNamed(
+                    AppRouter.profile,
+                    arguments: authorId,
+                  );
+                },
               ),
             ] else ...[
               Card(

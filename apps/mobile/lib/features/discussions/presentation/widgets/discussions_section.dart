@@ -12,11 +12,13 @@ import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 class DiscussionsSection extends StatefulWidget {
   final String reviewId;
   final DiscussionNotifier notifier;
+  final void Function(String authorId)? onAuthorTap;
 
   const DiscussionsSection({
     super.key,
     required this.reviewId,
     required this.notifier,
+    this.onAuthorTap,
   });
 
   @override
@@ -221,6 +223,7 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
                     onLoadMoreReplies: () {
                       widget.notifier.loadMoreReplies(thread.id);
                     },
+                    onAuthorTap: widget.onAuthorTap,
                   );
                 },
               ),
