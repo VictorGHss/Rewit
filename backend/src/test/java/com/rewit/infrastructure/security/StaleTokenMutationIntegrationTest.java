@@ -63,13 +63,13 @@ class StaleTokenMutationIntegrationTest {
     @Test
     @DisplayName("Inativa: mutações com o token antigo recebem 401 ACCOUNT_DISABLED; leitura segue; autenticação segue as regras atuais")
     void staleTokenOfInactiveAccountCannotMutate() throws Exception {
-        assertStaleTokenRejected("UPDATE users SET is_active = FALSE WHERE id = ?");
+        assertStaleTokenRejected("UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?");
     }
 
     @Test
     @DisplayName("Soft-deleted: mutações com o token antigo recebem 401 ACCOUNT_DISABLED; leitura segue; autenticação segue as regras atuais")
     void staleTokenOfSoftDeletedAccountCannotMutate() throws Exception {
-        assertStaleTokenRejected("UPDATE users SET is_active = FALSE, deleted_at = now() WHERE id = ?");
+        assertStaleTokenRejected("UPDATE users SET account_status = 'DELETED', is_active = FALSE, deleted_at = now() WHERE id = ?");
     }
 
     private void assertStaleTokenRejected(String deactivationSql) throws Exception {

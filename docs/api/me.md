@@ -162,3 +162,22 @@ A resposta intencionalmente **não** expõe segredos, hashes, sessões ou novos 
   - Token JWT ausente ou expirado (`AUTHENTICATION_REQUIRED`);
   - Conta de usuário inativa ou soft-deleted (`ACCOUNT_DISABLED`);
   - Senha atual incorreta (`INVALID_CREDENTIALS`).
+
+---
+
+## 4. Desativação da Própria Conta
+
+* **Método**: `POST`
+* **Rota**: `/api/v1/me/deactivate`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+
+### Resposta de Sucesso (`204 No Content`)
+A conta passa de `ACTIVE` para `DEACTIVATED` e todas as sessões de refresh são revogadas na mesma transação.
+
+### Regras
+- **Reversível pelo usuário**: em `POST /api/v1/auth/reactivate`, com as credenciais (ver `authentication.md`).
+- **Access token já emitido**: continua com assinatura válida até expirar (stateless), mas toda mutação protegida lê o estado atual da conta e responde `401 ACCOUNT_DISABLED`; refresh e login também são negados.
+- **Concorrência**: a linha da conta é travada e o estado relido; se uma suspensão ou exclusão confirmar antes, a resposta é `401 ACCOUNT_DISABLED`, sem indicar o motivo.
+
+### Códigos de Erro
+- `401 Unauthorized`: token ausente ou expirado (`AUTHENTICATION_REQUIRED`); conta não operacional (`ACCOUNT_DISABLED`).

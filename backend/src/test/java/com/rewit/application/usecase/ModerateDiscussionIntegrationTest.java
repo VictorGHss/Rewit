@@ -157,7 +157,7 @@ class ModerateDiscussionIntegrationTest {
     @DisplayName("Moderador com conta inativa não modera (401 ACCOUNT_DISABLED)")
     void inactiveModeratorIsRejected() {
         ReviewDiscussion comment = quarantinedComment();
-        jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE id = ?", moderator.getId());
+        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?", moderator.getId());
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> moderate(comment, moderator, DiscussionModerationAction.REMOVE_DISCUSSION));

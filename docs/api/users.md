@@ -123,3 +123,22 @@ Retornado quando a requisição não inclui cabeçalho `Authorization: Bearer <t
   * **Chamada pelo Próprio Usuário (`requester == target`) — 7 Queries**:
     * A query de `isFollowing` é omitida e resolvida imediatamente como `false` em memória, totalizando 7 queries indexadas.
 
+---
+
+## 6. Ciclo de Vida da Conta por Ação Administrativa
+
+Restrito a `ADMIN`. A role do JWT é a primeira barreira; o caso de uso confirma no banco que o ator está ativo e ainda é `ADMIN`. Toda transição que muda o estado revoga as sessões da conta alvo na mesma transação.
+
+| Método e rota | Transição | Resposta |
+|---|---|---|
+| `POST /api/v1/admin/users/{userId}/suspend` | `ACTIVE` ou `DEACTIVATED` -> `SUSPENDED` | `204 No Content` |
+| `POST /api/v1/admin/users/{userId}/reinstate` | `SUSPENDED` -> `ACTIVE` | `204 No Content` |
+| `DELETE /api/v1/admin/users/{userId}` | `ACTIVE`, `DEACTIVATED` ou `SUSPENDED` -> `DELETED` (exclusão lógica definitiva) | `204 No Content` |
+
+### Regras
+- **Idempotência**: repetir a operação sobre uma conta já no estado de destino responde `204` sem efeito.
+- **Transições proibidas** (`409 Conflict`, `ACCOUNT_STATUS_TRANSITION_DENIED`): sair de `DELETED`; reverter (`reinstate`) uma conta `DEACTIVATED`, que só o próprio usuário reativa.
+- **Própria conta**: `403 Forbidden` (`SELF_ACCOUNT_LIFECYCLE_FORBIDDEN`).
+- **Alvo inexistente**: `404 Not Found` (`USER_NOT_FOUND`).
+- **Sem permissão**: `403 Forbidden` para `USER` e `MODERATOR`, e para quem perdeu a role `ADMIN` depois de emitido o token.
+- **Fora desta etapa**: motivo, histórico/auditoria das decisões, anonimização e purge da conta excluída.

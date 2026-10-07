@@ -188,11 +188,19 @@ Retry-After: <segundos>
 
 O access token é validado só pelas claims, sem consulta ao banco, e pode ter sido emitido antes de a conta ficar inativa ou ser excluída. Por isso as mutações de autoria leem o estado atual da conta (`AccountStatusPolicy`, porta `UserRepository`) no início da própria transação, depois da validação dos argumentos e antes de rate limiting, locks e escritas.
 
-- **Regra**: a conta opera se `is_active = TRUE` e `deleted_at IS NULL` (`User.isOperational()`). Caso contrário, `401 ACCOUNT_DISABLED` ("Conta de usuário inativa ou inexistente"), o mesmo contrato de refresh, `/auth/me` e `/me`. Inativa, excluída e inexistente são indistinguíveis.
+- **Regra**: a conta opera se `account_status = 'ACTIVE'` (`User.isOperational()`; V21). `is_active` e `deleted_at` são derivados do estado e o schema impede divergência, então a regra anterior (`is_active = TRUE` e `deleted_at IS NULL`) continua equivalente. Caso contrário, `401 ACCOUNT_DISABLED` ("Conta de usuário inativa ou inexistente"), o mesmo contrato de refresh, `/auth/me` e `/me`. Inativa, excluída e inexistente são indistinguíveis.
 - **Mutações protegidas**: editar e excluir review, marcar e desmarcar helpful, criar e excluir comentário, denunciar, enviar e excluir mídia, seguir e deixar de seguir, e moderar review (estado do moderador). A criação de review já checava o autor e mantém o seu contrato (`403 USER_INACTIVE`, `404 USER_NOT_FOUND`); perfil e senha já usavam `ACCOUNT_DISABLED`.
 - **Fora da regra**: leituras (feed, listagens, perfis) não consultam o estado da conta; o logout continua permitido; notificações e o conteúdo histórico da conta não mudam.
 - **Concorrência**: a leitura do estado não usa lock. Uma desativação que confirme depois dela é ordenada após a mutação; inserts filhos pegam só `FOR KEY SHARE` na linha de `users`, compatível com o `UPDATE` da desativação, então nenhuma das duas espera a outra.
-- **Schema**: `chk_users_active_not_deleted` (V17) impede `is_active = TRUE` com `deleted_at` preenchido.
+- **Schema**: `chk_users_active_not_deleted` (V17) impede `is_active = TRUE` com `deleted_at` preenchido; `chk_users_status_consistency` (V21) amarra os dois a `account_status`.
+
+### 4.8 Ciclo de Vida da Conta (C2)
+
+- **Estados**: `ACTIVE`; `DEACTIVATED` (pelo próprio usuário, que reativa em `POST /api/v1/auth/reactivate`); `SUSPENDED` (ação administrativa, só revertida pela administração); `DELETED` (exclusão lógica definitiva, preservada para integridade e histórico). Transições no domínio (`User.deactivate/reactivate/suspend/reinstate/softDelete`); proibidas respondem `409 ACCOUNT_STATUS_TRANSITION_DENIED` apenas nos fluxos administrativos.
+- **Sessões**: toda transição que muda o estado revoga as sessões da conta na mesma transação, inclusive a volta para `ACTIVE`. Um refresh concorrente com a desativação pode criar uma sessão que o `UPDATE` de revogação não enxerga (linha nova fora do snapshot do comando); ela não serve enquanto a conta não opera (o refresh lê o estado) e é revogada na reativação ou na reversão, antes de voltar a valer.
+- **Access token**: stateless; não é invalidado. Até expirar, leituras continuam possíveis e toda mutação protegida responde `401 ACCOUNT_DISABLED` (§4.7).
+- **Concorrência**: toda escrita no estado parte de `UserRepository.findByIdForUpdate`, que trava a linha (`FOR NO KEY UPDATE`) e recarrega o estado com `refresh`. Uma consulta com lock não bastaria: se a conta já estiver carregada na transação (a reativação busca por e-mail antes), o Hibernate trava a linha mas devolve a instância com o estado antigo. A troca de senha usa a mesma leitura, porque grava a linha inteira.
+- **Sem vazar o estado**: fluxos do próprio usuário respondem `401 ACCOUNT_DISABLED` (sessão) ou `401 INVALID_CREDENTIALS` (credenciais), iguais para conta inexistente, desativada, suspensa ou excluída.
 
 ## 5. Endpoints Implementados
 

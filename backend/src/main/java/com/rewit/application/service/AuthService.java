@@ -12,6 +12,7 @@ import com.rewit.application.ratelimit.RateLimitSubject;
 import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.common.exception.RefreshTokenReuseDetectedException;
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.AuthSession;
 import com.rewit.domain.model.Profile;
@@ -124,6 +125,64 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException("Perfil não encontrado para o usuário", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
 
         return createSessionAndGenerateResult(user, profile, cmd.userAgent(), cmd.ipAddress());
+    }
+
+    /**
+     * Reativação de uma conta {@code DEACTIVATED} pelo próprio usuário (C2), com as mesmas credenciais do login.
+     *
+     * <p>Mesmo contrato e mesmas proteções do login: limite {@code LOGIN} na mesma identidade (não é um segundo
+     * orçamento de tentativas), exatamente uma verificação Argon2 em todo caminho e {@code 401 INVALID_CREDENTIALS}
+     * para senha errada e para conta inexistente, federada, suspensa ou excluída. O titular de uma conta suspensa
+     * não distingue esse estado de uma senha errada. Conta {@code ACTIVE} apenas autentica, como no login.
+     *
+     * <p>A reativação trava a linha da conta e relê o estado depois da senha verificada: uma suspensão concorrente
+     * confirmada antes vence. A transição revoga as sessões anteriores antes de criar a nova, inclusive alguma criada
+     * por um refresh concorrente com a desativação, que escapou da revogação daquela transação.
+     */
+    @Transactional
+    public AuthResult reactivate(LoginCommand cmd) {
+        Objects.requireNonNull(cmd, "LoginCommand cannot be null");
+
+        if (cmd.email() == null || cmd.email().isBlank() || cmd.password() == null || cmd.password().isBlank()) {
+            throw new BusinessException("Credenciais inválidas", "INVALID_CREDENTIALS");
+        }
+
+        String normalizedEmail = cmd.email().trim().toLowerCase();
+
+        RateLimitPermit attempt = rateLimiter.acquireOrThrow(RateLimitedAction.LOGIN, RateLimitSubject.ofIdentity(normalizedEmail));
+
+        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+
+        if (user == null || !isSelfRecoverable(user.getStatus())
+                || user.getAuthProvider() != AuthProvider.LOCAL || user.getPasswordHash() == null) {
+            passwordHasher.simulateVerification(cmd.password());
+            throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
+        }
+
+        if (!passwordHasher.matches(cmd.password(), user.getPasswordHash())) {
+            throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
+        }
+
+        User locked = userRepository.findByIdForUpdate(user.getId())
+                .filter(u -> isSelfRecoverable(u.getStatus()))
+                .orElseThrow(() -> new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS"));
+
+        if (locked.reactivate()) {
+            userRepository.save(locked);
+            authSessionRepository.revokeAllByUserId(locked.getId());
+        }
+
+        rateLimiter.release(attempt);
+
+        Profile profile = profileRepository.findByUserId(locked.getId())
+                .orElseThrow(() -> new BusinessException("Perfil não encontrado para o usuário", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
+
+        return createSessionAndGenerateResult(locked, profile, cmd.userAgent(), cmd.ipAddress());
+    }
+
+    /** Estados a partir dos quais o próprio usuário volta a operar: suspensão e exclusão não se desfazem por aqui. */
+    private static boolean isSelfRecoverable(AccountStatus status) {
+        return status == AccountStatus.ACTIVE || status == AccountStatus.DEACTIVATED;
     }
 
     // A revogação em massa do reúso precisa ser commitada mesmo com o erro devolvido; demais erros fazem rollback

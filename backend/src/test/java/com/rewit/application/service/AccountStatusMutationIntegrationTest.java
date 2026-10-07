@@ -150,7 +150,7 @@ class AccountStatusMutationIntegrationTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try (Connection deactivation = dataSource.getConnection()) {
             deactivation.setAutoCommit(false);
-            try (PreparedStatement ps = deactivation.prepareStatement("UPDATE users SET is_active = FALSE WHERE id = ?")) {
+            try (PreparedStatement ps = deactivation.prepareStatement("UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?")) {
                 ps.setObject(1, actor.getId());
                 assertEquals(1, ps.executeUpdate());
             }
@@ -188,13 +188,43 @@ class AccountStatusMutationIntegrationTest {
                 jdbcTemplate.update("UPDATE users SET is_active = TRUE WHERE id = ?", deleted.getId()));
         assertTrue(update.getMessage().contains("chk_users_active_not_deleted"));
 
-        // Os três estados válidos continuam aceitos
+        // Todo estado do ciclo de vida (V21) com is_active/deleted_at coerentes é aceito
         User valid = createUser("schema_validos");
-        jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE id = ?", valid.getId());
-        jdbcTemplate.update("UPDATE users SET deleted_at = now() WHERE id = ?", valid.getId());
-        jdbcTemplate.update("UPDATE users SET deleted_at = NULL, is_active = TRUE WHERE id = ?", valid.getId());
+        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", valid.getId());
+        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED' WHERE id = ?", valid.getId());
+        jdbcTemplate.update("UPDATE users SET account_status = 'DELETED', deleted_at = now() WHERE id = ?", valid.getId());
+        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', deleted_at = NULL, is_active = TRUE WHERE id = ?",
+                valid.getId());
         assertEquals(1, count("SELECT count(*) FROM pg_constraint WHERE conname = 'chk_users_active_not_deleted' "
                 + "AND conrelid = 'users'::regclass AND convalidated"));
+    }
+
+    @Test
+    @DisplayName("Schema (V21): is_active e deleted_at não divergem de account_status, que só aceita os quatro estados")
+    void legacyColumnsCannotDivergeFromAccountStatus() {
+        User user = createUser("schema_v21");
+        UUID id = user.getId();
+
+        // Escrita só na representação anterior: sem account_status correspondente, rejeitada
+        assertConstraintViolated("chk_users_status_consistency", "UPDATE users SET is_active = FALSE WHERE id = ?", id);
+        assertConstraintViolated("chk_users_status_consistency",
+                "UPDATE users SET account_status = 'SUSPENDED' WHERE id = ?", id);
+        assertConstraintViolated("chk_users_status_consistency",
+                "UPDATE users SET account_status = 'DELETED', is_active = FALSE WHERE id = ?", id);
+        assertConstraintViolated("chk_users_status_consistency",
+                "UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE, deleted_at = now() WHERE id = ?", id);
+        assertConstraintViolated("chk_users_account_status",
+                "UPDATE users SET account_status = 'BANNED', is_active = FALSE WHERE id = ?", id);
+
+        assertEquals("ACTIVE", jdbcTemplate.queryForObject("SELECT account_status FROM users WHERE id = ?", String.class, id));
+        assertEquals(2, count("SELECT count(*) FROM pg_constraint WHERE conname IN "
+                + "('chk_users_account_status', 'chk_users_status_consistency') AND conrelid = 'users'::regclass AND convalidated"));
+    }
+
+    private void assertConstraintViolated(String constraint, String sql, Object... args) {
+        DataIntegrityViolationException ex = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbcTemplate.update(sql, args));
+        assertTrue(ex.getMessage().contains(constraint), ex.getMessage());
     }
 
     private void assertEveryMutationRejected(AccountState state) {
@@ -249,8 +279,8 @@ class AccountStatusMutationIntegrationTest {
 
     private void setState(User user, AccountState state) {
         String sql = state == AccountState.INACTIVE
-                ? "UPDATE users SET is_active = FALSE WHERE id = ?"
-                : "UPDATE users SET is_active = FALSE, deleted_at = now() WHERE id = ?";
+                ? "UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?"
+                : "UPDATE users SET account_status = 'DELETED', is_active = FALSE, deleted_at = now() WHERE id = ?";
         assertEquals(1, jdbcTemplate.update(sql, user.getId()));
     }
 

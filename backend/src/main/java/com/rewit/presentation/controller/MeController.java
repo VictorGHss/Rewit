@@ -4,6 +4,7 @@ import com.rewit.application.dto.user.UserDtos.ChangePasswordCommand;
 import com.rewit.application.dto.user.UserDtos.UpdateProfileCommand;
 import com.rewit.application.dto.user.UserDtos.UserProfileResult;
 import com.rewit.application.service.UserService;
+import com.rewit.application.usecase.DeactivateAccountUseCase;
 import com.rewit.presentation.dto.user.ChangePasswordRequest;
 import com.rewit.presentation.dto.user.ChangePasswordResponse;
 import com.rewit.presentation.dto.user.UpdateProfileRequest;
@@ -40,15 +41,18 @@ public class MeController {
     private final UserService userService;
     private final ReviewService reviewService;
     private final UserFollowService userFollowService;
+    private final DeactivateAccountUseCase deactivateAccountUseCase;
 
     public MeController(
             UserService userService,
             ReviewService reviewService,
-            UserFollowService userFollowService
+            UserFollowService userFollowService,
+            DeactivateAccountUseCase deactivateAccountUseCase
     ) {
         this.userService = Objects.requireNonNull(userService, "userService must not be null");
         this.reviewService = Objects.requireNonNull(reviewService, "reviewService must not be null");
         this.userFollowService = Objects.requireNonNull(userFollowService, "userFollowService must not be null");
+        this.deactivateAccountUseCase = Objects.requireNonNull(deactivateAccountUseCase, "deactivateAccountUseCase must not be null");
     }
 
     @GetMapping
@@ -141,6 +145,15 @@ public class MeController {
 
         userService.changePassword(cmd);
         return ResponseEntity.ok(new ChangePasswordResponse("Senha alterada com sucesso. Todas as sessões anteriores foram revogadas."));
+    }
+
+    @PostMapping("/deactivate")
+    @Operation(summary = "Desativar a própria conta e revogar as sessões (reversível em /api/v1/auth/reactivate)",
+            security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<Void> deactivate(Authentication authentication) {
+        UUID authenticatedUserId = extractAuthenticatedUserId(authentication);
+        deactivateAccountUseCase.execute(authenticatedUserId);
+        return ResponseEntity.noContent().build();
     }
 
     private UUID extractAuthenticatedUserId(Authentication authentication) {

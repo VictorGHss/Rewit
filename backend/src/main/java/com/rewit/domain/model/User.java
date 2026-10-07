@@ -1,10 +1,14 @@
 package com.rewit.domain.model;
 
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.Role;
+import org.springframework.http.HttpStatus;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -18,7 +22,7 @@ public class User {
     private String passwordHash;
     private final AuthProvider authProvider;
     private final String providerUserId;
-    private boolean isActive;
+    private AccountStatus status;
     private boolean isVerified;
     private Role role;
     private Instant deletedAt;
@@ -31,7 +35,7 @@ public class User {
         this.passwordHash = passwordHash;
         this.authProvider = authProvider != null ? authProvider : AuthProvider.LOCAL;
         this.providerUserId = providerUserId != null && !providerUserId.isBlank() ? providerUserId.trim() : null;
-        this.isActive = true;
+        this.status = AccountStatus.ACTIVE;
         this.isVerified = false;
         this.role = Role.USER;
         this.deletedAt = null;
@@ -40,14 +44,14 @@ public class User {
     }
 
     private User(UUID id, String email, String passwordHash, AuthProvider authProvider,
-                 String providerUserId, boolean isActive, boolean isVerified, Role role,
+                 String providerUserId, AccountStatus status, boolean isVerified, Role role,
                  Instant deletedAt, Instant createdAt, Instant updatedAt) {
         this.id = id;
         this.email = email;
         this.passwordHash = passwordHash;
         this.authProvider = authProvider;
         this.providerUserId = providerUserId;
-        this.isActive = isActive;
+        this.status = status;
         this.isVerified = isVerified;
         this.role = role != null ? role : Role.USER;
         this.deletedAt = deletedAt;
@@ -66,20 +70,38 @@ public class User {
     }
 
     /**
-     * Reconstrói uma instância de User a partir da camada de persistência com papel (Role).
+     * Reconstrói uma instância de User a partir da camada de persistência, com o estado do ciclo de vida.
+     *
+     * @throws IllegalArgumentException se {@code deletedAt} não corresponder ao estado ({@code DELETED} se e só se
+     *                                  preenchido), a mesma invariante de {@code chk_users_status_consistency}
      */
     public static User rehydrate(UUID id, String email, String passwordHash, AuthProvider authProvider,
-                                 String providerUserId, boolean isActive, boolean isVerified, Role role,
+                                 String providerUserId, AccountStatus status, boolean isVerified, Role role,
                                  Instant deletedAt, Instant createdAt, Instant updatedAt) {
         if (id == null) {
             throw new BusinessException("O identificador do usuário é obrigatório", "MISSING_USER_ID");
         }
+        Objects.requireNonNull(status, "status must not be null");
+        if ((status == AccountStatus.DELETED) != (deletedAt != null)) {
+            throw new IllegalArgumentException("deletedAt inconsistente com o estado da conta " + status);
+        }
         return new User(id, normalizeEmail(email), passwordHash,
                 authProvider != null ? authProvider : AuthProvider.LOCAL,
                 providerUserId != null && !providerUserId.isBlank() ? providerUserId.trim() : null,
-                isActive, isVerified, role != null ? role : Role.USER, deletedAt,
+                status, isVerified, role != null ? role : Role.USER, deletedAt,
                 createdAt != null ? createdAt : Instant.now(),
                 updatedAt != null ? updatedAt : Instant.now());
+    }
+
+    /**
+     * Reconstrói uma instância de User a partir da representação anterior ({@code isActive}/{@code deletedAt}),
+     * convertida por {@link AccountStatus#fromLegacy}.
+     */
+    public static User rehydrate(UUID id, String email, String passwordHash, AuthProvider authProvider,
+                                 String providerUserId, boolean isActive, boolean isVerified, Role role,
+                                 Instant deletedAt, Instant createdAt, Instant updatedAt) {
+        return rehydrate(id, email, passwordHash, authProvider, providerUserId,
+                AccountStatus.fromLegacy(isActive, deletedAt), isVerified, role, deletedAt, createdAt, updatedAt);
     }
 
     /**
@@ -92,22 +114,72 @@ public class User {
                 deletedAt, createdAt, updatedAt);
     }
 
-    public void softDelete() {
-        this.isActive = false;
-        this.deletedAt = Instant.now();
-        this.updatedAt = Instant.now();
+    // ---------------------------------------------------------------------------------------------------------
+    // Ciclo de vida (C2). Cada transição devolve {@code true} se mudou o estado e {@code false} se a conta já estava
+    // no estado de destino (idempotente); transição proibida lança 409 ACCOUNT_STATUS_TRANSITION_DENIED. Quem chama
+    // decide o que o cliente vê: fluxos do próprio usuário nunca expõem esse código (o estado não pode vazar).
+    // ---------------------------------------------------------------------------------------------------------
+
+    /** Desativação pelo próprio usuário: somente a partir de {@code ACTIVE}. */
+    public boolean deactivate() {
+        return transition(AccountStatus.DEACTIVATED, AccountStatus.ACTIVE);
     }
 
-    public boolean isDeleted() {
-        return this.deletedAt != null;
+    /** Reativação pelo próprio usuário: somente de {@code DEACTIVATED}; suspensão e exclusão não se desfazem assim. */
+    public boolean reactivate() {
+        return transition(AccountStatus.ACTIVE, AccountStatus.DEACTIVATED);
     }
 
     /**
-     * Conta apta a operar: ativa e não excluída. Uma conta excluída nunca é ativa (constraint
-     * {@code chk_users_active_not_deleted}, V17), mas a regra não depende disso.
+     * Suspensão administrativa, também de uma conta {@code DEACTIVATED}: do contrário bastaria desativar a conta para
+     * escapar da sanção e reativá-la depois.
+     */
+    public boolean suspend() {
+        return transition(AccountStatus.SUSPENDED, AccountStatus.ACTIVE, AccountStatus.DEACTIVATED);
+    }
+
+    /** Reversão administrativa da suspensão: somente de {@code SUSPENDED}; nunca sobrepõe uma desativação do usuário. */
+    public boolean reinstate() {
+        return transition(AccountStatus.ACTIVE, AccountStatus.SUSPENDED);
+    }
+
+    /** Exclusão lógica definitiva, de qualquer estado não excluído. Não há transição que saia de {@code DELETED}. */
+    public boolean softDelete() {
+        boolean changed = transition(AccountStatus.DELETED,
+                AccountStatus.ACTIVE, AccountStatus.DEACTIVATED, AccountStatus.SUSPENDED);
+        if (changed) {
+            this.deletedAt = this.updatedAt;
+        }
+        return changed;
+    }
+
+    private boolean transition(AccountStatus target, AccountStatus... allowedFrom) {
+        if (this.status == target) {
+            return false;
+        }
+        if (!Arrays.asList(allowedFrom).contains(this.status)) {
+            throw new BusinessException("Transição de estado da conta não permitida", HttpStatus.CONFLICT,
+                    "ACCOUNT_STATUS_TRANSITION_DENIED");
+        }
+        this.status = target;
+        this.updatedAt = Instant.now();
+        return true;
+    }
+
+    public AccountStatus getStatus() {
+        return status;
+    }
+
+    public boolean isDeleted() {
+        return this.status == AccountStatus.DELETED;
+    }
+
+    /**
+     * Conta apta a operar: a única interpretação do sistema é {@code status == ACTIVE}. {@code is_active} e
+     * {@code deleted_at} são derivados do estado e o schema impede divergência (V17 e V21).
      */
     public boolean isOperational() {
-        return this.isActive && this.deletedAt == null;
+        return this.status == AccountStatus.ACTIVE;
     }
 
     public UUID getId() {
@@ -130,8 +202,9 @@ public class User {
         return providerUserId;
     }
 
+    /** Derivado do estado: equivale a {@link #isOperational()} (coluna {@code is_active}). */
     public boolean isActive() {
-        return isActive;
+        return isOperational();
     }
 
     public boolean isVerified() {

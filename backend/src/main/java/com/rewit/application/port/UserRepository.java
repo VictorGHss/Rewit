@@ -18,6 +18,13 @@ public interface UserRepository {
 
     Optional<User> findByIdIncludingDeleted(UUID id);
 
+    /**
+     * Carrega a conta em qualquer estado, inclusive excluída, travando a linha até o fim da transação. Toda escrita
+     * no estado da conta parte dessa leitura: duas operações concorrentes sobre a mesma conta são serializadas e a
+     * segunda enxerga o estado já confirmado pela primeira (sem lost update).
+     */
+    Optional<User> findByIdForUpdate(UUID id);
+
     boolean existsById(UUID id);
 
     Optional<User> findByEmail(String email);

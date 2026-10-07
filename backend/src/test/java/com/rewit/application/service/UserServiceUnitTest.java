@@ -256,7 +256,7 @@ class UserServiceUnitTest {
     @Test
     @DisplayName("changePassword: Deve alterar senha com sucesso, persistir novo hash e revogar todas as sessões")
     void shouldChangePasswordSuccessfullyWhenCurrentPasswordIsCorrect() {
-        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
         when(passwordHasher.matches("SenhaAtual@123", "hashSeguro")).thenReturn(true);
         when(passwordHasher.hash("NovaSenhaForte@456")).thenReturn("novoHashArgon2id");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -280,7 +280,7 @@ class UserServiceUnitTest {
     @Test
     @DisplayName("changePassword: Deve rejeitar com INVALID_CREDENTIALS (401) quando senha atual estiver incorreta")
     void shouldRejectWhenCurrentPasswordIsIncorrect() {
-        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
         when(passwordHasher.matches("SenhaErrada@123", "hashSeguro")).thenReturn(false);
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
@@ -305,7 +305,7 @@ class UserServiceUnitTest {
     @DisplayName("changePassword: Deve rejeitar contas de provedores externos com LOCAL_AUTH_REQUIRED (400)")
     void shouldRejectWhenUserIsNotLocalAuth() {
         User googleUser = new User(userId, "google.user@rewit.com", null, AuthProvider.GOOGLE, null);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(googleUser));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(googleUser));
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
                 new com.rewit.application.dto.user.UserDtos.ChangePasswordCommand(
@@ -327,7 +327,7 @@ class UserServiceUnitTest {
     @Test
     @DisplayName("changePassword: Deve lançar ACCOUNT_DISABLED (401) se usuário não existir")
     void shouldThrowWhenUserNotFoundOnChangePassword() {
-        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.empty());
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
                 new com.rewit.application.dto.user.UserDtos.ChangePasswordCommand(
@@ -346,7 +346,7 @@ class UserServiceUnitTest {
     @DisplayName("changePassword: Deve lançar ACCOUNT_DISABLED (401) se usuário estiver soft-deleted")
     void shouldThrowWhenUserIsSoftDeletedOnChangePassword() {
         testUser.softDelete();
-        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
                 new com.rewit.application.dto.user.UserDtos.ChangePasswordCommand(
@@ -364,7 +364,7 @@ class UserServiceUnitTest {
     @Test
     @DisplayName("changePassword: Deve rejeitar nova senha que viola política de tamanho mínimo (422)")
     void shouldRejectWhenNewPasswordViolatesPolicy() {
-        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
         when(passwordHasher.matches("SenhaAtual@123", "hashSeguro")).thenReturn(true);
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
@@ -386,7 +386,7 @@ class UserServiceUnitTest {
     @Test
     @DisplayName("changePassword: Deve rejeitar nova senha que excede 128 caracteres para caller interno (422)")
     void shouldRejectWhenNewPasswordExceeds128Characters() {
-        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
         when(passwordHasher.matches("SenhaAtual@123", "hashSeguro")).thenReturn(true);
 
         String tooLongPassword = "a".repeat(129);
@@ -409,7 +409,7 @@ class UserServiceUnitTest {
     @Test
     @DisplayName("changePassword: Deve rejeitar nova senha nula para caller interno (422)")
     void shouldRejectWhenNewPasswordIsNull() {
-        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
         when(passwordHasher.matches("SenhaAtual@123", "hashSeguro")).thenReturn(true);
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
@@ -432,7 +432,7 @@ class UserServiceUnitTest {
     @DisplayName("changePassword: Nenhuma senha ou hash deve vazar nas mensagens de exceção")
     void shouldNotLeakPasswordOrHashInExceptionMessages() {
         String sensitiveCurrentPassword = "MinhaSenhaSuperSecreta@999";
-        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
         when(passwordHasher.matches(sensitiveCurrentPassword, "hashSeguro")).thenReturn(false);
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =

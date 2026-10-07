@@ -39,8 +39,15 @@ public class AccountStatusPolicy {
                 .map(User::isOperational)
                 .orElse(false);
         if (!operational) {
-            throw new BusinessException("Conta de usuário inativa ou inexistente", HttpStatus.UNAUTHORIZED,
-                    "ACCOUNT_DISABLED");
+            throw accountDisabled();
         }
+    }
+
+    /**
+     * A mesma resposta para conta inexistente, desativada, suspensa ou excluída: o estado não pode ser inferido.
+     */
+    public static BusinessException accountDisabled() {
+        return new BusinessException("Conta de usuário inativa ou inexistente", HttpStatus.UNAUTHORIZED,
+                "ACCOUNT_DISABLED");
     }
 }

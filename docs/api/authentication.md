@@ -198,3 +198,26 @@ Retorna a representação pública e segura do usuário associado ao Access Toke
 - `passwordHash` **nunca** é retornado.
 - Refresh tokens, IP, user-agent e metadados internos de segurança são omitidos.
 - Se o usuário sofrer soft-delete (`deleted_at IS NOT NULL`), o endpoint recusa a requisição com `401 Unauthorized` (`ACCOUNT_DISABLED`).
+
+---
+
+## 6. Reativação de Conta Desativada
+
+Reverte uma desativação feita pelo próprio usuário (`POST /api/v1/me/deactivate`) com as credenciais locais e emite uma nova sessão.
+
+* **Método**: `POST`
+* **Rota**: `/api/v1/auth/reactivate`
+* **Autenticação**: Pública (as credenciais estão no corpo, como no login)
+
+### Requisição
+Mesmo corpo do login: `{"email": "...", "password": "..."}`.
+
+### Resposta de Sucesso (`200 OK`)
+Mesmo corpo do login (`accessToken`, `refreshToken`, `tokenType`, `expiresIn`, `user`). A conta volta a `ACTIVE`; uma conta já ativa apenas autentica.
+
+### Regras
+- **Somente conta desativada pelo usuário**: conta suspensa (ação administrativa) ou excluída não é reativada por aqui.
+- **Sem revelar o estado da conta**: senha errada, e-mail inexistente, conta federada, suspensa ou excluída recebem a mesma resposta do login (`401 Unauthorized`, `INVALID_CREDENTIALS`), com exatamente uma verificação Argon2 em todo caminho.
+- **Mesmo limite do login**: as tentativas consomem a janela `LOGIN` da mesma identidade; não é um segundo orçamento de tentativas.
+- **Sessões**: a transição revoga todas as sessões anteriores antes de criar a nova.
+- **Login de conta desativada**: `POST /api/v1/auth/login` continua respondendo `401 INVALID_CREDENTIALS`; o cliente oferece a reativação como fluxo próprio.

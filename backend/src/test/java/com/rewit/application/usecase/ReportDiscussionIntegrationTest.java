@@ -232,7 +232,7 @@ class ReportDiscussionIntegrationTest {
     @DisplayName("Conta inativa não denuncia (401 ACCOUNT_DISABLED)")
     void inactiveReporterIsRejected() {
         User inactive = createUser("inativo");
-        jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE id = ?", inactive.getId());
+        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?", inactive.getId());
 
         BusinessException ex = assertThrows(BusinessException.class, () -> report(inactive, comment));
         assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());

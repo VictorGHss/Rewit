@@ -66,6 +66,23 @@ public class AuthController {
         return ResponseEntity.ok(toAuthResponse(result));
     }
 
+    @PostMapping("/reactivate")
+    @Operation(summary = "Reativar a própria conta desativada com as credenciais locais e emitir tokens")
+    public ResponseEntity<AuthResponse> reactivate(
+            @Valid @RequestBody LoginRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        LoginCommand cmd = new LoginCommand(
+                request.email(),
+                request.password(),
+                httpRequest.getHeader("User-Agent"),
+                extractClientIp(httpRequest)
+        );
+
+        AuthResult result = authService.reactivate(cmd);
+        return ResponseEntity.ok(toAuthResponse(result));
+    }
+
     @PostMapping("/refresh")
     @Operation(summary = "Rotacionar refresh token e emitir novo access token")
     public ResponseEntity<AuthResponse> refresh(

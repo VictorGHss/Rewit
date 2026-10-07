@@ -154,6 +154,8 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 | `events` | `chk_event_dates` | CHECK | `end_at >= start_at` |
 | `users` | `chk_users_auth_provider` | CHECK | `auth_provider IN ('LOCAL', 'GOOGLE', 'APPLE')` |
 | `users` | `chk_users_active_not_deleted` | CHECK | `NOT (is_active AND deleted_at IS NOT NULL)` (V17; a migration antes normaliza para `is_active = FALSE` as linhas já excluídas) |
+| `users` | `chk_users_account_status` | CHECK | `account_status IN ('ACTIVE', 'DEACTIVATED', 'SUSPENDED', 'DELETED')` (V21; fonte de verdade do ciclo de vida da conta) |
+| `users` | `chk_users_status_consistency` | CHECK | `is_active = (account_status = 'ACTIVE')` e `(deleted_at IS NOT NULL) = (account_status = 'DELETED')` (V21; backfill: excluída -> `DELETED`, inativa sem exclusão -> `SUSPENDED`, demais -> `ACTIVE`) |
 | `business_accounts` | `chk_business_verification_status` | CHECK | `verification_status IN ('PENDING', 'APPROVED', 'REJECTED')` |
 | `business_accounts` | `chk_business_plan_tier` | CHECK | `plan_tier IN ('FREE', 'PREMIUM')` |
 | `review_tags` | `chk_review_tags_source` | CHECK | `source IN ('USER', 'RULE', 'AI', 'MODERATOR')` |

@@ -5,6 +5,9 @@ import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.entity.UserJpaEntity;
 import com.rewit.infrastructure.persistence.repository.UserJpaRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.LockModeType;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -19,9 +22,11 @@ import java.util.UUID;
 public class UserRepositoryAdapter implements UserRepository {
 
     private final UserJpaRepository userJpaRepository;
+    private final EntityManager entityManager;
 
-    public UserRepositoryAdapter(UserJpaRepository userJpaRepository) {
+    public UserRepositoryAdapter(UserJpaRepository userJpaRepository, EntityManager entityManager) {
         this.userJpaRepository = Objects.requireNonNull(userJpaRepository, "userJpaRepository must not be null");
+        this.entityManager = Objects.requireNonNull(entityManager, "entityManager must not be null");
     }
 
     @Override
@@ -54,6 +59,26 @@ public class UserRepositoryAdapter implements UserRepository {
             return Optional.empty();
         }
         return userJpaRepository.findById(id).map(UserRepositoryAdapter::toDomain);
+    }
+
+    @Override
+    public Optional<User> findByIdForUpdate(UUID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        UserJpaEntity entity = entityManager.find(UserJpaEntity.class, id);
+        if (entity == null) {
+            return Optional.empty();
+        }
+        // refresh com lock, e não uma consulta com lock: se a conta já foi carregada nesta transação (ex.: busca por
+        // e-mail na reativação), uma consulta travaria a linha mas devolveria a instância gerenciada com o estado
+        // antigo. O refresh trava (FOR NO KEY UPDATE) e recarrega o estado confirmado
+        try {
+            entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE);
+        } catch (EntityNotFoundException removedMeanwhile) {
+            return Optional.empty();
+        }
+        return Optional.of(entity.toDomain());
     }
 
     @Override

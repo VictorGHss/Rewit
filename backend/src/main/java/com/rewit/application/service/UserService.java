@@ -155,12 +155,11 @@ public class UserService {
         Objects.requireNonNull(cmd, "ChangePasswordCommand cannot be null");
         Objects.requireNonNull(cmd.userId(), "userId cannot be null");
 
-        User user = userRepository.findById(cmd.userId())
-                .orElseThrow(() -> new BusinessException("Conta de usuário inativa ou inexistente", HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED"));
-
-        if (user.isDeleted() || !user.isActive()) {
-            throw new BusinessException("Conta de usuário inativa ou inexistente", HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED");
-        }
+        // Linha travada: o save grava a linha inteira, inclusive o estado da conta. Lida sem lock, uma transição
+        // de ciclo de vida confirmada no meio seria sobrescrita pelo estado antigo (lost update)
+        User user = userRepository.findByIdForUpdate(cmd.userId())
+                .filter(User::isOperational)
+                .orElseThrow(AccountStatusPolicy::accountDisabled);
 
         if (user.getAuthProvider() != AuthProvider.LOCAL || user.getPasswordHash() == null) {
             throw new BusinessException("Alteração de senha permitida apenas para contas locais", HttpStatus.BAD_REQUEST, "LOCAL_AUTH_REQUIRED");

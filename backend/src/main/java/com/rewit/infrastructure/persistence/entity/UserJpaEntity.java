@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.entity;
 
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.Role;
 import com.rewit.domain.model.User;
@@ -40,6 +41,12 @@ public class UserJpaEntity {
 
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
+
+    // Fonte de verdade do ciclo de vida (V21); is_active e deleted_at são derivados dela pelo domínio e o schema
+    // rejeita divergência (chk_users_status_consistency)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_status", nullable = false, length = 16)
+    private AccountStatus accountStatus = AccountStatus.ACTIVE;
 
     @Column(name = "is_verified", nullable = false)
     private boolean isVerified = false;
@@ -84,7 +91,7 @@ public class UserJpaEntity {
                 this.passwordHash,
                 this.authProvider,
                 this.providerUserId,
-                this.isActive,
+                this.accountStatus,
                 this.isVerified,
                 this.role != null ? this.role : Role.USER,
                 this.deletedAt,
@@ -105,6 +112,7 @@ public class UserJpaEntity {
         entity.setAuthProvider(user.getAuthProvider());
         entity.setProviderUserId(user.getProviderUserId());
         entity.setRole(user.getRole() != null ? user.getRole() : Role.USER);
+        entity.setAccountStatus(user.getStatus());
         entity.setActive(user.isActive());
         entity.setVerified(user.isVerified());
         entity.setDeletedAt(user.getDeletedAt());
@@ -122,6 +130,7 @@ public class UserJpaEntity {
         this.authProvider = user.getAuthProvider();
         this.providerUserId = user.getProviderUserId();
         this.role = user.getRole() != null ? user.getRole() : Role.USER;
+        this.accountStatus = user.getStatus();
         this.isActive = user.isActive();
         this.isVerified = user.isVerified();
         this.deletedAt = user.getDeletedAt();
@@ -174,6 +183,14 @@ public class UserJpaEntity {
 
     public void setActive(boolean active) {
         isActive = active;
+    }
+
+    public AccountStatus getAccountStatus() {
+        return accountStatus;
+    }
+
+    public void setAccountStatus(AccountStatus accountStatus) {
+        this.accountStatus = accountStatus;
     }
 
     public boolean isVerified() {
