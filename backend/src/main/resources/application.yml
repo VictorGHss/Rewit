@@ -91,6 +91,14 @@ rewit:
   # igual em todas as instâncias; trocá-lo invalida as reservas já gravadas). Sem ele o purge não executa.
   account:
     email-reservation-secret: ${ACCOUNT_EMAIL_RESERVATION_SECRET:}
+    # Job diário do purge: contas DELETED há 30 dias ou mais, uma transação por conta. Sem o segredo acima, a passada
+    # é registrada como bloqueada e nenhuma conta é alterada.
+    purge:
+      enabled: ${ACCOUNT_PURGE_ENABLED:true}
+      interval-ms: ${ACCOUNT_PURGE_INTERVAL_MS:86400000}
+      initial-delay-ms: ${ACCOUNT_PURGE_INITIAL_DELAY_MS:600000}
+      batch-size: ${ACCOUNT_PURGE_BATCH_SIZE:100}
+      max-batches-per-run: ${ACCOUNT_PURGE_MAX_BATCHES_PER_RUN:10}
   # Rate limiting distribuído (ADR-013): janela deslizante no Redis, chaves derivadas por HMAC, sem limite por IP.
   # RATE_LIMIT_KEY_SECRET é obrigatório com o rate limiting ligado (mínimo 32 bytes) e igual em todas as instâncias.
   rate-limit:

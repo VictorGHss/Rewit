@@ -41,9 +41,9 @@ import java.util.UUID;
  * travada e o estado relido; só {@code DELETED} é aceito, e nenhuma transição sai de {@code DELETED}, então duas
  * execuções simultâneas são serializadas e a segunda vira no-op.
  *
- * <p>Sem disparo automático nesta etapa. Contrato esperado do job periódico: buscar contas {@code DELETED} elegíveis e
- * ainda não minimizadas ({@link UserRepository#findDeletedUserIdsPendingPurge}) e chamar este caso de uso para cada
- * uma, numa transação por conta.
+ * <p>Disparo: o job diário ({@link PurgeEligibleAccountsUseCase}, agendado por {@code AccountPurgeJobScheduler}) busca
+ * as contas {@code DELETED} elegíveis e ainda não minimizadas ({@link UserRepository#findDeletedUserIdsPendingPurge}) e
+ * chama este caso de uso para cada uma, numa transação por conta. Sem endpoint.
  */
 @Service
 public class PurgeDeletedAccountUseCase {
