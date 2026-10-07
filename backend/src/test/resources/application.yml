@@ -44,6 +44,9 @@ rewit:
       registration:
         # A suíte cadastra centenas de usuários em sequência; o limite de cadastro é testado em contexto próprio
         limit: 1000000
+  # Gerado por contexto, como o do rate limiting: nenhum segredo fixo no repositório
+  account:
+    email-reservation-secret: ${random.uuid}${random.uuid}
   minio:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:8333}
     access-key: ${OBJECT_STORAGE_ACCESS_KEY:change-me}

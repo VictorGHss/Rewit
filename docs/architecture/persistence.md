@@ -88,7 +88,8 @@ A migração `V4__identity_integrity.sql` consolidou a integridade de e-mail no 
    ```
 2. **Decisão de Soft-Delete para o MVP**:
    - O e-mail permanece **estritamente reservado mesmo após soft-delete** (`deleted_at IS NOT NULL`).
-   - **Após o purge (C2.3)**: o endereço sai do banco e a coluna passa a guardar `sha256(e-mail normalizado)@deleted.invalid` (`User.reservedEmailFor`). O registro procura também esse valor, então a reserva continua; o domínio `deleted.invalid` (RFC 2606) é recusado no cadastro, e nenhum usuário ocupa uma reserva de antemão. O hash não tem chave: quem tiver acesso ao banco consegue confirmar um e-mail candidato (a mesma informação que o `422` do cadastro já dá).
+   - **Após o purge (C2.3)**: o endereço sai do banco e a coluna passa a guardar `hex(HMAC-SHA256(segredo, e-mail normalizado))@deleted.invalid` (porta `EmailReservation`, implementação `HmacEmailReservation`). O registro procura também esse valor, então a reserva continua; o domínio `deleted.invalid` (RFC 2606) é recusado no cadastro, e nenhum usuário ocupa uma reserva de antemão.
+   - **Segredo**: `rewit.account.email-reservation-secret`, variável `ACCOUNT_EMAIL_RESERVATION_SECRET` (mínimo 32 bytes, estável e igual em todas as instâncias). Sem ele o purge não executa (sem fallback para hash sem chave); trocá-lo invalida as reservas já gravadas, que o registro deixa de reconhecer. Sem o segredo, quem tem acesso ao banco não consegue confirmar um e-mail candidato contra as reservas.
    - **Justificativa**: Evita sequestro de identidade (account takeover), colisões com auditorias históricas, e impersonação de contas desativadas no MVP. Caso uma política de liberação ou reciclagem de e-mail seja adotada no futuro, ela será explicitamente versionada via nova migração Flyway e política de expurgo de dados LGPD/GDPR.
 
 ---

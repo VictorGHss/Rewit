@@ -3,7 +3,9 @@ package com.rewit.application.port;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.User;
 
+import java.time.Instant;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -33,6 +35,12 @@ public interface UserRepository {
      * {@code user_id}. Uma consulta por conjunto, pela chave primária.
      */
     Set<UUID> findDeletedUserIds(Collection<UUID> userIds);
+
+    /**
+     * Contas {@code DELETED} com {@code deleted_at <= cutoff} e ainda não minimizadas (e-mail fora do domínio
+     * reservado), das mais antigas para as mais novas: o lote de um job periódico de purge (C2.3).
+     */
+    List<UUID> findDeletedUserIdsPendingPurge(Instant cutoff, int limit);
 
     boolean existsById(UUID id);
 

@@ -2,6 +2,7 @@ package com.rewit.application.service;
 
 import com.rewit.application.dto.auth.AuthDtos.*;
 import com.rewit.application.port.AuthSessionRepository;
+import com.rewit.application.port.EmailReservation;
 import com.rewit.application.port.PasswordHasher;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.RateLimiter;
@@ -43,6 +44,7 @@ public class AuthService {
     private final PasswordHasher passwordHasher;
     private final TokenService tokenService;
     private final RateLimiter rateLimiter;
+    private final EmailReservation emailReservation;
 
     public AuthService(
             UserRepository userRepository,
@@ -50,7 +52,8 @@ public class AuthService {
             AuthSessionRepository authSessionRepository,
             PasswordHasher passwordHasher,
             TokenService tokenService,
-            RateLimiter rateLimiter
+            RateLimiter rateLimiter,
+            EmailReservation emailReservation
     ) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.profileRepository = Objects.requireNonNull(profileRepository, "profileRepository must not be null");
@@ -58,6 +61,7 @@ public class AuthService {
         this.passwordHasher = Objects.requireNonNull(passwordHasher, "passwordHasher must not be null");
         this.tokenService = Objects.requireNonNull(tokenService, "tokenService must not be null");
         this.rateLimiter = Objects.requireNonNull(rateLimiter, "rateLimiter must not be null");
+        this.emailReservation = Objects.requireNonNull(emailReservation, "emailReservation must not be null");
     }
 
     @Transactional
@@ -77,9 +81,11 @@ public class AuthService {
             throw new BusinessException("E-mail inválido ou ausente", "INVALID_EMAIL");
         }
 
-        // Após o purge, o e-mail de uma conta excluída continua reservado na forma de User.reservedEmailFor
+        // Após o purge, o e-mail de uma conta excluída continua reservado como HMAC (EmailReservation). Sem segredo
+        // configurado o purge não executa, então não há valor reservado a procurar
         if (userRepository.existsByEmail(normalizedEmail)
-                || userRepository.existsByEmail(User.reservedEmailFor(normalizedEmail))) {
+                || (emailReservation.isConfigured()
+                    && userRepository.existsByEmail(emailReservation.reservedEmailFor(normalizedEmail)))) {
             throw new BusinessException("E-mail já cadastrado na plataforma", "EMAIL_ALREADY_EXISTS");
         }
 

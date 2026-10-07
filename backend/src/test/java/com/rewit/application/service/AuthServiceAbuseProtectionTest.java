@@ -5,6 +5,7 @@ import com.rewit.application.dto.auth.AuthDtos.LoginCommand;
 import com.rewit.application.dto.auth.AuthDtos.RefreshCommand;
 import com.rewit.application.dto.auth.AuthDtos.RegisterCommand;
 import com.rewit.application.port.AuthSessionRepository;
+import com.rewit.application.port.EmailReservation;
 import com.rewit.application.port.PasswordHasher;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.UserRepository;
@@ -295,7 +296,8 @@ class AuthServiceAbuseProtectionTest {
 
     private void rebuildService() {
         authService = new AuthService(userRepository, profileRepository, authSessionRepository, passwordHasher,
-                tokenService, RateLimitTestSupport.inMemory(rateLimitProperties, clock, new SimpleMeterRegistry()));
+                tokenService, RateLimitTestSupport.inMemory(rateLimitProperties, clock, new SimpleMeterRegistry()),
+                mock(EmailReservation.class));
     }
 
     private User localUser() {

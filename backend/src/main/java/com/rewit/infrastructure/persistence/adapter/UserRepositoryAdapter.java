@@ -9,9 +9,12 @@ import com.rewit.infrastructure.persistence.repository.UserJpaRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -95,6 +98,16 @@ public class UserRepositoryAdapter implements UserRepository {
             return Set.of();
         }
         return Set.copyOf(userJpaRepository.findIdsByIdInAndAccountStatus(candidates, AccountStatus.DELETED));
+    }
+
+    @Override
+    public List<UUID> findDeletedUserIdsPendingPurge(Instant cutoff, int limit) {
+        Objects.requireNonNull(cutoff, "cutoff must not be null");
+        if (limit <= 0) {
+            return List.of();
+        }
+        return userJpaRepository.findIdsPendingPurge(AccountStatus.DELETED, cutoff,
+                "%@" + User.RESERVED_EMAIL_DOMAIN, PageRequest.of(0, limit));
     }
 
     @Override

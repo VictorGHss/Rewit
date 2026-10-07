@@ -87,6 +87,10 @@ rewit:
     initial-delay-ms: ${AUTH_SESSION_CLEANUP_INITIAL_DELAY_MS:60000}
     batch-size: ${AUTH_SESSION_CLEANUP_BATCH_SIZE:100}
     max-batches-per-run: ${AUTH_SESSION_CLEANUP_MAX_BATCHES_PER_RUN:1}
+  # Purge de contas excluídas (C2.3): o e-mail reservado é um HMAC-SHA256 com este segredo (mínimo 32 bytes, estável e
+  # igual em todas as instâncias; trocá-lo invalida as reservas já gravadas). Sem ele o purge não executa.
+  account:
+    email-reservation-secret: ${ACCOUNT_EMAIL_RESERVATION_SECRET:}
   # Rate limiting distribuído (ADR-013): janela deslizante no Redis, chaves derivadas por HMAC, sem limite por IP.
   # RATE_LIMIT_KEY_SECRET é obrigatório com o rate limiting ligado (mínimo 32 bytes) e igual em todas as instâncias.
   rate-limit:

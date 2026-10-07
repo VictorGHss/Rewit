@@ -2,6 +2,7 @@ package com.rewit.application.service;
 
 import com.rewit.application.dto.auth.AuthDtos.*;
 import com.rewit.application.port.AuthSessionRepository;
+import com.rewit.application.port.EmailReservation;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
@@ -55,7 +56,8 @@ class LocalAuthenticationUnitTest {
                 authSessionRepository,
                 passwordHasher,
                 tokenService,
-                RateLimitTestSupport.inMemory()
+                RateLimitTestSupport.inMemory(),
+                mock(EmailReservation.class)
         );
     }
 

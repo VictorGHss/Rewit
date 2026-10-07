@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -21,18 +22,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("Purge de conta excluída (C2.3): minimização no domínio")
 class AccountPurgeDomainTest {
 
-    @Test
-    @DisplayName("E-mail reservado: determinístico, normalizado, sem o endereço e no domínio reservado")
-    void reservedEmail() {
-        String reserved = User.reservedEmailFor("  Maria.Silva@Exemplo.com ");
+    private static final String RESERVED = "a".repeat(64) + "@deleted.invalid";
 
-        assertEquals(reserved, User.reservedEmailFor("maria.silva@exemplo.com"));
-        assertNotEquals(reserved, User.reservedEmailFor("maria.silva2@exemplo.com"));
-        assertTrue(reserved.matches("^[0-9a-f]{64}@deleted\\.invalid$"), reserved);
-        assertFalse(reserved.contains("maria"));
-        assertTrue(User.isReservedEmail(reserved));
+    @Test
+    @DisplayName("Domínio reservado: reconhecido sem diferença de caixa; endereço comum não")
+    void reservedDomain() {
+        assertTrue(User.isReservedEmail(RESERVED));
         assertTrue(User.isReservedEmail("QUALQUER@DELETED.INVALID"));
         assertFalse(User.isReservedEmail("maria@exemplo.com"));
+        assertFalse(User.isReservedEmail("maria@deleted.invalid.com"));
+    }
+
+    @Test
+    @DisplayName("Período de arrependimento: elegível a partir de exatamente 30 dias após a exclusão")
+    void purgeGracePeriod() {
+        Instant deletedAt = Instant.parse("2026-01-01T00:00:00Z");
+        User user = deleted(deletedAt);
+
+        assertFalse(user.isPurgeEligible(deletedAt));
+        assertFalse(user.isPurgeEligible(deletedAt.plus(Duration.ofDays(30)).minusMillis(1)));
+        assertTrue(user.isPurgeEligible(deletedAt.plus(Duration.ofDays(30))), "o limite exato já é elegível");
+        assertTrue(user.isPurgeEligible(deletedAt.plus(Duration.ofDays(31))));
+        assertEquals(Duration.ofDays(30), User.PURGE_GRACE_PERIOD);
     }
 
     @Test
@@ -42,31 +53,46 @@ class AccountPurgeDomainTest {
         User user = User.rehydrate(UUID.randomUUID(), "pessoa@exemplo.com", "hash", AuthProvider.GOOGLE, "google-123",
                 AccountStatus.DELETED, true, Role.USER, now, now, now);
 
-        assertTrue(user.purgePersonalData());
-        assertEquals(User.reservedEmailFor("pessoa@exemplo.com"), user.getEmail());
+        assertTrue(user.purgePersonalData(RESERVED));
+        assertEquals(RESERVED, user.getEmail());
         assertNull(user.getPasswordHash());
         assertNull(user.getProviderUserId());
         assertEquals(AccountStatus.DELETED, user.getStatus());
         assertEquals(now, user.getDeletedAt());
 
         Instant updatedAt = user.getUpdatedAt();
-        assertFalse(user.purgePersonalData());
-        assertEquals(User.reservedEmailFor("pessoa@exemplo.com"), user.getEmail(), "não re-hasheia o valor reservado");
+        assertFalse(user.purgePersonalData("b".repeat(64) + "@deleted.invalid"));
+        assertEquals(RESERVED, user.getEmail(), "a reserva já gravada não é substituída");
         assertEquals(updatedAt, user.getUpdatedAt());
     }
 
     @Test
-    @DisplayName("Só conta DELETED tem os dados pessoais removidos")
+    @DisplayName("O valor reservado precisa estar no domínio reservado")
+    void reservedValueMustBeInReservedDomain() {
+        User user = deleted(Instant.now());
+        assertThrows(IllegalArgumentException.class, () -> user.purgePersonalData("pessoa@exemplo.com"));
+        assertThrows(IllegalArgumentException.class, () -> user.purgePersonalData(null));
+        assertEquals("pessoa@exemplo.com", user.getEmail());
+    }
+
+    @Test
+    @DisplayName("Só conta DELETED tem os dados pessoais removidos ou é avaliada para o purge")
     void purgeRequiresDeleted() {
         Instant now = Instant.now();
         for (AccountStatus status : new AccountStatus[]{AccountStatus.ACTIVE, AccountStatus.DEACTIVATED, AccountStatus.SUSPENDED}) {
             User user = User.rehydrate(UUID.randomUUID(), "ativa@exemplo.com", "hash", AuthProvider.LOCAL, null,
                     status, false, Role.USER, null, now, now);
-            BusinessException ex = assertThrows(BusinessException.class, user::purgePersonalData);
+            BusinessException ex = assertThrows(BusinessException.class, () -> user.purgePersonalData(RESERVED));
             assertEquals(HttpStatus.CONFLICT, ex.getStatus());
             assertEquals("ACCOUNT_NOT_DELETED", ex.getErrorCode());
+            assertThrows(BusinessException.class, () -> user.isPurgeEligible(now));
             assertEquals("ativa@exemplo.com", user.getEmail());
         }
+    }
+
+    private static User deleted(Instant deletedAt) {
+        return User.rehydrate(UUID.randomUUID(), "pessoa@exemplo.com", "hash", AuthProvider.LOCAL, null,
+                AccountStatus.DELETED, false, Role.USER, deletedAt, deletedAt, deletedAt);
     }
 
     @Test

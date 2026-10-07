@@ -6,12 +6,9 @@ import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.Role;
 import org.springframework.http.HttpStatus;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
-import java.util.HexFormat;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -70,19 +67,10 @@ public class User {
     public static final String RESERVED_EMAIL_DOMAIN = "deleted.invalid";
 
     /**
-     * Valor que substitui o e-mail de uma conta excluída no purge (C2.3): o SHA-256 do e-mail normalizado no domínio
-     * reservado. O endereço pessoal sai do banco e o e-mail continua reservado (decisão do MVP: sem reuso após a
-     * exclusão), porque o registro também procura esse valor. Determinístico e único por e-mail.
+     * Período de arrependimento (C2.3): a exclusão lógica ({@code DELETED}) é imediata; o purge dos dados pessoais só
+     * é elegível quando {@code deleted_at <= agora - 30 dias}.
      */
-    public static String reservedEmailFor(String email) {
-        String normalized = normalizeEmail(email);
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(normalized.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest) + "@" + RESERVED_EMAIL_DOMAIN;
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 indisponível", e);
-        }
-    }
+    public static final Duration PURGE_GRACE_PERIOD = Duration.ofDays(30);
 
     public static boolean isReservedEmail(String email) {
         return email != null && email.trim().toLowerCase().endsWith("@" + RESERVED_EMAIL_DOMAIN);
@@ -196,21 +184,35 @@ public class User {
     }
 
     /**
+     * Elegibilidade para o purge: conta {@code DELETED} há pelo menos {@link #PURGE_GRACE_PERIOD} (o limite exato já
+     * é elegível).
+     *
+     * @throws BusinessException 409 {@code ACCOUNT_NOT_DELETED} se a conta não estiver {@code DELETED}
+     */
+    public boolean isPurgeEligible(Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
+        requireDeleted();
+        return !this.deletedAt.isAfter(now.minus(PURGE_GRACE_PERIOD));
+    }
+
+    /**
      * Minimização dos dados pessoais de uma conta excluída (purge, C2.3), idempotente: o e-mail vira o valor reservado,
      * a credencial e o identificador do provedor externo saem. A linha permanece: avaliações, comentários, denúncias e
      * auditoria a referenciam.
      *
+     * @param reservedEmail valor reservado do e-mail atual (HMAC calculado fora do domínio, porta EmailReservation);
+     *                      ignorado se o e-mail já estiver reservado
      * @return {@code true} se algo mudou; {@code false} se a conta já estava minimizada
      * @throws BusinessException 409 {@code ACCOUNT_NOT_DELETED} se a conta não estiver {@code DELETED}
      */
-    public boolean purgePersonalData() {
-        if (this.status != AccountStatus.DELETED) {
-            throw new BusinessException("Somente uma conta excluída pode ter os dados pessoais removidos",
-                    HttpStatus.CONFLICT, "ACCOUNT_NOT_DELETED");
-        }
+    public boolean purgePersonalData(String reservedEmail) {
+        requireDeleted();
         boolean changed = false;
         if (!isReservedEmail(this.email)) {
-            this.email = reservedEmailFor(this.email);
+            if (!isReservedEmail(reservedEmail)) {
+                throw new IllegalArgumentException("O valor reservado precisa estar no domínio " + RESERVED_EMAIL_DOMAIN);
+            }
+            this.email = reservedEmail.trim().toLowerCase();
             changed = true;
         }
         if (this.passwordHash != null) {
@@ -225,6 +227,13 @@ public class User {
             this.updatedAt = Instant.now();
         }
         return changed;
+    }
+
+    private void requireDeleted() {
+        if (this.status != AccountStatus.DELETED) {
+            throw new BusinessException("Somente uma conta excluída pode ter os dados pessoais removidos",
+                    HttpStatus.CONFLICT, "ACCOUNT_NOT_DELETED");
+        }
     }
 
     public AccountStatus getStatus() {

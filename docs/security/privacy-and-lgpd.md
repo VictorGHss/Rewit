@@ -76,16 +76,18 @@ Registro técnico do que o código faz; não é parecer jurídico.
 
 Registro técnico do que o código faz; não é parecer jurídico.
 
+- **`DELETED` x purge**: a exclusão lógica (`account_status = DELETED`) é imediata: sessões revogadas, conta sem operar e identidade fora das leituras públicas. O purge minimiza e remove os dados pessoais e só é elegível após **30 dias** de arrependimento (`deleted_at <= agora - 30 dias`); antes disso resulta em `NOT_ELIGIBLE`, sem nenhuma alteração.
 - **Leitura pública (C2.2)**: a identidade de uma conta excluída não aparece em nenhuma projeção pública; perfil, follows e reputação respondem como um identificador inexistente.
-- **Purge (`PurgeDeletedAccountUseCase`)**, idempotente e restrito a contas `DELETED`:
+- **Purge (`PurgeDeletedAccountUseCase`)**, idempotente e restrito a contas `DELETED` elegíveis:
   - **Removido**: sessões, follows (nos dois sentidos), itens salvos, interesses, atividades, notificações da conta e snapshot de reputação.
-  - **Minimizado**: e-mail (valor reservado, sem o endereço; ver `architecture/persistence.md`), senha e id do provedor externo; perfil (handle reservado, nome "Usuário excluído", sem bio, avatar e reputação); coordenadas informadas nas avaliações (`reviews.user_coordinates`, `location_accuracy_meters`); o ator excluído nas notificações de outros usuários e o autor de presenças de produto.
+  - **Minimizado**: e-mail (HMAC-SHA256 com o segredo `ACCOUNT_EMAIL_RESERVATION_SECRET` no domínio `deleted.invalid`: a reserva contra novo cadastro continua sem guardar o endereço; ver `architecture/persistence.md`), senha e id do provedor externo; perfil (handle reservado, nome "Usuário excluído", sem bio, avatar e reputação); coordenadas informadas nas avaliações (`reviews.user_coordinates`, `location_accuracy_meters`); o ator excluído nas notificações de outros usuários e o autor de presenças de produto.
   - **Preservado**: a linha de `users` (com `account_status = DELETED` e `deleted_at`), avaliações, notas, helpful, comentários, mídia, denúncias e auditoria de moderação.
-- **Pendente (produto/jurídico)**:
-  - `check_ins.coordinates` é `NOT NULL` e o check-in sustenta `is_verified_on_site` da avaliação: removê-lo altera o histórico verificado, e anular a coordenada exige mudança de schema. Os check-ins permanecem.
-  - `business_accounts` (razão social e documento fiscal) não tem fluxo de transferência nem política de encerramento; permanece.
-  - Objetos de mídia continuam no storage enquanto as avaliações existirem; a remoção física depende de política de retenção (ADR-010).
-  - Backups (PITR) mantêm os dados anteriores ao purge pelo período de retenção, sem procedimento de reaplicação após restore.
+- **Preservado nesta etapa (decisão; pendência futura de retenção/minimização)**:
+  - **Check-ins**: `check_ins.coordinates` é `NOT NULL` e o check-in sustenta `is_verified_on_site` da avaliação (trigger). Schema, triggers e check-ins não mudam; a localização do check-in é uma pendência de política de retenção.
+  - **Contas empresariais** (`business_accounts`: razão social e documento fiscal): preservadas integralmente; exigem política e fluxo próprios (transferência, encerramento) antes de qualquer purge adicional.
+  - **Mídia**: linhas e objetos no storage permanecem ligados às avaliações históricas; sem deleção física, síncrona ou assíncrona, até a política de retenção de storage (ADR-010).
+- **Disparo**: não há scheduler automático nem endpoint. Contrato esperado do job periódico: buscar contas `DELETED` elegíveis e ainda não minimizadas (`UserRepository.findDeletedUserIdsPendingPurge`, das mais antigas para as mais novas, em lotes) e executar `PurgeDeletedAccountUseCase` para cada uma, numa transação por conta. Uma notificação criada para a conta em concorrência com o purge pode sobrar; uma execução posterior a remove.
+- **Backups e PITR**: o purge age só na base operacional. Backups e o histórico de PITR anteriores ao purge continuam com os dados originais pelo período de retenção deles, e uma restauração os reintroduz. Depois de qualquer restore, é preciso um processo operacional que reaplique o ciclo de vida e o purge das contas excluídas desde o ponto restaurado; esse replay não é automático.
 
 ## 7. Observabilidade: Logs, Traces e Métricas (ADR-012)
 

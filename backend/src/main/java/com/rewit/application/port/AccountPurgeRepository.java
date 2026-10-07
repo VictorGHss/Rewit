@@ -35,6 +35,10 @@ public interface AccountPurgeRepository {
             int productPresences,
             int reviewLocations
     ) {
+        public static PurgeCounts none() {
+            return new PurgeCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
         public int total() {
             return sessions + follows + savedItems + interests + activities + ownNotifications + othersNotifications
                     + reputationSnapshots + productPresences + reviewLocations;

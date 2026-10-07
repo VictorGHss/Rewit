@@ -4,13 +4,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.RateableTargetRepository;
+import com.rewit.application.port.AccountPurgeRepository;
+import com.rewit.application.port.EmailReservation;
+import com.rewit.application.port.ProfileRepository;
+import com.rewit.application.port.UserRepository;
+import com.rewit.application.usecase.PurgeDeletedAccountUseCase.Outcome;
 import com.rewit.application.usecase.PurgeDeletedAccountUseCase.PurgeResult;
+import com.rewit.infrastructure.account.HmacEmailReservation;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.RateableTarget;
-import com.rewit.domain.model.User;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.AssociateProductPresenceRequest;
@@ -45,6 +50,9 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -84,6 +92,10 @@ class PurgeDeletedAccountIntegrationTest {
     @Autowired private RateableTargetRepository rateableTargetRepository;
     @Autowired private PurgeDeletedAccountUseCase purgeDeletedAccountUseCase;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private EmailReservation emailReservation;
+    @Autowired private UserRepository userRepository;
+    @Autowired private ProfileRepository profileRepository;
+    @Autowired private AccountPurgeRepository accountPurgeRepository;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -106,7 +118,7 @@ class PurgeDeletedAccountIntegrationTest {
         UUID d = s.deleted().id();
         Map<String, Object> preservedBefore = preservedState(s);
 
-        PurgeResult result = purgeDeletedAccountUseCase.execute(d);
+        PurgeResult result = purgeAfterGrace(d);
         assertTrue(result.identityMinimized());
         assertTrue(result.relations().total() > 0);
 
@@ -122,7 +134,7 @@ class PurgeDeletedAccountIntegrationTest {
         // Minimizado: identidade da linha users e do perfil
         Map<String, Object> user = jdbcTemplate.queryForMap(
                 "SELECT email, password_hash, account_status, deleted_at FROM users WHERE id = ?", d);
-        assertEquals(User.reservedEmailFor(s.deleted().email()), user.get("email"));
+        assertEquals(emailReservation.reservedEmailFor(s.deleted().email()), user.get("email"));
         assertFalse(((String) user.get("email")).contains(s.deleted().email().substring(0, s.deleted().email().indexOf('@'))));
         assertNull(user.get("password_hash"));
         assertEquals("DELETED", user.get("account_status"));
@@ -158,10 +170,10 @@ class PurgeDeletedAccountIntegrationTest {
         Scenario s = scenario();
         UUID d = s.deleted().id();
 
-        assertTrue(purgeDeletedAccountUseCase.execute(d).changedAnything());
+        assertTrue(purgeAfterGrace(d).changedAnything());
         Map<String, Object> afterFirst = purgedState(s);
 
-        PurgeResult second = purgeDeletedAccountUseCase.execute(d);
+        PurgeResult second = purgeAfterGrace(d);
         assertFalse(second.changedAnything(), second.toString());
         assertEquals(afterFirst, purgedState(s));
         assertEquals(preservedState(s), preservedState(s));
@@ -171,7 +183,7 @@ class PurgeDeletedAccountIntegrationTest {
     @DisplayName("Reserva de e-mail: depois do purge o endereço original continua indisponível e o domínio reservado é recusado")
     void emailStaysReservedAfterPurge() throws Exception {
         Scenario s = scenario();
-        purgeDeletedAccountUseCase.execute(s.deleted().id());
+        purgeAfterGrace(s.deleted().id());
 
         mockMvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
                         .content(json(new RegisterRequest(s.deleted().email().toUpperCase(), "Senha@reuso1", "reuso_" + suffix(),
@@ -181,7 +193,7 @@ class PurgeDeletedAccountIntegrationTest {
 
         // O valor reservado não pode ser registrado (sem colisão nem tomada antecipada da reserva)
         mockMvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
-                        .content(json(new RegisterRequest(User.reservedEmailFor("outra." + suffix() + "@rewit.test"),
+                        .content(json(new RegisterRequest(emailReservation.reservedEmailFor("outra." + suffix() + "@rewit.test"),
                                 "Senha@reserva1", "reserva_" + suffix(), "Tentativa no domínio reservado"))))
                 .andExpect(status().is(422))
                 .andExpect(jsonPath("$.code").value("INVALID_EMAIL"));
@@ -227,7 +239,7 @@ class PurgeDeletedAccountIntegrationTest {
         try {
             // O primeiro purge termina o trabalho mas segura a transação (e o lock da conta) aberta
             Future<PurgeResult> first = executor.submit(() -> tx.execute(status -> {
-                PurgeResult result = purgeDeletedAccountUseCase.execute(d);
+                PurgeResult result = purgeAfterGrace(d);
                 firstDone.countDown();
                 try {
                     assertTrue(releaseFirst.await(30, TimeUnit.SECONDS));
@@ -239,7 +251,7 @@ class PurgeDeletedAccountIntegrationTest {
             }));
             assertTrue(firstDone.await(30, TimeUnit.SECONDS));
 
-            Future<PurgeResult> second = executor.submit(() -> purgeDeletedAccountUseCase.execute(d));
+            Future<PurgeResult> second = executor.submit(() -> purgeAfterGrace(d));
             awaitLockWaiter();
             releaseFirst.countDown();
 
@@ -250,8 +262,77 @@ class PurgeDeletedAccountIntegrationTest {
             releaseFirst.countDown();
             executor.shutdownNow();
         }
-        assertEquals(User.reservedEmailFor(s.deleted().email()),
+        assertEquals(emailReservation.reservedEmailFor(s.deleted().email()),
                 jdbcTemplate.queryForObject("SELECT email FROM users WHERE id = ?", String.class, d));
+    }
+
+    @Test
+    @DisplayName("Período de arrependimento: até 30 dias não elegível e sem mudança; no limite exato e depois, purge executa")
+    void gracePeriodGatesPurge() throws Exception {
+        Scenario s = scenario();
+        UUID d = s.deleted().id();
+        Instant deletedAt = deletedAt(d);
+        Map<String, Object> before = purgedState(s);
+
+        for (Instant tooEarly : List.of(deletedAt, deletedAt.plus(Duration.ofDays(29)),
+                deletedAt.plus(Duration.ofDays(30)).minusSeconds(1))) {
+            PurgeResult result = purgeDeletedAccountUseCase.execute(d, tooEarly);
+            assertEquals(Outcome.NOT_ELIGIBLE, result.outcome());
+            assertFalse(result.changedAnything());
+            assertEquals(before, purgedState(s), "nada muda dentro do período");
+        }
+        assertEquals(s.deleted().email(), jdbcTemplate.queryForObject("SELECT email FROM users WHERE id = ?", String.class, d));
+
+        // Limite exato (deleted_at = agora - 30 dias) já é elegível
+        PurgeResult atLimit = purgeDeletedAccountUseCase.execute(d, deletedAt.plus(Duration.ofDays(30)));
+        assertEquals(Outcome.PURGED, atLimit.outcome());
+        assertTrue(atLimit.changedAnything());
+
+        PurgeResult later = purgeDeletedAccountUseCase.execute(d, deletedAt.plus(Duration.ofDays(31)));
+        assertEquals(Outcome.PURGED, later.outcome());
+        assertFalse(later.changedAnything(), "idempotente depois do prazo");
+    }
+
+    @Test
+    @DisplayName("Segredo obrigatório: sem ACCOUNT_EMAIL_RESERVATION_SECRET o purge falha antes de qualquer escrita")
+    void purgeRequiresReservationSecret() throws Exception {
+        Scenario s = scenario();
+        UUID d = s.deleted().id();
+        Map<String, Object> before = purgedState(s);
+        Map<String, Object> preservedBefore = preservedState(s);
+        PurgeDeletedAccountUseCase withoutSecret = new PurgeDeletedAccountUseCase(userRepository, profileRepository,
+                accountPurgeRepository, new HmacEmailReservation(""));
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        Instant afterGrace = deletedAt(d).plus(Duration.ofDays(31));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> tx.execute(status -> withoutSecret.execute(d, afterGrace)));
+        assertTrue(ex.getMessage().contains("ACCOUNT_EMAIL_RESERVATION_SECRET"));
+        assertEquals(before, purgedState(s));
+        assertEquals(preservedBefore, preservedState(s));
+        assertEquals(s.deleted().email(), jdbcTemplate.queryForObject("SELECT email FROM users WHERE id = ?", String.class, d));
+
+        // Fora do prazo, a ausência do segredo não muda o contrato (não elegível, sem escrita)
+        assertEquals(Outcome.NOT_ELIGIBLE, tx.execute(status -> withoutSecret.execute(d, deletedAt(d))).outcome());
+    }
+
+    @Test
+    @DisplayName("Lote do job: DELETED elegíveis e ainda não minimizadas; some do lote depois do purge")
+    void pendingPurgeQueryFeedsPeriodicJob() throws Exception {
+        Scenario s = scenario();
+        UUID d = s.deleted().id();
+        Instant deletedAt = deletedAt(d);
+        TestUser active = s.active();
+
+        assertFalse(userRepository.findDeletedUserIdsPendingPurge(deletedAt.minusSeconds(1), 1000).contains(d),
+                "dentro do período não entra no lote");
+        List<UUID> pending = userRepository.findDeletedUserIdsPendingPurge(deletedAt.plus(Duration.ofDays(30)), 100_000);
+        assertTrue(pending.contains(d));
+        assertFalse(pending.contains(active.id()), "só contas DELETED");
+
+        purgeAfterGrace(d);
+        assertFalse(userRepository.findDeletedUserIdsPendingPurge(deletedAt.plus(Duration.ofDays(30)), 100_000).contains(d),
+                "já minimizada: não volta ao lote");
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -271,7 +352,7 @@ class PurgeDeletedAccountIntegrationTest {
                 body(get("/api/v1/me/notifications").param("size", "50"), s.active()));
         for (String response : responses) {
             for (String identifier : List.of(s.deleted().id().toString(), s.deleted().email(), s.deleted().handle(),
-                    s.deleted().displayName(), reserved, User.reservedEmailFor(s.deleted().email()))) {
+                    s.deleted().displayName(), reserved, emailReservation.reservedEmailFor(s.deleted().email()))) {
                 assertFalse(response.contains(identifier), "identidade exposta (" + identifier + "): " + response);
             }
         }
@@ -418,6 +499,16 @@ class PurgeDeletedAccountIntegrationTest {
     // ---------------------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------------------
+
+    /** Purge com o relógio além do período de arrependimento da conta. */
+    private PurgeResult purgeAfterGrace(UUID userId) {
+        return purgeDeletedAccountUseCase.execute(userId, deletedAt(userId).plus(Duration.ofDays(31)));
+    }
+
+    private Instant deletedAt(UUID userId) {
+        return jdbcTemplate.queryForObject("SELECT deleted_at FROM users WHERE id = ?", Timestamp.class, userId)
+                .toInstant();
+    }
 
     private void awaitLockWaiter() throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
