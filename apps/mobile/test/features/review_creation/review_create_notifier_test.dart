@@ -5,6 +5,7 @@ import 'package:rewit_mobile/features/review_creation/domain/entities/review_cre
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_notifier.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_state.dart';
+import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 
 class FakeReviewCreationRepository implements ReviewCreationRepository {
   CreateReviewInput? capturedInput;
@@ -98,6 +99,78 @@ void main() {
       expect(notifier.userLatitude, -23.5);
       expect(notifier.userLongitude, -46.6);
       expect(notifier.locationAccuracyMeters, 5.0);
+    });
+
+    test('selectTarget preenche dados do alvo e auto-preenche contextPlaceId se for PLACE', () {
+      const placeItem = SearchResultItem(
+        id: validPlaceId,
+        name: 'Padaria Modelo',
+        category: 'Panificação',
+        targetType: TargetType.place,
+        rawTargetType: 'PLACE',
+        status: 'ACTIVE',
+      );
+
+      notifier.selectTarget(0, placeItem);
+
+      expect(notifier.targets.first.rateableTargetId, validPlaceId);
+      expect(notifier.targets.first.targetName, 'Padaria Modelo');
+      expect(notifier.targets.first.targetType, 'PLACE');
+      expect(notifier.targets.first.category, 'Panificação');
+      expect(notifier.contextPlaceId, validPlaceId);
+    });
+
+    test('selectTarget para PRODUCT não sobrescreve contextPlaceId existente', () {
+      notifier.setContextPlaceId(validPlaceId);
+
+      const productItem = SearchResultItem(
+        id: validTargetId1,
+        name: 'Bolo de Chocolate',
+        category: 'Doces',
+        targetType: TargetType.product,
+        rawTargetType: 'PRODUCT',
+        status: 'ACTIVE',
+      );
+
+      notifier.selectTarget(0, productItem);
+
+      expect(notifier.targets.first.rateableTargetId, validTargetId1);
+      expect(notifier.targets.first.targetName, 'Bolo de Chocolate');
+      expect(notifier.targets.first.targetType, 'PRODUCT');
+      expect(notifier.contextPlaceId, validPlaceId);
+    });
+
+    test('clearTargetSelection redefine alvo para vazio preservando rating e comentário', () {
+      notifier.updateTarget(
+        0,
+        targetId: validTargetId1,
+        targetName: 'Café',
+        targetType: 'PRODUCT',
+        rating: 4.5,
+        specificComment: 'Muito bom',
+      );
+
+      notifier.clearTargetSelection(0);
+
+      expect(notifier.targets.first.rateableTargetId, '');
+      expect(notifier.targets.first.targetName, isNull);
+      expect(notifier.targets.first.targetType, isNull);
+      expect(notifier.targets.first.rating, 4.5);
+      expect(notifier.targets.first.specificComment, 'Muito bom');
+    });
+
+    test('isTargetAlreadySelected detecta alvos duplicados case-insensitively', () {
+      notifier.updateTarget(0, targetId: validTargetId1);
+      notifier.addTarget(targetId: validTargetId2);
+
+      expect(notifier.isTargetAlreadySelected(validTargetId1), isTrue);
+      expect(notifier.isTargetAlreadySelected(validTargetId1.toUpperCase()), isTrue);
+      expect(notifier.isTargetAlreadySelected(validTargetId2), isTrue);
+      expect(notifier.isTargetAlreadySelected(validPlaceId), isFalse);
+
+      // Excluindo o índice atual (para permitir o alvo atual ao editar)
+      expect(notifier.isTargetAlreadySelected(validTargetId1, excludeIndex: 0), isFalse);
+      expect(notifier.isTargetAlreadySelected(validTargetId1, excludeIndex: 1), isTrue);
     });
 
     group('Validações Locais', () {

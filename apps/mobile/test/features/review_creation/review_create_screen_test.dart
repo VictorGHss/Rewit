@@ -7,6 +7,8 @@ import 'package:rewit_mobile/features/review_creation/domain/entities/review_cre
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_notifier.dart';
+import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
+import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
 class MockReviewCreationRepository implements ReviewCreationRepository {
   CreateReviewInput? capturedInput;
@@ -38,11 +40,32 @@ class MockReviewCreationRepository implements ReviewCreationRepository {
   }
 }
 
+class MockSearchRepository implements SearchRepository {
+  List<SearchResultItem> itemsToReturn = [];
+
+  @override
+  Future<SearchPage> search({
+    required String query,
+    int page = 0,
+    int size = 20,
+  }) async {
+    return SearchPage(
+      items: itemsToReturn,
+      pageNumber: page,
+      pageSize: size,
+      totalElements: itemsToReturn.length,
+      totalPages: 1,
+      isLast: true,
+    );
+  }
+}
+
 void main() {
   const validTargetId = '11111111-1111-1111-1111-111111111111';
 
   Widget buildSubject({
     required ReviewCreationRepository repository,
+    SearchRepository? searchRepository,
     ReviewCreateNotifier? notifier,
     ValueChanged<FeedReview>? onReviewCreated,
   }) {
@@ -50,6 +73,7 @@ void main() {
       theme: AppTheme.lightTheme,
       home: ReviewCreateScreen(
         repository: repository,
+        searchRepository: searchRepository,
         notifier: notifier,
         onReviewCreated: onReviewCreated,
       ),
@@ -235,6 +259,108 @@ void main() {
       expect(find.text('Parâmetros da requisição inválidos'), findsOneWidget);
       expect(find.text('VALIDATION_ERROR'), findsOneWidget);
       expect(find.text('• targets[0].rating: A nota deve ser no mínimo 1.0'), findsOneWidget);
+    });
+
+    testWidgets('busca e seleciona alvo via Search V1 exibindo card selecionado e submetendo UUID correto', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final searchRepo = MockSearchRepository();
+      searchRepo.itemsToReturn = const [
+        SearchResultItem(
+          id: '55555555-5555-5555-5555-555555555555',
+          name: 'Pizzaria Bella Napoli',
+          category: 'Pizzarias',
+          targetType: TargetType.place,
+          rawTargetType: 'PLACE',
+          status: 'ACTIVE',
+        ),
+      ];
+
+      FeedReview? createdResult;
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        searchRepository: searchRepo,
+        onReviewCreated: (review) {
+          createdResult = review;
+        },
+      ));
+
+      // Campo de busca é exibido
+      expect(find.text('O que você quer avaliar? *'), findsOneWidget);
+
+      // Digita nome para busca
+      await tester.enterText(find.widgetWithText(TextFormField, 'O que você quer avaliar? *'), 'pizza');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      // Encontra resultado
+      expect(find.text('Pizzaria Bella Napoli'), findsOneWidget);
+      expect(find.text('Local'), findsOneWidget);
+
+      // Clica em Selecionar
+      await tester.tap(find.text('Selecionar'));
+      await tester.pumpAndSettle();
+
+      // Card de alvo selecionado aparece com botão Trocar
+      expect(find.text('Pizzaria Bella Napoli'), findsOneWidget);
+      expect(find.text('Trocar'), findsOneWidget);
+      expect(find.text('ID: 55555555-5555-5555-5555-555555555555'), findsOneWidget);
+
+      // Preenche relato e publica
+      final experienceField = find.widgetWithText(TextFormField, 'Conte sua experiência geral...');
+      await tester.enterText(experienceField, 'Melhor pizza da cidade!');
+
+      await tester.tap(find.text('Publicar Avaliação'));
+      await tester.pumpAndSettle();
+
+      expect(createdResult, isNotNull);
+      expect(repository.capturedInput?.targets.first.rateableTargetId, '55555555-5555-5555-5555-555555555555');
+      expect(find.text('Avaliação publicada com sucesso!'), findsOneWidget);
+    });
+
+    testWidgets('botão Trocar desmarca o alvo selecionado e reabre a busca', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final searchRepo = MockSearchRepository();
+      searchRepo.itemsToReturn = const [
+        SearchResultItem(
+          id: '55555555-5555-5555-5555-555555555555',
+          name: 'Pizzaria Bella Napoli',
+          category: 'Pizzarias',
+          targetType: TargetType.place,
+          rawTargetType: 'PLACE',
+          status: 'ACTIVE',
+        ),
+      ];
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        searchRepository: searchRepo,
+      ));
+
+      // Busca e seleciona
+      await tester.enterText(find.widgetWithText(TextFormField, 'O que você quer avaliar? *'), 'pizza');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Selecionar'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pizzaria Bella Napoli'), findsOneWidget);
+      expect(find.text('Trocar'), findsOneWidget);
+
+      // Clica em Trocar
+      await tester.tap(find.text('Trocar'));
+      await tester.pumpAndSettle();
+
+      // Card foi removido e campo de busca voltou
+      expect(find.text('O que você quer avaliar? *'), findsOneWidget);
+      expect(find.text('Trocar'), findsNothing);
     });
   });
 }

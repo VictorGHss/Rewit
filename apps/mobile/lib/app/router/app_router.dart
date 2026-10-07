@@ -11,6 +11,7 @@ import 'package:rewit_mobile/features/profile/presentation/screens/profile_place
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
+import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 
@@ -29,6 +30,7 @@ class AppRouter {
   final FeedRepository? feedRepository;
   final DiscussionRepository? discussionRepository;
   final ReviewCreationRepository? reviewCreationRepository;
+  final SearchRepository? searchRepository;
 
   const AppRouter({
     required this.authNotifier,
@@ -36,6 +38,7 @@ class AppRouter {
     this.feedRepository,
     this.discussionRepository,
     this.reviewCreationRepository,
+    this.searchRepository,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -56,6 +59,7 @@ class AppRouter {
                   authNotifier: authNotifier,
                   feedNotifier: feedNotifier,
                   reviewCreationRepository: reviewCreationRepository,
+                  searchRepository: searchRepository,
                 );
               }
               return LoginScreen(authNotifier: authNotifier);
@@ -120,6 +124,7 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => ReviewCreateScreen(
             repository: reviewCreationRepository,
+            searchRepository: searchRepository,
             onReviewCreated: (createdReview) {
               feedNotifier?.refresh();
               Navigator.of(context).pushReplacementNamed(

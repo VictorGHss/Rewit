@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/repositories/review_creation_repository.dart';
 import '../state/review_create_notifier.dart';
@@ -10,12 +11,14 @@ import '../widgets/target_item_input_widget.dart';
 /// Tela completa de criação de publicações de avaliação multi-alvo (Step 11.0 / Step 25.3).
 class ReviewCreateScreen extends StatefulWidget {
   final ReviewCreationRepository? repository;
+  final SearchRepository? searchRepository;
   final ReviewCreateNotifier? notifier;
   final ValueChanged<FeedReview>? onReviewCreated;
 
   const ReviewCreateScreen({
     super.key,
     this.repository,
+    this.searchRepository,
     this.notifier,
     this.onReviewCreated,
   });
@@ -51,6 +54,9 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
 
   void _handleStateChange() {
     if (!mounted) return;
+    if (_contextPlaceIdController.text != (_notifier.contextPlaceId ?? '')) {
+      _contextPlaceIdController.text = _notifier.contextPlaceId ?? '';
+    }
     final state = _notifier.state;
     if (state is ReviewCreateSuccess) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -242,6 +248,15 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     target: target,
                     canRemove: _notifier.targets.length > 1,
                     enabled: !isSubmitting,
+                    searchRepository: widget.searchRepository,
+                    isTargetSelectedElsewhere: (targetId) =>
+                        _notifier.isTargetAlreadySelected(targetId, excludeIndex: index),
+                    onTargetSelected: (item) {
+                      _notifier.selectTarget(index, item);
+                    },
+                    onClearSelection: () {
+                      _notifier.clearTargetSelection(index);
+                    },
                     onTargetIdChanged: (val) {
                       _notifier.updateTarget(index, targetId: val);
                     },

@@ -3,22 +3,34 @@ class CreateReviewTargetInput {
   final String rateableTargetId;
   final double rating;
   final String? specificComment;
+  final String? targetName;
+  final String? targetType;
+  final String? category;
 
   const CreateReviewTargetInput({
     required this.rateableTargetId,
     required this.rating,
     this.specificComment,
+    this.targetName,
+    this.targetType,
+    this.category,
   });
 
   CreateReviewTargetInput copyWith({
     String? rateableTargetId,
     double? rating,
     String? specificComment,
+    String? targetName,
+    String? targetType,
+    String? category,
   }) {
     return CreateReviewTargetInput(
       rateableTargetId: rateableTargetId ?? this.rateableTargetId,
       rating: rating ?? this.rating,
       specificComment: specificComment ?? this.specificComment,
+      targetName: targetName ?? this.targetName,
+      targetType: targetType ?? this.targetType,
+      category: category ?? this.category,
     );
   }
 
@@ -38,10 +50,20 @@ class CreateReviewTargetInput {
           runtimeType == other.runtimeType &&
           rateableTargetId == other.rateableTargetId &&
           rating == other.rating &&
-          specificComment == other.specificComment;
+          specificComment == other.specificComment &&
+          targetName == other.targetName &&
+          targetType == other.targetType &&
+          category == other.category;
 
   @override
-  int get hashCode => Object.hash(rateableTargetId, rating, specificComment);
+  int get hashCode => Object.hash(
+        rateableTargetId,
+        rating,
+        specificComment,
+        targetName,
+        targetType,
+        category,
+      );
 }
 
 /// Dados de entrada consolidados para criar uma avaliação no backend (POST /api/v1/reviews).

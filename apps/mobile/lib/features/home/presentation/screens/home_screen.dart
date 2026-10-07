@@ -7,6 +7,7 @@ import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
+import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
 
 /// Tela principal autenticada do aplicativo Rewit.
@@ -14,12 +15,14 @@ class HomeScreen extends StatefulWidget {
   final AuthNotifier authNotifier;
   final FeedNotifier? feedNotifier;
   final ReviewCreationRepository? reviewCreationRepository;
+  final SearchRepository? searchRepository;
 
   const HomeScreen({
     super.key,
     required this.authNotifier,
     this.feedNotifier,
     this.reviewCreationRepository,
+    this.searchRepository,
   });
 
   @override
@@ -235,6 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SearchPlaceholderScreen(),
           ReviewCreateScreen(
             repository: widget.reviewCreationRepository,
+            searchRepository: widget.searchRepository,
             onReviewCreated: (createdReview) {
               widget.feedNotifier?.refresh();
               Navigator.of(context).pushNamed(

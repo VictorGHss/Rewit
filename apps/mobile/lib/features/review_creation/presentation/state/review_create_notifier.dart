@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/repositories/review_creation_repository.dart';
 import 'review_create_state.dart';
@@ -45,13 +46,23 @@ class ReviewCreateNotifier extends ChangeNotifier {
   bool get isSubmitting => _state.isSubmitting;
 
   /// Adiciona um novo alvo para avaliação multi-alvo (Step 11.0).
-  void addTarget({String targetId = '', double rating = 5.0, String? comment}) {
+  void addTarget({
+    String targetId = '',
+    double rating = 5.0,
+    String? comment,
+    String? targetName,
+    String? targetType,
+    String? category,
+  }) {
     if (isSubmitting) return;
     _targets.add(
       CreateReviewTargetInput(
         rateableTargetId: targetId,
         rating: rating,
         specificComment: comment,
+        targetName: targetName,
+        targetType: targetType,
+        category: category,
       ),
     );
     notifyListeners();
@@ -66,12 +77,61 @@ class ReviewCreateNotifier extends ChangeNotifier {
     }
   }
 
+  /// Seleciona um item retornado pela busca no alvo do índice especificado.
+  void selectTarget(int index, SearchResultItem item) {
+    if (isSubmitting) return;
+    if (index >= 0 && index < _targets.length) {
+      final current = _targets[index];
+      _targets[index] = current.copyWith(
+        rateableTargetId: item.id,
+        targetName: item.name,
+        targetType: item.rawTargetType,
+        category: item.category,
+      );
+      // Auto-preenche o estabelecimento de contexto se for um Local e ainda não estiver definido
+      if ((_contextPlaceId == null || _contextPlaceId!.isEmpty) && item.isPlace) {
+        _contextPlaceId = item.id;
+      }
+      notifyListeners();
+    }
+  }
+
+  /// Limpa a seleção do alvo no índice especificado, reabrindo a busca.
+  void clearTargetSelection(int index) {
+    if (isSubmitting) return;
+    if (index >= 0 && index < _targets.length) {
+      final current = _targets[index];
+      _targets[index] = CreateReviewTargetInput(
+        rateableTargetId: '',
+        rating: current.rating,
+        specificComment: current.specificComment,
+      );
+      notifyListeners();
+    }
+  }
+
+  /// Verifica se um targetId já foi selecionado em outro item da avaliação.
+  bool isTargetAlreadySelected(String targetId, {int? excludeIndex}) {
+    if (targetId.trim().isEmpty) return false;
+    final normalized = targetId.trim().toLowerCase();
+    for (int i = 0; i < _targets.length; i++) {
+      if (excludeIndex != null && i == excludeIndex) continue;
+      if (_targets[i].rateableTargetId.trim().toLowerCase() == normalized) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Atualiza os dados de um alvo específico.
   void updateTarget(
     int index, {
     String? targetId,
     double? rating,
     String? specificComment,
+    String? targetName,
+    String? targetType,
+    String? category,
   }) {
     if (isSubmitting) return;
     if (index >= 0 && index < _targets.length) {
@@ -80,6 +140,9 @@ class ReviewCreateNotifier extends ChangeNotifier {
         rateableTargetId: targetId ?? current.rateableTargetId,
         rating: rating ?? current.rating,
         specificComment: specificComment ?? current.specificComment,
+        targetName: targetName ?? current.targetName,
+        targetType: targetType ?? current.targetType,
+        category: category ?? current.category,
       );
       notifyListeners();
     }

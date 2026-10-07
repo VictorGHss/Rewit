@@ -10,6 +10,7 @@ import 'package:rewit_mobile/features/discussions/data/repositories/discussion_r
 import 'package:rewit_mobile/features/feed/data/repositories/feed_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/review_creation/data/repositories/review_creation_repository_impl.dart';
+import 'package:rewit_mobile/features/search/data/repositories/search_repository_impl.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,7 @@ void main() async {
   final feedRepository = FeedRepositoryImpl(httpClient: httpClient);
   final discussionRepository = DiscussionRepositoryImpl(httpClient: httpClient);
   final reviewCreationRepository = ReviewCreationRepositoryImpl(httpClient: httpClient);
+  final searchRepository = SearchRepositoryImpl(httpClient: httpClient);
 
   authNotifier = AuthNotifier(authRepository: authRepository);
   final feedNotifier = FeedNotifier(feedRepository: feedRepository);
@@ -54,6 +56,7 @@ void main() async {
     feedRepository: feedRepository,
     discussionRepository: discussionRepository,
     reviewCreationRepository: reviewCreationRepository,
+    searchRepository: searchRepository,
   );
 
 

@@ -227,7 +227,7 @@ class RewitHttpClient {
 
     // Extrair cabeçalho Retry-After se presente (relevante em 429)
     int? retryAfterSeconds;
-    final retryAfterHeader = response.headers['retry-after'];
+    final retryAfterHeader = response.headers['retry-after'] ?? response.headers['Retry-After'];
     if (retryAfterHeader != null) {
       retryAfterSeconds = int.tryParse(retryAfterHeader.trim());
     }
