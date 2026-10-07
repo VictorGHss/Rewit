@@ -22,9 +22,11 @@ Seguindo as diretrizes fundamentais de privacidade do Rewit:
    * O votante é **estritamente anônimo**. O payload da notificação `REVIEW_HELPFUL` armazena `actorId = null`. O autor da avaliação recebe a mensagem genérica de que sua avaliação foi considerada útil, sem qualquer vazamento de identidade do autor do voto.
 2. **Reviews Anônimas**:
    * Quando o autor de uma avaliação anônima (`isAnonymous = true`) responde a um comentário em sua avaliação (`DISCUSSION_REPLY`), o campo `actorId` é persistido e exposto como **`null`**, garantindo que a identidade real do proprietário anônimo nunca seja descoberta pelo autor do comentário.
-3. **Ausência Absoluta de Notificações para Reports (Denúncias)**:
+3. **Ator com Conta Excluída (`DELETED`, C2)**:
+   * Na listagem, o `actorId` de um ator cuja conta foi excluída é exposto como **`null`**; em `NEW_FOLLOWER`, o `referenceId` (o próprio seguidor) também. A notificação continua na lista.
+4. **Ausência Absoluta de Notificações para Reports (Denúncias)**:
    * **Denúncias não geram notificações para nenhuma das partes.** O autor da avaliação denunciada nunca é notificado sobre denúncias, e o denunciante nunca é exposto, resguardando a segurança e o sigilo das ferramentas de governança comunitária (Step 19.0).
-4. **Proteção Anti-IDOR**:
+5. **Proteção Anti-IDOR**:
    * A identidade do destinatário é inferida **exclusivamente do token JWT** do contexto de segurança (`SecurityContextHolder`).
    * Não são aceitos parâmetros como `userId` no path ou no corpo de requisições.
    * Tentativas de marcar ou consultar notificações de outro usuário resultam em `404 Not Found` (`NOTIFICATION_NOT_FOUND`), prevenindo confirmação de existência.

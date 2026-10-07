@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -94,6 +95,27 @@ class DiscussionPresentationPolicyTest {
 
         assertEquals(author, view.author().id());
         assertNull(view.author().handle());
+    }
+
+    @Test
+    @DisplayName("Autor com conta DELETED: comentário mantido, autor sem id, handle nem avatar; tombstone e anonimato prevalecem")
+    void deletedAuthorHasNoIdentity() {
+        DiscussionItemView view = policy.present(discussion(DiscussionStatus.ACTIVE, null, false), viewer, false, profiles,
+                Set.of(author));
+
+        assertEquals(DiscussionViewState.VISIBLE, view.state());
+        assertEquals("Comentário", view.content());
+        assertNull(view.author().id());
+        assertNull(view.author().handle());
+        assertNull(view.author().avatarUrl());
+        assertEquals("Usuário excluído", view.author().displayName());
+
+        assertNull(policy.present(discussion(DiscussionStatus.REMOVED, null, false), viewer, false, profiles,
+                Set.of(author)).author(), "tombstone continua sem autor");
+        DiscussionItemView anonymousOwner = policy.present(discussion(DiscussionStatus.ACTIVE, null, true), viewer, true,
+                profiles, Set.of(author));
+        assertNull(anonymousOwner.author(), "o anonimato da avaliação continua mascarando o dono");
+        assertTrue(anonymousOwner.isFromOwner());
     }
 
     private ReviewDiscussion discussion(DiscussionStatus status, UUID parentId, boolean fromOwner) {

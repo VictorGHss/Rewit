@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -32,18 +33,31 @@ public class DiscussionPresentationPolicy {
      */
     public DiscussionItemView present(ReviewDiscussion discussion, UUID viewerId, boolean reviewAnonymous,
                                       Map<UUID, Profile> profilesByUserId) {
+        return present(discussion, viewerId, reviewAnonymous, profilesByUserId, Set.of());
+    }
+
+    /**
+     * @param deletedUserIds autores com conta {@code DELETED} (C2): o comentário continua, mas o autor é projetado
+     *                       sem id, handle nem avatar ({@link DiscussionAuthorView#deleted()})
+     */
+    public DiscussionItemView present(ReviewDiscussion discussion, UUID viewerId, boolean reviewAnonymous,
+                                      Map<UUID, Profile> profilesByUserId, Set<UUID> deletedUserIds) {
         Objects.requireNonNull(discussion, "discussion must not be null");
         Objects.requireNonNull(viewerId, "viewerId must not be null");
         Objects.requireNonNull(profilesByUserId, "profilesByUserId must not be null");
+        Objects.requireNonNull(deletedUserIds, "deletedUserIds must not be null");
 
         boolean viewerIsAuthor = viewerId.equals(discussion.getUserId());
         DiscussionViewState state = stateFor(discussion, viewerIsAuthor);
         boolean removed = state == DiscussionViewState.REMOVED;
         boolean isRoot = discussion.getParentId() == null;
 
-        DiscussionAuthorView author = exposesAuthor(discussion, reviewAnonymous)
-                ? authorView(discussion.getUserId(), profilesByUserId.get(discussion.getUserId()))
-                : null;
+        DiscussionAuthorView author = null;
+        if (exposesAuthor(discussion, reviewAnonymous)) {
+            author = deletedUserIds.contains(discussion.getUserId())
+                    ? DiscussionAuthorView.deleted()
+                    : authorView(discussion.getUserId(), profilesByUserId.get(discussion.getUserId()));
+        }
 
         return new DiscussionItemView(
                 discussion.getId(),

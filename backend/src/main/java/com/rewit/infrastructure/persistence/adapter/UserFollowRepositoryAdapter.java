@@ -2,6 +2,7 @@ package com.rewit.infrastructure.persistence.adapter;
 
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.UserFollowRepository;
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.model.UserFollow;
 import com.rewit.infrastructure.persistence.entity.UserFollowJpaEntity;
 import com.rewit.infrastructure.persistence.repository.UserFollowJpaRepository;
@@ -74,7 +75,7 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
         if (userId == null) {
             return 0;
         }
-        return userFollowJpaRepository.countByFollowedUserId(userId);
+        return userFollowJpaRepository.countVisibleFollowers(userId, AccountStatus.DELETED);
     }
 
     @Override
@@ -83,7 +84,7 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
         if (userId == null) {
             return 0;
         }
-        return userFollowJpaRepository.countByFollowerUserId(userId);
+        return userFollowJpaRepository.countVisibleFollowing(userId, AccountStatus.DELETED);
     }
 
     @Override
@@ -101,7 +102,7 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
                         .by((UserFollowJpaEntity entity) -> entity.getCreatedAt()).descending()
                         .and(Sort.sort(UserFollowJpaEntity.class).by((UserFollowJpaEntity entity) -> entity.getId()).ascending())
         );
-        Page<UserFollowJpaEntity> entityPage = userFollowJpaRepository.findByFollowerUserId(followerUserId, pageRequest);
+        Page<UserFollowJpaEntity> entityPage = userFollowJpaRepository.findVisibleFollowing(followerUserId, AccountStatus.DELETED, pageRequest);
 
         List<UserFollow> content = entityPage.getContent().stream()
                 .map(entity -> entity.toDomain())
@@ -132,7 +133,7 @@ public class UserFollowRepositoryAdapter implements UserFollowRepository {
                         .by((UserFollowJpaEntity entity) -> entity.getCreatedAt()).descending()
                         .and(Sort.sort(UserFollowJpaEntity.class).by((UserFollowJpaEntity entity) -> entity.getId()).ascending())
         );
-        Page<UserFollowJpaEntity> entityPage = userFollowJpaRepository.findByFollowedUserId(followedUserId, pageRequest);
+        Page<UserFollowJpaEntity> entityPage = userFollowJpaRepository.findVisibleFollowers(followedUserId, AccountStatus.DELETED, pageRequest);
 
         List<UserFollow> content = entityPage.getContent().stream()
                 .map(entity -> entity.toDomain())

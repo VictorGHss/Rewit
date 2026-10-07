@@ -7,6 +7,7 @@ import com.rewit.application.dto.notification.NotificationDtos.NotificationView;
 import com.rewit.application.dto.notification.NotificationDtos.UnreadCountView;
 import com.rewit.application.port.NotificationRepository;
 import com.rewit.application.port.OutboxRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.NotificationType;
 import com.rewit.domain.enums.OutboxMessageType;
@@ -20,7 +21,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Serviço de aplicação para gerenciamento e disparo de notificações internas in-app (Step 22.0).
@@ -32,23 +36,26 @@ public class NotificationService {
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
     private final AccountStatusPolicy accountStatusPolicy;
+    private final UserRepository userRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
     public NotificationService(NotificationRepository notificationRepository, OutboxRepository outboxRepository,
-                               AccountStatusPolicy accountStatusPolicy) {
-        this(notificationRepository, outboxRepository, new ObjectMapper(), accountStatusPolicy);
+                               AccountStatusPolicy accountStatusPolicy, UserRepository userRepository) {
+        this(notificationRepository, outboxRepository, new ObjectMapper(), accountStatusPolicy, userRepository);
     }
 
     public NotificationService(
             NotificationRepository notificationRepository,
             OutboxRepository outboxRepository,
             ObjectMapper objectMapper,
-            AccountStatusPolicy accountStatusPolicy
+            AccountStatusPolicy accountStatusPolicy,
+            UserRepository userRepository
     ) {
         this.notificationRepository = Objects.requireNonNull(notificationRepository, "NotificationRepository must not be null");
         this.outboxRepository = Objects.requireNonNull(outboxRepository, "OutboxRepository must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "ObjectMapper must not be null");
         this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "UserRepository must not be null");
     }
 
     /**
@@ -183,9 +190,9 @@ public class NotificationService {
 
         PageResult<Notification> paged = notificationRepository.findByUserId(userId, page, size);
 
-        List<NotificationView> views = paged.content().stream()
+        List<NotificationView> views = withoutDeletedIdentities(paged.content().stream()
                 .map(this::toView)
-                .toList();
+                .toList());
 
         return new PageResult<>(
                 views,
@@ -258,6 +265,30 @@ public class NotificationService {
         if (size > 50) {
             throw new BusinessException("O tamanho da página não pode ser superior a 50", HttpStatus.BAD_REQUEST, "PAGE_SIZE_EXCEEDED");
         }
+    }
+
+    /**
+     * O UUID de um ator com conta {@code DELETED} (C2) não chega ao destinatário: actorId e, em NEW_FOLLOWER,
+     * referenceId (o próprio seguidor) saem nulos, o mesmo contrato do ator mascarado. A notificação continua.
+     */
+    private List<NotificationView> withoutDeletedIdentities(List<NotificationView> views) {
+        Set<UUID> candidates = views.stream()
+                .flatMap(view -> Stream.of(view.actorId(), view.referenceId()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> deleted = candidates.isEmpty() ? Set.of() : userRepository.findDeletedUserIds(candidates);
+        if (deleted.isEmpty()) {
+            return views;
+        }
+        return views.stream()
+                .map(view -> new NotificationView(
+                        view.id(),
+                        view.type(),
+                        deleted.contains(view.actorId()) ? null : view.actorId(),
+                        deleted.contains(view.referenceId()) ? null : view.referenceId(),
+                        view.readAt(),
+                        view.createdAt()))
+                .toList();
     }
 
     private NotificationView toView(Notification n) {

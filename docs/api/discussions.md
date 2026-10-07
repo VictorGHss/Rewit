@@ -87,6 +87,7 @@ A permissão para criar ou visualizar discussões deriva estritamente da visibil
 
 * O status interno de moderação (`ACTIVE`, `UNDER_REVIEW`, `REMOVED`) não é exposto na listagem; o tombstone nunca indica se a remoção foi do autor ou da moderação.
 * Respostas não aparecem isoladas: a resposta de uma raiz em quarentena some junto com ela.
+* **Autor com conta excluída (`DELETED`, C2)**: o comentário e suas respostas continuam; o `author` vem como `{"id": null, "handle": null, "displayName": "Usuário excluído", "avatarUrl": null}`. Tombstone (`REMOVED`) e anonimato do dono da avaliação continuam com `author: null`.
 
 ### 2.9 Denúncias e Auto-quarentena (C3 D1)
 

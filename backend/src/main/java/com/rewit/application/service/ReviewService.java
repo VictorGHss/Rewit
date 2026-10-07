@@ -423,6 +423,9 @@ public class ReviewService {
         if (isAnonymous) {
             return PublicAuthorView.anonymous();
         }
+        if (userId != null && userRepository.findDeletedUserIds(Set.of(userId)).contains(userId)) {
+            return PublicAuthorView.deleted();
+        }
 
         if (profileRepository != null && userId != null) {
             Optional<Profile> profileOpt = profileRepository.findByUserId(userId);
@@ -513,6 +516,8 @@ public class ReviewService {
                 ? profileRepository.findByUserIdIn(nonAnonymousAuthorIds).stream()
                 .collect(Collectors.toMap(p -> p.getUserId(), p -> p, (a, b) -> a))
                 : Map.of();
+        // Autores de contas excluídas: identidade oculta, conteúdo mantido (C2)
+        Set<UUID> deletedAuthorIds = userRepository.findDeletedUserIds(nonAnonymousAuthorIds);
 
         // Resolução em lote de contagens e votos de Helpful para evitar N+1
         List<UUID> reviewIds = pageResult.content().stream()
@@ -535,6 +540,8 @@ public class ReviewService {
                     PublicAuthorView authorView;
                     if (review.isAnonymous()) {
                         authorView = PublicAuthorView.anonymous();
+                    } else if (deletedAuthorIds.contains(review.getUserId())) {
+                        authorView = PublicAuthorView.deleted();
                     } else {
                         Profile profile = profilesByUserId.get(review.getUserId());
                         if (profile != null) {
@@ -716,6 +723,8 @@ public class ReviewService {
                 ? profileRepository.findByUserIdIn(nonAnonymousAuthorIds).stream()
                 .collect(Collectors.toMap(p -> p.getUserId(), p -> p, (p1, p2) -> p1))
                 : Map.of();
+        // Autores de contas excluídas: identidade oculta, conteúdo mantido (C2)
+        Set<UUID> deletedAuthorIds = userRepository.findDeletedUserIds(nonAnonymousAuthorIds);
 
         Map<UUID, Long> helpfulCounts = (reviewReactionRepository != null && !reviewIds.isEmpty())
                 ? reviewReactionRepository.countHelpfulByReviewIds(reviewIds)
@@ -730,6 +739,8 @@ public class ReviewService {
                     PublicAuthorView authorView;
                     if (review.isAnonymous()) {
                         authorView = PublicAuthorView.anonymous();
+                    } else if (deletedAuthorIds.contains(review.getUserId())) {
+                        authorView = PublicAuthorView.deleted();
                     } else {
                         Profile profile = profilesByUserId.get(review.getUserId());
                         if (profile != null) {

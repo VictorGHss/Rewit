@@ -150,6 +150,7 @@ Com a introdução do subsistema social no Step 15.0:
 * **Seguir Usuário Inativo / Excluído**: O sistema rejeita o seguimento de usuários inativos (`isActive = false`) ou excluídos por soft-delete (`deletedAt != null`), retornando `404 Not Found` (`USER_NOT_FOUND`).
 * **Consulta de Listagens de Usuários Inativos**: Ao requisitar seguidores ou quem um usuário segue (`/api/v1/users/{id}/followers` ou `/following`), a existência de usuário ativo é validada. Usuários inexistentes ou inativos resultam em `404 Not Found`.
 * **Integridade Referencial no Banco de Dados**: A tabela relacional `user_follows` possui integridade física com `ON DELETE CASCADE` para `follower_user_id` e `followed_user_id`, garantindo que eventuais deleções físicas limpem automaticamente as associações órfãs.
+* **Conta excluída (`DELETED`, C2)**: os vínculos continuam no banco até o purge físico, mas não aparecem nas listas de seguidores e seguidos de ninguém nem entram em `followersCount`/`followingCount`. As listas da própria conta excluída respondem `404 USER_NOT_FOUND`, como as de um identificador inexistente.
 
 ---
 

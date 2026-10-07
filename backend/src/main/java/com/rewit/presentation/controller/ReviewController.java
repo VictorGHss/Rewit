@@ -183,8 +183,11 @@ public class ReviewController {
     }
 
     private static ReviewAuthorResponse toAuthorResponse(PublicAuthorView authorView) {
-        if (authorView == null || authorView.isAnonymous()) {
+        if (authorView == null) {
             return ReviewAuthorResponse.anonymous();
+        }
+        if (authorView.isAnonymous()) {
+            return ReviewAuthorResponse.hidden(authorView.displayName());
         }
         return ReviewAuthorResponse.of(
                 authorView.id(),

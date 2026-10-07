@@ -6,6 +6,7 @@ import com.rewit.application.dto.discussion.DiscussionThreadDtos.DiscussionThrea
 import com.rewit.application.port.DiscussionRepository;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.DiscussionStatus;
 import com.rewit.domain.model.Profile;
@@ -50,17 +51,20 @@ public class DiscussionThreadQueryService {
     private final DiscussionRepository discussionRepository;
     private final ReviewRepository reviewRepository;
     private final ProfileRepository profileRepository;
+    private final UserRepository userRepository;
     private final ReviewVisibilityPolicy reviewVisibilityPolicy;
     private final DiscussionPresentationPolicy presentationPolicy;
 
     public DiscussionThreadQueryService(DiscussionRepository discussionRepository,
                                         ReviewRepository reviewRepository,
                                         ProfileRepository profileRepository,
+                                        UserRepository userRepository,
                                         ReviewVisibilityPolicy reviewVisibilityPolicy,
                                         DiscussionPresentationPolicy presentationPolicy) {
         this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
         this.profileRepository = Objects.requireNonNull(profileRepository, "ProfileRepository must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "UserRepository must not be null");
         this.reviewVisibilityPolicy = Objects.requireNonNull(reviewVisibilityPolicy, "ReviewVisibilityPolicy must not be null");
         this.presentationPolicy = Objects.requireNonNull(presentationPolicy, "DiscussionPresentationPolicy must not be null");
     }
@@ -87,17 +91,17 @@ public class DiscussionThreadQueryService {
                 .collect(Collectors.groupingBy(ReviewDiscussion::getParentId, LinkedHashMap::new, Collectors.toList()));
         Map<UUID, Long> replyCounts = discussionRepository.countRepliesVisibleTo(expandableRootIds, viewerId);
 
-        Map<UUID, Profile> profiles = profilesOf(Stream.concat(
+        Authors authors = authorsOf(Stream.concat(
                 roots.content().stream(), repliesByRoot.values().stream().flatMap(List::stream)).toList(), review);
 
         List<DiscussionThreadView> threads = new ArrayList<>(roots.content().size());
         for (ReviewDiscussion root : roots.content()) {
             List<DiscussionItemView> replies = repliesByRoot.getOrDefault(root.getId(), List.of()).stream()
-                    .map(reply -> presentationPolicy.present(reply, viewerId, review.isAnonymous(), profiles))
+                    .map(reply -> presentationPolicy.present(reply, viewerId, review.isAnonymous(), authors.profiles(), authors.deleted()))
                     .toList();
             long replyCount = replyCounts.getOrDefault(root.getId(), 0L);
             threads.add(new DiscussionThreadView(
-                    presentationPolicy.present(root, viewerId, review.isAnonymous(), profiles),
+                    presentationPolicy.present(root, viewerId, review.isAnonymous(), authors.profiles(), authors.deleted()),
                     replies,
                     replyCount,
                     replyCount > replies.size()));
@@ -125,9 +129,9 @@ public class DiscussionThreadQueryService {
         Review review = accessibleReview(root.getReviewId(), viewerId);
 
         PageResult<ReviewDiscussion> replies = discussionRepository.findRepliesVisibleTo(rootId, viewerId, page, size);
-        Map<UUID, Profile> profiles = profilesOf(replies.content(), review);
+        Authors authors = authorsOf(replies.content(), review);
         List<DiscussionItemView> views = replies.content().stream()
-                .map(reply -> presentationPolicy.present(reply, viewerId, review.isAnonymous(), profiles))
+                .map(reply -> presentationPolicy.present(reply, viewerId, review.isAnonymous(), authors.profiles(), authors.deleted()))
                 .toList();
         return PageResult.of(views, replies.pageNumber(), replies.pageSize(), replies.totalElements());
     }
@@ -140,16 +144,20 @@ public class DiscussionThreadQueryService {
     }
 
     /** Perfis apenas dos autores que serão expostos, numa única consulta. */
-    private Map<UUID, Profile> profilesOf(Collection<ReviewDiscussion> discussions, Review review) {
+    /** Perfis dos autores expostos e, entre eles, os de contas excluídas (projetados sem identidade, C2). */
+    private record Authors(Map<UUID, Profile> profiles, Set<UUID> deleted) {}
+
+    private Authors authorsOf(Collection<ReviewDiscussion> discussions, Review review) {
         Set<UUID> authorIds = discussions.stream()
                 .filter(discussion -> presentationPolicy.exposesAuthor(discussion, review.isAnonymous()))
                 .map(ReviewDiscussion::getUserId)
                 .collect(Collectors.toSet());
         if (authorIds.isEmpty()) {
-            return Map.of();
+            return new Authors(Map.of(), Set.of());
         }
-        return profileRepository.findByUserIdIn(authorIds).stream()
+        Map<UUID, Profile> profiles = profileRepository.findByUserIdIn(authorIds).stream()
                 .collect(Collectors.toMap(Profile::getUserId, Function.identity(), (first, second) -> first));
+        return new Authors(profiles, userRepository.findDeletedUserIds(authorIds));
     }
 
     private static void requireViewer(UUID viewerId) {

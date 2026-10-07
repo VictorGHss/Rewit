@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.repository;
 
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.infrastructure.persistence.entity.UserFollowJpaEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -23,13 +24,46 @@ public interface UserFollowJpaRepository extends JpaRepository<UserFollowJpaEnti
 
     void deleteByFollowerUserIdAndFollowedUserId(UUID followerUserId, UUID followedUserId);
 
-    long countByFollowedUserId(UUID followedUserId);
+    // Leituras públicas (C2): vínculos com uma conta DELETED não aparecem nas listas nem nos contadores. O vínculo
+    // continua no banco até o purge físico, que o remove em cascata (FKs ON DELETE CASCADE).
 
-    long countByFollowerUserId(UUID followerUserId);
+    @Query("""
+        SELECT COUNT(f) FROM UserFollowJpaEntity f
+        WHERE f.followedUserId = :followedUserId
+          AND NOT EXISTS (SELECT 1 FROM UserJpaEntity u WHERE u.id = f.followerUserId AND u.accountStatus = :deleted)
+        """)
+    long countVisibleFollowers(@Param("followedUserId") UUID followedUserId, @Param("deleted") AccountStatus deleted);
 
-    Page<UserFollowJpaEntity> findByFollowerUserId(UUID followerUserId, Pageable pageable);
+    @Query("""
+        SELECT COUNT(f) FROM UserFollowJpaEntity f
+        WHERE f.followerUserId = :followerUserId
+          AND NOT EXISTS (SELECT 1 FROM UserJpaEntity u WHERE u.id = f.followedUserId AND u.accountStatus = :deleted)
+        """)
+    long countVisibleFollowing(@Param("followerUserId") UUID followerUserId, @Param("deleted") AccountStatus deleted);
 
-    Page<UserFollowJpaEntity> findByFollowedUserId(UUID followedUserId, Pageable pageable);
+    @Query(value = """
+        SELECT f FROM UserFollowJpaEntity f
+        WHERE f.followerUserId = :followerUserId
+          AND NOT EXISTS (SELECT 1 FROM UserJpaEntity u WHERE u.id = f.followedUserId AND u.accountStatus = :deleted)
+        """, countQuery = """
+        SELECT COUNT(f) FROM UserFollowJpaEntity f
+        WHERE f.followerUserId = :followerUserId
+          AND NOT EXISTS (SELECT 1 FROM UserJpaEntity u WHERE u.id = f.followedUserId AND u.accountStatus = :deleted)
+        """)
+    Page<UserFollowJpaEntity> findVisibleFollowing(@Param("followerUserId") UUID followerUserId,
+                                                   @Param("deleted") AccountStatus deleted, Pageable pageable);
+
+    @Query(value = """
+        SELECT f FROM UserFollowJpaEntity f
+        WHERE f.followedUserId = :followedUserId
+          AND NOT EXISTS (SELECT 1 FROM UserJpaEntity u WHERE u.id = f.followerUserId AND u.accountStatus = :deleted)
+        """, countQuery = """
+        SELECT COUNT(f) FROM UserFollowJpaEntity f
+        WHERE f.followedUserId = :followedUserId
+          AND NOT EXISTS (SELECT 1 FROM UserJpaEntity u WHERE u.id = f.followerUserId AND u.accountStatus = :deleted)
+        """)
+    Page<UserFollowJpaEntity> findVisibleFollowers(@Param("followedUserId") UUID followedUserId,
+                                                   @Param("deleted") AccountStatus deleted, Pageable pageable);
 
     @Modifying
     @Query(value = """

@@ -95,8 +95,19 @@ public final class ReviewDto {
             String avatarUrl,
             boolean isAnonymous
     ) {
+        /** Nome exibido no lugar do autor de uma conta excluída, em toda leitura pública. */
+        public static final String DELETED_DISPLAY_NAME = "Usuário excluído";
+
         public static PublicAuthorView anonymous() {
             return new PublicAuthorView(null, null, "Anônimo", null, true);
+        }
+
+        /**
+         * Autor de uma conta {@code DELETED} (C2): o conteúdo continua, a identidade não. Mesma forma do anônimo
+         * (sem id, handle, avatar nem link de perfil), com um nome que não se confunde com uma avaliação anônima.
+         */
+        public static PublicAuthorView deleted() {
+            return new PublicAuthorView(null, null, DELETED_DISPLAY_NAME, null, true);
         }
     }
 

@@ -87,6 +87,11 @@ public final class ReviewPresentationDtos {
             return new ReviewAuthorResponse(null, null, "Anônimo", null, true);
         }
 
+        /** Identidade oculta (avaliação anônima ou conta excluída): nunca id, handle nem avatar, só o nome exibido. */
+        public static ReviewAuthorResponse hidden(String displayName) {
+            return displayName == null ? anonymous() : new ReviewAuthorResponse(null, null, displayName, null, true);
+        }
+
         public static ReviewAuthorResponse of(UUID id, String handle, String displayName, String avatarUrl) {
             return new ReviewAuthorResponse(id, handle, displayName, avatarUrl, false);
         }

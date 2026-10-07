@@ -3,7 +3,9 @@ package com.rewit.application.port;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.User;
 
+import java.util.Collection;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -24,6 +26,13 @@ public interface UserRepository {
      * segunda enxerga o estado já confirmado pela primeira (sem lost update).
      */
     Optional<User> findByIdForUpdate(UUID id);
+
+    /**
+     * Quais dos usuários informados estão {@code DELETED}. Base das projeções públicas (C2): a identidade de uma
+     * conta excluída não aparece em nenhuma leitura pública, embora o conteúdo histórico continue referenciando o
+     * {@code user_id}. Uma consulta por conjunto, pela chave primária.
+     */
+    Set<UUID> findDeletedUserIds(Collection<UUID> userIds);
 
     boolean existsById(UUID id);
 

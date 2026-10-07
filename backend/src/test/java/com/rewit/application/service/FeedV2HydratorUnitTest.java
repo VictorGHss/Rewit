@@ -8,6 +8,7 @@ import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.feed.FeedCandidate;
 import com.rewit.domain.feed.FeedScore;
@@ -50,6 +51,9 @@ class FeedV2HydratorUnitTest {
     @Mock
     private ReviewReactionRepository reviewReactionRepository;
 
+    @Mock
+    private UserRepository userRepository;
+
     @Captor
     private ArgumentCaptor<Collection<UUID>> reviewIdsCaptor;
 
@@ -66,7 +70,8 @@ class FeedV2HydratorUnitTest {
                 reviewRepository,
                 reviewTargetRepository,
                 profileRepository,
-                reviewReactionRepository
+                reviewReactionRepository,
+                userRepository
         );
     }
 

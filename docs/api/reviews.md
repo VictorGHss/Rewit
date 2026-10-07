@@ -26,6 +26,7 @@ ReviewController (presentation)
   * O objeto `author` na representação pública não expõe `id`, `handle` ou `avatarUrl`.
   * O campo `displayName` é retornado como `"Anônimo"`.
   * `isAnonymous` é retornado como `true`.
+* **Autor com conta excluída (`DELETED`, C2)**: a avaliação, as notas, o helpful e os agregados continuam; o objeto `author` vem sem `id`, `handle` e `avatarUrl`, com `displayName = "Usuário excluído"` e `author.isAnonymous = true` (o `isAnonymous` da avaliação não muda). Vale para detalhe, listagem por alvo, Feed V1 e Feed V2. Contas `DEACTIVATED` e `SUSPENDED` não são afetadas.
 
 ### 1.3 Controle de Visibilidade (`visibility`)
 * **`PUBLIC`**: A avaliação pode ser consultada por usuários autenticados.

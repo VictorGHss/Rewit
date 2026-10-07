@@ -9,6 +9,7 @@ import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.feed.RankedFeedCandidate;
 import com.rewit.domain.model.Profile;
@@ -50,17 +51,20 @@ public class FeedV2Hydrator {
     private final ReviewTargetRepository reviewTargetRepository;
     private final ProfileRepository profileRepository;
     private final ReviewReactionRepository reviewReactionRepository;
+    private final UserRepository userRepository;
 
     public FeedV2Hydrator(
             ReviewRepository reviewRepository,
             ReviewTargetRepository reviewTargetRepository,
             ProfileRepository profileRepository,
-            ReviewReactionRepository reviewReactionRepository
+            ReviewReactionRepository reviewReactionRepository,
+            UserRepository userRepository
     ) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository is required");
         this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository is required");
         this.profileRepository = Objects.requireNonNull(profileRepository, "profileRepository is required");
         this.reviewReactionRepository = Objects.requireNonNull(reviewReactionRepository, "reviewReactionRepository is required");
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository is required");
     }
 
     /**
@@ -157,6 +161,11 @@ public class FeedV2Hydrator {
                 .collect(Collectors.toMap(profile -> profile.getUserId(), p -> p, (p1, p2) -> p1))
                 : Map.of();
 
+        // Autores de contas excluídas: identidade oculta, avaliação mantida (C2). Uma consulta por página
+        Set<UUID> deletedAuthorIds = !nonAnonymousAuthorIds.isEmpty()
+                ? userRepository.findDeletedUserIds(nonAnonymousAuthorIds)
+                : Set.of();
+
         // 5. Batch: Contagem total de votos de Helpful em lote
         Map<UUID, Long> helpfulCounts = reviewReactionRepository.countHelpfulByReviewIds(activeReviewIds);
 
@@ -179,6 +188,8 @@ public class FeedV2Hydrator {
             if (review.isAnonymous()) {
                 // Anonimato estrito: sem authorId, sem handle, sem avatar
                 authorView = PublicAuthorView.anonymous();
+            } else if (deletedAuthorIds.contains(review.getUserId())) {
+                authorView = PublicAuthorView.deleted();
             } else {
                 Profile profile = profilesByUserId.get(review.getUserId());
                 if (profile != null) {

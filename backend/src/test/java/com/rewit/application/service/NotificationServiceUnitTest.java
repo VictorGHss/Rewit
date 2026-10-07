@@ -6,6 +6,7 @@ import com.rewit.application.dto.notification.NotificationDtos.NotificationView;
 import com.rewit.application.dto.notification.NotificationDtos.UnreadCountView;
 import com.rewit.application.port.NotificationRepository;
 import com.rewit.application.port.OutboxRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.NotificationType;
 import com.rewit.domain.enums.OutboxStatus;
@@ -43,6 +44,9 @@ class NotificationServiceUnitTest {
     @Mock
     private AccountStatusPolicy accountStatusPolicy;
 
+    @Mock
+    private UserRepository userRepository;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private NotificationService notificationService;
 
@@ -53,7 +57,8 @@ class NotificationServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        notificationService = new NotificationService(notificationRepository, outboxRepository, objectMapper, accountStatusPolicy);
+        notificationService = new NotificationService(notificationRepository, outboxRepository, objectMapper, accountStatusPolicy,
+                userRepository);
     }
 
     @Nested

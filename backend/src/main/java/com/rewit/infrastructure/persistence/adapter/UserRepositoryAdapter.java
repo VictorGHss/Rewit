@@ -1,6 +1,7 @@
 package com.rewit.infrastructure.persistence.adapter;
 
 import com.rewit.application.port.UserRepository;
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.entity.UserJpaEntity;
@@ -10,9 +11,12 @@ import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Adaptador de persistência que implementa a porta UserRepository.
@@ -79,6 +83,18 @@ public class UserRepositoryAdapter implements UserRepository {
             return Optional.empty();
         }
         return Optional.of(entity.toDomain());
+    }
+
+    @Override
+    public Set<UUID> findDeletedUserIds(Collection<UUID> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<UUID> candidates = userIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        if (candidates.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(userJpaRepository.findIdsByIdInAndAccountStatus(candidates, AccountStatus.DELETED));
     }
 
     @Override

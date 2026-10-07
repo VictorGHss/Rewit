@@ -1,11 +1,14 @@
 package com.rewit.infrastructure.persistence.repository;
 
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.infrastructure.persistence.entity.UserJpaEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,6 +19,9 @@ public interface UserJpaRepository extends JpaRepository<UserJpaEntity, UUID> {
 
     @Query("SELECT u FROM UserJpaEntity u WHERE u.id = :id AND u.deletedAt IS NULL")
     Optional<UserJpaEntity> findActiveById(@Param("id") UUID id);
+
+    @Query("SELECT u.id FROM UserJpaEntity u WHERE u.id IN :ids AND u.accountStatus = :status")
+    List<UUID> findIdsByIdInAndAccountStatus(@Param("ids") Collection<UUID> ids, @Param("status") AccountStatus status);
 
     @Query("SELECT u FROM UserJpaEntity u WHERE LOWER(u.email) = LOWER(:email) AND u.deletedAt IS NULL")
     Optional<UserJpaEntity> findActiveByEmail(@Param("email") String email);

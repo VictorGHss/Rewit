@@ -1,5 +1,7 @@
 package com.rewit.application.dto.discussion;
 
+import com.rewit.application.dto.ReviewDto.PublicAuthorView;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -28,7 +30,13 @@ public final class DiscussionThreadDtos {
         PENDING_REVIEW
     }
 
-    public record DiscussionAuthorView(UUID id, String handle, String displayName, String avatarUrl) {}
+    public record DiscussionAuthorView(UUID id, String handle, String displayName, String avatarUrl) {
+
+        /** Autor de uma conta excluída (C2): mesmo nome exibido das avaliações, sem id, handle nem avatar. */
+        public static DiscussionAuthorView deleted() {
+            return new DiscussionAuthorView(null, null, PublicAuthorView.DELETED_DISPLAY_NAME, null);
+        }
+    }
 
     /**
      * @param content    {@code null} quando {@code REMOVED}
