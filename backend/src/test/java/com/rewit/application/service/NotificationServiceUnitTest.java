@@ -372,4 +372,224 @@ class NotificationServiceUnitTest {
             verify(notificationRepository, never()).save(any());
         }
     }
+
+    @Nested
+    @DisplayName("Contexto de navegação: reviewId e discussionId na listagem (C5.12)")
+    class NavigationContext {
+
+        private final UUID replyId = UUID.randomUUID();
+
+        /** Notificação gravada pelo método de criação real, para projetar o metadata que a produção grava. */
+        private Notification saved() {
+            ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+            verify(notificationRepository).save(captor.capture());
+            return captor.getValue();
+        }
+
+        private NotificationView listed(Notification notification) {
+            when(notificationRepository.findByUserId(userA, 0, 20))
+                    .thenReturn(PageResult.of(List.of(notification), 0, 20, 1));
+            return notificationService.findMyNotifications(userA, 0, 20).content().get(0);
+        }
+
+        private NotificationView listedWithMetadata(String type, String metadataJson) {
+            return listed(new Notification(UUID.randomUUID(), userA, type, "Título", "Conteúdo", "/url", metadataJson,
+                    null, Instant.now()));
+        }
+
+        private void assertNoUserUuid(NotificationView view, UUID user) {
+            assertNotEquals(user, view.actorId());
+            assertNotEquals(user, view.referenceId());
+            assertNotEquals(user, view.reviewId());
+            assertNotEquals(user, view.discussionId());
+        }
+
+        @Test
+        @DisplayName("REVIEW_HELPFUL: referenceId e reviewId são a avaliação; sem discussionId; votante anônimo")
+        void reviewHelpful() {
+            notificationService.notifyReviewHelpful(reviewId, userA);
+            NotificationView view = listed(saved());
+
+            assertEquals(reviewId, view.referenceId());
+            assertEquals(reviewId, view.reviewId());
+            assertNull(view.discussionId());
+            assertNull(view.actorId());
+        }
+
+        @Test
+        @DisplayName("NEW_DISCUSSION: referenceId e reviewId são a avaliação; discussionId é o comentário raiz")
+        void newDiscussion() {
+            notificationService.notifyNewDiscussion(reviewId, userA, userB, discussionId);
+            NotificationView view = listed(saved());
+
+            assertEquals(reviewId, view.referenceId());
+            assertEquals(reviewId, view.reviewId());
+            assertEquals(discussionId, view.discussionId());
+            assertEquals(userB, view.actorId());
+        }
+
+        @Test
+        @DisplayName("DISCUSSION_REPLY: referenceId e discussionId são a resposta; reviewId vem do metadata")
+        void discussionReply() {
+            notificationService.notifyDiscussionReply(reviewId, userA, userB, replyId, false);
+            NotificationView view = listed(saved());
+
+            assertEquals(replyId, view.referenceId());
+            assertEquals(reviewId, view.reviewId());
+            assertEquals(replyId, view.discussionId());
+            assertEquals(userB, view.actorId());
+        }
+
+        @Test
+        @DisplayName("DISCUSSION_REPLY com ator mascarado: actorId continua null e nenhum campo novo traz o ator")
+        void maskedReplyKeepsActorHidden() {
+            notificationService.notifyDiscussionReply(reviewId, userA, userB, replyId, true);
+            NotificationView view = listed(saved());
+
+            assertNull(view.actorId());
+            assertEquals(reviewId, view.reviewId());
+            assertEquals(replyId, view.discussionId());
+            assertNoUserUuid(view, userB);
+        }
+
+        @Test
+        @DisplayName("NEW_FOLLOWER: referenceId é o seguidor; reviewId e discussionId nulos")
+        void newFollower() {
+            notificationService.notifyNewFollower(userB, userA);
+            NotificationView view = listed(saved());
+
+            assertEquals(userB, view.referenceId());
+            assertNull(view.reviewId());
+            assertNull(view.discussionId());
+        }
+
+        @Test
+        @DisplayName("NEW_FOLLOWER com metadata legado contendo reviewId/discussionId: campos novos continuam nulos")
+        void newFollowerIgnoresContextKeys() {
+            NotificationView view = listedWithMetadata("NEW_FOLLOWER", "{\"actorId\":\"" + userB + "\",\"referenceId\":\""
+                    + userB + "\",\"reviewId\":\"" + userB + "\",\"discussionId\":\"" + userB + "\"}");
+
+            assertNull(view.reviewId());
+            assertNull(view.discussionId());
+        }
+
+        @Test
+        @DisplayName("Ator DELETED em NEW_DISCUSSION: actorId mascarado; avaliação e comentário preservados")
+        void deletedActorStaysMaskedWithContext() {
+            notificationService.notifyNewDiscussion(reviewId, userA, userB, discussionId);
+            Notification notification = saved();
+            when(userRepository.findDeletedUserIds(any())).thenReturn(java.util.Set.of(userB));
+
+            NotificationView view = listed(notification);
+
+            assertNull(view.actorId());
+            assertEquals(reviewId, view.reviewId());
+            assertEquals(discussionId, view.discussionId());
+            assertNoUserUuid(view, userB);
+        }
+
+        @Test
+        @DisplayName("Seguidor DELETED em NEW_FOLLOWER: actorId e referenceId nulos; nenhum campo novo o revela")
+        void deletedFollowerStaysHidden() {
+            notificationService.notifyNewFollower(userB, userA);
+            Notification notification = saved();
+            when(userRepository.findDeletedUserIds(any())).thenReturn(java.util.Set.of(userB));
+
+            NotificationView view = listed(notification);
+
+            assertNull(view.actorId());
+            assertNull(view.referenceId());
+            assertNoUserUuid(view, userB);
+        }
+
+        @Test
+        @DisplayName("Página com ator DELETED e notificação sem ator: a listagem não falha (Set imutável e campos nulos)")
+        void deletedActorAlongsideNotificationsWithoutActor() {
+            Notification fromDeletedFollower = new Notification(UUID.randomUUID(), userA, "NEW_FOLLOWER", "Novo", "Conteúdo",
+                    "/url", "{\"actorId\":\"" + userB + "\",\"referenceId\":\"" + userB + "\"}", null, Instant.now());
+            Notification helpful = new Notification(UUID.randomUUID(), userA, "REVIEW_HELPFUL", "Útil", "Conteúdo",
+                    "/url", "{\"actorId\":null,\"referenceId\":\"" + reviewId + "\"}", null, Instant.now());
+            when(notificationRepository.findByUserId(userA, 0, 20))
+                    .thenReturn(PageResult.of(List.of(fromDeletedFollower, helpful), 0, 20, 2));
+            // Como o adapter real: Set.copyOf, imutável
+            when(userRepository.findDeletedUserIds(any())).thenReturn(java.util.Set.copyOf(List.of(userB)));
+
+            List<NotificationView> views = notificationService.findMyNotifications(userA, 0, 20).content();
+
+            assertNull(views.get(0).actorId());
+            assertNull(views.get(0).referenceId());
+            assertNull(views.get(1).actorId());
+            assertEquals(reviewId, views.get(1).reviewId());
+        }
+
+        @Test
+        @DisplayName("Metadata ausente, vazio, malformado ou não-objeto: listagem não falha e o contexto é nulo")
+        void missingOrMalformedMetadata() {
+            for (String metadata : java.util.Arrays.asList(null, "", "   ", "{}", "{nao-e-json", "[]", "\"texto\"")) {
+                org.mockito.Mockito.reset(notificationRepository);
+                NotificationView view = listedWithMetadata("NEW_DISCUSSION", metadata);
+
+                assertNull(view.actorId(), String.valueOf(metadata));
+                assertNull(view.referenceId(), String.valueOf(metadata));
+                assertNull(view.reviewId(), String.valueOf(metadata));
+                assertNull(view.discussionId(), String.valueOf(metadata));
+            }
+        }
+
+        @Test
+        @DisplayName("UUID inválido em campo novo anula só esse campo; actorId e referenceId seguem como antes")
+        void invalidContextUuid() {
+            NotificationView newDiscussion = listedWithMetadata("NEW_DISCUSSION", "{\"actorId\":\"" + userB
+                    + "\",\"referenceId\":\"" + reviewId + "\",\"discussionId\":\"nao-e-uuid\"}");
+            assertEquals(userB, newDiscussion.actorId());
+            assertEquals(reviewId, newDiscussion.referenceId());
+            assertEquals(reviewId, newDiscussion.reviewId());
+            assertNull(newDiscussion.discussionId());
+
+            org.mockito.Mockito.reset(notificationRepository);
+            NotificationView reply = listedWithMetadata("DISCUSSION_REPLY", "{\"actorId\":\"" + userB
+                    + "\",\"referenceId\":\"" + replyId + "\",\"reviewId\":42}");
+            assertEquals(userB, reply.actorId());
+            assertEquals(replyId, reply.discussionId());
+            assertNull(reply.reviewId());
+        }
+
+        @Test
+        @DisplayName("UUID inválido em actorId/referenceId: mesmo comportamento de antes (ambos nulos), sem falhar")
+        void invalidLegacyUuidKeepsPreviousBehavior() {
+            NotificationView view = listedWithMetadata("DISCUSSION_REPLY", "{\"actorId\":\"invalido\",\"referenceId\":\""
+                    + replyId + "\",\"reviewId\":\"" + reviewId + "\"}");
+
+            assertNull(view.actorId());
+            assertNull(view.referenceId());
+            assertNull(view.discussionId(), "derivado de referenceId");
+            assertEquals(reviewId, view.reviewId());
+        }
+
+        @Test
+        @DisplayName("Metadata parcial: DISCUSSION_REPLY sem reviewId e NEW_DISCUSSION sem discussionId")
+        void partialMetadata() {
+            NotificationView reply = listedWithMetadata("DISCUSSION_REPLY",
+                    "{\"actorId\":null,\"referenceId\":\"" + replyId + "\"}");
+            assertNull(reply.reviewId());
+            assertEquals(replyId, reply.discussionId());
+
+            org.mockito.Mockito.reset(notificationRepository);
+            NotificationView discussion = listedWithMetadata("NEW_DISCUSSION",
+                    "{\"actorId\":\"" + userB + "\",\"referenceId\":\"" + reviewId + "\"}");
+            assertEquals(reviewId, discussion.reviewId());
+            assertNull(discussion.discussionId());
+        }
+
+        @Test
+        @DisplayName("Tipo desconhecido (legado): sem contexto, mesmo com chaves no metadata")
+        void unknownTypeHasNoContext() {
+            NotificationView view = listedWithMetadata("TIPO_LEGADO", "{\"referenceId\":\"" + reviewId
+                    + "\",\"reviewId\":\"" + reviewId + "\",\"discussionId\":\"" + discussionId + "\"}");
+
+            assertEquals(reviewId, view.referenceId());
+            assertNull(view.reviewId());
+            assertNull(view.discussionId());
+        }
+    }
 }

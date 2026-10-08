@@ -270,10 +270,12 @@ public class NotificationService {
     /**
      * O UUID de um ator com conta {@code DELETED} (C2) não chega ao destinatário: actorId e, em NEW_FOLLOWER,
      * referenceId (o próprio seguidor) saem nulos, o mesmo contrato do ator mascarado. A notificação continua.
+     * reviewId e discussionId identificam recursos, nunca pessoas; entram na mesma consulta só como salvaguarda contra
+     * metadata legado que carregue o UUID de um usuário excluído.
      */
     private List<NotificationView> withoutDeletedIdentities(List<NotificationView> views) {
         Set<UUID> candidates = views.stream()
-                .flatMap(view -> Stream.of(view.actorId(), view.referenceId()))
+                .flatMap(view -> Stream.of(view.actorId(), view.referenceId(), view.reviewId(), view.discussionId()))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Set<UUID> deleted = candidates.isEmpty() ? Set.of() : userRepository.findDeletedUserIds(candidates);
@@ -284,23 +286,65 @@ public class NotificationService {
                 .map(view -> new NotificationView(
                         view.id(),
                         view.type(),
-                        deleted.contains(view.actorId()) ? null : view.actorId(),
-                        deleted.contains(view.referenceId()) ? null : view.referenceId(),
+                        withoutDeleted(view.actorId(), deleted),
+                        withoutDeleted(view.referenceId(), deleted),
+                        withoutDeleted(view.reviewId(), deleted),
+                        withoutDeleted(view.discussionId(), deleted),
                         view.readAt(),
                         view.createdAt()))
                 .toList();
     }
 
+    /** O conjunto de excluídos é imutável ({@code Set.copyOf}), e {@code contains(null)} nele lança NPE. */
+    private static UUID withoutDeleted(UUID id, Set<UUID> deleted) {
+        return id != null && deleted.contains(id) ? null : id;
+    }
+
     private NotificationView toView(Notification n) {
         ParsedMetadata meta = parseMetadata(n.getMetadataJson());
+        NavigationContext context = navigationContext(n.getNotificationType(), meta);
         return new NotificationView(
                 n.getId(),
                 n.getNotificationType(),
                 meta.actorId(),
                 meta.referenceId(),
+                context.reviewId(),
+                context.discussionId(),
                 n.getReadAt(),
                 n.getCreatedAt()
         );
+    }
+
+    private record NavigationContext(UUID reviewId, UUID discussionId) {}
+
+    private static final NavigationContext NO_CONTEXT = new NavigationContext(null, null);
+
+    /**
+     * Avaliação e comentário de destino, a partir do que a criação de cada tipo grava no metadata (sem consulta extra):
+     * REVIEW_HELPFUL e NEW_DISCUSSION guardam a avaliação em referenceId e NEW_DISCUSSION o comentário raiz em
+     * discussionId; DISCUSSION_REPLY guarda a resposta em referenceId e a avaliação em reviewId. NEW_FOLLOWER (cujo
+     * referenceId é o seguidor) e tipos desconhecidos não têm contexto: nenhum UUID de pessoa chega a estes campos.
+     */
+    private static NavigationContext navigationContext(String notificationType, ParsedMetadata meta) {
+        NotificationType type = knownType(notificationType);
+        if (type == null) {
+            return NO_CONTEXT;
+        }
+        return switch (type) {
+            case REVIEW_HELPFUL -> new NavigationContext(meta.referenceId(), null);
+            case NEW_DISCUSSION -> new NavigationContext(meta.referenceId(), meta.discussionId());
+            case DISCUSSION_REPLY -> new NavigationContext(meta.reviewId(), meta.referenceId());
+            case NEW_FOLLOWER -> NO_CONTEXT;
+        };
+    }
+
+    private static NotificationType knownType(String notificationType) {
+        for (NotificationType candidate : NotificationType.values()) {
+            if (candidate.name().equals(notificationType)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private String buildMetadataJson(UUID actorId, UUID referenceId, Map<String, Object> extra) {
@@ -317,19 +361,48 @@ public class NotificationService {
         }
     }
 
-    private record ParsedMetadata(UUID actorId, UUID referenceId) {}
+    private record ParsedMetadata(UUID actorId, UUID referenceId, UUID reviewId, UUID discussionId) {}
 
+    private static final ParsedMetadata EMPTY_METADATA = new ParsedMetadata(null, null, null, null);
+
+    /**
+     * Metadata ausente, malformado ou legado nunca quebra a listagem. actorId e referenceId mantêm o comportamento de
+     * antes (um UUID inválido em qualquer dos dois anula ambos); reviewId e discussionId são lidos à parte, de modo que
+     * um valor inválido neles só anula o próprio campo, sem afetar os campos já existentes.
+     */
     private ParsedMetadata parseMetadata(String metadataJson) {
         if (metadataJson == null || metadataJson.isBlank()) {
-            return new ParsedMetadata(null, null);
+            return EMPTY_METADATA;
+        }
+        JsonNode node;
+        try {
+            node = objectMapper.readTree(metadataJson);
+        } catch (Exception e) {
+            return EMPTY_METADATA;
+        }
+        if (node == null) {
+            return EMPTY_METADATA;
+        }
+        UUID actorId;
+        UUID referenceId;
+        try {
+            actorId = node.hasNonNull("actorId") ? UUID.fromString(node.get("actorId").asText()) : null;
+            referenceId = node.hasNonNull("referenceId") ? UUID.fromString(node.get("referenceId").asText()) : null;
+        } catch (IllegalArgumentException e) {
+            actorId = null;
+            referenceId = null;
+        }
+        return new ParsedMetadata(actorId, referenceId, optionalUuid(node, "reviewId"), optionalUuid(node, "discussionId"));
+    }
+
+    private static UUID optionalUuid(JsonNode node, String field) {
+        if (!node.hasNonNull(field)) {
+            return null;
         }
         try {
-            JsonNode node = objectMapper.readTree(metadataJson);
-            UUID actorId = node.hasNonNull("actorId") ? UUID.fromString(node.get("actorId").asText()) : null;
-            UUID referenceId = node.hasNonNull("referenceId") ? UUID.fromString(node.get("referenceId").asText()) : null;
-            return new ParsedMetadata(actorId, referenceId);
-        } catch (Exception e) {
-            return new ParsedMetadata(null, null);
+            return UUID.fromString(node.get(field).asText());
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 }
