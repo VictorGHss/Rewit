@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         applicationId = "app.rewit.mobile"
-        minSdk = 23
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
