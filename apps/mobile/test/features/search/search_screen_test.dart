@@ -367,5 +367,40 @@ void main() {
       expect(find.text('PlaceDetailScreen Destino'), findsOneWidget);
       expect(navigatedPlaceId, equals('place-1'));
     });
+
+    testWidgets('11. toque em item PRODUCT sem onTargetTap navega para AppRouter.productDetail', (tester) async {
+      String? navigatedProductId;
+      repository.onSearch = (q, p, s) async => const SearchPage(
+            items: [productItem],
+            pageNumber: 0,
+            pageSize: 20,
+            totalElements: 1,
+            totalPages: 1,
+            isLast: true,
+          );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: SearchScreen(searchRepository: repository),
+          routes: {
+            AppRouter.productDetail: (context) {
+              navigatedProductId = ModalRoute.of(context)?.settings.arguments as String?;
+              return const Scaffold(body: Text('ProductDetailScreen Destino'));
+            },
+          },
+        ),
+      );
+
+      await tester.enterText(find.byType(TextFormField), 'croissant');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Croissant Tradicional'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ProductDetailScreen Destino'), findsOneWidget);
+      expect(navigatedProductId, equals('product-1'));
+    });
   });
 }

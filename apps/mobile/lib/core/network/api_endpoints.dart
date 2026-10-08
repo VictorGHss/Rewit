@@ -32,7 +32,15 @@ class ApiEndpoints {
     bool verifiedOnly = false,
   }) =>
       '/api/v1/targets/$id/reviews?page=$page&size=$size&sort=$sort&verifiedOnly=$verifiedOnly';
-
+  // Produtos e Descoberta no Catálogo (C5.3)
+  static const String products = '/api/v1/products';
+  static String productDetail(String id) => '/api/v1/products/$id';
+  static String productIdentifiers(String id) => '/api/v1/products/$id/identifiers';
+  static String productByIdentifier(String type, String value) =>
+      '/api/v1/products/identifiers/$type/$value';
+  static String placeProductsPath(String placeId) => '/api/v1/places/$placeId/products';
+  static String placeProducts(String placeId, {int page = 0, int size = 20}) =>
+      '/api/v1/places/$placeId/products?page=$page&size=$size';
   // Perfil Público e Grafo Social
   static String userProfile(String userId) => '/api/v1/users/$userId';
   static String userFollow(String userId) => '/api/v1/users/$userId/follow';

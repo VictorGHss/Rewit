@@ -7,8 +7,11 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
+import 'package:rewit_mobile/features/product/presentation/screens/product_detail_screen.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
@@ -29,6 +32,7 @@ class AppRouter {
   static const String home = '/home';
   static const String search = '/search';
   static const String placeDetail = '/place/detail';
+  static const String productDetail = '/product/detail';
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
   static const String followList = '/profile/follows';
@@ -45,6 +49,7 @@ class AppRouter {
   final SearchRepository? searchRepository;
   final UserProfileRepository? userProfileRepository;
   final PlaceRepository? placeRepository;
+  final ProductRepository? productRepository;
 
   const AppRouter({
     required this.authNotifier,
@@ -57,6 +62,7 @@ class AppRouter {
     this.searchRepository,
     this.userProfileRepository,
     this.placeRepository,
+    this.productRepository,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -168,6 +174,37 @@ class AppRouter {
           builder: (context) => PlaceDetailScreen(
             placeId: placeId,
             repository: placeRepository,
+            productRepository: productRepository,
+          ),
+          settings: settings,
+        );
+
+      case productDetail:
+        final args = settings.arguments;
+        String? productId;
+        PlaceDetail? contextPlace;
+        if (args is String) {
+          productId = args;
+        } else if (args is Map<String, dynamic>) {
+          productId = args['productId'] as String?;
+          contextPlace = args['contextPlace'] as PlaceDetail?;
+        }
+
+        if (productId == null || productId.isEmpty) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Identificador de produto ausente.')),
+            ),
+            settings: settings,
+          );
+        }
+
+        final validProductId = productId;
+        return MaterialPageRoute(
+          builder: (context) => ProductDetailScreen(
+            productId: validProductId,
+            contextPlace: contextPlace,
+            repository: productRepository,
           ),
           settings: settings,
         );

@@ -4,6 +4,8 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/widgets/review_card.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
+import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import '../../domain/entities/place_detail.dart';
 import '../../domain/repositories/place_repository.dart';
 import '../state/place_detail_notifier.dart';
@@ -17,12 +19,14 @@ class PlaceDetailScreen extends StatefulWidget {
   final String placeId;
   final PlaceRepository? repository;
   final PlaceDetailNotifier? notifier;
+  final ProductRepository? productRepository;
 
   const PlaceDetailScreen({
     super.key,
     required this.placeId,
     this.repository,
     this.notifier,
+    this.productRepository,
   });
 
   @override
@@ -33,6 +37,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
   late final PlaceDetailNotifier _notifier;
   bool _ownsNotifier = false;
   final ScrollController _scrollController = ScrollController();
+  List<ProductDetail>? _placeProducts;
 
   @override
   void initState() {
@@ -53,6 +58,23 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
 
     if (_notifier.state is PlaceDetailInitial) {
       _notifier.loadPlace();
+    }
+    if (widget.productRepository != null) {
+      _loadPlaceProducts();
+    }
+  }
+
+  Future<void> _loadPlaceProducts() async {
+    if (widget.productRepository == null) return;
+    try {
+      final page = await widget.productRepository!.getProductsInPlace(widget.placeId);
+      if (mounted) {
+        setState(() {
+          _placeProducts = page.products;
+        });
+      }
+    } catch (_) {
+      // Falhas no catálogo de produtos não quebram a visualização do local
     }
   }
 
@@ -193,7 +215,12 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
     final stats = state.stats;
 
     return RefreshIndicator(
-      onRefresh: () => _notifier.refresh(),
+      onRefresh: () async {
+        await _notifier.refresh();
+        if (widget.productRepository != null) {
+          await _loadPlaceProducts();
+        }
+      },
       child: ListView(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
@@ -387,6 +414,52 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
               ),
             ),
           ),
+
+          // 4.1 Produtos com presença registrada neste local (C5.3)
+          if (_placeProducts != null && _placeProducts!.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Text(
+              'Produtos neste local',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ..._placeProducts!.map(
+              (product) => Card(
+                elevation: 0,
+                margin: const EdgeInsets.only(bottom: 8.0),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+                ),
+                child: ListTile(
+                  leading: Icon(Icons.inventory_2_outlined, color: theme.colorScheme.primary),
+                  title: Text(
+                    product.displayName,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    product.category,
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface.withAlpha(160),
+                      fontSize: 12,
+                    ),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context).pushNamed(
+                      AppRouter.productDetail,
+                      arguments: {
+                        'productId': product.id,
+                        'contextPlace': place,
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
 
           const SizedBox(height: 24),
 

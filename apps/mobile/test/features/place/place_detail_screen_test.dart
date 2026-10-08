@@ -10,8 +10,52 @@ import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/state/place_detail_notifier.dart';
+import 'dart:typed_data';
+import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
+import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
+import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
+
+class _FakeProductRepoForPlace implements ProductRepository {
+  @override
+  Future<ProductsInPlacePage> getProductsInPlace(
+    String placeId, {
+    int page = 0,
+    int size = 20,
+  }) async {
+    return const ProductsInPlacePage(
+      products: [
+        ProductDetail(
+          id: 'prod-croissant',
+          name: 'Croissant de Amêndoas',
+          brand: 'Padaria Modelo',
+          category: 'PADARIA',
+          status: 'ACTIVE',
+        ),
+      ],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 1,
+      totalPages: 1,
+      isLast: true,
+    );
+  }
+
+  @override
+  Future<ProductDetail> getProductById(String id) async => throw UnimplementedError();
+  @override
+  Future<List<ProductIdentifier>> getProductIdentifiers(String id) async => throw UnimplementedError();
+  @override
+  Future<ProductDetail> getProductByIdentifier({required String type, required String value}) async => throw UnimplementedError();
+  @override
+  Future<TargetStats> getProductStats(String id) async => throw UnimplementedError();
+  @override
+  Future<TargetReviewsPage> getProductReviews(String productId, {int page = 0, int size = 10, String sort = 'newest', bool verifiedOnly = false}) async => throw UnimplementedError();
+  @override
+  Future<Uint8List> getProductImageBytes(String imageUrl) async => throw UnimplementedError();
+}
 
 class _FakePlaceRepository implements PlaceRepository {
   PlaceDetail? placeToReturn;
@@ -383,6 +427,47 @@ void main() {
 
       expect(find.text('UserProfileScreen Destino'), findsOneWidget);
       expect(receivedAuthorId, 'user-author-1');
+    });
+
+    testWidgets('exibe produtos disponíveis no local e navega para AppRouter.productDetail com contextPlace ao tocar', (tester) async {
+      final notifier = PlaceDetailNotifier(
+        repository: repository,
+        placeId: 'place-123',
+      );
+
+      final fakeProductRepo = _FakeProductRepoForPlace();
+      Object? receivedProductArgs;
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          child: PlaceDetailScreen(
+            placeId: 'place-123',
+            notifier: notifier,
+            productRepository: fakeProductRepo,
+          ),
+          routes: {
+            AppRouter.productDetail: (context) {
+              receivedProductArgs = ModalRoute.of(context)?.settings.arguments;
+              return const Scaffold(body: Text('ProductDetailScreen Destino'));
+            },
+          },
+        ),
+      );
+
+      await notifier.loadPlace();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Produtos neste local'), findsOneWidget);
+      expect(find.textContaining('Croissant de Amêndoas'), findsOneWidget);
+
+      await tester.tap(find.textContaining('Croissant de Amêndoas'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ProductDetailScreen Destino'), findsOneWidget);
+      expect(receivedProductArgs, isA<Map<String, dynamic>>());
+      final argsMap = receivedProductArgs as Map<String, dynamic>;
+      expect(argsMap['productId'], 'prod-croissant');
+      expect(argsMap['contextPlace'], isA<PlaceDetail>());
     });
   });
 }

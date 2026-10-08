@@ -101,6 +101,11 @@ class _SearchScreenState extends State<SearchScreen>
         AppRouter.placeDetail,
         arguments: item.id,
       );
+    } else if (item.isProduct) {
+      Navigator.of(context).pushNamed(
+        AppRouter.productDetail,
+        arguments: item.id,
+      );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
