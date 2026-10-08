@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
@@ -13,13 +14,18 @@ class FakeFeedRepository implements FeedRepository {
   FeedPage? page1Response;
   bool shouldThrowOnInitial = false;
   bool shouldThrowOnLoadMore = false;
+  bool shouldThrowOnHelpful = false;
+  Completer<HelpfulResult>? toggleHelpfulCompleter;
+  Completer<FeedPage>? delayedPage1Completer;
 
-  FeedReview _makeReview(String id) {
+  FeedReview _makeReview(String id, {bool isHelpful = false, int helpfulCount = 0}) {
     return FeedReview(
       id: id,
       author: const FeedAuthor(displayName: 'Test User', handle: 'tester'),
       visibility: 'PUBLIC',
       status: 'ACTIVE',
+      isHelpfulByMe: isHelpful,
+      helpfulCount: helpfulCount,
       createdAt: DateTime.now(),
     );
   }
@@ -36,6 +42,9 @@ class FakeFeedRepository implements FeedRepository {
         status: 500,
         detail: 'Falha temporária ao carregar página',
       ));
+    }
+    if (page > 0 && delayedPage1Completer != null) {
+      return delayedPage1Completer!.future;
     }
 
     if (page == 0) {
@@ -66,6 +75,12 @@ class FakeFeedRepository implements FeedRepository {
 
   @override
   Future<HelpfulResult> toggleHelpful(String reviewId, {required bool currentlyHelpful}) async {
+    if (shouldThrowOnHelpful) {
+      throw const NetworkException('Falha de rede ao votar útil');
+    }
+    if (toggleHelpfulCompleter != null) {
+      return toggleHelpfulCompleter!.future;
+    }
     return HelpfulResult(helpful: !currentlyHelpful, helpfulCount: currentlyHelpful ? 0 : 1);
   }
 
@@ -174,6 +189,148 @@ void main() {
       await notifier.refresh();
       expect((notifier.state as FeedSuccess).reviews.length, 2);
       expect((notifier.state as FeedSuccess).currentPage, 0);
+    });
+
+    test('loadMore deduplica avaliações pelo id caso a página seguinte contenha itens repetidos', () async {
+      await notifier.loadInitial();
+      // Página 1 contém 'rev-2' (já presente na p0) e 'rev-3' (novo)
+      repository.page1Response = FeedPage(
+        items: [repository._makeReview('rev-2'), repository._makeReview('rev-3')],
+        page: 1,
+        size: 10,
+        windowSize: 20,
+        totalPages: 2,
+      );
+
+      await notifier.loadMore();
+
+      final success = notifier.state as FeedSuccess;
+      expect(success.reviews.length, 3); // rev-1, rev-2, rev-3 (sem duplicata)
+      expect(success.reviews.map((r) => r.id).toList(), ['rev-1', 'rev-2', 'rev-3']);
+    });
+
+    test('sequence guard: refresh durante loadMore descarta resposta lenta da paginação', () async {
+      await notifier.loadInitial();
+      repository.delayedPage1Completer = Completer<FeedPage>();
+
+      // Inicia loadMore assíncrono
+      final loadMoreFuture = notifier.loadMore();
+      expect((notifier.state as FeedSuccess).isLoadingMore, isTrue);
+
+      // Usuário dispara refresh antes de loadMore completar
+      repository.page0Response = FeedPage(
+        items: [repository._makeReview('rev-fresh-1')],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 1,
+      );
+      await notifier.refresh();
+      expect((notifier.state as FeedSuccess).reviews.map((r) => r.id).toList(), ['rev-fresh-1']);
+
+      // Agora a resposta lenta do loadMore é resolvida
+      repository.delayedPage1Completer!.complete(FeedPage(
+        items: [repository._makeReview('rev-obsolete')],
+        page: 1,
+        size: 10,
+        windowSize: 20,
+        totalPages: 2,
+      ));
+      await loadMoreFuture;
+
+      // Estado deve permanecer apenas com o resultado do refresh
+      final finalSuccess = notifier.state as FeedSuccess;
+      expect(finalSuccess.reviews.map((r) => r.id).toList(), ['rev-fresh-1']);
+    });
+
+    test('toggleHelpful atualiza otimisticamente e reconcilia com resposta do repositório', () async {
+      await notifier.loadInitial();
+      final initialReview = (notifier.state as FeedSuccess).reviews.first;
+      expect(initialReview.id, 'rev-1');
+      expect(initialReview.isHelpfulByMe, isFalse);
+      expect(initialReview.helpfulCount, 0);
+
+      await notifier.toggleHelpful('rev-1');
+
+      final success = notifier.state as FeedSuccess;
+      final updated = success.reviews.firstWhere((r) => r.id == 'rev-1');
+      expect(updated.isHelpfulByMe, isTrue);
+      expect(updated.helpfulCount, 1);
+      expect(notifier.isTogglingHelpful('rev-1'), isFalse);
+    });
+
+    test('toggleHelpful reverte atualização otimista e lança erro quando repositório falha', () async {
+      await notifier.loadInitial();
+      repository.shouldThrowOnHelpful = true;
+
+      await expectLater(
+        notifier.toggleHelpful('rev-1'),
+        throwsA(isA<NetworkException>()),
+      );
+
+      final success = notifier.state as FeedSuccess;
+      final review = success.reviews.firstWhere((r) => r.id == 'rev-1');
+      expect(review.isHelpfulByMe, isFalse);
+      expect(review.helpfulCount, 0);
+      expect(notifier.isTogglingHelpful('rev-1'), isFalse);
+    });
+
+    test('toggleHelpful impede chamadas concorrentes para a mesma avaliação enquanto pendente', () async {
+      await notifier.loadInitial();
+      repository.toggleHelpfulCompleter = Completer<HelpfulResult>();
+
+      // Dispara primeira chamada que fica pendente
+      final future1 = notifier.toggleHelpful('rev-1');
+      expect(notifier.isTogglingHelpful('rev-1'), isTrue);
+
+      // Segunda chamada simultânea para o mesmo ID deve ser ignorada
+      final future2 = notifier.toggleHelpful('rev-1');
+
+      // Completa requisição
+      repository.toggleHelpfulCompleter!.complete(
+        const HelpfulResult(helpful: true, helpfulCount: 1),
+      );
+      await future1;
+      await future2;
+
+      expect(notifier.isTogglingHelpful('rev-1'), isFalse);
+      final success = notifier.state as FeedSuccess;
+      expect(success.reviews.first.isHelpfulByMe, isTrue);
+    });
+
+    test('toggleHelpful garante que contador não fique negativo (clamp >= 0)', () async {
+      repository.page0Response = FeedPage(
+        items: [repository._makeReview('rev-zero', isHelpful: true, helpfulCount: 0)],
+        page: 0,
+        size: 10,
+        windowSize: 1,
+        totalPages: 1,
+      );
+      await notifier.loadInitial();
+
+      await notifier.toggleHelpful('rev-zero');
+
+      final success = notifier.state as FeedSuccess;
+      final review = success.reviews.first;
+      expect(review.isHelpfulByMe, isFalse);
+      expect(review.helpfulCount, 0); // clamped to 0, not -1
+    });
+
+    test('updateReview atualiza dados da avaliação in-place sem recarregar o feed', () async {
+      await notifier.loadInitial();
+      final initialReview = (notifier.state as FeedSuccess).reviews.first;
+
+      final updatedReview = initialReview.copyWith(
+        experienceText: 'Texto atualizado na tela de detalhe',
+        helpfulCount: 42,
+      );
+
+      notifier.updateReview(updatedReview);
+
+      final success = notifier.state as FeedSuccess;
+      final review = success.reviews.firstWhere((r) => r.id == 'rev-1');
+      expect(review.experienceText, 'Texto atualizado na tela de detalhe');
+      expect(review.helpfulCount, 42);
     });
   });
 }

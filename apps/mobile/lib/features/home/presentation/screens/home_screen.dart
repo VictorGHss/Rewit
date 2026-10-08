@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
@@ -185,17 +186,34 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: FeedView(
               feedNotifier: widget.feedNotifier!,
-              onReviewTap: (review) {
-                Navigator.of(context).pushNamed(
+              mediaRepository: widget.mediaRepository,
+              onReviewTap: (review) async {
+                final result = await Navigator.of(context).pushNamed(
                   AppRouter.reviewDetail,
                   arguments: review,
                 );
+                if (result is FeedReview) {
+                  widget.feedNotifier?.updateReview(result);
+                }
               },
               onAuthorTap: (authorId) {
                 Navigator.of(context).pushNamed(
                   AppRouter.profile,
                   arguments: authorId,
                 );
+              },
+              onTargetTap: (targetId, targetType) {
+                if (targetType == 'PLACE') {
+                  Navigator.of(context).pushNamed(
+                    AppRouter.placeDetail,
+                    arguments: targetId,
+                  );
+                } else if (targetType == 'PRODUCT') {
+                  Navigator.of(context).pushNamed(
+                    AppRouter.productDetail,
+                    arguments: targetId,
+                  );
+                }
               },
             ),
           ),

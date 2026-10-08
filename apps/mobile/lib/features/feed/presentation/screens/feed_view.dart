@@ -3,28 +3,36 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_state.dart';
 import 'package:rewit_mobile/features/feed/presentation/widgets/review_card.dart';
+import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 
 /// Visão principal da timeline do Feed V2 com suporte a paginação infinita e pull-to-refresh.
 class FeedView extends StatefulWidget {
   final FeedNotifier feedNotifier;
+  final ReviewMediaRepository? mediaRepository;
   final void Function(FeedReview review)? onReviewTap;
   final void Function(String authorId)? onAuthorTap;
+  final void Function(String targetId, String targetType)? onTargetTap;
 
   const FeedView({
     super.key,
     required this.feedNotifier,
+    this.mediaRepository,
     this.onReviewTap,
     this.onAuthorTap,
+    this.onTargetTap,
   });
 
   @override
   State<FeedView> createState() => _FeedViewState();
 }
 
-class _FeedViewState extends State<FeedView> {
+class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin {
   final ScrollController _scrollController = ScrollController();
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -55,8 +63,24 @@ class _FeedViewState extends State<FeedView> {
     }
   }
 
+  Future<void> _handleToggleHelpful(String reviewId) async {
+    try {
+      await widget.feedNotifier.toggleHelpful(reviewId);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Falha ao atualizar voto útil. Tente novamente.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return ListenableBuilder(
       listenable: widget.feedNotifier,
       builder: (context, _) {
@@ -133,6 +157,7 @@ class _FeedViewState extends State<FeedView> {
           return RefreshIndicator(
             onRefresh: () => widget.feedNotifier.refresh(),
             child: ListView.builder(
+              key: const PageStorageKey('feed_list_view'),
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -143,8 +168,12 @@ class _FeedViewState extends State<FeedView> {
                   final review = reviews[index];
                   return ReviewCard(
                     review: review,
+                    mediaRepository: widget.mediaRepository,
                     onTap: () => widget.onReviewTap?.call(review),
                     onAuthorTap: widget.onAuthorTap,
+                    onTargetTap: widget.onTargetTap,
+                    isHelpfulLoading: widget.feedNotifier.isTogglingHelpful(review.id),
+                    onHelpfulTap: () => _handleToggleHelpful(review.id),
                   );
                 }
 

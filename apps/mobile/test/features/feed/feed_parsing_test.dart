@@ -132,5 +132,85 @@ void main() {
       expect(entity.hasMore, isFalse);
       expect(entity.items, isEmpty);
     });
+
+    test('deve deserializar targetType (PLACE, PRODUCT, SERVICE) e mapear para FeedTarget com flags', () {
+      final json = {
+        'items': [
+          {
+            'id': 'rev-types-1',
+            'author': {
+              'displayName': 'Avaliador',
+              'isAnonymous': false,
+            },
+            'experienceText': 'Avaliando múltiplos tipos de alvos.',
+            'status': 'ACTIVE',
+            'visibility': 'PUBLIC',
+            'isAnonymous': false,
+            'isVerifiedOnSite': false,
+            'helpfulCount': 0,
+            'isHelpfulByMe': false,
+            'targets': [
+              {
+                'id': 't-place',
+                'targetId': 'place-uuid-1',
+                'targetType': 'PLACE',
+                'rating': 4.5,
+              },
+              {
+                'id': 't-product',
+                'targetId': 'prod-uuid-2',
+                'type': 'PRODUCT', // chave alternativa comum em DTOs
+                'rating': 4.0,
+              },
+              {
+                'id': 't-service',
+                'targetId': 'serv-uuid-3',
+                'targetType': 'SERVICE',
+                'rating': 5.0,
+              },
+              {
+                'id': 't-unknown',
+                'targetId': 'unk-uuid-4',
+                'rating': 3.5,
+              },
+            ],
+            'createdAt': '2026-10-06T10:00:00Z',
+          }
+        ],
+        'page': 0,
+        'size': 10,
+        'windowSize': 1,
+        'totalPages': 1,
+      };
+
+      final entity = FeedPageDto.fromJson(json).toEntity();
+      final targets = entity.items.first.targets;
+
+      expect(targets.length, 4);
+
+      // PLACE
+      expect(targets[0].targetType, 'PLACE');
+      expect(targets[0].isPlace, isTrue);
+      expect(targets[0].isProduct, isFalse);
+      expect(targets[0].isService, isFalse);
+
+      // PRODUCT
+      expect(targets[1].targetType, 'PRODUCT');
+      expect(targets[1].isPlace, isFalse);
+      expect(targets[1].isProduct, isTrue);
+      expect(targets[1].isService, isFalse);
+
+      // SERVICE
+      expect(targets[2].targetType, 'SERVICE');
+      expect(targets[2].isPlace, isFalse);
+      expect(targets[2].isProduct, isFalse);
+      expect(targets[2].isService, isTrue);
+
+      // UNKNOWN
+      expect(targets[3].targetType, isNull);
+      expect(targets[3].isPlace, isFalse);
+      expect(targets[3].isProduct, isFalse);
+      expect(targets[3].isService, isFalse);
+    });
   });
 }

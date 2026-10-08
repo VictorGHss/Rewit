@@ -1,3 +1,5 @@
+import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+
 /// Entidade de autor de avaliação no Feed V2.
 class FeedAuthor {
   final String? id;
@@ -26,6 +28,7 @@ class FeedTarget {
   final double rating;
   final String? specificComment;
   final DateTime? createdAt;
+  final String? targetType;
 
   const FeedTarget({
     required this.id,
@@ -34,7 +37,12 @@ class FeedTarget {
     required this.rating,
     this.specificComment,
     this.createdAt,
+    this.targetType,
   });
+
+  bool get isPlace => targetType?.toUpperCase() == 'PLACE';
+  bool get isProduct => targetType?.toUpperCase() == 'PRODUCT';
+  bool get isService => targetType?.toUpperCase() == 'SERVICE';
 }
 
 /// Entidade representacional de uma avaliação ranqueada e diversificada no Feed V2.
@@ -52,6 +60,7 @@ class FeedReview {
   final List<FeedTarget> targets;
   final int helpfulCount;
   final bool isHelpfulByMe;
+  final List<ReviewMediaItem>? mediaItems;
 
   const FeedReview({
     required this.id,
@@ -67,6 +76,7 @@ class FeedReview {
     this.targets = const [],
     this.helpfulCount = 0,
     this.isHelpfulByMe = false,
+    this.mediaItems,
   });
 
   FeedReview copyWith({
@@ -82,6 +92,7 @@ class FeedReview {
     List<FeedTarget>? targets,
     int? helpfulCount,
     bool? isHelpfulByMe,
+    List<ReviewMediaItem>? mediaItems,
   }) {
     return FeedReview(
       id: id,
@@ -97,6 +108,7 @@ class FeedReview {
       targets: targets ?? this.targets,
       helpfulCount: helpfulCount ?? this.helpfulCount,
       isHelpfulByMe: isHelpfulByMe ?? this.isHelpfulByMe,
+      mediaItems: mediaItems ?? this.mediaItems,
     );
   }
 
