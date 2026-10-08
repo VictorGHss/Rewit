@@ -18,6 +18,10 @@ class ReviewCreateScreen extends StatefulWidget {
   final SearchRepository? searchRepository;
   final ReviewCreateNotifier? notifier;
   final ValueChanged<FeedReview>? onReviewCreated;
+  final String? initialTargetId;
+  final String? initialTargetName;
+  final String? initialTargetType;
+  final String? initialCategory;
 
   const ReviewCreateScreen({
     super.key,
@@ -27,6 +31,10 @@ class ReviewCreateScreen extends StatefulWidget {
     this.searchRepository,
     this.notifier,
     this.onReviewCreated,
+    this.initialTargetId,
+    this.initialTargetName,
+    this.initialTargetType,
+    this.initialCategory,
   });
 
   @override
@@ -53,8 +61,16 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
         repository: widget.repository ?? _FallbackReviewCreationRepository(),
         mediaRepository: widget.mediaRepository,
         mediaPickerService: widget.mediaPickerService,
+        initialTargetId: widget.initialTargetId,
+        initialTargetName: widget.initialTargetName,
+        initialTargetType: widget.initialTargetType,
+        initialCategory: widget.initialCategory,
       );
       _ownsNotifier = true;
+    }
+
+    if (_notifier.contextPlaceId != null && _notifier.contextPlaceId!.isNotEmpty) {
+      _contextPlaceIdController.text = _notifier.contextPlaceId!;
     }
 
     _notifier.addListener(_handleStateChange);

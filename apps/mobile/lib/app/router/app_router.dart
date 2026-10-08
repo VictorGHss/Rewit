@@ -7,6 +7,8 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
@@ -26,6 +28,7 @@ class AppRouter {
   static const String login = '/login';
   static const String home = '/home';
   static const String search = '/search';
+  static const String placeDetail = '/place/detail';
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
   static const String followList = '/profile/follows';
@@ -41,6 +44,7 @@ class AppRouter {
   final ReviewCreationRepository? reviewCreationRepository;
   final SearchRepository? searchRepository;
   final UserProfileRepository? userProfileRepository;
+  final PlaceRepository? placeRepository;
 
   const AppRouter({
     required this.authNotifier,
@@ -52,6 +56,7 @@ class AppRouter {
     this.reviewCreationRepository,
     this.searchRepository,
     this.userProfileRepository,
+    this.placeRepository,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -149,13 +154,47 @@ class AppRouter {
           settings: settings,
         );
 
+      case placeDetail:
+        final placeId = settings.arguments as String?;
+        if (placeId == null || placeId.isEmpty) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Identificador de local ausente.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => PlaceDetailScreen(
+            placeId: placeId,
+            repository: placeRepository,
+          ),
+          settings: settings,
+        );
+
       case reviewCreate:
+        final args = settings.arguments;
+        String? initialTargetId;
+        String? initialTargetName;
+        String? initialTargetType;
+        String? initialCategory;
+        if (args is Map<String, dynamic>) {
+          initialTargetId = args['targetId'] as String?;
+          initialTargetName = args['targetName'] as String?;
+          initialTargetType = args['targetType'] as String?;
+          initialCategory = args['category'] as String?;
+        }
+
         return MaterialPageRoute(
           builder: (context) => ReviewCreateScreen(
             repository: reviewCreationRepository,
             mediaRepository: reviewMediaRepository,
             mediaPickerService: mediaPickerService,
             searchRepository: searchRepository,
+            initialTargetId: initialTargetId,
+            initialTargetName: initialTargetName,
+            initialTargetType: initialTargetType,
+            initialCategory: initialCategory,
             onReviewCreated: (createdReview) {
               feedNotifier?.refresh();
               Navigator.of(context).pushReplacementNamed(

@@ -20,8 +20,18 @@ class ApiEndpoints {
   static String reviewMediaItem(String reviewId, String mediaId) =>
       '/api/v1/reviews/$reviewId/media/$mediaId';
   static String reviewHelpful(String id) => '/api/v1/reviews/$id/helpful';
-  static const String users = '/api/v1/users';
   static const String places = '/api/v1/places';
+  static String placeDetail(String id) => '/api/v1/places/$id';
+  static String targetStats(String id) => '/api/v1/targets/$id/stats';
+  static String targetReviewsPath(String id) => '/api/v1/targets/$id/reviews';
+  static String targetReviews(
+    String id, {
+    int page = 0,
+    int size = 10,
+    String sort = 'newest',
+    bool verifiedOnly = false,
+  }) =>
+      '/api/v1/targets/$id/reviews?page=$page&size=$size&sort=$sort&verifiedOnly=$verifiedOnly';
 
   // Perfil Público e Grafo Social
   static String userProfile(String userId) => '/api/v1/users/$userId';

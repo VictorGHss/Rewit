@@ -68,6 +68,10 @@ void main() {
     SearchRepository? searchRepository,
     ReviewCreateNotifier? notifier,
     ValueChanged<FeedReview>? onReviewCreated,
+    String? initialTargetId,
+    String? initialTargetName,
+    String? initialTargetType,
+    String? initialCategory,
   }) {
     return MaterialApp(
       theme: AppTheme.lightTheme,
@@ -76,6 +80,10 @@ void main() {
         searchRepository: searchRepository,
         notifier: notifier,
         onReviewCreated: onReviewCreated,
+        initialTargetId: initialTargetId,
+        initialTargetName: initialTargetName,
+        initialTargetType: initialTargetType,
+        initialCategory: initialCategory,
       ),
     );
   }
@@ -361,6 +369,27 @@ void main() {
       // Card foi removido e campo de busca voltou
       expect(find.text('O que você quer avaliar? *'), findsOneWidget);
       expect(find.text('Trocar'), findsNothing);
+    });
+
+    testWidgets('inicializa com alvo pré-selecionado exibindo card do alvo e contextPlaceId preenchido', (tester) async {
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        initialTargetId: 'place-pre-selected-uuid',
+        initialTargetName: 'Café do Bosque',
+        initialTargetType: 'PLACE',
+        initialCategory: 'Cafeterias',
+      ));
+      await tester.pumpAndSettle();
+
+      // Card já deve estar visível com o nome do local pré-selecionado
+      expect(find.text('Café do Bosque'), findsOneWidget);
+      expect(find.text('Trocar'), findsOneWidget);
+
+      // Context place ID deve estar preenchido
+      expect(find.text('place-pre-selected-uuid'), findsOneWidget);
+
+      // Não deve exibir o input de busca enquanto estiver selecionado
+      expect(find.text('O que você quer avaliar? *'), findsNothing);
     });
   });
 }

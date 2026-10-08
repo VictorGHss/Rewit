@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/router/app_router.dart';
 import '../../domain/entities/search_entities.dart';
 import '../../domain/entities/search_filter.dart';
 import '../../domain/repositories/search_repository.dart';
@@ -95,6 +96,11 @@ class _SearchScreenState extends State<SearchScreen>
   void _handleItemTap(SearchResultItem item) {
     if (widget.onTargetTap != null) {
       widget.onTargetTap!(item);
+    } else if (item.isPlace) {
+      Navigator.of(context).pushNamed(
+        AppRouter.placeDetail,
+        arguments: item.id,
+      );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

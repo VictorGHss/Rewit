@@ -44,7 +44,24 @@ class ReviewCreateNotifier extends ChangeNotifier {
     required this.repository,
     this.mediaRepository,
     this.mediaPickerService,
-  });
+    String? initialTargetId,
+    String? initialTargetName,
+    String? initialTargetType,
+    String? initialCategory,
+  }) {
+    if (initialTargetId != null && initialTargetId.isNotEmpty) {
+      _targets[0] = CreateReviewTargetInput(
+        rateableTargetId: initialTargetId,
+        rating: 5.0,
+        targetName: initialTargetName,
+        targetType: initialTargetType,
+        category: initialCategory,
+      );
+      if (initialTargetType == 'PLACE' || initialTargetType == null) {
+        _contextPlaceId = initialTargetId;
+      }
+    }
+  }
 
   List<CreateReviewTargetInput> get targets => List.unmodifiable(_targets);
   List<SelectedMediaItem> get selectedMedia => List.unmodifiable(_selectedMedia);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
@@ -330,6 +331,41 @@ void main() {
 
       expect(tappedItem, isNotNull);
       expect(tappedItem!.id, equals('place-1'));
+    });
+
+    testWidgets('10. toque em item PLACE sem onTargetTap navega para AppRouter.placeDetail', (tester) async {
+      String? navigatedPlaceId;
+      repository.onSearch = (q, p, s) async => const SearchPage(
+            items: [placeItem],
+            pageNumber: 0,
+            pageSize: 20,
+            totalElements: 1,
+            totalPages: 1,
+            isLast: true,
+          );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: SearchScreen(searchRepository: repository),
+          routes: {
+            AppRouter.placeDetail: (context) {
+              navigatedPlaceId = ModalRoute.of(context)?.settings.arguments as String?;
+              return const Scaffold(body: Text('PlaceDetailScreen Destino'));
+            },
+          },
+        ),
+      );
+
+      await tester.enterText(find.byType(TextFormField), 'padaria');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Padaria Bella Vista'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('PlaceDetailScreen Destino'), findsOneWidget);
+      expect(navigatedPlaceId, equals('place-1'));
     });
   });
 }
