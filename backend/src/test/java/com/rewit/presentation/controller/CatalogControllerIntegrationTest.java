@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -52,6 +53,9 @@ class CatalogControllerIntegrationTest {
 
     @Autowired
     private RateableTargetRepository rateableTargetRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -1012,30 +1016,45 @@ class CatalogControllerIntegrationTest {
         TestUser user = registerUser("nearby_valid");
         String suffix = UUID.randomUUID().toString().substring(0, 8);
 
-        // Centro: Porto Alegre (-30.0346, -51.2177)
-        double centerLat = -30.0346;
-        double centerLon = -51.2177;
+        // Região artificial no Atlântico Sul, sem places de nenhuma outra suíte (as demais usam Curitiba, Ponta
+        // Grossa, São Paulo e Porto Alegre). Os fixtures deste teste são os únicos candidatos do raio, então o limite de
+        // 100 não depende do que outras execuções deixaram no banco compartilhado
+        double centerLat = NEARBY_CENTER_LAT;
+        double centerLon = NEARBY_CENTER_LON;
 
-        // Local A: ~200m
-        Place placeA = placeRepository.save(new Place(
-                null, "Café POA A " + suffix, "cafe-poa-a-" + suffix, "CAFE", "Perto",
-                "Rua dos Andradas, 100", "Porto Alegre", "RS", "BR", -30.0335, -51.2185, 50, "USER", false, null, "ACTIVE"
-        ));
+        // Resíduos de qualquer execução anterior deste teste (inclusive interrompida antes do finally)
+        deleteNearbyFixtures();
+        assertEquals(0, countPlacesWithin(centerLat, centerLon, 5000),
+                "Pré-condição: a região isolada do teste não pode ter outros places");
 
-        // Local B: ~1500m
-        Place placeB = placeRepository.save(new Place(
-                null, "Restaurante POA B " + suffix, "restaurante-poa-b-" + suffix, "RESTAURANTE", "Médio",
-                "Av Ipiranga, 500", "Porto Alegre", "RS", "BR", -30.0450, -51.2050, 50, "USER", false, null, "ACTIVE"
-        ));
+        try {
+            // Local A: 200 m ao norte do centro
+            Place placeA = placeRepository.save(new Place(
+                    null, "Café Isolado A " + suffix, NEARBY_SLUG_PREFIX + "a-" + suffix, "CAFE", "Perto",
+                    "Rua Teste, 100", "Cidade Teste", "RS", "BR", -41.4982, -17.5000, 50, "USER", false, null, "ACTIVE"
+            ));
 
-        // Local C: ~3000m
-        Place placeC = placeRepository.save(new Place(
-                null, "Bar POA C " + suffix, "bar-poa-c-" + suffix, "BAR", "Mais distante",
-                "Av Assis Brasil, 1000", "Porto Alegre", "RS", "BR", -30.0100, -51.1900, 50, "USER", false, null, "ACTIVE"
-        ));
+            // Local B: 1499 m ao norte do centro
+            Place placeB = placeRepository.save(new Place(
+                    null, "Restaurante Isolado B " + suffix, NEARBY_SLUG_PREFIX + "b-" + suffix, "RESTAURANTE", "Médio",
+                    "Rua Teste, 500", "Cidade Teste", "RS", "BR", -41.4865, -17.5000, 50, "USER", false, null, "ACTIVE"
+            ));
 
-        // Consulta raio 2000m com limit 100 (máximo da API) para garantir que Place A e Place B
-        // apareçam mesmo quando outras runs acumularam Places no banco compartilhado sem limpeza
+            // Local C: 2999 m ao norte do centro (fora do raio de 2000 m, dentro do de 5000 m)
+            Place placeC = placeRepository.save(new Place(
+                    null, "Bar Isolado C " + suffix, NEARBY_SLUG_PREFIX + "c-" + suffix, "BAR", "Mais distante",
+                    "Rua Teste, 1000", "Cidade Teste", "RS", "BR", -41.4730, -17.5000, 50, "USER", false, null, "ACTIVE"
+            ));
+
+            assertNearbyContract(user, centerLat, centerLon, placeA, placeB, placeC);
+        } finally {
+            deleteNearbyFixtures();
+        }
+    }
+
+    private void assertNearbyContract(TestUser user, double centerLat, double centerLon,
+                                      Place placeA, Place placeB, Place placeC) throws Exception {
+        // Raio de 2000 m com limit 100 (máximo da API)
         MvcResult result = mockMvc.perform(get("/api/v1/places/nearby")
                         .header("Authorization", "Bearer " + user.accessToken())
                         .param("latitude", String.valueOf(centerLat))
@@ -1097,5 +1116,35 @@ class CatalogControllerIntegrationTest {
         assertEquals(1, limit1Node.get("items").size(), "A lista de itens com limit=1 deve conter exatamente 1 elemento");
         assertTrue(limit1Node.get("items").get(0).hasNonNull("distanceMeters"), "O item retornado deve conter distanceMeters");
         assertTrue(limit1Node.get("items").get(0).get("distanceMeters").asDouble() <= 5000.0, "A distância deve respeitar o raio de 5000m");
+        assertEquals(placeA.getId().toString(), limit1Node.get("items").get(0).get("id").asText(),
+                "Com limit=1, o item é o mais próximo do conjunto controlado");
+    }
+
+    private static final double NEARBY_CENTER_LAT = -41.5000;
+    private static final double NEARBY_CENTER_LON = -17.5000;
+    private static final String NEARBY_SLUG_PREFIX = "nearby-isolado-";
+
+    /**
+     * Remove somente fixtures inequívocos do teste de proximidade: o prefixo de slug próprio E a localização na região
+     * isolada (até 10 km do centro). Também remove os resíduos da versão anterior do teste, que gravava em Porto Alegre
+     * com os slugs {@code cafe-poa-a-}, {@code restaurante-poa-b-} e {@code bar-poa-c-} seguidos de 8 hexadecimais. O
+     * place é a especialização de {@code rateable_targets} (FK com ON DELETE CASCADE), então a remoção parte dele.
+     */
+    private void deleteNearbyFixtures() {
+        jdbcTemplate.update("""
+                DELETE FROM rateable_targets WHERE id IN (
+                    SELECT id FROM places
+                    WHERE (slug LIKE ? AND ST_DWithin(coordinates, ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography, 10000))
+                       OR (slug ~ '^(cafe-poa-a|restaurante-poa-b|bar-poa-c)-[0-9a-f]{8}$'
+                           AND ST_DWithin(coordinates, ST_SetSRID(ST_MakePoint(-51.2177, -30.0346), 4326)::geography, 10000)))
+                """, NEARBY_SLUG_PREFIX + "%", NEARBY_CENTER_LON, NEARBY_CENTER_LAT);
+    }
+
+    private long countPlacesWithin(double latitude, double longitude, double meters) {
+        Long count = jdbcTemplate.queryForObject("""
+                SELECT count(*) FROM places
+                WHERE ST_DWithin(coordinates, ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography, ?)
+                """, Long.class, longitude, latitude, meters);
+        return count == null ? 0 : count;
     }
 }
