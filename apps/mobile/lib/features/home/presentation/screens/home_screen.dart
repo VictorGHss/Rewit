@@ -11,7 +11,7 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
-import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
+import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
 
 /// Tela principal autenticada do aplicativo Rewit.
 class HomeScreen extends StatefulWidget {
@@ -250,7 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final pages = [
           _buildFeedView(context, state),
-          const SearchPlaceholderScreen(),
+          SearchScreen(searchRepository: widget.searchRepository),
           ReviewCreateScreen(
             repository: widget.reviewCreationRepository,
             mediaRepository: widget.mediaRepository,

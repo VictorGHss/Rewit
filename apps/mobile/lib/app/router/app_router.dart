@@ -17,7 +17,7 @@ import 'package:rewit_mobile/features/review_creation/presentation/screens/revie
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
-import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
+import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 
 /// Definição de rotas nomeadas e gerador centralizado de navegação.
@@ -143,7 +143,9 @@ class AppRouter {
 
       case search:
         return MaterialPageRoute(
-          builder: (context) => const SearchPlaceholderScreen(),
+          builder: (context) => SearchScreen(
+            searchRepository: searchRepository,
+          ),
           settings: settings,
         );
 
