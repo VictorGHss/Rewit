@@ -62,6 +62,10 @@ class FeedReview {
   final bool isHelpfulByMe;
   final List<ReviewMediaItem>? mediaItems;
 
+  /// Posse contextual ao usuário autenticado, calculada pelo backend sem expor o id do autor.
+  /// Nulo quando o payload de origem não informa (ex.: feed e listagens).
+  final bool? isMine;
+
   const FeedReview({
     required this.id,
     required this.author,
@@ -77,6 +81,7 @@ class FeedReview {
     this.helpfulCount = 0,
     this.isHelpfulByMe = false,
     this.mediaItems,
+    this.isMine,
   });
 
   FeedReview copyWith({
@@ -93,6 +98,7 @@ class FeedReview {
     int? helpfulCount,
     bool? isHelpfulByMe,
     List<ReviewMediaItem>? mediaItems,
+    bool? isMine,
   }) {
     return FeedReview(
       id: id,
@@ -109,6 +115,7 @@ class FeedReview {
       helpfulCount: helpfulCount ?? this.helpfulCount,
       isHelpfulByMe: isHelpfulByMe ?? this.isHelpfulByMe,
       mediaItems: mediaItems ?? this.mediaItems,
+      isMine: isMine ?? this.isMine,
     );
   }
 

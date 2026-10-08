@@ -178,7 +178,8 @@ public class ReviewController {
                 view.updatedAt(),
                 targetResponses,
                 view.helpfulCount(),
-                view.isHelpfulByMe()
+                view.isHelpfulByMe(),
+                view.isMine()
         );
     }
 

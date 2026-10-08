@@ -127,6 +127,7 @@ class FeedReviewDto {
   final List<FeedTargetDto> targets;
   final int helpfulCount;
   final bool isHelpfulByMe;
+  final bool? isMine;
 
   const FeedReviewDto({
     required this.id,
@@ -142,6 +143,7 @@ class FeedReviewDto {
     this.targets = const [],
     this.helpfulCount = 0,
     this.isHelpfulByMe = false,
+    this.isMine,
   });
 
   factory FeedReviewDto.fromJson(Map<String, dynamic> json) {
@@ -189,6 +191,7 @@ class FeedReviewDto {
       targets: parsedTargets,
       helpfulCount: (json['helpfulCount'] as num?)?.toInt() ?? 0,
       isHelpfulByMe: json['isHelpfulByMe'] as bool? ?? false,
+      isMine: json['isMine'] as bool?,
     );
   }
 
@@ -207,6 +210,7 @@ class FeedReviewDto {
       'targets': targets.map((t) => t.toJson()).toList(),
       'helpfulCount': helpfulCount,
       'isHelpfulByMe': isHelpfulByMe,
+      if (isMine != null) 'isMine': isMine,
     };
   }
 
@@ -225,6 +229,7 @@ class FeedReviewDto {
       targets: targets.map((t) => t.toEntity()).toList(),
       helpfulCount: helpfulCount,
       isHelpfulByMe: isHelpfulByMe,
+      isMine: isMine,
     );
   }
 }

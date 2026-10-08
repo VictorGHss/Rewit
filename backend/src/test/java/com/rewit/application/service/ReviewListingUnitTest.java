@@ -369,4 +369,33 @@ class ReviewListingUnitTest {
         assertEquals("UNDER_REVIEW", meResult.content().get(0).status());
         assertEquals("REMOVED", meResult.content().get(1).status());
     }
+
+    @Test
+    @DisplayName("14. GET individual: isMine é contextual ao requester e não depende do id público do autor")
+    void shouldResolveIsMineFromRealAuthorWithoutExposingIdentity() {
+        UUID reviewId = UUID.randomUUID();
+        Profile authorProfile = new Profile(UUID.randomUUID(), authorUserId, "author", "Author Name", "Bio", null);
+        when(profileRepository.findByUserId(authorUserId)).thenReturn(Optional.of(authorProfile));
+
+        Review publicReview = new Review(reviewId, authorUserId, null, "Public text", false, false, ReviewStatus.ACTIVE, "PUBLIC", null, null, null, Instant.now(), Instant.now());
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(publicReview));
+
+        assertTrue(reviewService.getReviewPublicView(reviewId, authorUserId).isMine());
+        assertFalse(reviewService.getReviewPublicView(reviewId, requesterUserId).isMine());
+        assertFalse(reviewService.getReviewPublicView(reviewId, null).isMine());
+
+        Review anonymousReview = new Review(reviewId, authorUserId, null, "Anon text", true, false, ReviewStatus.ACTIVE, "PUBLIC", null, null, null, Instant.now(), Instant.now());
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(anonymousReview));
+
+        ReviewPublicView ownAnonymous = reviewService.getReviewPublicView(reviewId, authorUserId);
+        assertTrue(ownAnonymous.isMine());
+        assertNull(ownAnonymous.author().id());
+        assertTrue(ownAnonymous.author().isAnonymous());
+
+        ReviewPublicView thirdPartyAnonymous = reviewService.getReviewPublicView(reviewId, requesterUserId);
+        assertFalse(thirdPartyAnonymous.isMine());
+        assertNull(thirdPartyAnonymous.author().id());
+
+        assertFalse(reviewService.getReviewPublicView(reviewId, null).isMine());
+    }
 }

@@ -362,7 +362,10 @@ public class ReviewService {
                 detail.status(),
                 detail.createdAt(),
                 detail.updatedAt(),
-                detail.targets()
+                detail.targets(),
+                0L,
+                false,
+                cmd.authorUserId() != null && cmd.authorUserId().equals(detail.userId())
         );
     }
 
@@ -421,7 +424,8 @@ public class ReviewService {
                 review.getUpdatedAt(),
                 targetViews,
                 helpfulCount,
-                isHelpfulByMe
+                isHelpfulByMe,
+                requesterIsAuthor
         );
     }
 

@@ -125,8 +125,31 @@ public final class ReviewDto {
             Instant updatedAt,
             List<ReviewTargetView> targets,
             long helpfulCount,
-            boolean isHelpfulByMe
+            boolean isHelpfulByMe,
+            /*
+             * Contextual ao requester: true somente quando ele é o autor real. Permite ao cliente reconhecer a própria
+             * review anônima sem que o id do autor seja exposto; a autorização continua no backend.
+             */
+            boolean isMine
     ) {
+        public ReviewPublicView(
+                UUID id,
+                PublicAuthorView author,
+                UUID contextPlaceId,
+                String experienceText,
+                boolean isAnonymous,
+                boolean isVerifiedOnSite,
+                String visibility,
+                String status,
+                Instant createdAt,
+                Instant updatedAt,
+                List<ReviewTargetView> targets,
+                long helpfulCount,
+                boolean isHelpfulByMe
+        ) {
+            this(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite, visibility, status, createdAt, updatedAt, targets, helpfulCount, isHelpfulByMe, false);
+        }
+
         public ReviewPublicView(
                 UUID id,
                 PublicAuthorView author,
@@ -140,7 +163,7 @@ public final class ReviewDto {
                 Instant updatedAt,
                 List<ReviewTargetView> targets
         ) {
-            this(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite, visibility, status, createdAt, updatedAt, targets, 0L, false);
+            this(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite, visibility, status, createdAt, updatedAt, targets, 0L, false, false);
         }
     }
 

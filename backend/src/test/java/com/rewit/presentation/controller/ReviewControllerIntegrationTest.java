@@ -555,4 +555,64 @@ class ReviewControllerIntegrationTest {
                 .andExpect(jsonPath("$.id").value(followersReviewId.toString()))
                 .andExpect(jsonPath("$.visibility").value("FOLLOWERS"));
     }
+
+    @Test
+    @DisplayName("14. GET /api/v1/reviews/{id} expõe isMine contextual ao requester sem revelar o autor de review anônima")
+    void shouldExposeContextualOwnershipWithoutRevealingAnonymousAuthor() throws Exception {
+        TestUser author = registerUser("rev_mine_author");
+        TestUser reader = registerUser("rev_mine_reader");
+
+        UUID publicReviewId = createReviewForOwnership(author, false);
+        UUID anonymousReviewId = createReviewForOwnership(author, true);
+
+        // Review pública: própria -> true; de terceiro -> false
+        mockMvc.perform(get("/api/v1/reviews/{id}", publicReviewId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + author.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isMine").value(true));
+        mockMvc.perform(get("/api/v1/reviews/{id}", publicReviewId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + reader.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isMine").value(false));
+
+        // Review anônima: própria -> true, ainda sem identidade do autor no corpo
+        MvcResult ownAnonymous = mockMvc.perform(get("/api/v1/reviews/{id}", anonymousReviewId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + author.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isMine").value(true))
+                .andExpect(jsonPath("$.author.id").isEmpty())
+                .andExpect(jsonPath("$.author.isAnonymous").value(true))
+                .andReturn();
+        assertFalse(ownAnonymous.getResponse().getContentAsString().contains(author.userId().toString()));
+
+        // Review anônima de terceiro -> false, sem o userId real em nenhum ponto do JSON
+        MvcResult thirdPartyAnonymous = mockMvc.perform(get("/api/v1/reviews/{id}", anonymousReviewId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + reader.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isMine").value(false))
+                .andExpect(jsonPath("$.author.id").isEmpty())
+                .andReturn();
+        assertFalse(thirdPartyAnonymous.getResponse().getContentAsString().contains(author.userId().toString()));
+    }
+
+    private UUID createReviewForOwnership(TestUser author, boolean isAnonymous) throws Exception {
+        RateableTarget target = createRateableTarget(TargetType.PLACE);
+        CreateReviewRequest request = new CreateReviewRequest(
+                null,
+                isAnonymous ? "Avaliação anônima própria" : "Avaliação pública própria",
+                isAnonymous,
+                "PUBLIC",
+                List.of(new CreateReviewTargetRequest(target.getId(), new BigDecimal("4.0"), null))
+        );
+
+        MvcResult postRes = mockMvc.perform(post("/api/v1/reviews")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + author.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.isMine").value(true))
+                .andReturn();
+
+        return UUID.fromString(objectMapper.readTree(postRes.getResponse().getContentAsString()).get("id").asText());
+    }
 }

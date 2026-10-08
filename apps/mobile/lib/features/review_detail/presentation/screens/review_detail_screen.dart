@@ -68,6 +68,10 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
 
   bool get _isAuthor {
     if (widget.isAuthor != null) return widget.isAuthor!;
+    // Fonte principal: posse contextual do backend, que também cobre a própria review anônima
+    final isMine = _review?.isMine;
+    if (isMine != null) return isMine;
+    // Fallback para payloads sem isMine (feed/listagens): comparação pelo id público do autor
     final authorId = _review?.author.id;
     if (authorId == null || authorId.isEmpty) return false;
     final currentUserId = widget.currentUserId;
@@ -373,7 +377,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Excluir Avaliação'),
         content: const Text(
-          'Deseja realmente excluir esta avaliação? Esta ação não pode ser desfeita e a publicação será removida permanentemente.',
+          'Deseja realmente excluir esta avaliação? Essa publicação será removida e deixará de aparecer para outras pessoas.',
         ),
         actions: [
           TextButton(

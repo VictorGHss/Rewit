@@ -212,5 +212,24 @@ void main() {
       expect(targets[3].isProduct, isFalse);
       expect(targets[3].isService, isFalse);
     });
+
+    test('deve deserializar isMine contextual e manter nulo quando ausente', () {
+      Map<String, dynamic> reviewJson({Object? isMine, bool includeIsMine = true}) => {
+            'id': 'rev-mine',
+            'author': {'id': null, 'handle': null, 'displayName': 'Anônimo', 'isAnonymous': true},
+            'isAnonymous': true,
+            'visibility': 'PUBLIC',
+            'status': 'ACTIVE',
+            'createdAt': '2026-10-08T10:00:00Z',
+            if (includeIsMine) 'isMine': isMine,
+          };
+
+      final mine = FeedReviewDto.fromJson(reviewJson(isMine: true)).toEntity();
+      expect(mine.isMine, isTrue);
+      expect(mine.author.id, isNull);
+
+      expect(FeedReviewDto.fromJson(reviewJson(isMine: false)).toEntity().isMine, isFalse);
+      expect(FeedReviewDto.fromJson(reviewJson(includeIsMine: false)).toEntity().isMine, isNull);
+    });
   });
 }

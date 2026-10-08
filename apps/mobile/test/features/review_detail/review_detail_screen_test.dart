@@ -333,6 +333,94 @@ void main() {
       expect(find.byKey(const Key('review_detail_delete_button')), findsNothing);
     });
 
+    group('posse contextual (isMine)', () {
+      Future<void> pumpDetail(WidgetTester tester, FeedReview review, {String? currentUserId}) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: review.id,
+              initialReview: review,
+              feedRepository: feedRepo,
+              discussionRepository: discussionRepo,
+              currentUserId: currentUserId,
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pumpAndSettle();
+      }
+
+      void expectActions(Matcher matcher) {
+        expect(find.byKey(const Key('review_detail_edit_button')), matcher);
+        expect(find.byKey(const Key('review_detail_delete_button')), matcher);
+      }
+
+      const anonymousAuthor = FeedAuthor(id: null, displayName: 'Anônimo', isAnonymous: true);
+
+      testWidgets('review pública própria (isMine=true) mostra ações', (tester) async {
+        await pumpDetail(tester, feedRepo.sampleReview.copyWith(isMine: true), currentUserId: 'usr-1');
+        expectActions(findsOneWidget);
+      });
+
+      testWidgets('review de terceiro (isMine=false) não mostra ações, mesmo com id público coincidente', (tester) async {
+        await pumpDetail(tester, feedRepo.sampleReview.copyWith(isMine: false), currentUserId: 'usr-1');
+        expectActions(findsNothing);
+      });
+
+      testWidgets('review anônima própria (isMine=true, sem id público) mostra ações', (tester) async {
+        final review = feedRepo.sampleReview.copyWith(isAnonymous: true, author: anonymousAuthor, isMine: true);
+        await pumpDetail(tester, review, currentUserId: 'usr-1');
+        expectActions(findsOneWidget);
+      });
+
+      testWidgets('review anônima de terceiro (isMine=false) não mostra ações', (tester) async {
+        final review = feedRepo.sampleReview.copyWith(isAnonymous: true, author: anonymousAuthor, isMine: false);
+        await pumpDetail(tester, review, currentUserId: 'usr-1');
+        expectActions(findsNothing);
+      });
+
+      testWidgets('review de autor excluído (isMine=false) não mostra ações', (tester) async {
+        final review = feedRepo.sampleReview.copyWith(
+          author: const FeedAuthor(id: null, displayName: 'Usuário excluído', isAnonymous: true),
+          isMine: false,
+        );
+        await pumpDetail(tester, review, currentUserId: 'usr-1');
+        expectActions(findsNothing);
+      });
+
+      testWidgets('review sem isMine e sem autoria comprovada não mostra ações', (tester) async {
+        expect(feedRepo.sampleReview.isMine, isNull);
+        await pumpDetail(tester, feedRepo.sampleReview, currentUserId: 'another-user');
+        expectActions(findsNothing);
+      });
+    });
+
+    testWidgets('diálogo de exclusão descreve remoção sem prometer exclusão permanente', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: feedRepo.sampleReview.copyWith(isMine: true),
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('review_detail_delete_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Essa publicação será removida e deixará de aparecer para outras pessoas.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('permanentemente'), findsNothing);
+    });
+
     testWidgets('excluir avaliação: cancelar no diálogo não chama deleteReview', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
