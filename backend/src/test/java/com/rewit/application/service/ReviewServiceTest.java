@@ -114,7 +114,7 @@ class ReviewServiceTest {
         when(userRepository.findById(authorUserId)).thenReturn(Optional.of(activeUser));
 
         UUID missingTargetId = UUID.randomUUID();
-        when(rateableTargetRepository.existsById(missingTargetId)).thenReturn(false);
+        when(rateableTargetRepository.existsPubliclyVisibleById(missingTargetId)).thenReturn(false);
 
         CreateReviewCommand cmd = new CreateReviewCommand(
                 authorUserId,
@@ -138,8 +138,8 @@ class ReviewServiceTest {
 
         UUID target1 = UUID.randomUUID();
         UUID target2 = UUID.randomUUID();
-        when(rateableTargetRepository.existsById(target1)).thenReturn(true);
-        when(rateableTargetRepository.existsById(target2)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(target1)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(target2)).thenReturn(true);
 
         when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
         when(reviewTargetRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
@@ -177,8 +177,8 @@ class ReviewServiceTest {
         UUID targetMissing = UUID.randomUUID();
         UUID targetValid2 = UUID.randomUUID();
 
-        when(rateableTargetRepository.existsById(targetValid1)).thenReturn(true);
-        when(rateableTargetRepository.existsById(targetMissing)).thenReturn(false);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetValid1)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetMissing)).thenReturn(false);
 
         CreateReviewCommand cmd = new CreateReviewCommand(
                 authorUserId,
@@ -253,7 +253,7 @@ class ReviewServiceTest {
         when(userRepository.findById(authorUserId)).thenReturn(Optional.of(activeUser));
 
         UUID targetId = UUID.randomUUID();
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
         when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
         when(reviewTargetRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -281,7 +281,7 @@ class ReviewServiceTest {
         when(userRepository.findById(authorUserId)).thenReturn(Optional.of(activeUser));
 
         UUID targetId = UUID.randomUUID();
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
         when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
         when(reviewTargetRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -338,8 +338,8 @@ class ReviewServiceTest {
         UUID uuidA = UUID.fromString("11111111-1111-1111-1111-111111111111");
         UUID uuidB = UUID.fromString("22222222-2222-2222-2222-222222222222");
 
-        when(rateableTargetRepository.existsById(uuidA)).thenReturn(true);
-        when(rateableTargetRepository.existsById(uuidB)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(uuidA)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(uuidB)).thenReturn(true);
         when(reviewRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(reviewTargetRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -362,6 +362,32 @@ class ReviewServiceTest {
         org.mockito.InOrder inOrder = inOrder(rateableTargetStatsRepository);
         inOrder.verify(rateableTargetStatsRepository).recalculateAndSave(uuidA);
         inOrder.verify(rateableTargetStatsRepository).recalculateAndSave(uuidB);
+    }
+
+    @Test
+    @DisplayName("11.1 Ordem de lock das stats é a natural de UUID, a mesma de edição, exclusão e moderação")
+    void shouldLockStatsInNaturalUuidOrderLikeOtherReviewMutations() {
+        when(userRepository.findById(authorUserId)).thenReturn(Optional.of(activeUser));
+
+        // Ordens divergentes: como texto "7fff..." < "8000..."; como UUID (bits mais significativos com sinal)
+        // 0x8000... é negativo e vem antes. Edição, exclusão e moderação usam a ordem natural (sorted())
+        UUID textFirst = UUID.fromString("7fffffff-ffff-ffff-ffff-ffffffffffff");
+        UUID naturalFirst = UUID.fromString("80000000-0000-0000-0000-000000000000");
+        assertTrue(naturalFirst.compareTo(textFirst) < 0);
+        assertTrue(textFirst.toString().compareTo(naturalFirst.toString()) < 0);
+
+        when(rateableTargetRepository.existsPubliclyVisibleById(textFirst)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(naturalFirst)).thenReturn(true);
+        when(reviewRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(reviewTargetRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        reviewService.createReview(new CreateReviewCommand(authorUserId, null, "Ordem de lock", false, "PUBLIC",
+                List.of(new CreateReviewTargetCommand(textFirst, new BigDecimal("4.0"), null),
+                        new CreateReviewTargetCommand(naturalFirst, new BigDecimal("5.0"), null))));
+
+        org.mockito.InOrder inOrder = inOrder(rateableTargetStatsRepository);
+        inOrder.verify(rateableTargetStatsRepository).recalculateAndSave(naturalFirst);
+        inOrder.verify(rateableTargetStatsRepository).recalculateAndSave(textFirst);
     }
 
     @Test

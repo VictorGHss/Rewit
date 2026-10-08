@@ -129,6 +129,48 @@ class CatalogPublicDetailIntegrationTest {
     }
 
     @Test
+    @DisplayName("Nova review em alvo ou local de contexto indisponível responde o 404 de inexistente e não grava nada")
+    void reviewCreationRequiresAvailableTargetAndContext() throws Exception {
+        TestUser author = register("detalhe_nova_review");
+        Fixture f = fixture();
+        jdbcTemplate.update("UPDATE products SET status = 'DISCONTINUED' WHERE id = ?", f.productId());
+        Integer before = jdbcTemplate.queryForObject("SELECT count(*) FROM reviews WHERE user_id = ?", Integer.class,
+                author.id());
+
+        // Produto descontinuado como alvo: mesmo 404 de um alvo inexistente
+        JsonNode hiddenTarget = read(post("/api/v1/reviews").contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateReviewRequest(f.placeId(), "Nova", false, "PUBLIC",
+                        List.of(new CreateReviewTargetRequest(f.productId(), new BigDecimal("4.0"), null))))), author, 404);
+        assertEquals("RATEABLE_TARGET_NOT_FOUND", hiddenTarget.get("code").asText());
+        JsonNode missingTarget = read(post("/api/v1/reviews").contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateReviewRequest(f.placeId(), "Nova", false, "PUBLIC",
+                        List.of(new CreateReviewTargetRequest(UUID.randomUUID(), new BigDecimal("4.0"), null))))), author, 404);
+        assertEquals(missingTarget.get("detail").asText().replaceAll("[0-9a-f-]{36}", ""),
+                hiddenTarget.get("detail").asText().replaceAll("[0-9a-f-]{36}", ""));
+
+        // Local de contexto fechado: mesmo 404 de um local inexistente, mesmo com alvo disponível
+        jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.placeId());
+        UUID activeProduct = productRepository.save(new Product(null, "Produto ativo " + UUID.randomUUID(), "Marca", null,
+                null, "BEBIDA", null, "ACTIVE")).getId();
+        JsonNode hiddenContext = read(post("/api/v1/reviews").contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateReviewRequest(f.placeId(), "Nova", false, "PUBLIC",
+                        List.of(new CreateReviewTargetRequest(activeProduct, new BigDecimal("4.0"), null))))), author, 404);
+        assertEquals("PLACE_NOT_FOUND", hiddenContext.get("code").asText());
+        JsonNode missingContext = read(post("/api/v1/reviews").contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateReviewRequest(UUID.randomUUID(), "Nova", false, "PUBLIC",
+                        List.of(new CreateReviewTargetRequest(activeProduct, new BigDecimal("4.0"), null))))), author, 404);
+        assertEquals(missingContext.get("detail").asText(), hiddenContext.get("detail").asText());
+
+        assertEquals(before, jdbcTemplate.queryForObject("SELECT count(*) FROM reviews WHERE user_id = ?", Integer.class,
+                author.id()), "nenhuma review gravada");
+
+        // Alvo e contexto disponíveis seguem aceitos
+        read(post("/api/v1/reviews").contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateReviewRequest(null, "Nova", false, "PUBLIC",
+                        List.of(new CreateReviewTargetRequest(activeProduct, new BigDecimal("4.0"), null))))), author, 201);
+    }
+
+    @Test
     @DisplayName("Inexistente: o mesmo 404 de sempre em todos os endpoints")
     void missingTargets() throws Exception {
         TestUser viewer = register("detalhe_leitor");

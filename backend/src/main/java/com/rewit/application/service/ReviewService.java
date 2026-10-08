@@ -29,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -154,9 +153,13 @@ public class ReviewService {
             throw new BusinessException("Autor inativo ou excluído", HttpStatus.FORBIDDEN, "USER_INACTIVE");
         }
 
-        // 2. Validação de contextPlace quando informado
+        // 2. Validação de contextPlace quando informado: só local ACTIVE, como nas leituras públicas (C5.2);
+        // indisponível responde como inexistente
         if (cmd.contextPlaceId() != null) {
-            if (placeRepository.findById(cmd.contextPlaceId()).isEmpty()) {
+            boolean contextAvailable = placeRepository.findById(cmd.contextPlaceId())
+                    .filter(place -> CatalogService.PUBLIC_CATALOG_STATUS.equals(place.getStatus()))
+                    .isPresent();
+            if (!contextAvailable) {
                 throw new BusinessException("Local de contexto não encontrado", HttpStatus.NOT_FOUND, "PLACE_NOT_FOUND");
             }
         }
@@ -186,9 +189,10 @@ public class ReviewService {
             }
         }
 
-        // 3.2. Validação de existência no banco (I/O)
+        // 3.2. Validação no banco (I/O): o alvo precisa estar publicamente disponível (place/product ACTIVE, C5.2);
+        // indisponível responde como inexistente
         for (CreateReviewTargetCommand targetCmd : cmd.targets()) {
-            if (!rateableTargetRepository.existsById(targetCmd.rateableTargetId())) {
+            if (!rateableTargetRepository.existsPubliclyVisibleById(targetCmd.rateableTargetId())) {
                 throw new BusinessException("Alvo avaliável não encontrado: " + targetCmd.rateableTargetId(), HttpStatus.NOT_FOUND, "RATEABLE_TARGET_NOT_FOUND");
             }
         }
@@ -267,7 +271,9 @@ public class ReviewService {
             List<UUID> targetIdsToUpdate = savedTargets.stream()
                     .map((ReviewTarget target) -> target.getTargetId())
                     .distinct()
-                    .sorted(Comparator.comparing((UUID id) -> id.toString()))
+                    // Mesma ordem de lock (UUID natural) da edição, exclusão e moderação: ordens diferentes entre
+                    // transações que travam as mesmas linhas de stats produzem deadlock
+                    .sorted()
                     .toList();
 
             for (UUID targetId : targetIdsToUpdate) {
