@@ -32,6 +32,17 @@ public class ReviewVisibilityPolicy {
      * @throws BusinessException com 404 se a avaliação não estiver ACTIVE,
      *                           ou 403 se o solicitante não atender às regras de visibilidade
      */
+    /**
+     * Leitura do conteúdo de uma avaliação, a mesma regra do detalhe ({@code GET /api/v1/reviews/{id}}): o autor
+     * continua lendo a própria avaliação em qualquer estado; para os demais vale {@link #validateCanAccess}.
+     */
+    public void validateCanRead(Review review, UUID requesterUserId) {
+        if (review != null && requesterUserId != null && requesterUserId.equals(review.getUserId())) {
+            return;
+        }
+        validateCanAccess(review, requesterUserId);
+    }
+
     public void validateCanAccess(Review review, UUID requesterUserId) {
         if (review == null || review.getStatus() != ReviewStatus.ACTIVE) {
             throw new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND");

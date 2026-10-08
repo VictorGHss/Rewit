@@ -292,31 +292,40 @@ class ReviewMediaServiceUnitTest {
 
     // 12. PUBLIC
     @Test
-    @DisplayName("12. Review pública permite upload por usuário autenticado com acesso")
+    @DisplayName("12. Review pública: o autor anexa mídia; terceiro que a vê recebe 403 FORBIDDEN sem tocar o storage")
     void testPublicReviewUpload() {
         Review review = createReview(reviewId, authorUserId, "PUBLIC", ReviewStatus.ACTIVE, false);
         when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
         when(reviewMediaRepository.countActiveByReviewId(reviewId)).thenReturn(0L);
         when(reviewMediaRepository.save(any(ReviewMedia.class))).thenAnswer(i -> i.getArgument(0));
 
-        UploadMediaCommand cmd = new UploadMediaCommand(reviewId, otherUserId, validJpegBytes, "photo.jpg");
-        ReviewMediaView result = reviewMediaService.uploadMedia(cmd);
+        ReviewMediaView result = reviewMediaService.uploadMedia(
+                new UploadMediaCommand(reviewId, authorUserId, validJpegBytes, "photo.jpg"));
         assertNotNull(result);
+
+        clearInvocations(objectStoragePort, reviewMediaRepository);
+        BusinessException ex = assertThrows(BusinessException.class, () -> reviewMediaService.uploadMedia(
+                new UploadMediaCommand(reviewId, otherUserId, validJpegBytes, "photo.jpg")));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+        assertEquals("FORBIDDEN", ex.getErrorCode());
+        verifyNoInteractions(objectStoragePort);
+        verify(reviewMediaRepository, never()).save(any(ReviewMedia.class));
     }
 
     // 13. FOLLOWERS autorizado
     @Test
-    @DisplayName("13. Review FOLLOWERS permite upload quando usuário autenticado é seguidor do autor")
-    void testFollowersAuthorized() {
+    @DisplayName("13. Seguidor vê a review FOLLOWERS, mas não anexa mídia a ela: só o autor (403 FORBIDDEN)")
+    void testFollowerCannotUploadToOthersReview() {
         Review review = createReview(reviewId, authorUserId, "FOLLOWERS", ReviewStatus.ACTIVE, false);
         when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
         when(userFollowRepository.isFollowing(otherUserId, authorUserId)).thenReturn(true);
-        when(reviewMediaRepository.countActiveByReviewId(reviewId)).thenReturn(0L);
-        when(reviewMediaRepository.save(any(ReviewMedia.class))).thenAnswer(i -> i.getArgument(0));
 
         UploadMediaCommand cmd = new UploadMediaCommand(reviewId, otherUserId, validJpegBytes, "photo.jpg");
-        ReviewMediaView result = reviewMediaService.uploadMedia(cmd);
-        assertNotNull(result);
+        BusinessException ex = assertThrows(BusinessException.class, () -> reviewMediaService.uploadMedia(cmd));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+        assertEquals("FORBIDDEN", ex.getErrorCode());
+        verifyNoInteractions(objectStoragePort);
+        verify(reviewMediaRepository, never()).save(any(ReviewMedia.class));
     }
 
     // 14. FOLLOWERS não autorizado

@@ -29,23 +29,27 @@ Seguindo as diretrizes estritas de privacidade do projeto (ADR-005 e LGPD):
   * O identificador do autor é persistido internamente no PostgreSQL apenas para auditoria, governança e validação de permissão de exclusão.
 
 ### 1.4 Herança de Autorização da Review
-A mídia herda a autorização e ciclo de vida da Review correspondente via `ReviewVisibilityPolicy`:
-* **`PUBLIC`**: Usuário autenticado com acesso à avaliação pode fazer upload e visualizar as mídias.
-* **`FOLLOWERS`**: Autor da avaliação + seguidores legítimos podem fazer upload e visualizar mídias. Terceiros não-seguidores recebem `403 Forbidden`.
-* **`PRIVATE`**: Somente o próprio autor da avaliação tem permissão para upload, listagem e download. Terceiros recebem `403 Forbidden`.
-* **`UNDER_REVIEW`** (moderação preventiva) ou **`REMOVED`**: Acesso à avaliação e mídias associadas é bloqueado (`404 NOT_FOUND`).
+A mídia herda a autorização e o ciclo de vida da Review correspondente (`ReviewVisibilityPolicy`):
+* **Upload**: somente o **autor** da avaliação, com a conta operacional e a avaliação `ACTIVE`. Quem apenas vê a avaliação (qualquer usuário numa `PUBLIC`, seguidores numa `FOLLOWERS`) recebe `403 Forbidden` (`FORBIDDEN`).
+* **Listagem e download** seguem a mesma regra do detalhe da avaliação (`GET /api/v1/reviews/{id}`):
+  * **`PUBLIC`**: qualquer usuário autenticado;
+  * **`FOLLOWERS`**: autor e seguidores; terceiros recebem `403 Forbidden`;
+  * **`PRIVATE`**: somente o autor; terceiros recebem `403 Forbidden`;
+  * **`UNDER_REVIEW`** ou **`REMOVED`**: `404 Not Found` (`REVIEW_NOT_FOUND`) para terceiros; o autor continua acessando, como no detalhe. Upload em avaliação inativa é recusado com `404`, inclusive para o autor.
 
 ### 1.5 Autorização e Consistência de Exclusão (DELETE)
 * **Somente o autor da Review pode excluir anexos de mídia.**
 * Tentativas de exclusão por seguidores, autores de comentários ou terceiros retornam `403 Forbidden`.
 * **Ordem de Operações e Consistência Lógica**:
-  1. O registro em `review_media` é marcado com status `REMOVED` e comitado no PostgreSQL em primeiro lugar.
-  2. Em seguida, a remoção física no Object Storage (`objectStoragePort.delete(objectKey)`) é executada.
-  3. Essa ordem impede a ocorrência de inconsistência crítica onde uma mídia permaneceria `ACTIVE` no banco apontando para um objeto inexistente no storage.
-  4. Caso ocorra falha de comunicação ou indisponibilidade no storage durante o delete, o banco permanece como `REMOVED`. Como todos os endpoints públicos exigem `status = ACTIVE`, o objeto torna-se imediatamente inacessível para qualquer usuário, garantindo a segurança lógica dos dados.
+  1. O registro em `review_media` é marcado com status `REMOVED` na transação da requisição.
+  2. A remoção física no Object Storage (`objectStoragePort.delete(objectKey)`) só acontece **depois do commit** (`afterCommit`), ainda antes da resposta.
+  3. Se o commit falhar, a requisição falha, a mídia continua `ACTIVE` e o objeto continua no storage: nunca há mídia `ACTIVE` apontando para um objeto inexistente.
+  4. Se o storage falhar depois do commit, a exclusão continua válida (`204`): a mídia está `REMOVED` e inacessível por qualquer rota; o objeto permanece no storage (ver §1.6).
 * Operação idempotente: requisições repetidas para mídia já removida retornam sucesso (`204 No Content`).
 
 ### 1.6 Limitações de Consistência e Garbage Collection
+* **Compensação do upload**: o objeto é enviado ao storage antes de a metadata ser confirmada (o `INSERT` acontece no commit). Se a transação sofrer rollback por qualquer motivo, inclusive uma falha no próprio commit, o objeto enviado é removido (`afterCompletion`). Se essa remoção também falhar, ou se o processo parar entre o envio e o commit, o objeto fica sem linha em `review_media` e é tratado pelo GC de storage (STEP 28).
+* **Chave no storage**: `reviews/{reviewId}/{mediaId}/image.{jpg|png}`, com `mediaId` aleatório e nunca reutilizado; sem dados do usuário (e-mail, handle ou id). A chave não aparece nas respostas, que expõem apenas a rota da API.
 * **Ausência de Transações Distribuídas (2PC)**: PostgreSQL e SeaweedFS/S3 não participam de transação atômica compartilhada. Em falha de exclusão física do storage após atualização do banco, o blob binário permanece no storage, sem no entanto ser exposto publicamente por nenhuma rota da API. Como a linha `REMOVED` continua sendo referência, esse blob **não** é coletado pelo GC de storage do STEP 28; uma política de retenção para mídias `REMOVED` é uma decisão separada.
 * **Exclusão Física em Cascata (ON DELETE CASCADE)**: A foreign key relacional `review_media.review_id -> reviews(id) ON DELETE CASCADE` exclui os metadados relacionais caso uma Review seja excluída fisicamente do banco de dados (ex: scripts SQL manuais de manutenção). No fluxo padrão da aplicação Rewit, Reviews utilizam exclusivamente soft delete (`status = 'REMOVED'`). Objetos que ficam sem nenhuma linha em `review_media` são tratados pelo GC de storage (STEP 28): quarentena, grace period, rechecagem sob lock e exclusão idempotente, desligado por padrão. Ver [Reconciliação e GC de Storage de Mídia](../architecture/storage-reconciliation.md).
 
@@ -61,7 +65,7 @@ A mídia herda a autorização e ciclo de vida da Review correspondente via `Rev
 | :--- | :--- | :--- |
 | **Formatos Permitidos** | JPEG (`image/jpeg`), PNG (`image/png`) | `415 Unsupported Media Type` (`UNSUPPORTED_MEDIA_TYPE`) |
 | **Detecção de Tipo** | Magic Bytes reais do cabeçalho binário | `415 Unsupported Media Type` (rejeita SVG, HTML, PDF, binários) |
-| **Tamanho Máximo** | **10 MB** (10.485.760 bytes) por arquivo | `413 Payload Too Large` (`MEDIA_SIZE_EXCEEDED`) |
+| **Tamanho Máximo** | **10 MB** (10.485.760 bytes) por arquivo, o limite exato é aceito | `413 Payload Too Large` (`MEDIA_SIZE_EXCEEDED`); acima de 11 MB por arquivo ou 12 MB por requisição o servidor recusa antes do controller com `413` (`PAYLOAD_TOO_LARGE`). Os limites do multipart derivam do limite de negócio (`MultipartConfig`); o padrão do Spring (1 MB) não vale mais |
 | **Tamanho Mínimo** | Maior que 0 bytes | `400 Bad Request` (`EMPTY_MEDIA_FILE`) |
 | **Dimensões Máximas** | **10.000 x 10.000 pixels** e máx. 100 MP (validado antes do decode) | `400 Bad Request` (`INVALID_IMAGE_DIMENSIONS`) |
 | **Quantidade Máxima** | **5 imagens ativas** por Review (protegido por lock pessimista) | `400 Bad Request` (`MAX_MEDIA_LIMIT_REACHED`) |
@@ -135,9 +139,9 @@ Recupera o stream binário da imagem sanitizada para exibição na interface web
 #### Cabeçalhos de Resposta:
 * `Content-Type`: `image/jpeg` ou `image/png`
 * `Content-Length`: `<tamanho-em-bytes>`
-* `Cache-Control`: depende da visibilidade da avaliação:
-  * `PUBLIC`: `public, max-age=86400`;
-  * `PRIVATE` e `FOLLOWERS`: `private, no-store`. O acesso depende de quem lê, então a mídia nunca pode ser guardada por cache compartilhado (proxy/CDN).
+* `Cache-Control`: depende da visibilidade e do estado da avaliação:
+  * `PUBLIC` e `ACTIVE`: `public, max-age=86400`;
+  * `PRIVATE`, `FOLLOWERS` e avaliações em `UNDER_REVIEW`/`REMOVED` (lidas pelo autor): `private, no-store`. O acesso depende de quem lê, então a mídia nunca pode ser guardada por cache compartilhado (proxy/CDN).
 
 #### Prevenção Anti-IDOR:
 Caso a `mediaId` exista no sistema mas pertença a uma avaliação distinta daquela presente no path (`reviewId`), o backend retorna imediatamente `404 Not Found` (`MEDIA_NOT_FOUND`), impedindo a inferência ou correlação de identificadores entre avaliações.
@@ -164,8 +168,9 @@ Remove o anexo de imagem da avaliação.
 | `400 Bad Request` | `INVALID_IMAGE_DIMENSIONS` | A imagem excede o limite dimensional de 10.000x10.000 pixels. |
 | `400 Bad Request` | `MAX_MEDIA_LIMIT_REACHED` | A avaliação já possui 5 mídias ativas anexadas. |
 | `401 Unauthorized` | `UNAUTHORIZED` | Token JWT ausente, expirado ou inválido. |
-| `403 Forbidden` | `FORBIDDEN` | Usuário não autorizado a acessar avaliação privada/restrita ou a excluir mídia de terceiros. |
-| `404 Not Found` | `REVIEW_NOT_FOUND` | Avaliação não encontrada ou em estado `UNDER_REVIEW`/`REMOVED`. |
+| `401 Unauthorized` | `ACCOUNT_DISABLED` | Upload ou exclusão com a conta não operacional (desativada, suspensa ou excluída). |
+| `403 Forbidden` | `FORBIDDEN` | Usuário não autorizado a acessar avaliação privada/restrita, a anexar mídia à avaliação de outra pessoa ou a excluir mídia de terceiros. |
+| `404 Not Found` | `REVIEW_NOT_FOUND` | Avaliação não encontrada; ou em estado `UNDER_REVIEW`/`REMOVED` para terceiros (e para upload, inclusive do autor). |
 | `404 Not Found` | `MEDIA_NOT_FOUND` | Mídia inexistente, inativa ou desacoplada da avaliação informada (IDOR). |
 | `413 Payload Too Large` | `MEDIA_SIZE_EXCEEDED` | Arquivo físico enviado superior a 10 MB. |
 | `415 Unsupported Media Type` | `UNSUPPORTED_MEDIA_TYPE` | Formato não aceito ou magic bytes incompatíveis com JPEG/PNG. |

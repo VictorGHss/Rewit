@@ -11,6 +11,7 @@ import com.rewit.application.ratelimit.RateLimitSubject;
 import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReviewMediaType;
+import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewMedia;
 import com.rewit.infrastructure.storage.ImageSanitizer;
@@ -20,6 +21,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.Objects;
@@ -91,8 +94,13 @@ public class ReviewMediaService {
         Review review = reviewRepository.findByIdForUpdate(cmd.reviewId())
                 .orElseThrow(() -> new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND"));
 
-        // 3. Validação de visibilidade e acesso baseada na Review
+        // 3. Validação de visibilidade e acesso baseada na Review (avaliação inativa: 404, mesmo para o autor)
         reviewVisibilityPolicy.validateCanAccess(review, cmd.authenticatedUserId());
+
+        // 3.1 Somente o autor anexa mídia à própria avaliação (mesmo contrato do delete)
+        if (!review.getUserId().equals(cmd.authenticatedUserId())) {
+            throw new BusinessException("Apenas o autor da avaliação pode anexar mídia", HttpStatus.FORBIDDEN, "FORBIDDEN");
+        }
 
         // 4. Verificação transacionalmente segura do limite máximo de 5 mídias ativas
         long activeCount = reviewMediaRepository.countActiveByReviewId(review.getId());
@@ -129,20 +137,49 @@ public class ReviewMediaService {
                 sanitized.height()
         );
 
+        // A metadata só é confirmada no commit (o INSERT pode falhar no flush, depois deste método): com transação
+        // ativa, qualquer rollback remove o objeto enviado. Sem transação, a compensação é imediata no catch
+        boolean cleanupOnRollback = registerRollbackCleanup(objectKey);
         ReviewMedia saved;
         try {
             saved = reviewMediaRepository.save(media);
-        } catch (Exception ex) {
-            log.error("Falha ao salvar metadata de mídia no banco de dados. Executando compensação no storage para key '{}'", objectKey, ex);
-            try {
-                objectStoragePort.delete(objectKey);
-            } catch (Exception compensationEx) {
-                log.error("Erro durante compensação ao deletar objeto '{}' após falha no banco (erro={})", objectKey, compensationEx.getClass().getSimpleName());
+        } catch (RuntimeException ex) {
+            if (!cleanupOnRollback) {
+                deleteUploadedObject(objectKey);
             }
             throw ex;
         }
 
         return ReviewMediaView.fromDomain(saved);
+    }
+
+    private boolean registerRollbackCleanup(String objectKey) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return false;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_ROLLED_BACK) {
+                    deleteUploadedObject(objectKey);
+                }
+            }
+        });
+        return true;
+    }
+
+    /**
+     * Compensação do upload: remove o objeto cuja metadata não foi confirmada. Se o storage também falhar, o objeto
+     * fica órfão (sem linha em review_media) e é coletado pelo GC de storage (ADR-010).
+     */
+    private void deleteUploadedObject(String objectKey) {
+        log.warn("Upload de mídia sem metadata confirmada; removendo o objeto enviado (key '{}')", objectKey);
+        try {
+            objectStoragePort.delete(objectKey);
+        } catch (RuntimeException compensationEx) {
+            log.error("Compensação do upload falhou; o objeto '{}' fica para o GC de storage (erro={})",
+                    objectKey, compensationEx.getClass().getSimpleName());
+        }
     }
 
     /**
@@ -161,7 +198,8 @@ public class ReviewMediaService {
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND"));
 
-        reviewVisibilityPolicy.validateCanAccess(review, requesterUserId);
+        // Mesma regra do detalhe da avaliação: o autor lê a própria em qualquer estado; terceiros só ACTIVE e visível
+        reviewVisibilityPolicy.validateCanRead(review, requesterUserId);
 
         return reviewMediaRepository.findActiveByReviewId(reviewId)
                 .stream()
@@ -188,7 +226,7 @@ public class ReviewMediaService {
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND"));
 
-        reviewVisibilityPolicy.validateCanAccess(review, requesterUserId);
+        reviewVisibilityPolicy.validateCanRead(review, requesterUserId);
 
         ReviewMedia media = reviewMediaRepository.findById(mediaId)
                 .orElseThrow(() -> new BusinessException("Mídia não encontrada", HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND"));
@@ -200,7 +238,10 @@ public class ReviewMediaService {
 
         // Acesso ao storage somente após autorização completa
         byte[] data = objectStoragePort.get(media.getObjectKey());
-        boolean publiclyCacheable = review.getVisibility() == null || "PUBLIC".equalsIgnoreCase(review.getVisibility());
+        // Cache compartilhado só para avaliação PUBLIC e ACTIVE: as demais dependem de quem lê (inclusive a do próprio
+        // autor em análise ou removida)
+        boolean publiclyCacheable = review.getStatus() == ReviewStatus.ACTIVE
+                && (review.getVisibility() == null || "PUBLIC".equalsIgnoreCase(review.getVisibility()));
         return new MediaDownloadResult(data, media.getMimeType(), publiclyCacheable);
     }
 
@@ -249,16 +290,34 @@ public class ReviewMediaService {
             return;
         }
 
-        // 1. Soft delete prioritário no PostgreSQL
+        // 1. Soft delete no PostgreSQL
         media.markRemoved();
         reviewMediaRepository.save(media);
 
-        // 2. Remoção física do objeto no storage
+        // 2. Remoção física só depois do commit do REMOVED (ainda antes da resposta): se o commit falhar, a linha
+        // continua ACTIVE e o objeto também, sem apontar para um arquivo inexistente
+        String objectKey = media.getObjectKey();
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    deleteRemovedObject(objectKey);
+                }
+            });
+        } else {
+            deleteRemovedObject(objectKey);
+        }
+    }
+
+    /**
+     * Remoção física de melhor esforço de uma mídia já REMOVED: se o storage falhar, a mídia continua logicamente
+     * excluída e inacessível; o objeto permanece (a linha REMOVED o referencia, ADR-010).
+     */
+    private void deleteRemovedObject(String objectKey) {
         try {
-            objectStoragePort.delete(media.getObjectKey());
-        } catch (Exception ex) {
-            log.warn("Falha ao remover arquivo físico do storage '{}' durante exclusão (erro={})", media.getObjectKey(), ex.getClass().getSimpleName());
-            // Mantém registro como REMOVED no banco: a mídia está logicamente eliminada e inacessível
+            objectStoragePort.delete(objectKey);
+        } catch (RuntimeException ex) {
+            log.warn("Falha ao remover arquivo físico do storage '{}' durante exclusão (erro={})", objectKey, ex.getClass().getSimpleName());
         }
     }
 }
