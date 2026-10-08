@@ -182,6 +182,9 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 }
 ```
 
+* Se a presença do produto no local já existe, a resposta devolve a presença existente, com `reportedByUserId` de quem a relatou primeiro.
+* **Privacidade**: se essa conta foi excluída (`DELETED`), `reportedByUserId` volta `null`; o UUID da conta excluída nunca aparece na resposta. Para contas ativas, o comportamento não muda. O dado gravado não é alterado por esta leitura; a minimização é feita pelo purge da conta.
+
 ---
 
 ### 2.6 Adoção de Local no Catálogo (POST /api/v1/places/adopt)
@@ -308,6 +311,68 @@ Mesmo quando nenhum local for encontrado dentro do raio solicitado, a API retorn
 }
 ```
 
+### 2.9 Busca Global de Locais e Produtos (GET /api/v1/search)
+* **Método**: `GET`
+* **Rota**: `/api/v1/search`
+* **Autenticação**: Obrigatória
+
+#### Query Parameters
+| Parâmetro | Obrigatório | Padrão | Regra |
+|---|---|---|---|
+| `q` | sim | — | Termo da busca; não pode ser vazio nem só espaços (espaços nas pontas são ignorados) |
+| `page` | não | `0` | Página, a partir de 0; negativa é recusada |
+| `size` | não | `20` | Itens por página, de 1 a 50 |
+
+#### Escopo
+* Locais (`PLACE`): casa por nome, categoria ou cidade.
+* Produtos (`PRODUCT`): casa por nome ou categoria. Marca e código de barras não fazem parte da busca.
+* Só itens com status `ACTIVE`.
+
+#### Correspondência
+* O termo é procurado como trecho do texto (contém), sem diferença de maiúsculas/minúsculas e sem acentos: `cafe` encontra `Café`, `sao` encontra `São`, `acai` encontra `Açaí` (e vice-versa).
+* `%`, `_` e `\` são caracteres literais, não curingas: `q=%` encontra apenas textos que contêm `%`, nunca o catálogo inteiro; `a_b` não encontra `axb`.
+* A normalização (minúsculas e `unaccent`) é a função `rewit_search_normalize` (migration V22). A mesma expressão é indexada com trigram (`idx_places_search_*`, `idx_products_search_*`), e a busca usa esses índices em vez de varrer as tabelas.
+
+#### Ordenação e paginação
+* Ordem: relevância decrescente (maior similaridade trigram do termo com o nome ou a categoria), depois nome crescente, depois `id` crescente.
+* A ordem é total: com o catálogo inalterado, a mesma consulta sempre devolve a mesma ordem, e as páginas não repetem nem perdem itens.
+* `totalElements` e `totalPages` contam todos os itens que casam com o termo.
+
+#### Rate limit
+* Por usuário autenticado, no Redis compartilhado entre instâncias (ADR-013). Padrão: **60 buscas por janela deslizante de 60 segundos**. Configurável com `RATE_LIMIT_SEARCH_LIMIT` e `RATE_LIMIT_SEARCH_WINDOW` (`rewit.rate-limit.query.search.*`).
+* Acima do limite: `429 Too Many Requests`, RFC 7807, `code` `RATE_LIMIT_EXCEEDED` e cabeçalho `Retry-After` (segundos).
+* Requisições recusadas por validação (`400`) não consomem o limite.
+
+#### Resposta de Sucesso (`200 OK`)
+```json
+{
+  "content": [
+    {
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "name": "Café Central",
+      "slug": "cafe-central-curitiba",
+      "category": "CAFE",
+      "targetType": "PLACE",
+      "status": "ACTIVE"
+    },
+    {
+      "id": "7ca85f64-5717-4562-b3fc-2c963f66afb2",
+      "name": "Café em Grãos",
+      "slug": null,
+      "category": "BEBIDA",
+      "targetType": "PRODUCT",
+      "status": "ACTIVE"
+    }
+  ],
+  "pageNumber": 0,
+  "pageSize": 20,
+  "totalElements": 2,
+  "totalPages": 1,
+  "isLast": true
+}
+```
+* `slug` é sempre `null` para produtos.
+
 ---
 
 ## 3. Códigos de Erro Esperados
@@ -316,7 +381,9 @@ Mesmo quando nenhum local for encontrado dentro do raio solicitado, a API retorn
   * Coordenadas inválidas para busca nearby (`INVALID_NEARBY_COORDINATES`).
   * Raio inválido para busca nearby (`INVALID_NEARBY_RADIUS`).
   * Limite inválido para busca nearby (`INVALID_NEARBY_LIMIT`).
+  * Busca global: termo vazio (`INVALID_SEARCH_QUERY`), página negativa (`INVALID_PAGE`), tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
 * `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
 * `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido. A presença de produto é sempre atribuída ao usuário autenticado.
 * `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`).
 * `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`).
+* `429 Too Many Requests` (`RATE_LIMIT_EXCEEDED`): limite de buscas globais do usuário atingido; acompanha `Retry-After`.

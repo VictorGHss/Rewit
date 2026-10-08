@@ -35,6 +35,7 @@ public class RateLimitProperties {
     private final Backend backend = new Backend();
     private final Auth auth = new Auth();
     private final Content content = new Content();
+    private final QueryPolicies query = new QueryPolicies();
 
     public Policy policyFor(RateLimitedAction action) {
         return switch (action) {
@@ -44,6 +45,7 @@ public class RateLimitProperties {
             case REPORT_CREATION -> content.reportCreation;
             case DISCUSSION_CREATION -> content.discussionCreation;
             case MEDIA_UPLOAD -> content.mediaUpload;
+            case SEARCH -> query.search;
         };
     }
 
@@ -119,6 +121,10 @@ public class RateLimitProperties {
 
     public Content getContent() {
         return content;
+    }
+
+    public QueryPolicies getQuery() {
+        return query;
     }
 
     /** Comportamento do rate limiter em relação ao Redis. */
@@ -200,6 +206,20 @@ public class RateLimitProperties {
 
         public Policy getMediaUpload() {
             return mediaUpload;
+        }
+    }
+
+    /** Políticas de consultas por usuário autenticado (C5.1). */
+    public static class QueryPolicies {
+
+        /**
+         * Busca global por usuário. O app consulta com debounce de 350 ms e mínimo de 2 caracteres, então quem digita
+         * fica bem abaixo de uma busca por segundo em média; o limite contém varreduras automatizadas do catálogo.
+         */
+        private final Policy search = new Policy(60, Duration.ofSeconds(60));
+
+        public Policy getSearch() {
+            return search;
         }
     }
 

@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.hibernate.exception.ConstraintViolationException;
@@ -29,6 +30,7 @@ import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProductIdentifierRepository;
 import com.rewit.application.port.ProductPresenceRepository;
 import com.rewit.application.port.ProductRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.Place;
@@ -50,6 +52,7 @@ public class CatalogService {
     private final PlaceExternalReferenceRepository placeExternalReferenceRepository;
     private final TransactionOperations transactionOperations;
     private final AccountStatusPolicy accountStatusPolicy;
+    private final UserRepository userRepository;
 
     @Autowired
     public CatalogService(PlaceRepository placeRepository,
@@ -58,7 +61,8 @@ public class CatalogService {
                           ProductPresenceRepository productPresenceRepository,
                           PlaceExternalReferenceRepository placeExternalReferenceRepository,
                           PlatformTransactionManager transactionManager,
-                          AccountStatusPolicy accountStatusPolicy) {
+                          AccountStatusPolicy accountStatusPolicy,
+                          UserRepository userRepository) {
         this(
                 placeRepository,
                 productRepository,
@@ -66,7 +70,8 @@ public class CatalogService {
                 productPresenceRepository,
                 placeExternalReferenceRepository,
                 createTransactionOperations(transactionManager),
-                accountStatusPolicy
+                accountStatusPolicy,
+                userRepository
         );
     }
 
@@ -85,7 +90,8 @@ public class CatalogService {
                           ProductPresenceRepository productPresenceRepository,
                           PlaceExternalReferenceRepository placeExternalReferenceRepository,
                           TransactionOperations transactionOperations,
-                          AccountStatusPolicy accountStatusPolicy) {
+                          AccountStatusPolicy accountStatusPolicy,
+                          UserRepository userRepository) {
         this.placeRepository = Objects.requireNonNull(placeRepository, "placeRepository must not be null");
         this.productRepository = Objects.requireNonNull(productRepository, "productRepository must not be null");
         this.productIdentifierRepository = Objects.requireNonNull(productIdentifierRepository, "productIdentifierRepository must not be null");
@@ -93,6 +99,7 @@ public class CatalogService {
         this.placeExternalReferenceRepository = Objects.requireNonNull(placeExternalReferenceRepository, "placeExternalReferenceRepository must not be null");
         this.transactionOperations = transactionOperations != null ? transactionOperations : TransactionOperations.withoutTransaction();
         this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "accountStatusPolicy must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
     }
 
     public CatalogService(PlaceRepository placeRepository,
@@ -100,7 +107,8 @@ public class CatalogService {
                           ProductIdentifierRepository productIdentifierRepository,
                           ProductPresenceRepository productPresenceRepository,
                           PlaceExternalReferenceRepository placeExternalReferenceRepository,
-                          AccountStatusPolicy accountStatusPolicy) {
+                          AccountStatusPolicy accountStatusPolicy,
+                          UserRepository userRepository) {
         this(
                 placeRepository,
                 productRepository,
@@ -108,7 +116,8 @@ public class CatalogService {
                 productPresenceRepository,
                 placeExternalReferenceRepository,
                 TransactionOperations.withoutTransaction(),
-                accountStatusPolicy
+                accountStatusPolicy,
+                userRepository
         );
     }
 
@@ -141,12 +150,28 @@ public class CatalogService {
         return addProductIdentifier(cmd);
     }
 
-    /** A presença é atribuída sempre ao ator, nunca a um usuário informado no comando. */
+    /**
+     * A presença é atribuída sempre ao ator, nunca a um usuário informado no comando. Se a presença já existia, a
+     * resposta traz quem a relatou primeiro; quando essa conta está excluída, o relato sai sem autor (C2: a
+     * identidade de uma conta DELETED não aparece em leituras públicas), sem alterar o que está gravado.
+     */
     @Transactional
     public ProductPresence associateProductToPlace(UUID actorUserId, AssociateProductPresenceCommand cmd) {
         requireOperationalActor(actorUserId);
         Objects.requireNonNull(cmd, "AssociateProductPresenceCommand cannot be null");
-        return associateProductToPlace(new AssociateProductPresenceCommand(cmd.productId(), cmd.placeId(), actorUserId));
+        ProductPresence presence = associateProductToPlace(
+                new AssociateProductPresenceCommand(cmd.productId(), cmd.placeId(), actorUserId));
+        return withoutDeletedReporter(presence);
+    }
+
+    private ProductPresence withoutDeletedReporter(ProductPresence presence) {
+        UUID reporter = presence.getReportedByUserId();
+        if (reporter == null || !userRepository.findDeletedUserIds(Set.of(reporter)).contains(reporter)) {
+            return presence;
+        }
+        // Projeção para a resposta, não persistida
+        return new ProductPresence(presence.getId(), presence.getProductId(), presence.getPlaceId(), null,
+                presence.getVerificationStatus(), presence.getStatus());
     }
 
     private void requireOperationalActor(UUID actorUserId) {

@@ -132,6 +132,11 @@ rewit:
       media-upload:
         limit: 10
         window: PT60S
+    query:
+      # Buscas por usuário (GET /api/v1/search); o app consulta com debounce de 350 ms
+      search:
+        limit: ${RATE_LIMIT_SEARCH_LIMIT:60}
+        window: ${RATE_LIMIT_SEARCH_WINDOW:PT60S}
   # GC de storage (Step 28.5): desligado por padrão. Ao ligar, defina também, sem defaults:
   # interval-ms, page-size, max-pages, max-candidates, max-deletes, grace-period e max-duration
   # (ex.: REWIT_STORAGE_GC_GRACE_PERIOD). O modo destrutivo exige STORAGE_GC_DRY_RUN=false explícito.

@@ -11,6 +11,7 @@ import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProductIdentifierRepository;
 import com.rewit.application.port.ProductPresenceRepository;
 import com.rewit.application.port.ProductRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
@@ -57,6 +58,9 @@ class CatalogServiceUnitTest {
     @Mock
     private AccountStatusPolicy accountStatusPolicy;
 
+    @Mock
+    private UserRepository userRepository;
+
     private CatalogService catalogService;
 
     @BeforeEach
@@ -67,7 +71,8 @@ class CatalogServiceUnitTest {
                 productIdentifierRepository,
                 productPresenceRepository,
                 placeExternalReferenceRepository,
-                accountStatusPolicy
+                accountStatusPolicy,
+                userRepository
         );
     }
 
