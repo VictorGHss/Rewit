@@ -23,6 +23,7 @@ import 'package:rewit_mobile/features/product/domain/entities/products_in_place_
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 
 class MockAuthRepo implements AuthRepository {
@@ -121,7 +122,16 @@ class MockFeedRepo implements FeedRepository {
   Future<List<ReviewMediaItem>> getReviewMedia(String reviewId) async {
     return [];
   }
+
+  @override
+  Future<FeedReview> updateReview(String reviewId, UpdateReviewInput input) async {
+    return sampleReview;
+  }
+
+  @override
+  Future<void> deleteReview(String reviewId) async {}
 }
+
 
 class MockDiscussionRepo implements DiscussionRepository {
   @override

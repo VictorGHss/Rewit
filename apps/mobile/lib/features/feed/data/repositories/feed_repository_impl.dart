@@ -7,6 +7,7 @@ import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.d
 import 'package:rewit_mobile/features/review_detail/data/models/review_media_dto.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
 
 /// Implementação de [FeedRepository] integrando com a API REST do Rewit.
 class FeedRepositoryImpl implements FeedRepository {
@@ -73,5 +74,26 @@ class FeedRepositoryImpl implements FeedRepository {
     return jsonList
         .map((item) => ReviewMediaDto.fromJson(item as Map<String, dynamic>).toEntity())
         .toList();
+  }
+
+  @override
+  Future<FeedReview> updateReview(String reviewId, UpdateReviewInput input) async {
+    final response = await _httpClient.patch(
+      ApiEndpoints.reviewDetail(reviewId),
+      body: input.toJson(),
+      requiresAuth: true,
+    );
+
+    final Map<String, dynamic> jsonMap = jsonDecode(response.body) as Map<String, dynamic>;
+    final dto = FeedReviewDto.fromJson(jsonMap);
+    return dto.toEntity();
+  }
+
+  @override
+  Future<void> deleteReview(String reviewId) async {
+    await _httpClient.delete(
+      ApiEndpoints.reviewDetail(reviewId),
+      requiresAuth: true,
+    );
   }
 }

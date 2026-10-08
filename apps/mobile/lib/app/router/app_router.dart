@@ -24,6 +24,7 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
+import 'package:rewit_mobile/features/review_detail/presentation/screens/review_edit_screen.dart';
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
@@ -42,6 +43,7 @@ class AppRouter {
   static const String profile = '/profile';
   static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
+  static const String reviewEdit = '/review/edit';
   static const String accountSettings = '/settings';
   static const String scanner = '/scanner';
 
@@ -152,6 +154,7 @@ class AppRouter {
               feedRepository: feedRepository,
               mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
+              feedNotifier: feedNotifier,
               currentUserId: currentUserId,
             ),
             settings: settings,
@@ -163,6 +166,7 @@ class AppRouter {
               feedRepository: feedRepository,
               mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
+              feedNotifier: feedNotifier,
               currentUserId: currentUserId,
             ),
             settings: settings,
@@ -175,6 +179,25 @@ class AppRouter {
           ),
           settings: settings,
         );
+
+      case reviewEdit:
+        final args = settings.arguments;
+        if (args is FeedReview && feedRepository != null) {
+          return MaterialPageRoute(
+            builder: (context) => ReviewEditScreen(
+              review: args,
+              feedRepository: feedRepository!,
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => const Scaffold(
+            body: Center(child: Text('Avaliação para edição não fornecida.')),
+          ),
+          settings: settings,
+        );
+
 
       case search:
         return MaterialPageRoute(

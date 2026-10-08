@@ -7,6 +7,7 @@ import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart
 import 'package:rewit_mobile/features/feed/presentation/state/feed_state.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
 
 
 class FakeFeedRepository implements FeedRepository {
@@ -88,7 +89,16 @@ class FakeFeedRepository implements FeedRepository {
   Future<List<ReviewMediaItem>> getReviewMedia(String reviewId) async {
     return [];
   }
+
+  @override
+  Future<FeedReview> updateReview(String reviewId, UpdateReviewInput input) async {
+    return _makeReview(reviewId);
+  }
+
+  @override
+  Future<void> deleteReview(String reviewId) async {}
 }
+
 
 
 void main() {
@@ -331,6 +341,43 @@ void main() {
       final review = success.reviews.firstWhere((r) => r.id == 'rev-1');
       expect(review.experienceText, 'Texto atualizado na tela de detalhe');
       expect(review.helpfulCount, 42);
+    });
+
+    test('removeReview remove avaliação da lista in-place preservando as demais', () async {
+      await notifier.loadInitial();
+      expect((notifier.state as FeedSuccess).reviews.length, 2);
+
+      notifier.removeReview('rev-1');
+
+      final success = notifier.state as FeedSuccess;
+      expect(success.reviews.length, 1);
+      expect(success.reviews.first.id, 'rev-2');
+    });
+
+    test('removeReview transiciona para FeedEmpty quando o feed continha apenas o item excluído', () async {
+      repository.page0Response = FeedPage(
+        items: [repository._makeReview('rev-sole')],
+        page: 0,
+        size: 10,
+        windowSize: 1,
+        totalPages: 1,
+      );
+      await notifier.loadInitial();
+      expect(notifier.state, isA<FeedSuccess>());
+
+      notifier.removeReview('rev-sole');
+
+      expect(notifier.state, isA<FeedEmpty>());
+    });
+
+    test('removeReview não altera estado quando o identificador não existe na lista', () async {
+      await notifier.loadInitial();
+      final beforeReviews = (notifier.state as FeedSuccess).reviews;
+
+      notifier.removeReview('rev-inexistente');
+
+      final afterReviews = (notifier.state as FeedSuccess).reviews;
+      expect(afterReviews.length, beforeReviews.length);
     });
   });
 }

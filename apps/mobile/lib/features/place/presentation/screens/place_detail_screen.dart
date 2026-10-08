@@ -114,12 +114,16 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
     }
   }
 
-  void _navigateToReviewDetail(FeedReview review) {
-    Navigator.of(context).pushNamed(
+  Future<void> _navigateToReviewDetail(FeedReview review) async {
+    final result = await Navigator.of(context).pushNamed(
       AppRouter.reviewDetail,
       arguments: review,
     );
+    if (result != null && mounted) {
+      _notifier.refresh();
+    }
   }
+
 
   void _navigateToAuthorProfile(String authorId) {
     Navigator.of(context).pushNamed(

@@ -6,8 +6,10 @@ import 'package:rewit_mobile/features/discussions/presentation/state/discussion_
 import 'package:rewit_mobile/features/discussions/presentation/widgets/discussions_section.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
+import 'package:rewit_mobile/features/review_detail/presentation/screens/review_edit_screen.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/widgets/authenticated_image.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
@@ -20,6 +22,7 @@ class ReviewDetailScreen extends StatefulWidget {
   final ReviewMediaRepository? mediaRepository;
   final DiscussionRepository? discussionRepository;
   final DiscussionNotifier? discussionNotifier;
+  final FeedNotifier? feedNotifier;
   final String? currentUserId;
   final bool? isAuthor;
 
@@ -31,9 +34,11 @@ class ReviewDetailScreen extends StatefulWidget {
     this.mediaRepository,
     this.discussionRepository,
     this.discussionNotifier,
+    this.feedNotifier,
     this.currentUserId,
     this.isAuthor,
   });
+
 
   @override
   State<ReviewDetailScreen> createState() => _ReviewDetailScreenState();
@@ -53,6 +58,10 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   // Interação com Helpful
   bool _isTogglingHelpful = false;
 
+  // Ciclo de vida da própria avaliação (C5.7)
+  bool _isDeleting = false;
+  bool _wasEdited = false;
+
   // Notifier de Discussões
   DiscussionNotifier? _discussionNotifier;
   bool _ownsNotifier = false;
@@ -61,8 +70,11 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     if (widget.isAuthor != null) return widget.isAuthor!;
     final authorId = _review?.author.id;
     if (authorId == null || authorId.isEmpty) return false;
-    return widget.currentUserId == authorId;
+    final currentUserId = widget.currentUserId;
+    if (currentUserId == null || currentUserId.isEmpty) return false;
+    return currentUserId == authorId;
   }
+
 
   @override
   void initState() {
@@ -323,6 +335,121 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     }
   }
 
+  Future<void> _navigateToEdit() async {
+    final review = _review;
+    if (review == null || widget.feedRepository == null || _isDeleting) return;
+
+    final updatedReview = await Navigator.of(context).push<FeedReview>(
+      MaterialPageRoute(
+        builder: (context) => ReviewEditScreen(
+          review: review,
+          feedRepository: widget.feedRepository!,
+        ),
+      ),
+    );
+
+    if (updatedReview != null && mounted) {
+      setState(() {
+        _review = updatedReview.copyWith(
+          mediaItems: _mediaItems.isNotEmpty ? _mediaItems : updatedReview.mediaItems,
+        );
+        _wasEdited = true;
+      });
+      widget.feedNotifier?.updateReview(_review!);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Avaliação atualizada com sucesso!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmAndDeleteReview() async {
+    if (_isDeleting || widget.feedRepository == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir Avaliação'),
+        content: const Text(
+          'Deseja realmente excluir esta avaliação? Esta ação não pode ser desfeita e a publicação será removida permanentemente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('confirm_delete_review_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isDeleting = true;
+    });
+
+    try {
+      await widget.feedRepository!.deleteReview(widget.reviewId);
+
+      if (mounted) {
+        widget.feedNotifier?.removeReview(widget.reviewId);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Avaliação excluída com sucesso.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.of(context).pop({'deleted': true, 'reviewId': widget.reviewId});
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Falha ao excluir avaliação: ${e.detail}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } on NetworkException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Erro inesperado ao excluir avaliação.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
+  }
+
   String _formatDate(DateTime date) {
     return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} às ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
@@ -356,21 +483,55 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     final review = _review!;
     final author = review.author;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Avaliação'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.share_outlined),
-            tooltip: 'Compartilhar',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Compartilhamento em breve.')),
-              );
-            },
+    return PopScope(
+      canPop: !_isDeleting,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (!_isDeleting) {
+          Navigator.of(context).pop(_wasEdited ? _review : null);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: BackButton(
+            onPressed: _isDeleting
+                ? null
+                : () => Navigator.of(context).pop(_wasEdited ? _review : null),
           ),
-        ],
-      ),
+          title: const Text('Avaliação'),
+          actions: [
+            if (_isAuthor) ...[
+              IconButton(
+                key: const Key('review_detail_edit_button'),
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Editar Avaliação',
+                onPressed: _isDeleting ? null : _navigateToEdit,
+              ),
+              IconButton(
+                key: const Key('review_detail_delete_button'),
+                icon: _isDeleting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.delete_outline),
+                tooltip: 'Excluir Avaliação',
+                onPressed: _isDeleting ? null : _confirmAndDeleteReview,
+              ),
+            ],
+            IconButton(
+              icon: const Icon(Icons.share_outlined),
+              tooltip: 'Compartilhar',
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Compartilhamento em breve.')),
+                );
+              },
+            ),
+          ],
+        ),
+
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -829,6 +990,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 }

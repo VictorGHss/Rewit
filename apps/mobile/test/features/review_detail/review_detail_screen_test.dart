@@ -1,18 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
+import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_state.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 
 class FakeFullFeedRepo implements FeedRepository {
   bool helpfulToggled = false;
   int currentHelpfulCount = 5;
   bool isHelpful = false;
+  bool deleteCalled = false;
+  String? deletedReviewId;
+  bool shouldThrowOnDelete = false;
+  FeedReview? reviewToReturnOnUpdate;
+
 
   final FeedReview sampleReview = FeedReview(
     id: 'rev-screen-1',
@@ -78,7 +87,29 @@ class FakeFullFeedRepo implements FeedRepository {
       ),
     ];
   }
+
+  @override
+  Future<FeedReview> updateReview(String reviewId, UpdateReviewInput input) async {
+    return reviewToReturnOnUpdate ?? sampleReview;
+  }
+
+  @override
+  Future<void> deleteReview(String reviewId) async {
+    deleteCalled = true;
+    deletedReviewId = reviewId;
+    if (shouldThrowOnDelete) {
+      throw const ApiException(ProblemDetail(
+        type: 'about:blank',
+        title: 'Acesso Proibido',
+        status: 403,
+        detail: 'Apenas o autor pode excluir a avaliação',
+        code: 'REVIEW_NOT_OWNED',
+      ));
+    }
+  }
 }
+
+
 
 class FakeDiscussionRepoForDetail implements DiscussionRepository {
   @override
@@ -228,6 +259,237 @@ void main() {
       expect(feedRepo.helpfulToggled, isTrue);
       expect(find.text('6 pessoas acharam útil'), findsOneWidget);
       expect(find.text('Útil'), findsWidgets);
+    });
+
+    testWidgets('botões de editar e excluir aparecem quando usuário autenticado é o autor', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: feedRepo.sampleReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            currentUserId: 'usr-1',
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('review_detail_edit_button')), findsOneWidget);
+      expect(find.byKey(const Key('review_detail_delete_button')), findsOneWidget);
+    });
+
+    testWidgets('botões de editar e excluir NÃO aparecem para outro usuário', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: feedRepo.sampleReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            currentUserId: 'another-user',
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('review_detail_edit_button')), findsNothing);
+      expect(find.byKey(const Key('review_detail_delete_button')), findsNothing);
+    });
+
+    testWidgets('botões de editar e excluir NÃO aparecem para avaliação anônima sem ID público', (tester) async {
+      final anonReview = feedRepo.sampleReview.copyWith(
+        isAnonymous: true,
+        author: const FeedAuthor(
+          id: null,
+          displayName: 'Anônimo',
+          isAnonymous: true,
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: anonReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            currentUserId: 'usr-1',
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('review_detail_edit_button')), findsNothing);
+      expect(find.byKey(const Key('review_detail_delete_button')), findsNothing);
+    });
+
+    testWidgets('excluir avaliação: cancelar no diálogo não chama deleteReview', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: feedRepo.sampleReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            currentUserId: 'usr-1',
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      // Clica em excluir
+      await tester.tap(find.byKey(const Key('review_detail_delete_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Excluir Avaliação'), findsOneWidget);
+
+      // Clica em cancelar
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Excluir Avaliação'), findsNothing);
+      expect(feedRepo.deleteCalled, isFalse);
+    });
+
+    testWidgets('excluir avaliação: confirmar chama deleteReview, atualiza FeedNotifier e fecha tela', (tester) async {
+      final feedNotifier = FeedNotifier(feedRepository: feedRepo);
+      await feedNotifier.loadInitial();
+      expect(feedNotifier.state, isA<FeedSuccess>());
+
+      dynamic popResult;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: ElevatedButton(
+                onPressed: () async {
+                  popResult = await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ReviewDetailScreen(
+                        reviewId: 'rev-screen-1',
+                        initialReview: feedRepo.sampleReview,
+                        feedRepository: feedRepo,
+                        discussionRepository: discussionRepo,
+                        feedNotifier: feedNotifier,
+                        currentUserId: 'usr-1',
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Abrir Detalhe'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Abrir Detalhe'));
+      await tester.pumpAndSettle();
+
+      // Clica em excluir
+      await tester.tap(find.byKey(const Key('review_detail_delete_button')));
+      await tester.pumpAndSettle();
+
+      // Confirma no diálogo
+      await tester.tap(find.byKey(const Key('confirm_delete_review_button')));
+      await tester.pumpAndSettle();
+
+      expect(feedRepo.deleteCalled, isTrue);
+      expect(feedRepo.deletedReviewId, 'rev-screen-1');
+      expect(popResult, {'deleted': true, 'reviewId': 'rev-screen-1'});
+      expect(feedNotifier.state, isA<FeedEmpty>());
+    });
+
+    testWidgets('excluir avaliação: erro do backend exibe SnackBar e não fecha a tela', (tester) async {
+      feedRepo.shouldThrowOnDelete = true;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: feedRepo.sampleReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            currentUserId: 'usr-1',
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      // Clica em excluir
+      await tester.tap(find.byKey(const Key('review_detail_delete_button')));
+      await tester.pumpAndSettle();
+
+      // Confirma no diálogo
+      await tester.tap(find.byKey(const Key('confirm_delete_review_button')));
+      await tester.pumpAndSettle();
+
+      expect(feedRepo.deleteCalled, isTrue);
+      expect(find.text('Falha ao excluir avaliação: Apenas o autor pode excluir a avaliação'), findsOneWidget);
+
+      // Tela continua aberta com o título
+      expect(find.text('Avaliação'), findsOneWidget);
+    });
+
+    testWidgets('editar avaliação: abre ReviewEditScreen e atualiza dados exibidos na tela de detalhe após sucesso', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      feedRepo.reviewToReturnOnUpdate = feedRepo.sampleReview.copyWith(
+        experienceText: 'Texto editado e confirmado com sucesso!',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: feedRepo.sampleReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            currentUserId: 'usr-1',
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      // Clica em Editar
+      await tester.tap(find.byKey(const Key('review_detail_edit_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Editar Avaliação'), findsOneWidget);
+
+      // Clica em Salvar
+      await tester.tap(find.byKey(const Key('submit_edit_button')));
+      await tester.pumpAndSettle();
+
+      // Voltou para a tela de detalhe com o texto atualizado
+      expect(find.text('Texto editado e confirmado com sucesso!'), findsOneWidget);
+      expect(find.text('Avaliação atualizada com sucesso!'), findsOneWidget);
     });
   });
 }

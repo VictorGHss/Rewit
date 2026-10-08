@@ -215,4 +215,20 @@ class FeedNotifier extends ChangeNotifier {
     _state = currentState.copyWith(reviews: updatedList);
     notifyListeners();
   }
+
+  /// Remove uma avaliação localmente sem recarregar o feed inteiro.
+  void removeReview(String reviewId) {
+    final currentState = _state;
+    if (currentState is! FeedSuccess) return;
+
+    final updatedList = currentState.reviews.where((r) => r.id != reviewId).toList();
+    if (updatedList.length == currentState.reviews.length) return;
+
+    if (updatedList.isEmpty) {
+      _state = const FeedEmpty();
+    } else {
+      _state = currentState.copyWith(reviews: updatedList);
+    }
+    notifyListeners();
+  }
 }

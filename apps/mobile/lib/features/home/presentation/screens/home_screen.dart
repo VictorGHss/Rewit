@@ -194,8 +194,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
                 if (result is FeedReview) {
                   widget.feedNotifier?.updateReview(result);
+                } else if (result is Map && result['deleted'] == true) {
+                  final id = result['reviewId'] as String? ?? review.id;
+                  widget.feedNotifier?.removeReview(id);
                 }
               },
+
               onAuthorTap: (authorId) {
                 Navigator.of(context).pushNamed(
                   AppRouter.profile,
@@ -303,13 +307,20 @@ class _HomeScreenState extends State<HomeScreen> {
             mediaRepository: widget.mediaRepository,
             mediaPickerService: widget.mediaPickerService,
             searchRepository: widget.searchRepository,
-            onReviewCreated: (createdReview) {
+            onReviewCreated: (createdReview) async {
               widget.feedNotifier?.refresh();
-              Navigator.of(context).pushNamed(
+              final result = await Navigator.of(context).pushNamed(
                 AppRouter.reviewDetail,
                 arguments: createdReview,
               );
+              if (result is FeedReview) {
+                widget.feedNotifier?.updateReview(result);
+              } else if (result is Map && result['deleted'] == true) {
+                final id = result['reviewId'] as String? ?? createdReview.id;
+                widget.feedNotifier?.removeReview(id);
+              }
             },
+
           ),
           ProfilePlaceholderScreen(
             authNotifier: widget.authNotifier,
