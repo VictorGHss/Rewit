@@ -24,6 +24,7 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
+import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
@@ -42,6 +43,7 @@ class AppRouter {
   static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
   static const String accountSettings = '/settings';
+  static const String scanner = '/scanner';
 
   final AuthNotifier authNotifier;
   final FeedNotifier? feedNotifier;
@@ -300,6 +302,14 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => AccountSettingsScreen(
             authNotifier: authNotifier,
+          ),
+          settings: settings,
+        );
+
+      case scanner:
+        return MaterialPageRoute(
+          builder: (context) => ScannerScreen(
+            productRepository: productRepository,
           ),
           settings: settings,
         );

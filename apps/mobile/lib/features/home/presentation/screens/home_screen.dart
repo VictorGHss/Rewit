@@ -321,6 +321,13 @@ class _HomeScreenState extends State<HomeScreen> {
           appBar: AppBar(
             title: const Text('Rewit'),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: 'Escanear Código',
+                onPressed: () {
+                  Navigator.of(context).pushNamed(AppRouter.scanner);
+                },
+              ),
               if (_notificationsNotifier != null)
                 ListenableBuilder(
                   listenable: _notificationsNotifier!,
