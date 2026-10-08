@@ -20,6 +20,7 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   image_picker: ^1.2.4
   mobile_scanner: ^7.4.2
+  geolocator: ^14.1.1
 
 dev_dependencies:
   flutter_test:

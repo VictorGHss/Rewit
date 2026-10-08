@@ -10,6 +10,8 @@
 	<string>Rewit</string>
 	<key>NSCameraUsageDescription</key>
 	<string>A câmera é usada para escanear códigos de barras de produtos e QR codes dentro do Rewit.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>O Rewit usa sua localização apenas quando você solicita a validação de presença em um local.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

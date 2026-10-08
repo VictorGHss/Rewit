@@ -3,8 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_notifier.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
@@ -60,12 +62,37 @@ class MockSearchRepository implements SearchRepository {
   }
 }
 
+class MockLocationService implements LocationService {
+  LocationResult resultToReturn = const LocationSuccess(
+    DeviceLocation(
+      latitude: -23.5505,
+      longitude: -46.6333,
+      accuracyMeters: 12.0,
+    ),
+  );
+  int callCount = 0;
+  bool openSettingsCalled = false;
+
+  @override
+  Future<LocationResult> getCurrentLocation({Duration timeout = const Duration(seconds: 10)}) async {
+    callCount++;
+    return resultToReturn;
+  }
+
+  @override
+  Future<bool> openAppSettings() async {
+    openSettingsCalled = true;
+    return true;
+  }
+}
+
 void main() {
   const validTargetId = '11111111-1111-1111-1111-111111111111';
 
   Widget buildSubject({
     required ReviewCreationRepository repository,
     SearchRepository? searchRepository,
+    LocationService? locationService,
     ReviewCreateNotifier? notifier,
     ValueChanged<FeedReview>? onReviewCreated,
     String? initialTargetId,
@@ -78,6 +105,7 @@ void main() {
       home: ReviewCreateScreen(
         repository: repository,
         searchRepository: searchRepository,
+        locationService: locationService,
         notifier: notifier,
         onReviewCreated: onReviewCreated,
         initialTargetId: initialTargetId,
@@ -390,6 +418,265 @@ void main() {
 
       // Não deve exibir o input de busca enquanto estiver selecionado
       expect(find.text('O que você quer avaliar? *'), findsNothing);
+    });
+
+    testWidgets('exibe card de check-in com estado inicial Sem check-in e botão Validar minha presença sem campos manuais de latitude/longitude', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      expect(find.text('Presença e Check-in no Local (Opcional)'), findsOneWidget);
+      expect(find.text('Sem check-in'), findsOneWidget);
+      expect(find.byKey(const Key('validate_presence_button')), findsOneWidget);
+
+      // Garante que campos manuais de latitude e longitude não existem na tela
+      expect(find.text('Latitude (-90 a 90)'), findsNothing);
+      expect(find.text('Longitude (-180 a 180)'), findsNothing);
+    });
+
+    testWidgets('clicar em Validar minha presença exibe diálogo de consentimento de privacidade e cancelar descarta', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+
+      // Diálogo de consentimento exibido
+      expect(find.text('Validação de Presença'), findsOneWidget);
+      expect(
+        find.text('Para validar que você está no local, o Rewit precisa usar sua localização atual por alguns instantes.\n\nA localização não será acompanhada em segundo plano.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('location_consent_cancel_button')), findsOneWidget);
+      expect(find.byKey(const Key('location_consent_confirm_button')), findsOneWidget);
+
+      // Clica em Cancelar
+      await tester.tap(find.byKey(const Key('location_consent_cancel_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Validação de Presença'), findsNothing);
+      expect(locService.callCount, 0);
+      expect(find.text('Sem check-in'), findsOneWidget);
+    });
+
+    testWidgets('confirmar consentimento captura localização e exibe Presença capturada com precisão sem exibir coordenadas brutas', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      expect(locService.callCount, 1);
+      expect(find.text('Presença capturada'), findsOneWidget);
+      expect(find.text('Precisão aproximada: 12 m'), findsOneWidget);
+
+      // Nunca expor coordenadas brutas (lat/long) na UI
+      expect(find.textContaining('-23.5505'), findsNothing);
+      expect(find.textContaining('-46.6333'), findsNothing);
+
+      // Botões de ação pós-captura
+      expect(find.byKey(const Key('update_location_button')), findsOneWidget);
+      expect(find.byKey(const Key('remove_checkin_button')), findsOneWidget);
+    });
+
+    testWidgets('exibe aviso de localização aproximada quando precisão > 100m', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      locService.resultToReturn = const LocationSuccess(
+        DeviceLocation(
+          latitude: -23.5505,
+          longitude: -46.6333,
+          accuracyMeters: 140.0,
+        ),
+      );
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Presença capturada'), findsOneWidget);
+      expect(find.text('Precisão aproximada: 140 m'), findsOneWidget);
+      expect(
+        find.text('Localização aproximada concedida. A precisão pode não ser suficiente para validar presença no local.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('botão Atualizar localização dispara nova captura', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      // Primeira captura via consentimento
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+      expect(locService.callCount, 1);
+
+      // Atualiza localização diretamente
+      await tester.tap(find.byKey(const Key('update_location_button')));
+      await tester.pumpAndSettle();
+      expect(locService.callCount, 2);
+    });
+
+    testWidgets('botão Remover check-in descarta coordenadas e retorna para Sem check-in', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Presença capturada'), findsOneWidget);
+
+      // Clica em Remover check-in
+      await tester.tap(find.byKey(const Key('remove_checkin_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sem check-in'), findsOneWidget);
+      expect(find.byKey(const Key('validate_presence_button')), findsOneWidget);
+    });
+
+    testWidgets('exibe mensagem de erro e botão Tentar novamente quando captura falha', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      locService.resultToReturn = const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'O serviço de localização está desativado no aparelho.',
+      );
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('O serviço de localização está desativado no aparelho.'), findsOneWidget);
+      expect(find.byKey(const Key('retry_location_button')), findsOneWidget);
+      expect(find.byKey(const Key('open_settings_button')), findsNothing);
+
+      // Testa Tentar novamente após serviço reativado
+      locService.resultToReturn = const LocationSuccess(
+        DeviceLocation(latitude: -23.5505, longitude: -46.6333, accuracyMeters: 10.0),
+      );
+      await tester.tap(find.byKey(const Key('retry_location_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Presença capturada'), findsOneWidget);
+    });
+
+    testWidgets('exibe botão Abrir configurações quando permissão for negada permanentemente', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      locService.resultToReturn = const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão de localização permanentemente negada. Ative nas configurações do dispositivo.',
+      );
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Permissão de localização permanentemente negada. Ative nas configurações do dispositivo.'), findsOneWidget);
+      expect(find.byKey(const Key('open_settings_button')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('open_settings_button')));
+      await tester.pumpAndSettle();
+
+      expect(locService.openSettingsCalled, isTrue);
+    });
+
+    testWidgets('submissão com check-in envia coordenadas capturadas no repositório', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      // Captura localização
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      // Preenche alvo
+      final targetField = find.widgetWithText(TextFormField, 'Identificador do Alvo (UUID) *');
+      await tester.enterText(targetField, validTargetId);
+
+      // Publica
+      await tester.tap(find.text('Publicar Avaliação'));
+      await tester.pumpAndSettle();
+
+      expect(repository.capturedInput?.userLatitude, -23.5505);
+      expect(repository.capturedInput?.userLongitude, -46.6333);
+      expect(repository.capturedInput?.locationAccuracyMeters, 12.0);
     });
   });
 }

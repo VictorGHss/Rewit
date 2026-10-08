@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_notifier.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_state.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
@@ -37,6 +39,31 @@ class FakeReviewCreationRepository implements ReviewCreationRepository {
               .toList(),
         );
   }
+}
+
+class FakeLocationService implements LocationService {
+  LocationResult resultToReturn = const LocationSuccess(
+    DeviceLocation(
+      latitude: -23.5505,
+      longitude: -46.6333,
+      accuracyMeters: 15.0,
+    ),
+  );
+  bool openSettingsResult = true;
+  int callCount = 0;
+  Duration? simulatedDelay;
+
+  @override
+  Future<LocationResult> getCurrentLocation({Duration timeout = const Duration(seconds: 10)}) async {
+    callCount++;
+    if (simulatedDelay != null) {
+      await Future.delayed(simulatedDelay!);
+    }
+    return resultToReturn;
+  }
+
+  @override
+  Future<bool> openAppSettings() async => openSettingsResult;
 }
 
 void main() {
@@ -309,6 +336,136 @@ void main() {
         expect(notifier.targets.first.rateableTargetId, '');
         expect(notifier.experienceText, isNull);
         expect(notifier.isAnonymous, isFalse);
+      });
+    });
+
+    group('Location Check-in Tests (C5.10)', () {
+      late FakeReviewCreationRepository locRepo;
+      late FakeLocationService locService;
+      late ReviewCreateNotifier locNotifier;
+
+      setUp(() {
+        locRepo = FakeReviewCreationRepository();
+        locService = FakeLocationService();
+        locNotifier = ReviewCreateNotifier(
+          repository: locRepo,
+          locationService: locService,
+        );
+      });
+
+      test('estado inicial de localização é idle sem coordenadas', () {
+        expect(locNotifier.locationStatus, LocationCaptureStatus.idle);
+        expect(locNotifier.hasLocation, isFalse);
+        expect(locNotifier.isRequestingLocation, isFalse);
+        expect(locNotifier.userLatitude, isNull);
+        expect(locNotifier.userLongitude, isNull);
+        expect(locNotifier.locationAccuracyMeters, isNull);
+        expect(locNotifier.locationErrorMessage, isNull);
+      });
+
+      test('captureLocation com sucesso define coordenadas e status captured', () async {
+        final success = await locNotifier.captureLocation();
+
+        expect(success, isTrue);
+        expect(locNotifier.locationStatus, LocationCaptureStatus.captured);
+        expect(locNotifier.hasLocation, isTrue);
+        expect(locNotifier.userLatitude, -23.5505);
+        expect(locNotifier.userLongitude, -46.6333);
+        expect(locNotifier.locationAccuracyMeters, 15.0);
+        expect(locNotifier.isApproximateLocation, isFalse);
+        expect(locNotifier.locationErrorMessage, isNull);
+        expect(locNotifier.locationFailureReason, isNull);
+      });
+
+      test('captureLocation com precisão > 100m sinaliza isApproximateLocation', () async {
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(
+            latitude: -23.5505,
+            longitude: -46.6333,
+            accuracyMeters: 120.0,
+          ),
+        );
+
+        final success = await locNotifier.captureLocation();
+
+        expect(success, isTrue);
+        expect(locNotifier.locationStatus, LocationCaptureStatus.captured);
+        expect(locNotifier.isApproximateLocation, isTrue);
+        expect(locNotifier.locationAccuracyMeters, 120.0);
+      });
+
+      test('captureLocation com falha define status error e motivo estruturado', () async {
+        locService.resultToReturn = const LocationFailure(
+          reason: LocationFailureReason.permissionDenied,
+          message: 'Permissão de localização negada.',
+        );
+
+        final success = await locNotifier.captureLocation();
+
+        expect(success, isFalse);
+        expect(locNotifier.locationStatus, LocationCaptureStatus.error);
+        expect(locNotifier.locationFailureReason, LocationFailureReason.permissionDenied);
+        expect(locNotifier.locationErrorMessage, 'Permissão de localização negada.');
+        expect(locNotifier.hasLocation, isFalse);
+      });
+
+      test('não permite capturas simultâneas concorrentes', () async {
+        locService.simulatedDelay = const Duration(milliseconds: 50);
+
+        final future1 = locNotifier.captureLocation();
+        expect(locNotifier.isRequestingLocation, isTrue);
+
+        final future2 = locNotifier.captureLocation();
+        final success2 = await future2;
+        final success1 = await future1;
+
+        expect(success2, isFalse);
+        expect(success1, isTrue);
+        expect(locService.callCount, 1);
+      });
+
+      test('clearCoordinates remove dados e restaura status para idle', () async {
+        await locNotifier.captureLocation();
+        expect(locNotifier.hasLocation, isTrue);
+
+        locNotifier.clearCoordinates();
+
+        expect(locNotifier.locationStatus, LocationCaptureStatus.idle);
+        expect(locNotifier.hasLocation, isFalse);
+        expect(locNotifier.userLatitude, isNull);
+        expect(locNotifier.userLongitude, isNull);
+        expect(locNotifier.locationAccuracyMeters, isNull);
+      });
+
+      test('submit envia coordenadas no payload quando check-in é realizado', () async {
+        locNotifier.updateTarget(0, targetId: validTargetId1);
+        await locNotifier.captureLocation();
+
+        final submitted = await locNotifier.submit();
+
+        expect(submitted, isTrue);
+        expect(locRepo.capturedInput?.userLatitude, -23.5505);
+        expect(locRepo.capturedInput?.userLongitude, -46.6333);
+        expect(locRepo.capturedInput?.locationAccuracyMeters, 15.0);
+      });
+
+      test('submit envia coordenadas nulas quando nenhum check-in foi realizado', () async {
+        locNotifier.updateTarget(0, targetId: validTargetId1);
+
+        final submitted = await locNotifier.submit();
+
+        expect(submitted, isTrue);
+        expect(locRepo.capturedInput?.userLatitude, isNull);
+        expect(locRepo.capturedInput?.userLongitude, isNull);
+        expect(locRepo.capturedInput?.locationAccuracyMeters, isNull);
+      });
+
+      test('openAppSettings repassa para o LocationService', () async {
+        locService.openSettingsResult = true;
+        expect(await locNotifier.openAppSettings(), isTrue);
+
+        locService.openSettingsResult = false;
+        expect(await locNotifier.openAppSettings(), isFalse);
       });
     });
   });

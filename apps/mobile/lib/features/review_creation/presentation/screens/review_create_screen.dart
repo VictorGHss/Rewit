@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
@@ -10,12 +11,13 @@ import '../state/review_create_state.dart';
 import '../widgets/review_media_picker_section.dart';
 import '../widgets/target_item_input_widget.dart';
 
-/// Tela completa de criação de publicações de avaliação multi-alvo (Step 11.0 / Step 25.3 / C4 Mídia).
+/// Tela completa de criação de publicações de avaliação multi-alvo (Step 11.0 / Step 25.3 / C4 Mídia / C5.10 Check-in).
 class ReviewCreateScreen extends StatefulWidget {
   final ReviewCreationRepository? repository;
   final ReviewMediaRepository? mediaRepository;
   final MediaPickerService? mediaPickerService;
   final SearchRepository? searchRepository;
+  final LocationService? locationService;
   final ReviewCreateNotifier? notifier;
   final ValueChanged<FeedReview>? onReviewCreated;
   final String? initialTargetId;
@@ -29,6 +31,7 @@ class ReviewCreateScreen extends StatefulWidget {
     this.mediaRepository,
     this.mediaPickerService,
     this.searchRepository,
+    this.locationService,
     this.notifier,
     this.onReviewCreated,
     this.initialTargetId,
@@ -47,9 +50,6 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
 
   final TextEditingController _contextPlaceIdController = TextEditingController();
   final TextEditingController _experienceTextController = TextEditingController();
-  final TextEditingController _latitudeController = TextEditingController();
-  final TextEditingController _longitudeController = TextEditingController();
-  final TextEditingController _accuracyController = TextEditingController();
 
   @override
   void initState() {
@@ -61,6 +61,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
         repository: widget.repository ?? _FallbackReviewCreationRepository(),
         mediaRepository: widget.mediaRepository,
         mediaPickerService: widget.mediaPickerService,
+        locationService: widget.locationService,
         initialTargetId: widget.initialTargetId,
         initialTargetName: widget.initialTargetName,
         initialTargetType: widget.initialTargetType,
@@ -117,10 +118,41 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
     }
     _contextPlaceIdController.dispose();
     _experienceTextController.dispose();
-    _latitudeController.dispose();
-    _longitudeController.dispose();
-    _accuracyController.dispose();
     super.dispose();
+  }
+
+  Future<void> _requestLocationConsent() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.location_on_outlined, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('Validação de Presença'),
+          ],
+        ),
+        content: const Text(
+          'Para validar que você está no local, o Rewit precisa usar sua localização atual por alguns instantes.\n\nA localização não será acompanhada em segundo plano.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('location_consent_cancel_button'),
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('location_consent_confirm_button'),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await _notifier.captureLocation();
+    }
   }
 
   Future<void> _submit() async {
@@ -434,95 +466,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // Seção: Presença Geográfica (Opcional)
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.my_location_outlined),
-                  title: const Text('Presença e Check-in no Local (Opcional)'),
-                  subtitle: const Text(
-                    'Informar coordenadas para validação de presença no local',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _latitudeController,
-                                  enabled: !isSubmitting,
-                                  keyboardType: const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                    signed: true,
-                                  ),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Latitude (-90 a 90)',
-                                    isDense: true,
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (val) {
-                                    final lat = double.tryParse(val);
-                                    _notifier.setCoordinates(
-                                      latitude: lat,
-                                      longitude: _notifier.userLongitude,
-                                      accuracyMeters: _notifier.locationAccuracyMeters,
-                                    );
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _longitudeController,
-                                  enabled: !isSubmitting,
-                                  keyboardType: const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                    signed: true,
-                                  ),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Longitude (-180 a 180)',
-                                    isDense: true,
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (val) {
-                                    final lng = double.tryParse(val);
-                                    _notifier.setCoordinates(
-                                      latitude: _notifier.userLatitude,
-                                      longitude: lng,
-                                      accuracyMeters: _notifier.locationAccuracyMeters,
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          TextFormField(
-                            controller: _accuracyController,
-                            enabled: !isSubmitting,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            decoration: const InputDecoration(
-                              labelText: 'Precisão em metros (opcional)',
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
-                            onChanged: (val) {
-                              final acc = double.tryParse(val);
-                              _notifier.setCoordinates(
-                                latitude: _notifier.userLatitude,
-                                longitude: _notifier.userLongitude,
-                                accuracyMeters: acc,
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                // Seção: Presença Geográfica e Check-in no Local (C5.10)
+                _buildLocationSection(theme, isSubmitting),
                 const SizedBox(height: 16),
 
                 // Seção de Seleção e Upload de Fotos/Mídias
@@ -572,6 +517,245 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildLocationSection(ThemeData theme, bool isSubmitting) {
+    final status = _notifier.locationStatus;
+    final hasLocation = _notifier.hasLocation;
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.my_location,
+                  size: 20,
+                  color: hasLocation ? Colors.green.shade700 : theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Presença e Check-in no Local (Opcional)',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Valide sua presença no estabelecimento no momento da avaliação. '
+              'A localização é obtida sob demanda e nunca rastreada em segundo plano.',
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurface.withAlpha(160),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (status == LocationCaptureStatus.requesting) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 12),
+                    Text(
+                      'Obtendo localização...',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (status == LocationCaptureStatus.captured && hasLocation) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withAlpha(20),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.withAlpha(80)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Presença capturada',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.green,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (_notifier.locationAccuracyMeters != null)
+                          Text(
+                            'Precisão aproximada: ${_notifier.locationAccuracyMeters!.round()} m',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.colorScheme.onSurface.withAlpha(160),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (_notifier.isApproximateLocation) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withAlpha(30),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.amber.withAlpha(100)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.info_outline, size: 16, color: Colors.orange),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Localização aproximada concedida. A precisão pode não ser suficiente para validar presença no local.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.amber.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('update_location_button'),
+                      onPressed: isSubmitting ? null : () => _notifier.captureLocation(),
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Atualizar localização', style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('remove_checkin_button'),
+                      onPressed: isSubmitting ? null : () => _notifier.clearCoordinates(),
+                      icon: const Icon(Icons.close, size: 16),
+                      label: const Text('Remover check-in', style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                ],
+              ),
+            ] else if (status == LocationCaptureStatus.error) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.errorContainer.withAlpha(90),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: theme.colorScheme.error.withAlpha(80)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.location_off, size: 20, color: theme.colorScheme.error),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _notifier.locationErrorMessage ?? 'Não foi possível obter sua localização agora.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: theme.colorScheme.onErrorContainer,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            key: const Key('retry_location_button'),
+                            onPressed: isSubmitting ? null : () => _notifier.captureLocation(),
+                            child: const Text('Tentar novamente', style: TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                        if (_notifier.locationFailureReason == LocationFailureReason.permissionDeniedForever) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton(
+                              key: const Key('open_settings_button'),
+                              onPressed: isSubmitting ? null : () => _notifier.openAppSettings(),
+                              child: const Text('Abrir configurações', style: TextStyle(fontSize: 12)),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: isSubmitting ? null : () => _notifier.clearCoordinates(),
+                          child: const Text('Ignorar', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      'Sem check-in',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurface.withAlpha(180),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  FilledButton.tonalIcon(
+                    key: const Key('validate_presence_button'),
+                    onPressed: isSubmitting ? null : _requestLocationConsent,
+                    icon: const Icon(Icons.pin_drop_outlined, size: 18),
+                    label: const Text('Validar minha presença'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

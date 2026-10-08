@@ -1,18 +1,29 @@
 import 'package:flutter/foundation.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
+import '../../data/services/geolocator_location_service.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/repositories/review_creation_repository.dart';
 import 'review_create_state.dart';
+
+/// Estado do ciclo de captura de localização sob demanda para check-in (C5.10).
+enum LocationCaptureStatus {
+  idle,
+  requesting,
+  captured,
+  error,
+}
 
 /// Gerenciador de estado reativo para o formulário e submissão de avaliações.
 class ReviewCreateNotifier extends ChangeNotifier {
   final ReviewCreationRepository repository;
   final ReviewMediaRepository? mediaRepository;
   final MediaPickerService? mediaPickerService;
+  final LocationService? locationService;
 
   static final RegExp _uuidRegex = RegExp(
     r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
@@ -39,11 +50,15 @@ class ReviewCreateNotifier extends ChangeNotifier {
   double? _userLatitude;
   double? _userLongitude;
   double? _locationAccuracyMeters;
+  LocationCaptureStatus _locationStatus = LocationCaptureStatus.idle;
+  String? _locationErrorMessage;
+  LocationFailureReason? _locationFailureReason;
 
   ReviewCreateNotifier({
     required this.repository,
     this.mediaRepository,
     this.mediaPickerService,
+    this.locationService,
     String? initialTargetId,
     String? initialTargetName,
     String? initialTargetType,
@@ -73,6 +88,14 @@ class ReviewCreateNotifier extends ChangeNotifier {
   double? get userLongitude => _userLongitude;
   double? get locationAccuracyMeters => _locationAccuracyMeters;
   bool get isSubmitting => _state.isSubmitting;
+
+  LocationCaptureStatus get locationStatus => _locationStatus;
+  String? get locationErrorMessage => _locationErrorMessage;
+  LocationFailureReason? get locationFailureReason => _locationFailureReason;
+  bool get hasLocation => _userLatitude != null && _userLongitude != null;
+  bool get isRequestingLocation => _locationStatus == LocationCaptureStatus.requesting;
+  bool get isApproximateLocation =>
+      _locationAccuracyMeters != null && _locationAccuracyMeters! > 100.0;
 
   /// Adiciona um novo alvo para avaliação multi-alvo (Step 11.0).
   void addTarget({
@@ -205,7 +228,49 @@ class ReviewCreateNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Define coordenadas de presença para check-in no local.
+  /// Captura a localização atual sob demanda (chamada única) com proteção contra concorrência (C5.10).
+  Future<bool> captureLocation({Duration timeout = const Duration(seconds: 10)}) async {
+    if (isSubmitting || _locationStatus == LocationCaptureStatus.requesting) {
+      return false;
+    }
+
+    _locationStatus = LocationCaptureStatus.requesting;
+    _locationErrorMessage = null;
+    _locationFailureReason = null;
+    notifyListeners();
+
+    try {
+      final service = locationService ?? const GeolocatorLocationService();
+      final result = await service.getCurrentLocation(timeout: timeout);
+
+      switch (result) {
+        case LocationSuccess(:final location):
+          _userLatitude = location.latitude;
+          _userLongitude = location.longitude;
+          _locationAccuracyMeters = location.accuracyMeters;
+          _locationStatus = LocationCaptureStatus.captured;
+          _locationErrorMessage = null;
+          _locationFailureReason = null;
+          notifyListeners();
+          return true;
+
+        case LocationFailure(:final reason, :final message):
+          _locationStatus = LocationCaptureStatus.error;
+          _locationFailureReason = reason;
+          _locationErrorMessage = message;
+          notifyListeners();
+          return false;
+      }
+    } catch (_) {
+      _locationStatus = LocationCaptureStatus.error;
+      _locationFailureReason = LocationFailureReason.error;
+      _locationErrorMessage = 'Não foi possível obter sua localização agora.';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Define coordenadas de presença para check-in no local (compatibilidade e testes).
   void setCoordinates({
     double? latitude,
     double? longitude,
@@ -215,16 +280,30 @@ class ReviewCreateNotifier extends ChangeNotifier {
     _userLatitude = latitude;
     _userLongitude = longitude;
     _locationAccuracyMeters = accuracyMeters;
+    _locationStatus = (latitude != null && longitude != null)
+        ? LocationCaptureStatus.captured
+        : LocationCaptureStatus.idle;
+    _locationErrorMessage = null;
+    _locationFailureReason = null;
     notifyListeners();
   }
 
-  /// Remove coordenadas de presença.
+  /// Remove coordenadas de presença e descarta os dados da memória da criação.
   void clearCoordinates() {
     if (isSubmitting) return;
     _userLatitude = null;
     _userLongitude = null;
     _locationAccuracyMeters = null;
+    _locationStatus = LocationCaptureStatus.idle;
+    _locationErrorMessage = null;
+    _locationFailureReason = null;
     notifyListeners();
+  }
+
+  /// Abre as configurações do sistema para ajuste manual de permissões se necessário.
+  Future<bool> openAppSettings() async {
+    final service = locationService ?? const GeolocatorLocationService();
+    return service.openAppSettings();
   }
 
   /// Seleciona mídias da galeria até o limite restante de 5 anexos.
