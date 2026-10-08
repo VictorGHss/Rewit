@@ -1,5 +1,6 @@
 package com.rewit.presentation.dto.catalog;
 
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.constraints.DecimalMax;
@@ -177,6 +178,29 @@ public final class CatalogPresentationDtos {
             String category,
             String imageUrl,
             String status
+    ) {
+        public static ProductResponse fromDomain(com.rewit.domain.model.Product product) {
+            return new ProductResponse(
+                    product.getId(),
+                    product.getName(),
+                    product.getBrand(),
+                    product.getModel(),
+                    product.getDescription(),
+                    product.getCategory(),
+                    product.getImageUrl(),
+                    product.getStatus()
+            );
+        }
+    }
+
+    /** Identificador público de produto: só tipo e valor, sem id de linha, produto ou datas (C5.3). */
+    public record PublicProductIdentifierResponse(
+            String identifierType,
+            String identifierValue
+    ) {}
+
+    public record ProductIdentifiersResponse(
+            List<PublicProductIdentifierResponse> identifiers
     ) {}
 
     public record AddProductIdentifierRequest(

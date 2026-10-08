@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.adapter;
 
+import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.ProductRepository;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Product;
@@ -76,6 +77,15 @@ public class ProductRepositoryAdapter implements ProductRepository {
         return productJpaRepository.findByNameContainingIgnoreCase(name.trim()).stream()
                 .map(ProductRepositoryAdapter::toDomain)
                 .toList();
+    }
+
+    @Override
+    public PageResult<Product> findActiveByPlace(UUID placeId, int page, int size) {
+        Objects.requireNonNull(placeId, "placeId must not be null");
+        List<Product> content = productJpaRepository.findActiveByPlace(placeId, size, (long) page * size).stream()
+                .map(ProductRepositoryAdapter::toDomain)
+                .toList();
+        return PageResult.of(content, page, size, productJpaRepository.countActiveByPlace(placeId));
     }
 
     private static Product toDomain(ProductJpaEntity entity) {

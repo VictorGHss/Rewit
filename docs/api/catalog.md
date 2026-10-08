@@ -104,6 +104,10 @@ Vale para `GET /api/v1/places/{id}` e `GET /api/v1/products/{id}`, com a mesma r
 * Qualquer outro status do catálogo (places `INACTIVE`/`CLOSED`, products `INACTIVE`/`DISCONTINUED`) responde exatamente como um id inexistente: `404` com `PLACE_NOT_FOUND` ou `PRODUCT_NOT_FOUND`. O corpo não informa status, nome, slug nem que o alvo existiu.
 * O registro não é alterado: a regra vale só para a leitura pública.
 * As estatísticas e as avaliações do alvo seguem a mesma regra (`docs/api/reviews.md`, seções 3.3 e 3.4).
+* Também seguem a mesma regra os identificadores do produto (2.10), o lookup por código (2.11) e os produtos de um local (2.12).
+
+#### Composição da tela de produto
+O detalhe de produto é composto no cliente, sem endpoint agregado: `GET /api/v1/products/{id}` (dados), `GET /api/v1/products/{id}/identifiers` (códigos), `GET /api/v1/targets/{id}/stats` (média e total) e `GET /api/v1/targets/{id}/reviews` (avaliações paginadas, com helpful, `verifiedOnly`, visibilidade e anonimização de contas excluídas). O `id` do produto é o próprio `RateableTarget`.
 
 ---
 
@@ -349,6 +353,7 @@ Mesmo quando nenhum local for encontrado dentro do raio solicitado, a API retorn
 * Por usuário autenticado, no Redis compartilhado entre instâncias (ADR-013). Padrão: **60 buscas por janela deslizante de 60 segundos**. Configurável com `RATE_LIMIT_SEARCH_LIMIT` e `RATE_LIMIT_SEARCH_WINDOW` (`rewit.rate-limit.query.search.*`).
 * Acima do limite: `429 Too Many Requests`, RFC 7807, `code` `RATE_LIMIT_EXCEEDED` e cabeçalho `Retry-After` (segundos).
 * Requisições recusadas por validação (`400`) não consomem o limite.
+* O lookup de produto por código (2.11) consome o mesmo limite.
 
 #### Resposta de Sucesso (`200 OK`)
 ```json
@@ -380,6 +385,81 @@ Mesmo quando nenhum local for encontrado dentro do raio solicitado, a API retorn
 ```
 * `slug` é sempre `null` para produtos.
 
+### 2.10 Identificadores Públicos do Produto (GET /api/v1/products/{id}/identifiers)
+* **Método**: `GET`
+* **Rota**: `/api/v1/products/{id}/identifiers`
+* **Autenticação**: Obrigatória
+* **Produto indisponível**: produto fora de `ACTIVE` ou inexistente responde `404` `PRODUCT_NOT_FOUND`, sem listar códigos.
+* **Tipos expostos**: só códigos comerciais padronizados: `EAN`, `UPC`, `GTIN` e `ISBN`. O tipo gravado é texto livre (2.4); identificadores de qualquer outro tipo nunca aparecem em leituras públicas.
+* **Ordem**: por tipo e depois por valor. Sem paginação: a lista é a dos códigos do produto.
+* Cada item traz só tipo e valor: sem id da linha, id do produto, datas ou quem cadastrou.
+
+#### Resposta (`200 OK`)
+```json
+{
+  "identifiers": [
+    { "identifierType": "EAN", "identifierValue": "7891234567890" },
+    { "identifierType": "GTIN", "identifierValue": "07891234567890" }
+  ]
+}
+```
+Produto sem códigos públicos: `{"identifiers": []}`.
+
+---
+
+### 2.11 Produto por Código (GET /api/v1/products/identifiers/{type}/{value})
+* **Método**: `GET`
+* **Rota**: `/api/v1/products/identifiers/{type}/{value}` (mesmo formato de `GET /api/v1/places/external/{provider}/{externalId}`)
+* **Autenticação**: Obrigatória
+* **Chave**: o código é único por par (tipo, valor). O mesmo valor pode existir em tipos diferentes, por isso o tipo é obrigatório e não se presume que todo código seja EAN.
+* **Tipos suportados**: `EAN`, `UPC`, `GTIN`, `ISBN`. Outro tipo: `400` `INVALID_IDENTIFIER_TYPE`.
+* **Normalização**: a mesma da gravação (2.4). O tipo é comparado sem diferença de maiúsculas e minúsculas; o valor, sem os espaços das pontas. O valor é comparado exatamente como foi cadastrado (hífens contam).
+* **Validação do valor**: de 1 a 128 caracteres (o tamanho da coluna), só letras, dígitos e hífen. Fora disso: `400` `INVALID_IDENTIFIER_VALUE`.
+* **Resposta (`200 OK`)**: o `ProductResponse` do detalhe (2.3).
+* **Não encontrado**: código inexistente e produto fora de `ACTIVE` respondem o mesmo `404` `PRODUCT_NOT_FOUND`. Um código de produto inativo ou descontinuado não é revelado.
+* **Rate limit**: consome o limite de buscas do usuário (2.9, 60 por minuto por padrão), compartilhado com `GET /api/v1/search`, contra a enumeração de códigos. Acima do limite: `429` `RATE_LIMIT_EXCEEDED` com `Retry-After`. Requisição inválida (`400`) não consome o limite.
+
+---
+
+### 2.12 Produtos de um Local (GET /api/v1/places/{id}/products)
+* **Método**: `GET`
+* **Rota**: `/api/v1/places/{id}/products`
+* **Autenticação**: Obrigatória
+* **Significado**: produtos com presença registrada no local (2.5).
+* **Local indisponível**: local fora de `ACTIVE` ou inexistente responde `404` `PLACE_NOT_FOUND`, sem listar produtos.
+* **Itens**: só produtos `ACTIVE`, no formato `ProductResponse` do detalhe (2.3).
+* **Privacidade**: nenhum dado da presença é exposto: nem quem a relatou (`reportedByUserId`), nem o id, as datas ou o status da presença.
+* **Ordem**: nome crescente e depois `id` crescente. A ordem é total: as páginas não repetem nem perdem itens.
+
+#### Query Parameters
+| Parâmetro | Padrão | Regra |
+|---|---|---|
+| `page` | `0` | A partir de 0; negativa: `400` `INVALID_PAGE` |
+| `size` | `20` | De 1 a 50; fora disso: `400` `INVALID_PAGE_SIZE` |
+
+#### Resposta (`200 OK`)
+```json
+{
+  "content": [
+    {
+      "id": "7ca85f64-5717-4562-b3fc-2c963f66afb2",
+      "name": "Café em Grãos",
+      "brand": "Marca",
+      "model": null,
+      "description": null,
+      "category": "BEBIDA",
+      "imageUrl": null,
+      "status": "ACTIVE"
+    }
+  ],
+  "pageNumber": 0,
+  "pageSize": 20,
+  "totalElements": 1,
+  "totalPages": 1,
+  "isLast": true
+}
+```
+
 ---
 
 ## 3. Códigos de Erro Esperados
@@ -389,8 +469,10 @@ Mesmo quando nenhum local for encontrado dentro do raio solicitado, a API retorn
   * Raio inválido para busca nearby (`INVALID_NEARBY_RADIUS`).
   * Limite inválido para busca nearby (`INVALID_NEARBY_LIMIT`).
   * Busca global: termo vazio (`INVALID_SEARCH_QUERY`), página negativa (`INVALID_PAGE`), tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
+  * Produtos de um local: página negativa (`INVALID_PAGE`), tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
+  * Produto por código: tipo fora de `EAN`/`UPC`/`GTIN`/`ISBN` (`INVALID_IDENTIFIER_TYPE`) ou valor vazio, longo demais ou com caractere inválido (`INVALID_IDENTIFIER_VALUE`).
 * `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
 * `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido. A presença de produto é sempre atribuída ao usuário autenticado.
 * `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`). No detalhe público, local ou produto fora de `ACTIVE` também responde `PLACE_NOT_FOUND`/`PRODUCT_NOT_FOUND`, indistinguível de inexistente.
 * `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`).
-* `429 Too Many Requests` (`RATE_LIMIT_EXCEEDED`): limite de buscas globais do usuário atingido; acompanha `Retry-After`.
+* `429 Too Many Requests` (`RATE_LIMIT_EXCEEDED`): limite de buscas do usuário atingido (busca global e produto por código); acompanha `Retry-After`.

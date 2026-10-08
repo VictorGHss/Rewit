@@ -38,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Rate limiting da busca global ponta a ponta: HTTP, Spring Security, CatalogSearchService e Redis reais.
+ * Rate limiting da busca global (e do lookup de produto por código, que divide o mesmo limite) ponta a ponta: HTTP, Spring Security, CatalogSearchService e Redis reais.
  * Contexto próprio com limite pequeno e janela de 2 segundos. O contador é conferido por uma conexão Redis
  * independente (como outra instância da API), na mesma chave HMAC que o limitador deriva.
  */
@@ -119,6 +119,35 @@ class SearchRateLimitIntegrationTest {
         }
         assertEquals(0L, redis.opsForZSet().zCard(key));
         search(user).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("Lookup por código de produto divide o mesmo limite da busca: enumerar códigos também recebe 429")
+    void productLookupSharesSearchLimit() throws Exception {
+        TestUser user = register();
+        String key = new RateLimitKeyDeriver(rateLimitProperties.getKeySecret())
+                .derive(RateLimitedAction.SEARCH, RateLimitSubject.ofUser(user.id()));
+
+        search(user).andExpect(status().isOk());
+        lookup(user, "7890000000001").andExpect(status().isNotFound());
+        lookup(user, "7890000000002").andExpect(status().isNotFound());
+        assertEquals(3L, redis.opsForZSet().zCard(key), "busca e lookup na mesma chave SEARCH do usuário");
+
+        lookup(user, "7890000000003").andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, matchesPattern("^[1-9]\\d*$")))
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
+        search(user).andExpect(status().isTooManyRequests());
+
+        // Código malformado é recusado antes do limite, sem consumi-lo
+        mockMvc.perform(get("/api/v1/products/identifiers/{type}/{value}", "SKU", "1")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.accessToken()))
+                .andExpect(status().isBadRequest());
+        assertEquals(3L, redis.opsForZSet().zCard(key));
+    }
+
+    private ResultActions lookup(TestUser user, String code) throws Exception {
+        return mockMvc.perform(get("/api/v1/products/identifiers/{type}/{value}", "EAN", code)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.accessToken()));
     }
 
     private ResultActions search(TestUser user) throws Exception {

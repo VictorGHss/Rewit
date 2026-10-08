@@ -6,6 +6,7 @@ import com.rewit.infrastructure.persistence.entity.ProductIdentifierJpaEntity;
 import com.rewit.infrastructure.persistence.repository.ProductIdentifierJpaRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -46,6 +47,17 @@ public class ProductIdentifierRepositoryAdapter implements ProductIdentifierRepo
             return List.of();
         }
         return repository.findByProductId(productId).stream()
+                .map(ProductIdentifierRepositoryAdapter::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<ProductIdentifier> findByProductIdAndTypes(UUID productId, Collection<String> identifierTypes) {
+        if (productId == null || identifierTypes == null || identifierTypes.isEmpty()) {
+            return List.of();
+        }
+        return repository.findByProductIdAndIdentifierTypeInOrderByIdentifierTypeAscIdentifierValueAsc(productId, identifierTypes)
+                .stream()
                 .map(ProductIdentifierRepositoryAdapter::toDomain)
                 .toList();
     }

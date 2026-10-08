@@ -4,6 +4,7 @@ import com.rewit.application.dto.catalog.CatalogDtos.AddProductIdentifierCommand
 import com.rewit.application.dto.catalog.CatalogDtos.AssociateProductPresenceCommand;
 import com.rewit.application.dto.catalog.CatalogDtos.CreateProductCommand;
 import com.rewit.application.service.CatalogService;
+import com.rewit.application.service.ProductDiscoveryService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.Product;
 import com.rewit.domain.model.ProductIdentifier;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -26,9 +28,12 @@ import java.util.UUID;
 public class ProductController {
 
     private final CatalogService catalogService;
+    private final ProductDiscoveryService productDiscoveryService;
 
-    public ProductController(CatalogService catalogService) {
+    public ProductController(CatalogService catalogService, ProductDiscoveryService productDiscoveryService) {
         this.catalogService = Objects.requireNonNull(catalogService, "CatalogService must not be null");
+        this.productDiscoveryService = Objects.requireNonNull(productDiscoveryService,
+                "ProductDiscoveryService must not be null");
     }
 
     @PostMapping
@@ -53,6 +58,28 @@ public class ProductController {
     @GetMapping("/{id}")
     public ResponseEntity<ProductResponse> getProductById(@PathVariable UUID id) {
         Product product = catalogService.getProductById(id);
+        return ResponseEntity.ok(toResponse(product));
+    }
+
+    @GetMapping("/{id}/identifiers")
+    public ResponseEntity<ProductIdentifiersResponse> getProductIdentifiers(@PathVariable UUID id) {
+        List<PublicProductIdentifierResponse> identifiers = productDiscoveryService.getPublicIdentifiers(id).stream()
+                .map(identifier -> new PublicProductIdentifierResponse(
+                        identifier.getIdentifierType(),
+                        identifier.getIdentifierValue()
+                ))
+                .toList();
+        return ResponseEntity.ok(new ProductIdentifiersResponse(identifiers));
+    }
+
+    @GetMapping("/identifiers/{type}/{value}")
+    public ResponseEntity<ProductResponse> getProductByIdentifier(
+            @PathVariable String type,
+            @PathVariable String value,
+            Authentication authentication
+    ) {
+        UUID requesterUserId = extractAuthenticatedUserId(authentication);
+        Product product = productDiscoveryService.findByIdentifier(requesterUserId, type, value);
         return ResponseEntity.ok(toResponse(product));
     }
 
@@ -104,16 +131,7 @@ public class ProductController {
     }
 
     private ProductResponse toResponse(Product product) {
-        return new ProductResponse(
-                product.getId(),
-                product.getName(),
-                product.getBrand(),
-                product.getModel(),
-                product.getDescription(),
-                product.getCategory(),
-                product.getImageUrl(),
-                product.getStatus()
-        );
+        return ProductResponse.fromDomain(product);
     }
 
     private UUID extractAuthenticatedUserId(Authentication authentication) {

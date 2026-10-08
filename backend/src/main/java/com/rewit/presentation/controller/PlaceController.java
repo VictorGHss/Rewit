@@ -4,14 +4,19 @@ import com.rewit.application.dto.catalog.CatalogDtos.CreatePlaceCommand;
 import com.rewit.application.dto.catalog.CatalogDtos.ExternalReferenceInput;
 import com.rewit.application.dto.catalog.CatalogDtos.NearbyPlaceResult;
 import com.rewit.application.dto.catalog.CatalogDtos.PlaceAdoptionResult;
+import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.service.CatalogService;
+import com.rewit.application.service.ProductDiscoveryService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.Product;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.AdoptPlaceRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.CreatePlaceRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.NearbyPlaceItemResponse;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.NearbyPlacesResponse;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.PlaceResponse;
+import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.ProductResponse;
+import com.rewit.presentation.dto.common.PagedResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,9 +36,12 @@ import java.util.UUID;
 public class PlaceController {
 
     private final CatalogService catalogService;
+    private final ProductDiscoveryService productDiscoveryService;
 
-    public PlaceController(CatalogService catalogService) {
+    public PlaceController(CatalogService catalogService, ProductDiscoveryService productDiscoveryService) {
         this.catalogService = Objects.requireNonNull(catalogService, "CatalogService must not be null");
+        this.productDiscoveryService = Objects.requireNonNull(productDiscoveryService,
+                "ProductDiscoveryService must not be null");
     }
 
     @PostMapping
@@ -154,6 +162,23 @@ public class PlaceController {
     public ResponseEntity<PlaceResponse> getPlaceById(@PathVariable UUID id) {
         Place place = catalogService.getPlaceById(id);
         return ResponseEntity.ok(toResponse(place));
+    }
+
+    @GetMapping("/{id}/products")
+    public ResponseEntity<PagedResponse<ProductResponse>> getProductsInPlace(
+            @PathVariable UUID id,
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size
+    ) {
+        PageResult<Product> result = productDiscoveryService.getProductsInPlace(id, page, size);
+        return ResponseEntity.ok(new PagedResponse<>(
+                result.content().stream().map(ProductResponse::fromDomain).toList(),
+                result.pageNumber(),
+                result.pageSize(),
+                result.totalElements(),
+                result.totalPages(),
+                result.isLast()
+        ));
     }
 
     @GetMapping("/external/{provider}/{externalId}")

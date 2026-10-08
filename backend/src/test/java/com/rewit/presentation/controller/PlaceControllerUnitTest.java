@@ -5,6 +5,7 @@ import com.rewit.application.dto.catalog.CatalogDtos.CreatePlaceCommand;
 import com.rewit.application.dto.catalog.CatalogDtos.NearbyPlaceResult;
 import com.rewit.application.dto.catalog.CatalogDtos.PlaceAdoptionResult;
 import com.rewit.application.service.CatalogService;
+import com.rewit.application.service.ProductDiscoveryService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.common.exception.GlobalExceptionHandler;
 import com.rewit.domain.model.Place;
@@ -42,6 +43,9 @@ class PlaceControllerUnitTest {
 
     @Mock
     private CatalogService catalogService;
+
+    @Mock
+    private ProductDiscoveryService productDiscoveryService;
 
     @Mock
     private Authentication authentication;

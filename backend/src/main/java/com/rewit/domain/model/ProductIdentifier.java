@@ -3,6 +3,7 @@ package com.rewit.domain.model;
 import com.rewit.common.exception.BusinessException;
 
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -10,6 +11,12 @@ import java.util.UUID;
  * Evita concatenações frágeis de múltiplos códigos em uma única coluna.
  */
 public class ProductIdentifier {
+
+    /**
+     * Tipos de código comercial padronizado (os do schema, V1) expostos em leituras públicas. O tipo gravado é texto
+     * livre: qualquer outro valor fica fora da descoberta pública.
+     */
+    public static final Set<String> PUBLIC_TYPES = Set.of("EAN", "UPC", "GTIN", "ISBN");
 
     private final UUID id;
     private final UUID productId;
