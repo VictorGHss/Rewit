@@ -20,6 +20,7 @@ import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_r
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/my_reviews_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
@@ -44,6 +45,7 @@ class AppRouter {
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
   static const String editProfile = '/profile/edit';
+  static const String myReviews = '/profile/my-reviews';
   static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
   static const String reviewEdit = '/review/edit';
@@ -319,6 +321,23 @@ class AppRouter {
             initialProfile: initialProfile,
             repository: userProfileRepository!,
             authNotifier: authNotifier,
+          ),
+          settings: settings,
+        );
+
+      case myReviews:
+        if (userProfileRepository == null) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Repositório de perfil indisponível.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => MyReviewsScreen(
+            repository: userProfileRepository!,
+            mediaRepository: reviewMediaRepository,
           ),
           settings: settings,
         );

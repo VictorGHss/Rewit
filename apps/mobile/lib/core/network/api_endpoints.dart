@@ -53,6 +53,9 @@ class ApiEndpoints {
       '/api/v1/me/followers?page=$page&size=$size';
   static String myFollowing({int page = 0, int size = 10}) =>
       '/api/v1/me/following?page=$page&size=$size';
+  static const String myReviewsPath = '/api/v1/me/reviews';
+  static String myReviews({int page = 0, int size = 10}) =>
+      '/api/v1/me/reviews?page=$page&size=$size';
 
   // Discussões e Comentários Comunitários
   static String reviewDiscussions(String reviewId, {int page = 0, int size = 20}) =>

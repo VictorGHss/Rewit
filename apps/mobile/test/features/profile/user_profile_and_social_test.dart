@@ -17,8 +17,9 @@ import 'package:rewit_mobile/features/discussions/presentation/widgets/discussio
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/widgets/review_card.dart';
-import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
+import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/profile/data/models/follow_user_summary_dto.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
 import 'package:rewit_mobile/features/profile/data/models/user_profile_dto.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/follow_user_summary.dart';
@@ -258,6 +259,32 @@ class FakeUserProfileRepository implements UserProfileRepository {
               displayName: 'Seguindo Um',
             ),
           ],
+        );
+  }
+
+  TargetReviewsPage? myReviewsToReturn;
+  bool shouldThrowMyReviewsError = false;
+
+  @override
+  Future<TargetReviewsPage> getMyReviews({int page = 0, int size = 10}) async {
+    if (shouldThrowMyReviewsError) {
+      throw const ApiException(
+        ProblemDetail(
+          type: 'https://api.rewit.app/errors/internal-error',
+          title: 'Erro',
+          status: 500,
+          detail: 'Erro ao carregar minhas avaliações.',
+        ),
+      );
+    }
+    return myReviewsToReturn ??
+        const TargetReviewsPage(
+          pageNumber: 0,
+          pageSize: 10,
+          totalElements: 0,
+          totalPages: 0,
+          isLast: true,
+          reviews: [],
         );
   }
 }

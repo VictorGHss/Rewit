@@ -484,6 +484,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     context: context,
                     label: 'Avaliações',
                     count: profile.stats.totalReviews,
+                    onTap: _isMyProfile
+                        ? () => Navigator.of(context).pushNamed(AppRouter.myReviews)
+                        : null,
                   ),
                   _buildStatItem(
                     context: context,
@@ -536,6 +539,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               onPressed: _openEditProfile,
               icon: const Icon(Icons.edit_outlined),
               label: const Text('Editar Perfil'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('my_reviews_button'),
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRouter.myReviews);
+              },
+              icon: const Icon(Icons.rate_review_outlined),
+              label: const Text('Minhas avaliações'),
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(

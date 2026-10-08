@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:rewit_mobile/core/network/api_endpoints.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
+import 'package:rewit_mobile/features/place/data/models/place_dtos.dart';
+import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/profile/data/models/follow_user_summary_dto.dart';
 import 'package:rewit_mobile/features/profile/data/models/user_profile_dto.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/follow_user_summary.dart';
@@ -61,5 +63,21 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     final dto = PagedFollowUsersDto.fromJson(json);
     return dto.toEntity();
+  }
+
+  @override
+  Future<TargetReviewsPage> getMyReviews({int page = 0, int size = 10}) async {
+    final response = await httpClient.get(
+      ApiEndpoints.myReviewsPath,
+      queryParameters: {
+        'page': page,
+        'size': size,
+      },
+    );
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao listar minhas avaliações.');
+    }
+    return TargetReviewsPageDto.fromJson(decoded).toEntity();
   }
 }
