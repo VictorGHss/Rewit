@@ -98,6 +98,13 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 * **Autenticação**: Obrigatória
 * **Resposta (`200 OK`)**: Retorna o `PlaceResponse` completo.
 
+#### Visibilidade pública dos detalhes (place e product)
+Vale para `GET /api/v1/places/{id}` e `GET /api/v1/products/{id}`, com a mesma regra da busca global (2.9):
+* Só alvos com status `ACTIVE` são expostos; a resposta de um alvo `ACTIVE` não muda.
+* Qualquer outro status do catálogo (places `INACTIVE`/`CLOSED`, products `INACTIVE`/`DISCONTINUED`) responde exatamente como um id inexistente: `404` com `PLACE_NOT_FOUND` ou `PRODUCT_NOT_FOUND`. O corpo não informa status, nome, slug nem que o alvo existiu.
+* O registro não é alterado: a regra vale só para a leitura pública.
+* As estatísticas e as avaliações do alvo seguem a mesma regra (`docs/api/reviews.md`, seções 3.3 e 3.4).
+
 ---
 
 ### 2.3 Criar Produto Global
@@ -384,6 +391,6 @@ Mesmo quando nenhum local for encontrado dentro do raio solicitado, a API retorn
   * Busca global: termo vazio (`INVALID_SEARCH_QUERY`), página negativa (`INVALID_PAGE`), tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
 * `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
 * `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido. A presença de produto é sempre atribuída ao usuário autenticado.
-* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`).
+* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`). No detalhe público, local ou produto fora de `ACTIVE` também responde `PLACE_NOT_FOUND`/`PRODUCT_NOT_FOUND`, indistinguível de inexistente.
 * `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`).
 * `429 Too Many Requests` (`RATE_LIMIT_EXCEEDED`): limite de buscas globais do usuário atingido; acompanha `Retry-After`.

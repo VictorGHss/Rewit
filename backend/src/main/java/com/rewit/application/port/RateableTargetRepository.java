@@ -15,4 +15,10 @@ public interface RateableTargetRepository {
     Optional<RateableTarget> findById(UUID id);
 
     boolean existsById(UUID id);
+
+    /**
+     * Se o alvo pode ser exposto em leituras públicas (stats e reviews do alvo): existe e, sendo place ou product,
+     * tem status {@code ACTIVE}, a mesma regra da busca global. Alvo ausente ou indisponível são indistinguíveis.
+     */
+    boolean existsPubliclyVisibleById(UUID id);
 }

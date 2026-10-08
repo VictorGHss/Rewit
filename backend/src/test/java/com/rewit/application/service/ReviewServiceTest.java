@@ -368,7 +368,7 @@ class ReviewServiceTest {
     @DisplayName("12. Consulta de estatísticas quando o alvo possui estatísticas calculadas")
     void shouldReturnTargetStatsWhenFound() {
         UUID targetId = UUID.randomUUID();
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
         RateableTargetStats stats = new RateableTargetStats(targetId, new BigDecimal("4.50"), 12);
         when(rateableTargetStatsRepository.findByTargetId(targetId)).thenReturn(Optional.of(stats));
 
@@ -384,7 +384,7 @@ class ReviewServiceTest {
     @DisplayName("13. Consulta de estatísticas quando o alvo existe mas ainda não possui avaliações (default 0.00 / 0)")
     void shouldReturnDefaultStatsWhenTargetExistsWithoutStats() {
         UUID targetId = UUID.randomUUID();
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
         when(rateableTargetStatsRepository.findByTargetId(targetId)).thenReturn(Optional.empty());
 
         TargetStatsView view = reviewService.getTargetStats(targetId);
@@ -399,7 +399,7 @@ class ReviewServiceTest {
     @DisplayName("14. Consulta de estatísticas rejeitada quando o alvo não existe em rateable_targets")
     void shouldThrowWhenTargetNotFoundOnGetTargetStats() {
         UUID missingId = UUID.randomUUID();
-        when(rateableTargetRepository.existsById(missingId)).thenReturn(false);
+        when(rateableTargetRepository.existsPubliclyVisibleById(missingId)).thenReturn(false);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> reviewService.getTargetStats(missingId));
         assertEquals("RATEABLE_TARGET_NOT_FOUND", ex.getErrorCode());

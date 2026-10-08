@@ -84,7 +84,7 @@ class ReviewListingUnitTest {
     @Test
     @DisplayName("1. Lança 404 quando RateableTarget não existe")
     void shouldThrow404WhenTargetNotFound() {
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(false);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(false);
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 reviewService.findReviewsByTarget(targetId, 0, 10, "newest", false, requesterUserId)
@@ -98,7 +98,7 @@ class ReviewListingUnitTest {
     @Test
     @DisplayName("2. Retorna página vazia quando RateableTarget existe mas não tem reviews")
     void shouldReturnEmptyPageWhenTargetHasNoReviews() {
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
         when(reviewRepository.findByTarget(eq(targetId), eq(requesterUserId), eq(false), eq("newest"), eq(0), eq(10)))
                 .thenReturn(PageResult.of(List.of(), 0, 10, 0));
 
@@ -154,7 +154,7 @@ class ReviewListingUnitTest {
     @Test
     @DisplayName("7. Permite ordenações válidas: newest, rating_desc, rating_asc")
     void shouldAllowValidSortOptions() {
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
         when(reviewRepository.findByTarget(any(), any(), anyBoolean(), anyString(), anyInt(), anyInt()))
                 .thenReturn(PageResult.of(List.of(), 0, 10, 0));
 
@@ -167,7 +167,7 @@ class ReviewListingUnitTest {
     @Test
     @DisplayName("8. Anonimização em lote: autor mascarado com 'Anônimo' e dados sigilosos ocultos")
     void shouldMaskAnonymousAuthorsInBatch() {
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
 
         Review anonymousReview = new Review(
                 UUID.randomUUID(), authorUserId, null, "Experiência anônima",
@@ -198,7 +198,7 @@ class ReviewListingUnitTest {
     @Test
     @DisplayName("9. Autor público tem perfil resolvido em lote sem N+1")
     void shouldResolvePublicAuthorProfilesInBatch() {
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
 
         Review publicReview = new Review(
                 UUID.randomUUID(), authorUserId, null, "Excelente lugar",
@@ -277,7 +277,7 @@ class ReviewListingUnitTest {
     @DisplayName("12. Auditoria de Visibilidade - Casos A a E: Equivalência entre GET individual e listagem por target")
     void shouldValidateVisibilityCasesAtoE() {
         UUID reviewId = UUID.randomUUID();
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
 
         ReviewTarget target = new ReviewTarget(UUID.randomUUID(), reviewId, targetId, new BigDecimal("4.5"), "Comentário");
         Profile authorProfile = new Profile(UUID.randomUUID(), authorUserId, "author", "Author Name", "Bio", null);
@@ -342,7 +342,7 @@ class ReviewListingUnitTest {
     @Test
     @DisplayName("13. Auditoria de Visibilidade - Casos F e G: Status UNDER_REVIEW e REMOVED não aparecem em listagem por target mas aparecem em /me/reviews")
     void shouldValidateStatusFilteringCasesFandG() {
-        when(rateableTargetRepository.existsById(targetId)).thenReturn(true);
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
         UUID reviewFId = UUID.randomUUID();
         UUID reviewGId = UUID.randomUUID();
 

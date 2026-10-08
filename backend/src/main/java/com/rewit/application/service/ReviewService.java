@@ -444,7 +444,8 @@ public class ReviewService {
             throw new BusinessException("O identificador do alvo avaliável é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_TARGET_ID");
         }
 
-        if (!rateableTargetRepository.existsById(targetId)) {
+        // Alvo indisponível (place/product fora de ACTIVE) responde como inexistente: nada de stats nem reviews
+        if (!rateableTargetRepository.existsPubliclyVisibleById(targetId)) {
             throw new BusinessException("Alvo avaliável não encontrado", HttpStatus.NOT_FOUND, "RATEABLE_TARGET_NOT_FOUND");
         }
 
@@ -494,7 +495,8 @@ public class ReviewService {
             throw new BusinessException("Ordenação inválida: " + sort, HttpStatus.BAD_REQUEST, "INVALID_SORT");
         }
 
-        if (!rateableTargetRepository.existsById(targetId)) {
+        // Alvo indisponível (place/product fora de ACTIVE) responde como inexistente: nada de stats nem reviews
+        if (!rateableTargetRepository.existsPubliclyVisibleById(targetId)) {
             throw new BusinessException("Alvo avaliável não encontrado", HttpStatus.NOT_FOUND, "RATEABLE_TARGET_NOT_FOUND");
         }
 

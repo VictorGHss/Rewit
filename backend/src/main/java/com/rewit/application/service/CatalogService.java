@@ -45,6 +45,9 @@ import com.rewit.domain.model.ProductPresence;
 @Service
 public class CatalogService {
 
+    /** Único status de place/product exposto em leituras públicas (busca e detalhe). */
+    private static final String PUBLIC_CATALOG_STATUS = "ACTIVE";
+
     private final PlaceRepository placeRepository;
     private final ProductRepository productRepository;
     private final ProductIdentifierRepository productIdentifierRepository;
@@ -421,7 +424,9 @@ public class CatalogService {
         if (id == null) {
             throw new BusinessException("Identificador de local inválido", HttpStatus.BAD_REQUEST, "INVALID_PLACE_ID");
         }
+        // Detalhe público só de ACTIVE, como a busca: indisponível e inexistente são o mesmo 404
         return placeRepository.findById(id)
+                .filter(place -> PUBLIC_CATALOG_STATUS.equals(place.getStatus()))
                 .orElseThrow(() -> new BusinessException("Local não encontrado", HttpStatus.NOT_FOUND, "PLACE_NOT_FOUND"));
     }
 
@@ -465,7 +470,9 @@ public class CatalogService {
         if (id == null) {
             throw new BusinessException("Identificador de produto inválido", HttpStatus.BAD_REQUEST, "INVALID_PRODUCT_ID");
         }
+        // Detalhe público só de ACTIVE, como a busca: indisponível e inexistente são o mesmo 404
         return productRepository.findById(id)
+                .filter(product -> PUBLIC_CATALOG_STATUS.equals(product.getStatus()))
                 .orElseThrow(() -> new BusinessException("Produto não encontrado", HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND"));
     }
 

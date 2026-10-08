@@ -46,6 +46,14 @@ public class RateableTargetRepositoryAdapter implements RateableTargetRepository
         return repository.existsById(id);
     }
 
+    @Override
+    public boolean existsPubliclyVisibleById(UUID id) {
+        if (id == null) {
+            return false;
+        }
+        return repository.existsPubliclyVisibleById(id);
+    }
+
     private static RateableTarget toDomain(RateableTargetJpaEntity entity) {
         return entity != null ? entity.toDomain() : null;
     }

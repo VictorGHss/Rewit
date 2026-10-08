@@ -238,6 +238,7 @@ Retorna a representação pública da avaliação com alvos, notas, comentários
 * **Método**: `GET`
 * **Rota**: `/api/v1/targets/{id}/stats`
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Alvo indisponível**: place ou product fora de `ACTIVE` responde como inexistente, `404` com `RATEABLE_TARGET_NOT_FOUND`, sem `averageRating` nem `reviewsCount` (mesma regra do detalhe do catálogo, `docs/api/catalog.md` 2.2).
 
 #### Resposta (`200 OK` - Com Avaliações Existentes)
 ```json
@@ -268,6 +269,7 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
 * **Método**: `GET`
 * **Rota**: `/api/v1/targets/{id}/reviews`
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Alvo indisponível**: place ou product fora de `ACTIVE` responde como inexistente, `404` com `RATEABLE_TARGET_NOT_FOUND`, para qualquer usuário, inclusive autores de reviews do alvo: nenhuma review, contagem ou autor é exposto. Para alvos `ACTIVE`, as regras abaixo não mudam.
 
 #### Parâmetros de Consulta (Query Params):
 | Parâmetro | Tipo | Padrão | Validação / Descrição |
@@ -290,7 +292,7 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
 * O array `targets` de cada item da listagem reflete especificamente o alvo consultado.
 
 #### Performance e Complexidade de Consultas:
-* **Complexidade O(1) em relação ao `size` da página**: A busca do conteúdo e contagem é realizada em paginação nativa pelo banco via índice composto `idx_review_targets_target_rating`, e os perfis de autor são carregados em lote via query `IN (...)`. O número de queries SQL executadas por requisição paginada é constante (4 queries: verificação de existência, contagem total distinta, slice paginado e batch de perfis), garantindo ausência total de consultas N+1.
+* **Complexidade O(1) em relação ao `size` da página**: A busca do conteúdo e contagem é realizada em paginação nativa pelo banco via índice composto `idx_review_targets_target_rating`, e os perfis de autor são carregados em lote via query `IN (...)`. O número de queries SQL executadas por requisição paginada é constante (4 queries: verificação de existência e disponibilidade pública do alvo, contagem total distinta, slice paginado e batch de perfis), garantindo ausência total de consultas N+1.
 
 #### Exemplo de Resposta (`200 OK` - Envelope Paginado):
 ```json
@@ -498,5 +500,5 @@ Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
 | `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas, página negativa (`page < 0`), tamanho inválido (`size <= 0` ou `size > 50`), ordenação não suportada ou tentativa de autor marcar a própria review como útil | `validation-error` / `INVALID_PAGE` / `INVALID_SIZE` / `PAGE_SIZE_EXCEEDED` / `INVALID_SORT` / `SELF_HELPFUL_FORBIDDEN` |
 | `401 Unauthorized` | Requisição sem token JWT válido no header `Authorization` | N/A (Spring Security filter) |
 | `403 Forbidden` | Tentativa de consultar ou interagir com Review `PRIVATE` de terceiro, ou Review `FOLLOWERS` por usuário que não seja seguidor ativo do autor | `FORBIDDEN` |
-| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente, alvo inexistente na consulta de stats/reviews ou Review inativa (`UNDER_REVIEW` / `REMOVED`) | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
+| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente, alvo inexistente ou indisponível (place/product fora de `ACTIVE`) na consulta de stats/reviews ou Review inativa (`UNDER_REVIEW` / `REMOVED`) | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
 | `422 Unprocessable Entity` | Violação de regra de negócio do domínio: alvo duplicado no mesmo Review ou nota com mais de 1 casa decimal | `DUPLICATE_REVIEW_TARGET` / `INVALID_RATING_PRECISION` |
