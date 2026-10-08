@@ -8,6 +8,31 @@ import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.d
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 
+import 'package:rewit_mobile/features/notifications/domain/entities/notifications_page.dart';
+import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
+
+class StubNotificationRepo implements NotificationRepository {
+  @override
+  Future<NotificationsPage> getNotifications({int page = 0, int size = 20}) async =>
+      const NotificationsPage(
+        items: [],
+        pageNumber: 0,
+        pageSize: 20,
+        totalElements: 0,
+        totalPages: 0,
+        isLast: true,
+      );
+
+  @override
+  Future<int> getUnreadCount() async => 3;
+
+  @override
+  Future<void> markAsRead(String notificationId) async {}
+
+  @override
+  Future<void> markAllAsRead() async {}
+}
+
 class StubAuthRepo implements AuthRepository {
   bool logoutCalled = false;
 
@@ -152,6 +177,34 @@ void main() {
       // Verifica tela Home autenticada
       expect(find.text('Ana Paula'), findsOneWidget);
       expect(find.text('@anapaula'), findsOneWidget);
+    });
+
+    testWidgets('exibe ícone de notificações com badge de não lidas no AppBar da HomeScreen e navega para Notificações', (tester) async {
+      final notifRepo = StubNotificationRepo();
+      final authNotifier = AuthNotifier(authRepository: repo);
+      await authNotifier.checkAuthStatus();
+      final router = AppRouter(
+        authNotifier: authNotifier,
+        notificationRepository: notifRepo,
+      );
+
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        initialRoute: AppRouter.root,
+        onGenerateRoute: router.onGenerateRoute,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.notifications_outlined), findsOneWidget);
+      expect(find.text('3'), findsOneWidget); // Badge label
+
+      // Clica no ícone de notificações
+      await tester.tap(find.byIcon(Icons.notifications_outlined));
+      await tester.pumpAndSettle();
+
+      // Confirma que abriu a tela de notificações
+      expect(find.text('Notificações'), findsOneWidget);
+      expect(find.text('Nenhuma notificação por enquanto'), findsOneWidget);
     });
   });
 }

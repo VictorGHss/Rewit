@@ -61,4 +61,13 @@ class ApiEndpoints {
       '/api/v1/discussions/$discussionId/replies?page=$page&size=$size';
   static String discussionDetail(String discussionId) => '/api/v1/discussions/$discussionId';
   static String reportDiscussion(String discussionId) => '/api/v1/discussions/$discussionId/reports';
+
+  // Notificações In-App (C5.4)
+  static const String notificationsPath = '/api/v1/me/notifications';
+  static String notifications({int page = 0, int size = 20}) =>
+      '/api/v1/me/notifications?page=$page&size=$size';
+  static const String notificationsUnreadCount = '/api/v1/me/notifications/unread-count';
+  static String notificationRead(String notificationId) =>
+      '/api/v1/me/notifications/$notificationId/read';
+  static const String notificationsReadAll = '/api/v1/me/notifications/read-all';
 }

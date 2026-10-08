@@ -4,6 +4,8 @@ import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
+import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
+import 'package:rewit_mobile/features/notifications/presentation/state/notifications_notifier.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
@@ -22,6 +24,8 @@ class HomeScreen extends StatefulWidget {
   final MediaPickerService? mediaPickerService;
   final SearchRepository? searchRepository;
   final UserProfileRepository? userProfileRepository;
+  final NotificationRepository? notificationRepository;
+  final NotificationsNotifier? notificationsNotifier;
 
   const HomeScreen({
     super.key,
@@ -32,6 +36,8 @@ class HomeScreen extends StatefulWidget {
     this.mediaPickerService,
     this.searchRepository,
     this.userProfileRepository,
+    this.notificationRepository,
+    this.notificationsNotifier,
   });
 
   @override
@@ -40,6 +46,29 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  NotificationsNotifier? _notificationsNotifier;
+  bool _internalNotificationsNotifier = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.notificationsNotifier != null) {
+      _notificationsNotifier = widget.notificationsNotifier;
+      _internalNotificationsNotifier = false;
+    } else if (widget.notificationRepository != null) {
+      _notificationsNotifier = NotificationsNotifier(repository: widget.notificationRepository!);
+      _internalNotificationsNotifier = true;
+    }
+    _notificationsNotifier?.fetchUnreadCount();
+  }
+
+  @override
+  void dispose() {
+    if (_internalNotificationsNotifier) {
+      _notificationsNotifier?.dispose();
+    }
+    super.dispose();
+  }
 
   Future<void> _confirmLogout() async {
     final confirmed = await showDialog<bool>(
@@ -274,6 +303,27 @@ class _HomeScreenState extends State<HomeScreen> {
           appBar: AppBar(
             title: const Text('Rewit'),
             actions: [
+              if (_notificationsNotifier != null)
+                ListenableBuilder(
+                  listenable: _notificationsNotifier!,
+                  builder: (context, _) {
+                    final unreadCount = _notificationsNotifier!.unreadCount;
+                    return IconButton(
+                      icon: Badge(
+                        isLabelVisible: unreadCount > 0,
+                        label: Text(unreadCount > 99 ? '99+' : '$unreadCount'),
+                        child: const Icon(Icons.notifications_outlined),
+                      ),
+                      tooltip: 'Notificações',
+                      onPressed: () async {
+                        await Navigator.of(context).pushNamed(AppRouter.notifications);
+                        if (mounted) {
+                          _notificationsNotifier?.fetchUnreadCount();
+                        }
+                      },
+                    );
+                  },
+                ),
               IconButton(
                 icon: const Icon(Icons.settings_outlined),
                 tooltip: 'Configurações da Conta',

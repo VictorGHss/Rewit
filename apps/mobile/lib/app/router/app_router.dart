@@ -7,6 +7,9 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
+import 'package:rewit_mobile/features/notifications/presentation/screens/notifications_screen.dart';
+import 'package:rewit_mobile/features/notifications/presentation/state/notifications_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
@@ -30,6 +33,7 @@ class AppRouter {
   static const String root = '/';
   static const String login = '/login';
   static const String home = '/home';
+  static const String notifications = '/notifications';
   static const String search = '/search';
   static const String placeDetail = '/place/detail';
   static const String productDetail = '/product/detail';
@@ -50,6 +54,8 @@ class AppRouter {
   final UserProfileRepository? userProfileRepository;
   final PlaceRepository? placeRepository;
   final ProductRepository? productRepository;
+  final NotificationRepository? notificationRepository;
+  final NotificationsNotifier? notificationsNotifier;
 
   const AppRouter({
     required this.authNotifier,
@@ -63,6 +69,8 @@ class AppRouter {
     this.userProfileRepository,
     this.placeRepository,
     this.productRepository,
+    this.notificationRepository,
+    this.notificationsNotifier,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -87,6 +95,8 @@ class AppRouter {
                   mediaPickerService: mediaPickerService,
                   searchRepository: searchRepository,
                   userProfileRepository: userProfileRepository,
+                  notificationRepository: notificationRepository,
+                  notificationsNotifier: notificationsNotifier,
                 );
               }
               return LoginScreen(authNotifier: authNotifier);
@@ -111,6 +121,18 @@ class AppRouter {
             mediaPickerService: mediaPickerService,
             searchRepository: searchRepository,
             userProfileRepository: userProfileRepository,
+            notificationRepository: notificationRepository,
+            notificationsNotifier: notificationsNotifier,
+          ),
+          settings: settings,
+        );
+
+      case notifications:
+        final passedNotifier = settings.arguments as NotificationsNotifier?;
+        return MaterialPageRoute(
+          builder: (context) => NotificationsScreen(
+            repository: notificationRepository,
+            notifier: passedNotifier ?? notificationsNotifier,
           ),
           settings: settings,
         );

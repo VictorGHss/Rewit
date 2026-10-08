@@ -12,6 +12,7 @@ import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
+import 'package:rewit_mobile/features/notifications/data/repositories/notification_repository_impl.dart';
 import 'package:rewit_mobile/features/review_creation/data/repositories/review_creation_repository_impl.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/data/repositories/review_media_repository_impl.dart';
@@ -52,6 +53,7 @@ void main() async {
   final productRepository = ProductRepositoryImpl(httpClient: httpClient);
   final mediaRepository = ReviewMediaRepositoryImpl(client: httpClient);
   final mediaPickerService = ImagePickerMediaService();
+  final notificationRepository = NotificationRepositoryImpl(httpClient: httpClient);
 
   authNotifier = AuthNotifier(authRepository: authRepository);
   final feedNotifier = FeedNotifier(feedRepository: feedRepository);
@@ -72,6 +74,7 @@ void main() async {
     userProfileRepository: userProfileRepository,
     placeRepository: placeRepository,
     productRepository: productRepository,
+    notificationRepository: notificationRepository,
   );
 
 
