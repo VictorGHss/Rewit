@@ -138,6 +138,6 @@ public class DiscussionRepositoryAdapter implements DiscussionRepository {
     }
 
     private static List<ReviewDiscussion> toDomain(List<DiscussionJpaEntity> entities) {
-        return entities.stream().map(DiscussionJpaEntity::toDomain).toList();
+        return entities.stream().map(entity -> entity.toDomain()).toList();
     }
 }

@@ -52,9 +52,9 @@ public class QueryAdminDiscussionReportsUseCase {
 
         PageResult<DiscussionReport> reports = discussionReportRepository.findAdminPage(status, reason, discussionId, page, size, direction);
         Map<UUID, ReviewDiscussion> discussions = discussionRepository
-                .findAllByIds(reports.content().stream().map(DiscussionReport::getDiscussionId).distinct().toList())
+                .findAllByIds(reports.content().stream().map(report -> report.getDiscussionId()).distinct().toList())
                 .stream()
-                .collect(Collectors.toMap(ReviewDiscussion::getId, Function.identity()));
+                .collect(Collectors.toMap(discussion -> discussion.getId(), Function.identity()));
 
         List<AdminDiscussionReportView> views = reports.content().stream()
                 .map(report -> toView(report, discussions.get(report.getDiscussionId())))

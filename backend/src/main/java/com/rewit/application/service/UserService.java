@@ -158,7 +158,7 @@ public class UserService {
         // Linha travada: o save grava a linha inteira, inclusive o estado da conta. Lida sem lock, uma transição
         // de ciclo de vida confirmada no meio seria sobrescrita pelo estado antigo (lost update)
         User user = userRepository.findByIdForUpdate(cmd.userId())
-                .filter(User::isOperational)
+                .filter(account -> account.isOperational())
                 .orElseThrow(AccountStatusPolicy::accountDisabled);
 
         if (user.getAuthProvider() != AuthProvider.LOCAL || user.getPasswordHash() == null) {

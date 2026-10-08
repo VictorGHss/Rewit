@@ -61,7 +61,7 @@ class RedisRateLimitStoreIntegrationTest {
     @AfterEach
     void tearDown() {
         instanceA.delete(key);
-        factories.forEach(LettuceConnectionFactory::destroy);
+        factories.forEach(factory -> factory.destroy());
     }
 
     @Test

@@ -197,7 +197,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
     public ProblemDetail handleMaxUploadSizeExceeded(org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.PAYLOAD_TOO_LARGE, "O tamanho do arquivo excede o limite máximo permitido");
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONTENT_TOO_LARGE, "O tamanho do arquivo excede o limite máximo permitido");
         problem.setTitle("Arquivo Muito Grande");
         problem.setType(URI.create("https://api.rewit.app/errors/payload-too-large"));
         problem.setProperty("code", "PAYLOAD_TOO_LARGE");

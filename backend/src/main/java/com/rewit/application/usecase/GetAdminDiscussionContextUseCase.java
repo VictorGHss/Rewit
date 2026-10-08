@@ -46,7 +46,7 @@ public class GetAdminDiscussionContextUseCase {
                 : discussionRepository.findById(discussion.getParentId()).map(AdminDiscussionView::fromDomain).orElse(null);
 
         List<DiscussionReport> reports = discussionReportRepository.findByDiscussionId(discussionId);
-        long pending = reports.stream().filter(DiscussionReport::isPending).count();
+        long pending = reports.stream().filter(report -> report.isPending()).count();
 
         return new AdminDiscussionContextView(
                 AdminDiscussionView.fromDomain(discussion),

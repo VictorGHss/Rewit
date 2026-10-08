@@ -44,7 +44,7 @@ public class DiscussionReportRepositoryAdapter implements DiscussionReportReposi
             return Optional.empty();
         }
         return jpaRepository.findByDiscussionIdAndReporterUserId(discussionId, reporterUserId)
-                .map(DiscussionReportJpaEntity::toDomain);
+                .map(entity -> entity.toDomain());
     }
 
     @Override
@@ -63,7 +63,7 @@ public class DiscussionReportRepositoryAdapter implements DiscussionReportReposi
             return List.of();
         }
         return jpaRepository.saveAllAndFlush(reports.stream().map(DiscussionReportJpaEntity::fromDomain).toList())
-                .stream().map(DiscussionReportJpaEntity::toDomain).toList();
+                .stream().map(entity -> entity.toDomain()).toList();
     }
 
     @Override
@@ -73,7 +73,7 @@ public class DiscussionReportRepositoryAdapter implements DiscussionReportReposi
             return List.of();
         }
         return jpaRepository.findByDiscussionIdAndStatus(discussionId, ReportStatus.PENDING).stream()
-                .map(DiscussionReportJpaEntity::toDomain).toList();
+                .map(entity -> entity.toDomain()).toList();
     }
 
     @Override
@@ -83,7 +83,7 @@ public class DiscussionReportRepositoryAdapter implements DiscussionReportReposi
             return List.of();
         }
         return jpaRepository.findByDiscussionIdOrderByCreatedAtAscIdAsc(discussionId).stream()
-                .map(DiscussionReportJpaEntity::toDomain).toList();
+                .map(entity -> entity.toDomain()).toList();
     }
 
     @Override
@@ -103,7 +103,7 @@ public class DiscussionReportRepositoryAdapter implements DiscussionReportReposi
         Sort sort = Sort.by(new Sort.Order(direction, "createdAt"), new Sort.Order(direction, "id"));
         Page<DiscussionReportJpaEntity> paged = jpaRepository.findAdminPage(status, reason, discussionId,
                 PageRequest.of(page, size, sort));
-        return PageResult.of(paged.getContent().stream().map(DiscussionReportJpaEntity::toDomain).toList(),
+        return PageResult.of(paged.getContent().stream().map(entity -> entity.toDomain()).toList(),
                 paged.getNumber(), paged.getSize(), paged.getTotalElements());
     }
 }

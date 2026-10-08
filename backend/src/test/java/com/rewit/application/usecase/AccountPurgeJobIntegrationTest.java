@@ -9,7 +9,6 @@ import com.rewit.application.port.AccountPurgeRepository;
 import com.rewit.application.port.EmailReservation;
 import com.rewit.application.port.ProfileRepository;
 import com.rewit.application.port.UserRepository;
-import com.rewit.application.usecase.PurgeDeletedAccountUseCase.PurgeResult;
 import com.rewit.application.usecase.PurgeEligibleAccountsUseCase.AccountPurgeRunResult;
 import com.rewit.infrastructure.account.HmacEmailReservation;
 import com.rewit.presentation.dto.auth.LoginRequest;

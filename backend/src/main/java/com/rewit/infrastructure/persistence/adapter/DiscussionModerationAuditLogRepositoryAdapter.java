@@ -37,7 +37,7 @@ public class DiscussionModerationAuditLogRepositoryAdapter implements Discussion
             return List.of();
         }
         return jpaRepository.findByDiscussionIdOrderByCreatedAtAscIdAsc(discussionId).stream()
-                .map(DiscussionModerationAuditLogJpaEntity::toDomain)
+                .map(entity -> entity.toDomain())
                 .toList();
     }
 }

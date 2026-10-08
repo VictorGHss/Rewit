@@ -36,7 +36,7 @@ public class DeactivateAccountUseCase {
         }
 
         User user = userRepository.findByIdForUpdate(userId)
-                .filter(User::isOperational)
+                .filter(account -> account.isOperational())
                 .orElseThrow(AccountStatusPolicy::accountDisabled);
 
         user.deactivate();

@@ -56,7 +56,7 @@ public class AdminAccountLifecycleUseCase {
 
         // Estado e role atuais do ator, sem lock (mesma semântica de AccountStatusPolicy)
         User actor = userRepository.findById(actorUserId)
-                .filter(User::isOperational)
+                .filter(account -> account.isOperational())
                 .orElseThrow(AccountStatusPolicy::accountDisabled);
         if (actor.getRole() != Role.ADMIN) {
             throw new BusinessException("Acesso negado", HttpStatus.FORBIDDEN, "FORBIDDEN");

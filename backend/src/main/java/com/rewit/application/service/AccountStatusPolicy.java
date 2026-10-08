@@ -2,7 +2,6 @@ package com.rewit.application.service;
 
 import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
-import com.rewit.domain.model.User;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -36,7 +35,7 @@ public class AccountStatusPolicy {
     public void requireOperational(UUID actorUserId) {
         Objects.requireNonNull(actorUserId, "actorUserId must not be null");
         boolean operational = userRepository.findById(actorUserId)
-                .map(User::isOperational)
+                .map(account -> account.isOperational())
                 .orElse(false);
         if (!operational) {
             throw accountDisabled();

@@ -239,7 +239,7 @@ public class UserFollowService {
      */
     private User requireVisibleUser(UUID userId) {
         return userRepository.findById(userId)
-                .filter(User::isOperational)
+                .filter(account -> account.isOperational())
                 .orElseThrow(() -> new BusinessException("Usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
     }
 

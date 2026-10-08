@@ -129,7 +129,7 @@ public class PurgeEligibleAccountsUseCase {
                     }
                 } catch (BusinessException | DataAccessException e) {
                     failed++;
-                    failuresByType.merge(e.getClass().getSimpleName(), 1, Integer::sum);
+                    failuresByType.merge(e.getClass().getSimpleName(), 1, (current, increment) -> current + increment);
                     log.warn("Account purge: falha de uma conta, a passada continua (erro={})", e.getClass().getSimpleName());
                 }
             }

@@ -84,15 +84,15 @@ public class DiscussionThreadQueryService {
         // Raiz em análise não expõe respostas, nem ao próprio autor
         List<UUID> expandableRootIds = roots.content().stream()
                 .filter(root -> root.getStatus() != DiscussionStatus.UNDER_REVIEW)
-                .map(ReviewDiscussion::getId)
+                .map(root -> root.getId())
                 .toList();
         Map<UUID, List<ReviewDiscussion>> repliesByRoot = discussionRepository
                 .findFirstRepliesVisibleTo(expandableRootIds, viewerId, INLINE_REPLY_LIMIT).stream()
-                .collect(Collectors.groupingBy(ReviewDiscussion::getParentId, LinkedHashMap::new, Collectors.toList()));
+                .collect(Collectors.groupingBy(reply -> reply.getParentId(), LinkedHashMap::new, Collectors.toList()));
         Map<UUID, Long> replyCounts = discussionRepository.countRepliesVisibleTo(expandableRootIds, viewerId);
 
         Authors authors = authorsOf(Stream.concat(
-                roots.content().stream(), repliesByRoot.values().stream().flatMap(List::stream)).toList(), review);
+                roots.content().stream(), repliesByRoot.values().stream().flatMap(replies -> replies.stream())).toList(), review);
 
         List<DiscussionThreadView> threads = new ArrayList<>(roots.content().size());
         for (ReviewDiscussion root : roots.content()) {
@@ -150,13 +150,13 @@ public class DiscussionThreadQueryService {
     private Authors authorsOf(Collection<ReviewDiscussion> discussions, Review review) {
         Set<UUID> authorIds = discussions.stream()
                 .filter(discussion -> presentationPolicy.exposesAuthor(discussion, review.isAnonymous()))
-                .map(ReviewDiscussion::getUserId)
+                .map(discussion -> discussion.getUserId())
                 .collect(Collectors.toSet());
         if (authorIds.isEmpty()) {
             return new Authors(Map.of(), Set.of());
         }
         Map<UUID, Profile> profiles = profileRepository.findByUserIdIn(authorIds).stream()
-                .collect(Collectors.toMap(Profile::getUserId, Function.identity(), (first, second) -> first));
+                .collect(Collectors.toMap(profile -> profile.getUserId(), Function.identity(), (first, second) -> first));
         return new Authors(profiles, userRepository.findDeletedUserIds(authorIds));
     }
 

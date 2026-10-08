@@ -51,7 +51,7 @@ class PurgeEligibleAccountsUseCaseTest {
     @DisplayName("Busca candidatas pelo corte de 30 dias e repassa o mesmo instante ao caso de uso")
     void usesGracePeriodCutoffAndDelegates() {
         UUID a = UUID.randomUUID();
-        when(userRepository.findDeletedUserIdsPendingPurge(any(), anyInt())).thenReturn(List.of(a), List.of());
+        when(userRepository.findDeletedUserIdsPendingPurge(any(), anyInt())).thenReturn(List.of(a)).thenReturn(List.of());
         when(purge.execute(a, NOW)).thenReturn(PURGED);
 
         AccountPurgeRunResult result = useCase(100, 10).run(NOW);
@@ -68,7 +68,7 @@ class PurgeEligibleAccountsUseCaseTest {
         UUID b = UUID.randomUUID();
         UUID c = UUID.randomUUID();
         UUID d = UUID.randomUUID();
-        when(userRepository.findDeletedUserIdsPendingPurge(any(), anyInt())).thenReturn(List.of(a, b, c, d), List.of());
+        when(userRepository.findDeletedUserIdsPendingPurge(any(), anyInt())).thenReturn(List.of(a, b, c, d)).thenReturn(List.of());
         when(purge.execute(a, NOW)).thenReturn(PURGED);
         when(purge.execute(b, NOW)).thenThrow(new CannotAcquireLockException("lock"));
         when(purge.execute(c, NOW)).thenThrow(new BusinessException("x", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
@@ -106,7 +106,7 @@ class PurgeEligibleAccountsUseCaseTest {
         UUID third = UUID.randomUUID();
         // A conta que falhou continua pendente e volta no topo da consulta
         when(userRepository.findDeletedUserIdsPendingPurge(any(), anyInt()))
-                .thenReturn(List.of(failing), List.of(failing, second), List.of(failing, third));
+                .thenReturn(List.of(failing)).thenReturn(List.of(failing, second)).thenReturn(List.of(failing, third));
         when(purge.execute(failing, NOW)).thenThrow(new CannotAcquireLockException("lock"));
         when(purge.execute(second, NOW)).thenReturn(PURGED);
         when(purge.execute(third, NOW)).thenReturn(PURGED);
