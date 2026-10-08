@@ -93,6 +93,7 @@ class AuthRepositoryImpl implements AuthRepository {
         'newPassword': newPassword,
       },
       requiresAuth: true,
+      treatInvalidCredentialsAsBusinessError: true,
     );
 
     await _tokenStorage.clearTokens();

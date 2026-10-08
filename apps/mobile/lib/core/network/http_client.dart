@@ -60,6 +60,7 @@ class RewitHttpClient {
     Map<String, String>? headers,
     Map<String, dynamic>? queryParameters,
     bool requiresAuth = true,
+    bool treatInvalidCredentialsAsBusinessError = false,
   }) {
     return _send(
       method: 'POST',
@@ -68,6 +69,7 @@ class RewitHttpClient {
       headers: headers,
       queryParameters: queryParameters,
       requiresAuth: requiresAuth,
+      treatInvalidCredentialsAsBusinessError: treatInvalidCredentialsAsBusinessError,
     );
   }
 
@@ -203,6 +205,7 @@ class RewitHttpClient {
     Map<String, String>? headers,
     Map<String, dynamic>? queryParameters,
     bool requiresAuth = true,
+    bool treatInvalidCredentialsAsBusinessError = false,
   }) async {
     final uri = _buildUri(path, queryParameters);
     final mergedHeaders = await _buildHeaders(headers, requiresAuth: requiresAuth);
@@ -238,7 +241,11 @@ class RewitHttpClient {
           throw UnsupportedError('Método HTTP $method não suportado.');
       }
 
-      return _handleResponse(response, requiresAuth: requiresAuth);
+      return _handleResponse(
+        response,
+        requiresAuth: requiresAuth,
+        treatInvalidCredentialsAsBusinessError: treatInvalidCredentialsAsBusinessError,
+      );
     } on TimeoutException {
       throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
     } on http.ClientException catch (e) {
@@ -301,7 +308,11 @@ class RewitHttpClient {
     return headers;
   }
 
-  http.Response _handleResponse(http.Response response, {required bool requiresAuth}) {
+  http.Response _handleResponse(
+    http.Response response, {
+    required bool requiresAuth,
+    bool treatInvalidCredentialsAsBusinessError = false,
+  }) {
     final statusCode = response.statusCode;
 
     // Respostas de sucesso (2xx)
@@ -319,9 +330,12 @@ class RewitHttpClient {
     // Parsing estruturado de erro RFC 7807
     final problem = ProblemDetail.fromResponseBody(response.body, statusCode);
 
-    // Se a sessão expirou em requisição autenticada (401 não autorizado, exceto credenciais inválidas)
-    if (statusCode == 401 && requiresAuth && problem.code != 'INVALID_CREDENTIALS') {
-      onSessionExpired?.call();
+    // Se a sessão expirou em requisição autenticada (401 não autorizado)
+    if (statusCode == 401 && requiresAuth) {
+      final isLocalBusinessError = treatInvalidCredentialsAsBusinessError && problem.code == 'INVALID_CREDENTIALS';
+      if (!isLocalBusinessError) {
+        onSessionExpired?.call();
+      }
     }
 
     throw ApiException(

@@ -440,6 +440,56 @@ void main() {
       expect(await tokenStorage.getRefreshToken(), 'valid-refresh-token');
     });
 
+    test('changePassword com erro 401 UNAUTHORIZED (token expirado) invoca onSessionExpired', () async {
+      await tokenStorage.saveTokens(
+        accessToken: 'expired-access-token',
+        refreshToken: 'valid-refresh-token',
+      );
+
+      final errorPayload = {
+        'type': 'https://api.rewit.app/errors/unauthorized',
+        'title': 'Não autorizado',
+        'status': 401,
+        'detail': 'Token expirado ou revogado.',
+        'code': 'UNAUTHORIZED',
+      };
+
+      final mockClient = MockHttpHandler((request) async {
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(errorPayload))),
+          401,
+          headers: {'content-type': 'application/problem+json'},
+        );
+      });
+
+      bool sessionExpiredCalled = false;
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+        onSessionExpired: () => sessionExpiredCalled = true,
+      );
+
+      final repo = AuthRepositoryImpl(
+        httpClient: httpClient,
+        tokenStorage: tokenStorage,
+      );
+
+      await expectLater(
+        repo.changePassword(
+          currentPassword: 'any-password',
+          newPassword: 'new-pwd-123',
+        ),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 401)
+              .having((e) => e.errorCode, 'errorCode', 'UNAUTHORIZED'),
+        ),
+      );
+
+      expect(sessionExpiredCalled, isTrue);
+    });
+
     test('changePassword com erro 400 de validação lança ApiException e mantém tokens intactos', () async {
       await tokenStorage.saveTokens(
         accessToken: 'valid-access-token',
