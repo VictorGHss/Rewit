@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 
@@ -123,6 +125,77 @@ class RewitHttpClient {
     );
   }
 
+  /// Executa uma requisição POST multipart (para upload de arquivos binários).
+  Future<http.Response> postMultipart(
+    String path, {
+    required String fieldName,
+    required List<int> fileBytes,
+    required String filename,
+    String? mimeType,
+    Map<String, String>? headers,
+    Map<String, dynamic>? queryParameters,
+    bool requiresAuth = true,
+  }) async {
+    final uri = _buildUri(path, queryParameters);
+    final request = http.MultipartRequest('POST', uri);
+
+    if (requiresAuth && _tokenStorage != null) {
+      final token = await _tokenStorage.getAccessToken();
+      if (token != null && token.isNotEmpty) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+    }
+    request.headers['Accept'] = 'application/json';
+    if (headers != null) {
+      request.headers.addAll(headers);
+    }
+
+    MediaType? contentType;
+    if (mimeType != null && mimeType.contains('/')) {
+      final parts = mimeType.split('/');
+      contentType = MediaType(parts[0], parts[1]);
+    }
+
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        fieldName,
+        fileBytes,
+        filename: filename,
+        contentType: contentType,
+      ),
+    );
+
+    try {
+      final streamedResponse = await _client.send(request).timeout(timeout);
+      final response = await http.Response.fromStream(streamedResponse);
+      return _handleResponse(response, requiresAuth: requiresAuth);
+    } on TimeoutException {
+      throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
+    } on http.ClientException catch (e) {
+      throw NetworkException('Falha de conexão com o servidor.', e);
+    } on ApiException {
+      rethrow;
+    } on NetworkException {
+      rethrow;
+    } catch (e) {
+      throw NetworkException('Erro inesperado na comunicação de rede.', e);
+    }
+  }
+
+  /// Recupera os bytes brutos de um recurso autenticado (ex: download de imagem sanitizada).
+  Future<Uint8List> getBytes(
+    String path, {
+    Map<String, String>? headers,
+    bool requiresAuth = true,
+  }) async {
+    final response = await get(
+      path,
+      headers: headers,
+      requiresAuth: requiresAuth,
+    );
+    return response.bodyBytes;
+  }
+
   Future<http.Response> _send({
     required String method,
     required String path,
@@ -180,6 +253,17 @@ class RewitHttpClient {
   }
 
   Uri _buildUri(String path, Map<String, dynamic>? queryParameters) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      final uri = Uri.parse(path);
+      if (queryParameters != null && queryParameters.isNotEmpty) {
+        final sanitizedParams = queryParameters.map(
+          (key, value) => MapEntry(key, value?.toString() ?? ''),
+        );
+        return uri.replace(queryParameters: sanitizedParams);
+      }
+      return uri;
+    }
+
     final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
     final cleanPath = path.startsWith('/') ? path : '/$path';
     final fullUrl = '$cleanBase$cleanPath';

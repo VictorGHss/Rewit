@@ -11,6 +11,8 @@ import 'package:rewit_mobile/features/feed/data/repositories/feed_repository_imp
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/review_creation/data/repositories/review_creation_repository_impl.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
+import 'package:rewit_mobile/features/review_detail/data/repositories/review_media_repository_impl.dart';
 import 'package:rewit_mobile/features/search/data/repositories/search_repository_impl.dart';
 
 void main() async {
@@ -44,6 +46,8 @@ void main() async {
   final reviewCreationRepository = ReviewCreationRepositoryImpl(httpClient: httpClient);
   final searchRepository = SearchRepositoryImpl(httpClient: httpClient);
   final userProfileRepository = UserProfileRepositoryImpl(httpClient: httpClient);
+  final mediaRepository = ReviewMediaRepositoryImpl(client: httpClient);
+  final mediaPickerService = ImagePickerMediaService();
 
   authNotifier = AuthNotifier(authRepository: authRepository);
   final feedNotifier = FeedNotifier(feedRepository: feedRepository);
@@ -56,6 +60,8 @@ void main() async {
     authNotifier: authNotifier,
     feedNotifier: feedNotifier,
     feedRepository: feedRepository,
+    reviewMediaRepository: mediaRepository,
+    mediaPickerService: mediaPickerService,
     discussionRepository: discussionRepository,
     reviewCreationRepository: reviewCreationRepository,
     searchRepository: searchRepository,

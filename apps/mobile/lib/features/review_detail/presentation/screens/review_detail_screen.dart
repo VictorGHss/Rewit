@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/discussions/presentation/state/discussion_notifier.dart';
 import 'package:rewit_mobile/features/discussions/presentation/widgets/discussions_section.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
+import 'package:rewit_mobile/features/review_detail/presentation/widgets/authenticated_image.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 
@@ -14,16 +17,22 @@ class ReviewDetailScreen extends StatefulWidget {
   final String reviewId;
   final FeedReview? initialReview;
   final FeedRepository? feedRepository;
+  final ReviewMediaRepository? mediaRepository;
   final DiscussionRepository? discussionRepository;
   final DiscussionNotifier? discussionNotifier;
+  final String? currentUserId;
+  final bool? isAuthor;
 
   const ReviewDetailScreen({
     super.key,
     required this.reviewId,
     this.initialReview,
     this.feedRepository,
+    this.mediaRepository,
     this.discussionRepository,
     this.discussionNotifier,
+    this.currentUserId,
+    this.isAuthor,
   });
 
   @override
@@ -38,6 +47,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   // Mídias da avaliação
   List<ReviewMediaItem> _mediaItems = [];
   bool _isLoadingMedia = false;
+  String? _mediaErrorMessage;
+  String? _deletingMediaId;
 
   // Interação com Helpful
   bool _isTogglingHelpful = false;
@@ -45,6 +56,13 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   // Notifier de Discussões
   DiscussionNotifier? _discussionNotifier;
   bool _ownsNotifier = false;
+
+  bool get _isAuthor {
+    if (widget.isAuthor != null) return widget.isAuthor!;
+    final authorId = _review?.author.id;
+    if (authorId == null || authorId.isEmpty) return false;
+    return widget.currentUserId == authorId;
+  }
 
   @override
   void initState() {
@@ -76,6 +94,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   Future<void> _loadReview() async {
     if (widget.feedRepository == null) return;
     setState(() {
+      _isLoadingMedia = false;
       _isLoading = true;
       _errorMessage = null;
     });
@@ -100,13 +119,21 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   }
 
   Future<void> _loadMedia() async {
-    if (widget.feedRepository == null) return;
     setState(() {
       _isLoadingMedia = true;
+      _mediaErrorMessage = null;
     });
 
     try {
-      final media = await widget.feedRepository!.getReviewMedia(widget.reviewId);
+      List<ReviewMediaItem> media;
+      if (widget.mediaRepository != null) {
+        media = await widget.mediaRepository!.getReviewMedia(widget.reviewId);
+      } else if (widget.feedRepository != null) {
+        media = await widget.feedRepository!.getReviewMedia(widget.reviewId);
+      } else {
+        media = [];
+      }
+
       if (mounted) {
         setState(() {
           _mediaItems = media;
@@ -117,9 +144,148 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
       if (mounted) {
         setState(() {
           _isLoadingMedia = false;
+          _mediaErrorMessage = 'Não foi possível carregar as fotos da avaliação.';
         });
       }
     }
+  }
+
+  Future<void> _confirmAndDeleteMedia(ReviewMediaItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir Foto'),
+        content: const Text(
+          'Deseja realmente remover esta foto da avaliação? Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _deletingMediaId = item.id;
+    });
+
+    try {
+      if (widget.mediaRepository != null) {
+        await widget.mediaRepository!.deleteMedia(
+          reviewId: widget.reviewId,
+          mediaId: item.id,
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _mediaItems.removeWhere((m) => m.id == item.id);
+          _deletingMediaId = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Foto removida com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _deletingMediaId = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Falha ao excluir foto: ${e.detail}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _deletingMediaId = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Erro inesperado ao excluir foto.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _openMediaPreview(ReviewMediaItem item) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppBar(
+              title: Text(item.mimeType.split('/').last.toUpperCase()),
+              actions: [
+                if (_isAuthor)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: 'Excluir Foto',
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _confirmAndDeleteMedia(item);
+                    },
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                ),
+              ],
+            ),
+            if (widget.mediaRepository != null)
+              AuthenticatedImage(
+                url: item.url,
+                mediaRepository: widget.mediaRepository!,
+                fit: BoxFit.contain,
+                height: 300,
+              )
+            else
+              Container(
+                height: 300,
+                color: Colors.grey.shade100,
+                child: const Center(child: Icon(Icons.image, size: 60)),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Tamanho: ${(item.sizeBytes / 1024).toStringAsFixed(1)} KB',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                  Text(
+                    _formatDate(item.createdAt),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _handleToggleHelpful() async {
@@ -418,9 +584,34 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
               const Center(
                 child: Padding(
                   padding: EdgeInsets.symmetric(vertical: 8.0),
-                  child: LoadingIndicator(message: 'Carregando mídias...'),
+                  child: LoadingIndicator(message: 'Carregando fotos...'),
                 ),
               ),
+            ] else if (_mediaErrorMessage != null) ...[
+              Card(
+                color: theme.colorScheme.errorContainer.withAlpha(80),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, color: theme.colorScheme.error),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _mediaErrorMessage!,
+                          style: TextStyle(fontSize: 13, color: theme.colorScheme.onErrorContainer),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _loadMedia,
+                        child: const Text('Tentar novamente'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
             ] else if (_mediaItems.isNotEmpty) ...[
               Text(
                 'Fotos e Anexos (${_mediaItems.length})',
@@ -430,34 +621,115 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
               ),
               const SizedBox(height: 8),
               SizedBox(
-                height: 110,
+                height: 120,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: _mediaItems.length,
                   separatorBuilder: (context, _) => const SizedBox(width: 10),
                   itemBuilder: (context, index) {
                     final item = _mediaItems[index];
-                    return Container(
-                      width: 120,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.image, size: 40, color: theme.colorScheme.primary),
-                          const SizedBox(height: 4),
-                          Text(
-                            item.mimeType.split('/').last.toUpperCase(),
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            '${(item.sizeBytes / 1024).toStringAsFixed(0)} KB',
-                            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
-                          ),
-                        ],
+                    final isDeletingThis = _deletingMediaId == item.id;
+
+                    return GestureDetector(
+                      onTap: isDeletingThis ? null : () => _openMediaPreview(item),
+                      child: Container(
+                        width: 120,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(100)),
+                        ),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: widget.mediaRepository != null
+                                  ? AuthenticatedImage(
+                                      url: item.url,
+                                      mediaRepository: widget.mediaRepository!,
+                                      borderRadius: BorderRadius.circular(7),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : Center(
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.image, size: 36, color: theme.colorScheme.primary),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            item.mimeType.split('/').last.toUpperCase(),
+                                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                          ),
+                                          Text(
+                                            '${(item.sizeBytes / 1024).toStringAsFixed(0)} KB',
+                                            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                            ),
+                            // Rodapé com tamanho quando renderizado com AuthenticatedImage
+                            if (widget.mediaRepository != null)
+                              Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withAlpha(130),
+                                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(7)),
+                                  ),
+                                  child: Text(
+                                    '${(item.sizeBytes / 1024).toStringAsFixed(0)} KB',
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ),
+                            // Botão de exclusão (apenas para o autor)
+                            if (_isAuthor)
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: isDeletingThis
+                                    ? Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withAlpha(150),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      )
+                                    : GestureDetector(
+                                        key: ValueKey('delete_media_${item.id}'),
+                                        onTap: () => _confirmAndDeleteMedia(item),
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withAlpha(150),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.delete_outline,
+                                            size: 16,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                              ),
+                          ],
+                        ),
                       ),
                     );
                   },

@@ -21,11 +21,21 @@ class ReviewCreateSubmitting extends ReviewCreateState {
   bool get isSubmitting => true;
 }
 
-/// Estado de sucesso contendo a avaliação criada.
+/// Estado de sucesso contendo a avaliação criada e resultado opcional de uploads de mídia.
 class ReviewCreateSuccess extends ReviewCreateState {
   final FeedReview createdReview;
+  final int uploadedMediaCount;
+  final int failedMediaCount;
+  final String? mediaErrorMessage;
 
-  const ReviewCreateSuccess(this.createdReview);
+  const ReviewCreateSuccess(
+    this.createdReview, {
+    this.uploadedMediaCount = 0,
+    this.failedMediaCount = 0,
+    this.mediaErrorMessage,
+  });
+
+  bool get hasMediaFailures => failedMediaCount > 0;
 }
 
 /// Estado de erro estruturado (RFC 7807, validação local ou falha de conectividade).

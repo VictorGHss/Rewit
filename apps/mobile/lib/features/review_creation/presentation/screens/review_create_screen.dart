@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
+import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/repositories/review_creation_repository.dart';
 import '../state/review_create_notifier.dart';
 import '../state/review_create_state.dart';
-import '../widgets/media_upload_extension_card.dart';
+import '../widgets/review_media_picker_section.dart';
 import '../widgets/target_item_input_widget.dart';
 
-/// Tela completa de criação de publicações de avaliação multi-alvo (Step 11.0 / Step 25.3).
+/// Tela completa de criação de publicações de avaliação multi-alvo (Step 11.0 / Step 25.3 / C4 Mídia).
 class ReviewCreateScreen extends StatefulWidget {
   final ReviewCreationRepository? repository;
+  final ReviewMediaRepository? mediaRepository;
+  final MediaPickerService? mediaPickerService;
   final SearchRepository? searchRepository;
   final ReviewCreateNotifier? notifier;
   final ValueChanged<FeedReview>? onReviewCreated;
@@ -18,6 +22,8 @@ class ReviewCreateScreen extends StatefulWidget {
   const ReviewCreateScreen({
     super.key,
     this.repository,
+    this.mediaRepository,
+    this.mediaPickerService,
     this.searchRepository,
     this.notifier,
     this.onReviewCreated,
@@ -45,6 +51,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
     } else {
       _notifier = ReviewCreateNotifier(
         repository: widget.repository ?? _FallbackReviewCreationRepository(),
+        mediaRepository: widget.mediaRepository,
+        mediaPickerService: widget.mediaPickerService,
       );
       _ownsNotifier = true;
     }
@@ -59,12 +67,28 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
     }
     final state = _notifier.state;
     if (state is ReviewCreateSuccess) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Avaliação publicada com sucesso!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (state.hasMediaFailures) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Avaliação criada com sucesso! Porém ${state.failedMediaCount} anexo(s) falharam no upload.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              state.uploadedMediaCount > 0
+                  ? 'Avaliação publicada com ${state.uploadedMediaCount} foto(s) anexada(s)!'
+                  : 'Avaliação publicada com sucesso!',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
       widget.onReviewCreated?.call(state.createdReview);
     }
   }
@@ -485,8 +509,11 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                // Ponto de Extensão para Fotos/Mídias
-                const MediaUploadExtensionCard(),
+                // Seção de Seleção e Upload de Fotos/Mídias
+                ReviewMediaPickerSection(
+                  notifier: _notifier,
+                  enabled: !isSubmitting,
+                ),
                 const SizedBox(height: 12),
 
                 // Botão de Submissão com proteção anti-duplo clique

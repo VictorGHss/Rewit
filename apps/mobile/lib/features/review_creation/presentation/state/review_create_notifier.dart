@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
+import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/repositories/review_creation_repository.dart';
@@ -8,6 +11,8 @@ import 'review_create_state.dart';
 /// Gerenciador de estado reativo para o formulário e submissão de avaliações.
 class ReviewCreateNotifier extends ChangeNotifier {
   final ReviewCreationRepository repository;
+  final ReviewMediaRepository? mediaRepository;
+  final MediaPickerService? mediaPickerService;
 
   static final RegExp _uuidRegex = RegExp(
     r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
@@ -25,6 +30,8 @@ class ReviewCreateNotifier extends ChangeNotifier {
     ),
   ];
 
+  final List<SelectedMediaItem> _selectedMedia = [];
+
   String? _contextPlaceId;
   String? _experienceText;
   bool _isAnonymous = false;
@@ -33,9 +40,14 @@ class ReviewCreateNotifier extends ChangeNotifier {
   double? _userLongitude;
   double? _locationAccuracyMeters;
 
-  ReviewCreateNotifier({required this.repository});
+  ReviewCreateNotifier({
+    required this.repository,
+    this.mediaRepository,
+    this.mediaPickerService,
+  });
 
   List<CreateReviewTargetInput> get targets => List.unmodifiable(_targets);
+  List<SelectedMediaItem> get selectedMedia => List.unmodifiable(_selectedMedia);
   String? get contextPlaceId => _contextPlaceId;
   String? get experienceText => _experienceText;
   bool get isAnonymous => _isAnonymous;
@@ -198,6 +210,101 @@ class ReviewCreateNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Seleciona mídias da galeria até o limite restante de 5 anexos.
+  Future<void> pickMedia() async {
+    if (isSubmitting || mediaPickerService == null) return;
+    final remainingSlots = SelectedMediaItem.maxItemsPerReview - _selectedMedia.length;
+    if (remainingSlots <= 0) return;
+
+    final picked = await mediaPickerService!.pickImages(maxImages: remainingSlots);
+    if (picked.isNotEmpty) {
+      final toAdd = picked.take(remainingSlots);
+      _selectedMedia.addAll(toAdd);
+      notifyListeners();
+    }
+  }
+
+  /// Adiciona diretamente um item de mídia selecionado (útil para testes ou integrações diretas).
+  void addSelectedMediaItem(SelectedMediaItem item) {
+    if (isSubmitting) return;
+    if (_selectedMedia.length < SelectedMediaItem.maxItemsPerReview) {
+      _selectedMedia.add(item);
+      notifyListeners();
+    }
+  }
+
+  /// Remove uma mídia selecionada pelo índice.
+  void removeSelectedMediaItem(int index) {
+    if (isSubmitting) return;
+    if (index >= 0 && index < _selectedMedia.length) {
+      _selectedMedia.removeAt(index);
+      notifyListeners();
+    }
+  }
+
+  /// Limpa todas as mídias selecionadas.
+  void clearSelectedMedia() {
+    if (isSubmitting) return;
+    _selectedMedia.clear();
+    notifyListeners();
+  }
+
+  /// Reenvia uma mídia que falhou durante o envio pós-publicação.
+  Future<bool> retryMediaUpload(int index, String reviewId) async {
+    if (mediaRepository == null || index < 0 || index >= _selectedMedia.length) {
+      return false;
+    }
+    final item = _selectedMedia[index];
+    if (item.isTerminalError || item.status == MediaUploadStatus.uploaded) {
+      return false;
+    }
+
+    _selectedMedia[index] = item.copyWith(status: MediaUploadStatus.uploading);
+    notifyListeners();
+
+    try {
+      final uploaded = await mediaRepository!.uploadMedia(
+        reviewId: reviewId,
+        bytes: item.bytes,
+        filename: item.name,
+        mimeType: item.mimeType,
+      );
+      _selectedMedia[index] = item.copyWith(
+        status: MediaUploadStatus.uploaded,
+        uploadedMedia: uploaded,
+        errorMessage: null,
+        errorCode: null,
+      );
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      final isTerminal = e.statusCode == 413 ||
+          e.statusCode == 415 ||
+          e.statusCode == 403 ||
+          e.errorCode == 'MEDIA_SIZE_EXCEEDED' ||
+          e.errorCode == 'UNSUPPORTED_MEDIA_TYPE' ||
+          e.errorCode == 'MAX_MEDIA_LIMIT_REACHED' ||
+          e.errorCode == 'FORBIDDEN';
+      _selectedMedia[index] = item.copyWith(
+        status: MediaUploadStatus.failed,
+        errorCode: e.errorCode,
+        errorMessage: e.detail,
+        isTerminalError: isTerminal,
+        retryAfterSeconds: e.retryAfterSeconds,
+      );
+      notifyListeners();
+      return false;
+    } catch (_) {
+      _selectedMedia[index] = item.copyWith(
+        status: MediaUploadStatus.failed,
+        errorMessage: 'Falha ao reenviar anexo de imagem.',
+        isTerminalError: false,
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Validação local espelhando os invariantes do backend.
   String? validate() {
     if (_targets.isEmpty) {
@@ -259,10 +366,15 @@ class ReviewCreateNotifier extends ChangeNotifier {
       return 'A precisão da localização não pode ser negativa.';
     }
 
+    if (_selectedMedia.length > SelectedMediaItem.maxItemsPerReview) {
+      return 'É permitido anexar no máximo ${SelectedMediaItem.maxItemsPerReview} fotos por avaliação.';
+    }
+
     return null;
   }
 
-  /// Submete a criação da avaliação ao backend com proteção contra cliques múltiplos.
+  /// Submete a criação da avaliação ao backend com proteção contra cliques múltiplos
+  /// e realiza o upload sequencial controlado das mídias anexadas.
   Future<bool> submit() async {
     if (isSubmitting) return false;
 
@@ -295,7 +407,100 @@ class ReviewCreateNotifier extends ChangeNotifier {
       );
 
       final created = await repository.createReview(input);
-      _state = ReviewCreateSuccess(created);
+
+      if (_selectedMedia.isEmpty || mediaRepository == null) {
+        _state = ReviewCreateSuccess(created);
+        notifyListeners();
+        return true;
+      }
+
+      // Upload sequencial controlado das mídias anexadas
+      int uploadedCount = 0;
+      int failedCount = 0;
+
+      for (int i = 0; i < _selectedMedia.length; i++) {
+        final item = _selectedMedia[i];
+
+        // Validação preventiva de tamanho no cliente
+        if (item.sizeBytes > SelectedMediaItem.maxSizeBytes) {
+          _selectedMedia[i] = item.copyWith(
+            status: MediaUploadStatus.failed,
+            errorCode: 'MEDIA_SIZE_EXCEEDED',
+            errorMessage: 'O tamanho do arquivo excede o limite máximo permitido de 10 MB',
+            isTerminalError: true,
+          );
+          failedCount++;
+          notifyListeners();
+          continue;
+        }
+
+        // Validação preventiva de formato no cliente
+        if (!item.isFormatValid) {
+          _selectedMedia[i] = item.copyWith(
+            status: MediaUploadStatus.failed,
+            errorCode: 'UNSUPPORTED_MEDIA_TYPE',
+            errorMessage: 'Formato não suportado. Utilize apenas JPEG ou PNG.',
+            isTerminalError: true,
+          );
+          failedCount++;
+          notifyListeners();
+          continue;
+        }
+
+        _selectedMedia[i] = item.copyWith(status: MediaUploadStatus.uploading);
+        notifyListeners();
+
+        try {
+          final uploadedItem = await mediaRepository!.uploadMedia(
+            reviewId: created.id,
+            bytes: item.bytes,
+            filename: item.name,
+            mimeType: item.mimeType,
+          );
+          _selectedMedia[i] = item.copyWith(
+            status: MediaUploadStatus.uploaded,
+            uploadedMedia: uploadedItem,
+            errorMessage: null,
+            errorCode: null,
+          );
+          uploadedCount++;
+          notifyListeners();
+        } on ApiException catch (e) {
+          failedCount++;
+          final isTerminal = e.statusCode == 413 ||
+              e.statusCode == 415 ||
+              e.statusCode == 403 ||
+              e.errorCode == 'MEDIA_SIZE_EXCEEDED' ||
+              e.errorCode == 'UNSUPPORTED_MEDIA_TYPE' ||
+              e.errorCode == 'MAX_MEDIA_LIMIT_REACHED' ||
+              e.errorCode == 'FORBIDDEN';
+          _selectedMedia[i] = item.copyWith(
+            status: MediaUploadStatus.failed,
+            errorCode: e.errorCode,
+            errorMessage: e.detail,
+            isTerminalError: isTerminal,
+            retryAfterSeconds: e.retryAfterSeconds,
+          );
+          notifyListeners();
+        } catch (_) {
+          failedCount++;
+          _selectedMedia[i] = item.copyWith(
+            status: MediaUploadStatus.failed,
+            errorMessage: 'Falha no envio da imagem.',
+            isTerminalError: false,
+          );
+          notifyListeners();
+        }
+      }
+
+      _state = ReviewCreateSuccess(
+        created,
+        uploadedMediaCount: uploadedCount,
+        failedMediaCount: failedCount,
+        mediaErrorMessage: failedCount > 0
+            ? '$failedCount anexo(s) falharam no upload.'
+            : null,
+      );
       notifyListeners();
       return true;
     } on ApiException catch (e) {
@@ -340,6 +545,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
         specificComment: null,
       ),
     );
+    _selectedMedia.clear();
     _contextPlaceId = null;
     _experienceText = null;
     _isAnonymous = false;

@@ -12,7 +12,9 @@ import 'package:rewit_mobile/features/profile/presentation/screens/account_setti
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
+import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_placeholder_screen.dart';
@@ -33,6 +35,8 @@ class AppRouter {
   final AuthNotifier authNotifier;
   final FeedNotifier? feedNotifier;
   final FeedRepository? feedRepository;
+  final ReviewMediaRepository? reviewMediaRepository;
+  final MediaPickerService? mediaPickerService;
   final DiscussionRepository? discussionRepository;
   final ReviewCreationRepository? reviewCreationRepository;
   final SearchRepository? searchRepository;
@@ -42,6 +46,8 @@ class AppRouter {
     required this.authNotifier,
     this.feedNotifier,
     this.feedRepository,
+    this.reviewMediaRepository,
+    this.mediaPickerService,
     this.discussionRepository,
     this.reviewCreationRepository,
     this.searchRepository,
@@ -66,6 +72,8 @@ class AppRouter {
                   authNotifier: authNotifier,
                   feedNotifier: feedNotifier,
                   reviewCreationRepository: reviewCreationRepository,
+                  mediaRepository: reviewMediaRepository,
+                  mediaPickerService: mediaPickerService,
                   searchRepository: searchRepository,
                   userProfileRepository: userProfileRepository,
                 );
@@ -88,6 +96,8 @@ class AppRouter {
             authNotifier: authNotifier,
             feedNotifier: feedNotifier,
             reviewCreationRepository: reviewCreationRepository,
+            mediaRepository: reviewMediaRepository,
+            mediaPickerService: mediaPickerService,
             searchRepository: searchRepository,
             userProfileRepository: userProfileRepository,
           ),
@@ -96,13 +106,18 @@ class AppRouter {
 
       case reviewDetail:
         final args = settings.arguments;
+        final currentUserId = (authNotifier.state is Authenticated)
+            ? (authNotifier.state as Authenticated).user.id
+            : null;
         if (args is FeedReview) {
           return MaterialPageRoute(
             builder: (context) => ReviewDetailScreen(
               reviewId: args.id,
               initialReview: args,
               feedRepository: feedRepository,
+              mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
+              currentUserId: currentUserId,
             ),
             settings: settings,
           );
@@ -111,7 +126,9 @@ class AppRouter {
             builder: (context) => ReviewDetailScreen(
               reviewId: args,
               feedRepository: feedRepository,
+              mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
+              currentUserId: currentUserId,
             ),
             settings: settings,
           );
@@ -134,6 +151,8 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => ReviewCreateScreen(
             repository: reviewCreationRepository,
+            mediaRepository: reviewMediaRepository,
+            mediaPickerService: mediaPickerService,
             searchRepository: searchRepository,
             onReviewCreated: (createdReview) {
               feedNotifier?.refresh();

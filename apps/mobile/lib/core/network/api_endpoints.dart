@@ -17,6 +17,8 @@ class ApiEndpoints {
   static const String reviews = '/api/v1/reviews';
   static String reviewDetail(String id) => '/api/v1/reviews/$id';
   static String reviewMedia(String id) => '/api/v1/reviews/$id/media';
+  static String reviewMediaItem(String reviewId, String mediaId) =>
+      '/api/v1/reviews/$reviewId/media/$mediaId';
   static String reviewHelpful(String id) => '/api/v1/reviews/$id/helpful';
   static const String users = '/api/v1/users';
   static const String places = '/api/v1/places';
