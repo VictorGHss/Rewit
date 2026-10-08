@@ -12,6 +12,7 @@ import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_resu
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
+import 'package:rewit_mobile/shared/widgets/error_view.dart';
 
 class FakeFullFeedRepo implements FeedRepository {
   bool helpfulToggled = false;
@@ -21,7 +22,8 @@ class FakeFullFeedRepo implements FeedRepository {
   String? deletedReviewId;
   bool shouldThrowOnDelete = false;
   FeedReview? reviewToReturnOnUpdate;
-
+  FeedReview? reviewToReturnOnGetById;
+  bool shouldThrowOnGetById = false;
 
   final FeedReview sampleReview = FeedReview(
     id: 'rev-screen-1',
@@ -62,7 +64,17 @@ class FakeFullFeedRepo implements FeedRepository {
   }
 
   @override
-  Future<FeedReview> getReviewById(String reviewId) async => sampleReview;
+  Future<FeedReview> getReviewById(String reviewId) async {
+    if (shouldThrowOnGetById) {
+      throw const ApiException(ProblemDetail(
+        type: 'about:blank',
+        title: 'Erro',
+        status: 500,
+        detail: 'Erro interno ao buscar avaliação',
+      ));
+    }
+    return reviewToReturnOnGetById ?? sampleReview;
+  }
 
   @override
   Future<HelpfulResult> toggleHelpful(String reviewId, {required bool currentlyHelpful}) async {
@@ -312,6 +324,7 @@ void main() {
           isAnonymous: true,
         ),
       );
+      feedRepo.reviewToReturnOnGetById = anonReview;
 
       await tester.pumpWidget(
         MaterialApp(
@@ -335,6 +348,7 @@ void main() {
 
     group('posse contextual (isMine)', () {
       Future<void> pumpDetail(WidgetTester tester, FeedReview review, {String? currentUserId}) async {
+        feedRepo.reviewToReturnOnGetById = review;
         await tester.pumpWidget(
           MaterialApp(
             theme: AppTheme.lightTheme,
@@ -393,6 +407,109 @@ void main() {
         expect(feedRepo.sampleReview.isMine, isNull);
         await pumpDetail(tester, feedRepo.sampleReview, currentUserId: 'another-user');
         expectActions(findsNothing);
+      });
+    });
+
+    group('atualização canônica de ownership em segundo plano', () {
+      testWidgets('initialReview anônima do feed (isMine=null) ganha botões de editar e excluir após getReviewById canônico retornar isMine=true', (tester) async {
+        final anonymousFeedReview = feedRepo.sampleReview.copyWith(
+          isAnonymous: true,
+          author: const FeedAuthor(id: null, displayName: 'Anônimo', isAnonymous: true),
+          isMine: null,
+        );
+        final canonicalOwnedReview = anonymousFeedReview.copyWith(
+          isMine: true,
+        );
+
+        feedRepo.reviewToReturnOnGetById = canonicalOwnedReview;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: 'rev-screen-1',
+              initialReview: anonymousFeedReview,
+              feedRepository: feedRepo,
+              discussionRepository: discussionRepo,
+              currentUserId: 'usr-1',
+            ),
+          ),
+        );
+
+        // Frame inicial: renderiza imediatamente com initialReview sem spinner de tela cheia
+        expect(find.text('Carregando detalhes...'), findsNothing);
+        expect(find.text('Anônimo'), findsWidgets);
+
+        // Aguarda resolução da chamada em background getReviewById
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        // Agora botões de editar e excluir aparecem pois isMine=true foi carregado da versão canônica
+        expect(find.byKey(const Key('review_detail_edit_button')), findsOneWidget);
+        expect(find.byKey(const Key('review_detail_delete_button')), findsOneWidget);
+      });
+
+      testWidgets('initialReview não exibe botões se getReviewById canônico retornar isMine=false', (tester) async {
+        final anonymousFeedReview = feedRepo.sampleReview.copyWith(
+          isAnonymous: true,
+          author: const FeedAuthor(id: null, displayName: 'Anônimo', isAnonymous: true),
+          isMine: null,
+        );
+        final canonicalOtherReview = anonymousFeedReview.copyWith(
+          isMine: false,
+        );
+
+        feedRepo.reviewToReturnOnGetById = canonicalOtherReview;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: 'rev-screen-1',
+              initialReview: anonymousFeedReview,
+              feedRepository: feedRepo,
+              discussionRepository: discussionRepo,
+              currentUserId: 'usr-1',
+            ),
+          ),
+        );
+
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('review_detail_edit_button')), findsNothing);
+        expect(find.byKey(const Key('review_detail_delete_button')), findsNothing);
+      });
+
+      testWidgets('falha no getReviewById preserva initialReview visível sem exibir tela de erro ou quebrar a tela', (tester) async {
+        final initialReview = feedRepo.sampleReview.copyWith(
+          experienceText: 'Avaliação visível vinda do feed antes da falha de rede.',
+        );
+
+        feedRepo.shouldThrowOnGetById = true;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: 'rev-screen-1',
+              initialReview: initialReview,
+              feedRepository: feedRepo,
+              discussionRepository: discussionRepo,
+              currentUserId: 'usr-1',
+            ),
+          ),
+        );
+
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        // Não deve mostrar ErrorView
+        expect(find.byType(ErrorView), findsNothing);
+        expect(find.text('Erro ao carregar avaliação'), findsNothing);
+
+        // Conteúdo da initialReview continua na tela
+        expect(find.text('Avaliação visível vinda do feed antes da falha de rede.'), findsOneWidget);
       });
     });
 

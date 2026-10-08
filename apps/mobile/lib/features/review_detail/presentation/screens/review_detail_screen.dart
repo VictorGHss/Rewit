@@ -96,6 +96,9 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
       _loadReview();
     } else if (_review != null) {
       _loadMedia();
+      if (widget.feedRepository != null) {
+        _loadReview();
+      }
     }
   }
 
@@ -109,26 +112,38 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
 
   Future<void> _loadReview() async {
     if (widget.feedRepository == null) return;
-    setState(() {
-      _isLoadingMedia = false;
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    final hasInitialReview = _review != null;
+    if (!hasInitialReview) {
+      setState(() {
+        _isLoadingMedia = false;
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       final review = await widget.feedRepository!.getReviewById(widget.reviewId);
       if (mounted) {
         setState(() {
-          _review = review;
+          _review = review.copyWith(
+            mediaItems: _mediaItems.isNotEmpty ? _mediaItems : review.mediaItems,
+            isHelpfulByMe: _isTogglingHelpful ? _review?.isHelpfulByMe : review.isHelpfulByMe,
+            helpfulCount: _isTogglingHelpful ? _review?.helpfulCount : review.helpfulCount,
+            isMine: review.isMine ?? _review?.isMine,
+          );
           _isLoading = false;
         });
-        _loadMedia();
+        if (!hasInitialReview) {
+          _loadMedia();
+        }
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Não foi possível carregar os detalhes da avaliação.';
           _isLoading = false;
+          if (_review == null) {
+            _errorMessage = 'Não foi possível carregar os detalhes da avaliação.';
+          }
         });
       }
     }
