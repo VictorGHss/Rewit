@@ -62,6 +62,12 @@ class FakeAuthRepoForEdit implements AuthRepository {
       tokens: const AuthTokens(accessToken: 'access-123', refreshToken: 'refresh-123'),
     );
   }
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {}
 }
 
 class FakeProfileRepoForEdit implements UserProfileRepository {

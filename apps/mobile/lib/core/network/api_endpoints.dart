@@ -11,6 +11,7 @@ class ApiEndpoints {
   static const String authMe = '/api/v1/auth/me';
   static const String meProfile = '/api/v1/me/profile';
   static const String meDeactivate = '/api/v1/me/deactivate';
+  static const String mePassword = '/api/v1/me/password';
 
   // Feed e Avaliações
   static const String feed = '/api/v1/feed';

@@ -18,6 +18,12 @@ abstract class AuthRepository {
   /// Desativa a própria conta do usuário autenticado atual via POST /api/v1/me/deactivate.
   Future<void> deactivateAccount();
 
+  /// Altera a senha da conta local autenticada via POST /api/v1/me/password.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  });
+
   /// Renova a sessão usando o Refresh Token armazenado localmente.
   Future<Authenticated> refreshTokens();
 

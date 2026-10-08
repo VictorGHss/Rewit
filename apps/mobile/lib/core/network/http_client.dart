@@ -319,8 +319,8 @@ class RewitHttpClient {
     // Parsing estruturado de erro RFC 7807
     final problem = ProblemDetail.fromResponseBody(response.body, statusCode);
 
-    // Se a sessão expirou em requisição autenticada (401 não autorizado)
-    if (statusCode == 401 && requiresAuth) {
+    // Se a sessão expirou em requisição autenticada (401 não autorizado, exceto credenciais inválidas)
+    if (statusCode == 401 && requiresAuth && problem.code != 'INVALID_CREDENTIALS') {
       onSessionExpired?.call();
     }
 

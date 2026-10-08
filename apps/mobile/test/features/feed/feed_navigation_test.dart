@@ -55,6 +55,12 @@ class MockAuthRepo implements AuthRepository {
 
   @override
   Future<void> deactivateAccount() async {}
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {}
 }
 
 class MockFeedRepo implements FeedRepository {

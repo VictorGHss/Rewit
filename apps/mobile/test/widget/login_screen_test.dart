@@ -56,6 +56,12 @@ class MockAuthRepo implements AuthRepository {
   @override
   Future<void> logout() async {}
 
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {}
+
   bool reactivateCalled = false;
 
   @override
@@ -157,6 +163,18 @@ void main() {
 
       expect(successCalled, isTrue);
       expect(repo.lastEmail, 'correto@rewit.com');
+    });
+
+    testWidgets('exibe banner de confirmação quando redirecionado após alteração de senha', (tester) async {
+      final repo = MockAuthRepo()..shouldSucceed = true;
+      final notifier = AuthNotifier(authRepository: repo);
+      await notifier.login('user@test.com', 'senha123');
+      await notifier.changePassword(currentPassword: 'senha123', newPassword: 'novaSenha123');
+
+      await tester.pumpWidget(buildSubject(notifier));
+
+      expect(find.text('Senha alterada. Entre novamente com sua nova senha.'), findsOneWidget);
+      expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
     });
   });
 }

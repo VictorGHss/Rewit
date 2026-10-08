@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'change_password_screen.dart';
 
 /// Tela de configurações e gerenciamento de conta do usuário autenticado.
 class AccountSettingsScreen extends StatefulWidget {
@@ -216,6 +217,57 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               ),
               const SizedBox(height: 16),
             ],
+
+            // Seção: Segurança (C5.11)
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.security_outlined, color: theme.colorScheme.primary),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Segurança',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ListTile(
+                      key: const Key('change_password_tile'),
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.lock_reset_outlined),
+                      title: const Text('Alterar senha', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text(
+                        'Atualize sua senha de acesso. As sessões ativas serão encerradas.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => ChangePasswordScreen(
+                              authNotifier: widget.authNotifier,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
 
             // Seção: Gerenciamento da Conta
             Card(

@@ -18,6 +18,7 @@ import 'package:rewit_mobile/features/product/presentation/screens/product_detai
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/change_password_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/my_reviews_screen.dart';
@@ -50,6 +51,7 @@ class AppRouter {
   static const String reviewDetail = '/review/detail';
   static const String reviewEdit = '/review/edit';
   static const String accountSettings = '/settings';
+  static const String changePassword = '/settings/change-password';
   static const String scanner = '/scanner';
 
   final AuthNotifier authNotifier;
@@ -365,6 +367,14 @@ class AppRouter {
       case accountSettings:
         return MaterialPageRoute(
           builder: (context) => AccountSettingsScreen(
+            authNotifier: authNotifier,
+          ),
+          settings: settings,
+        );
+
+      case changePassword:
+        return MaterialPageRoute(
+          builder: (context) => ChangePasswordScreen(
             authNotifier: authNotifier,
           ),
           settings: settings,

@@ -161,6 +161,41 @@ class FakeAuthRepository implements AuthRepository {
       ));
     }
   }
+
+  bool changePasswordCalled = false;
+  String? lastCurrentPassword;
+  String? lastNewPassword;
+  bool shouldThrowApiErrorOnChangePassword = false;
+  bool shouldThrowNetworkOnChangePassword = false;
+  int? changePasswordStatusCode;
+  String? changePasswordErrorCode;
+  String? changePasswordErrorDetail;
+  int? changePasswordRetryAfter;
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    changePasswordCalled = true;
+    lastCurrentPassword = currentPassword;
+    lastNewPassword = newPassword;
+    if (shouldThrowNetworkOnChangePassword) {
+      throw const NetworkException('Sem conexão com a internet');
+    }
+    if (shouldThrowApiErrorOnChangePassword) {
+      throw ApiException(
+        ProblemDetail(
+          type: 'about:blank',
+          title: 'Erro',
+          status: changePasswordStatusCode ?? 400,
+          detail: changePasswordErrorDetail ?? 'Erro ao alterar senha',
+          code: changePasswordErrorCode ?? 'BAD_REQUEST',
+        ),
+        retryAfterSeconds: changePasswordRetryAfter,
+      );
+    }
+  }
 }
 
 void main() {
@@ -303,6 +338,234 @@ void main() {
       expect(await tokenStorage.getAccessToken(), isNull);
       expect(await tokenStorage.getRefreshToken(), isNull);
     });
+
+    test('changePassword envia POST para /api/v1/me/password com body correto e limpa tokens no sucesso', () async {
+      await tokenStorage.saveTokens(
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+      );
+
+      http.BaseRequest? capturedRequest;
+      String? capturedBody;
+
+      final mockClient = MockHttpHandler((request) async {
+        capturedRequest = request;
+        if (request is http.Request) {
+          capturedBody = request.body;
+        }
+        return http.StreamedResponse(
+          Stream.value(utf8.encode('')),
+          204,
+        );
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+      );
+
+      final repo = AuthRepositoryImpl(
+        httpClient: httpClient,
+        tokenStorage: tokenStorage,
+      );
+
+      await repo.changePassword(
+        currentPassword: 'current-pwd-123',
+        newPassword: 'new-pwd-secret-456',
+      );
+
+      expect(capturedRequest?.url.path, '/api/v1/me/password');
+      expect(capturedRequest?.method, 'POST');
+      expect(capturedRequest?.headers['authorization'], 'Bearer valid-access-token');
+
+      final bodyMap = jsonDecode(capturedBody!) as Map<String, dynamic>;
+      expect(bodyMap['currentPassword'], 'current-pwd-123');
+      expect(bodyMap['newPassword'], 'new-pwd-secret-456');
+
+      expect(await tokenStorage.getAccessToken(), isNull);
+      expect(await tokenStorage.getRefreshToken(), isNull);
+    });
+
+    test('changePassword com erro 401 INVALID_CREDENTIALS não limpa tokens e propaga ApiException', () async {
+      await tokenStorage.saveTokens(
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+      );
+
+      final errorPayload = {
+        'type': 'https://api.rewit.app/errors/invalid-credentials',
+        'title': 'Credenciais inválidas',
+        'status': 401,
+        'detail': 'Senha atual incorreta.',
+        'code': 'INVALID_CREDENTIALS',
+      };
+
+      final mockClient = MockHttpHandler((request) async {
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(errorPayload))),
+          401,
+          headers: {'content-type': 'application/problem+json'},
+        );
+      });
+
+      bool sessionExpiredCalled = false;
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+        onSessionExpired: () => sessionExpiredCalled = true,
+      );
+
+      final repo = AuthRepositoryImpl(
+        httpClient: httpClient,
+        tokenStorage: tokenStorage,
+      );
+
+      await expectLater(
+        repo.changePassword(
+          currentPassword: 'wrong-password',
+          newPassword: 'new-pwd-123',
+        ),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 401)
+              .having((e) => e.errorCode, 'errorCode', 'INVALID_CREDENTIALS')
+              .having((e) => e.detail, 'detail', 'Senha atual incorreta.'),
+        ),
+      );
+
+      expect(sessionExpiredCalled, isFalse);
+      expect(await tokenStorage.getAccessToken(), 'valid-access-token');
+      expect(await tokenStorage.getRefreshToken(), 'valid-refresh-token');
+    });
+
+    test('changePassword com erro 400 de validação lança ApiException e mantém tokens intactos', () async {
+      await tokenStorage.saveTokens(
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+      );
+
+      final errorPayload = {
+        'type': 'https://api.rewit.app/errors/validation-error',
+        'title': 'Dados inválidos',
+        'status': 400,
+        'detail': 'A nova senha deve ter entre 8 e 128 caracteres.',
+        'code': 'VALIDATION_ERROR',
+      };
+
+      final mockClient = MockHttpHandler((request) async {
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(errorPayload))),
+          400,
+          headers: {'content-type': 'application/problem+json'},
+        );
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+      );
+
+      final repo = AuthRepositoryImpl(
+        httpClient: httpClient,
+        tokenStorage: tokenStorage,
+      );
+
+      await expectLater(
+        repo.changePassword(
+          currentPassword: 'valid-current',
+          newPassword: 'short',
+        ),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 400)
+              .having((e) => e.errorCode, 'errorCode', 'VALIDATION_ERROR'),
+        ),
+      );
+
+      expect(await tokenStorage.getAccessToken(), 'valid-access-token');
+    });
+
+    test('changePassword com erro 429 Too Many Requests lança ApiException com retryAfterSeconds', () async {
+      await tokenStorage.saveTokens(
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+      );
+
+      final errorPayload = {
+        'type': 'https://api.rewit.app/errors/rate-limit',
+        'title': 'Muitas requisições',
+        'status': 429,
+        'detail': 'Limite de tentativas excedido.',
+        'code': 'RATE_LIMIT_EXCEEDED',
+      };
+
+      final mockClient = MockHttpHandler((request) async {
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(errorPayload))),
+          429,
+          headers: {
+            'content-type': 'application/problem+json',
+            'retry-after': '45',
+          },
+        );
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+      );
+
+      final repo = AuthRepositoryImpl(
+        httpClient: httpClient,
+        tokenStorage: tokenStorage,
+      );
+
+      await expectLater(
+        repo.changePassword(
+          currentPassword: 'current-pwd',
+          newPassword: 'new-valid-pwd',
+        ),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 429)
+              .having((e) => e.retryAfterSeconds, 'retryAfterSeconds', 45),
+        ),
+      );
+    });
+
+    test('changePassword com falha de rede lança NetworkException', () async {
+      await tokenStorage.saveTokens(
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+      );
+
+      final mockClient = MockHttpHandler((request) async {
+        throw http.ClientException('Falha de conexão com a internet');
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+      );
+
+      final repo = AuthRepositoryImpl(
+        httpClient: httpClient,
+        tokenStorage: tokenStorage,
+      );
+
+      await expectLater(
+        repo.changePassword(
+          currentPassword: 'current-pwd',
+          newPassword: 'new-valid-pwd',
+        ),
+        throwsA(isA<NetworkException>()),
+      );
+    });
   });
 
   group('AuthNotifier', () {
@@ -421,6 +684,95 @@ void main() {
       final unauth = notifier.state as Unauthenticated;
       expect(unauth.errorMessage, contains('expirou'));
       expect(unauth.errorCode, 'SESSION_EXPIRED');
+    });
+
+    test('changePassword com sucesso transiciona para Unauthenticated com PASSWORD_CHANGED', () async {
+      final repo = FakeAuthRepository();
+      final notifier = AuthNotifier(authRepository: repo);
+      await notifier.login('user@test.com', 'pwd123');
+      expect(notifier.isAuthenticated, isTrue);
+
+      final success = await notifier.changePassword(
+        currentPassword: 'pwd123',
+        newPassword: 'newSecretPassword1',
+      );
+
+      expect(success, isTrue);
+      expect(repo.changePasswordCalled, isTrue);
+      expect(repo.lastCurrentPassword, 'pwd123');
+      expect(repo.lastNewPassword, 'newSecretPassword1');
+      expect(notifier.isAuthenticated, isFalse);
+      expect(notifier.state, isA<Unauthenticated>());
+      final unauth = notifier.state as Unauthenticated;
+      expect(unauth.errorCode, 'PASSWORD_CHANGED');
+      expect(unauth.errorMessage, 'Senha alterada. Entre novamente com sua nova senha.');
+    });
+
+    test('changePassword com senha atual incorreta (INVALID_CREDENTIALS) preserva Authenticated e relança exceção', () async {
+      final repo = FakeAuthRepository()
+        ..shouldThrowApiErrorOnChangePassword = true
+        ..changePasswordStatusCode = 401
+        ..changePasswordErrorCode = 'INVALID_CREDENTIALS'
+        ..changePasswordErrorDetail = 'Senha atual incorreta.';
+      final notifier = AuthNotifier(authRepository: repo);
+      await notifier.login('user@test.com', 'pwd123');
+      expect(notifier.isAuthenticated, isTrue);
+      final currentUser = (notifier.state as Authenticated).user;
+
+      await expectLater(
+        notifier.changePassword(
+          currentPassword: 'wrong-password',
+          newPassword: 'newSecretPassword1',
+        ),
+        throwsA(isA<ApiException>().having((e) => e.errorCode, 'errorCode', 'INVALID_CREDENTIALS')),
+      );
+
+      // Usuário continua autenticado!
+      expect(notifier.isAuthenticated, isTrue);
+      expect(notifier.state, isA<Authenticated>());
+      expect((notifier.state as Authenticated).user.id, currentUser.id);
+    });
+
+    test('changePassword com sessão expirada (401 sem INVALID_CREDENTIALS) transiciona para Unauthenticated SESSION_EXPIRED', () async {
+      final repo = FakeAuthRepository()
+        ..shouldThrowApiErrorOnChangePassword = true
+        ..changePasswordStatusCode = 401
+        ..changePasswordErrorCode = 'UNAUTHORIZED'
+        ..changePasswordErrorDetail = 'Token inválido ou expirado.';
+      final notifier = AuthNotifier(authRepository: repo);
+      await notifier.login('user@test.com', 'pwd123');
+      expect(notifier.isAuthenticated, isTrue);
+
+      await expectLater(
+        notifier.changePassword(
+          currentPassword: 'pwd123',
+          newPassword: 'newSecretPassword1',
+        ),
+        throwsA(isA<ApiException>()),
+      );
+
+      expect(notifier.isAuthenticated, isFalse);
+      expect(notifier.state, isA<Unauthenticated>());
+      final unauth = notifier.state as Unauthenticated;
+      expect(unauth.errorCode, 'SESSION_EXPIRED');
+    });
+
+    test('changePassword com erro de rede ou 400 preserva Authenticated e relança exceção', () async {
+      final repo = FakeAuthRepository()
+        ..shouldThrowNetworkOnChangePassword = true;
+      final notifier = AuthNotifier(authRepository: repo);
+      await notifier.login('user@test.com', 'pwd123');
+      expect(notifier.isAuthenticated, isTrue);
+
+      await expectLater(
+        notifier.changePassword(
+          currentPassword: 'pwd123',
+          newPassword: 'newSecretPassword1',
+        ),
+        throwsA(isA<NetworkException>()),
+      );
+
+      expect(notifier.isAuthenticated, isTrue);
     });
   });
 }

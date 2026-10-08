@@ -82,6 +82,23 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await _httpClient.post(
+      ApiEndpoints.mePassword,
+      body: {
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      },
+      requiresAuth: true,
+    );
+
+    await _tokenStorage.clearTokens();
+  }
+
+  @override
   Future<Authenticated> refreshTokens() async {
     final currentRefreshToken = await _tokenStorage.getRefreshToken();
     if (currentRefreshToken == null || currentRefreshToken.isEmpty) {

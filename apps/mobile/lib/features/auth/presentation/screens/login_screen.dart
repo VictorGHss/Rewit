@@ -147,80 +147,88 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 32),
 
-                        // Banner de erro de credenciais ou rede (ProblemDetail RFC 7807)
+                        // Banner de mensagem de status/sucesso ou erro (ProblemDetail RFC 7807)
                         if (errorMessage != null) ...[
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.error.withAlpha(25),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: theme.colorScheme.error.withAlpha(100),
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(
-                                      Icons.error_outline,
-                                      color: theme.colorScheme.error,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        errorMessage,
-                                        style: TextStyle(
-                                          color: theme.colorScheme.error,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                if (state is Unauthenticated && state.retryAfterSeconds != null) ...[
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Por favor, aguarde ${state.retryAfterSeconds} segundos antes de tentar novamente.',
-                                    style: TextStyle(
-                                      color: theme.colorScheme.error,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                          Builder(
+                            builder: (context) {
+                              final isSuccess = state is Unauthenticated && state.errorCode == 'PASSWORD_CHANGED';
+                              final bannerColor = isSuccess ? Colors.green : theme.colorScheme.error;
+                              final bannerIcon = isSuccess ? Icons.check_circle_outline : Icons.error_outline;
+
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: bannerColor.withAlpha(25),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: bannerColor.withAlpha(100),
                                   ),
-                                ],
-                                if (state is Unauthenticated && state.isInvalidCredentials) ...[
-                                  const SizedBox(height: 8),
-                                  Divider(height: 1, color: theme.colorScheme.error.withAlpha(60)),
-                                  const SizedBox(height: 6),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Flexible(
-                                        child: Text(
-                                          'Sua conta foi desativada?',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: theme.colorScheme.error,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          bannerIcon,
+                                          color: bannerColor,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            errorMessage,
+                                            style: TextStyle(
+                                              color: isSuccess ? Colors.green.shade800 : bannerColor,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      TextButton(
-                                        onPressed: isLoading ? null : _confirmAndReactivate,
-                                        style: TextButton.styleFrom(
-                                          visualDensity: VisualDensity.compact,
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      ],
+                                    ),
+                                    if (state is Unauthenticated && state.retryAfterSeconds != null) ...[
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        'Por favor, aguarde ${state.retryAfterSeconds} segundos antes de tentar novamente.',
+                                        style: TextStyle(
+                                          color: theme.colorScheme.error,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
                                         ),
-                                        child: const Text('Reativar Conta', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                       ),
                                     ],
-                                  ),
-                                ],
-                              ],
-                            ),
+                                    if (state is Unauthenticated && state.isInvalidCredentials) ...[
+                                      const SizedBox(height: 8),
+                                      Divider(height: 1, color: theme.colorScheme.error.withAlpha(60)),
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              'Sua conta foi desativada?',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: theme.colorScheme.error,
+                                              ),
+                                            ),
+                                          ),
+                                          TextButton(
+                                            onPressed: isLoading ? null : _confirmAndReactivate,
+                                            style: TextButton.styleFrom(
+                                              visualDensity: VisualDensity.compact,
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                            ),
+                                            child: const Text('Reativar Conta', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              );
+                            },
                           ),
                           const SizedBox(height: 20),
                         ],

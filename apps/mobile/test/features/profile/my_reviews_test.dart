@@ -177,6 +177,12 @@ class FakeAuthRepo implements AuthRepository {
       tokens: const AuthTokens(accessToken: 'token', refreshToken: 'refresh'),
     );
   }
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {}
 }
 
 FeedReview createSampleReview({

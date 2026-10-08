@@ -189,6 +189,68 @@ class AuthNotifier extends ChangeNotifier {
     }
   }
 
+  /// Altera a senha da conta autenticada, revoga a sessão local e transiciona para Unauthenticated.
+  Future<bool> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    if (isLoading) return false;
+
+    final currentUser = _state is Authenticated ? (_state as Authenticated) : null;
+    _state = const Authenticating(statusMessage: 'Alterando senha...');
+    notifyListeners();
+
+    try {
+      await _authRepository.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
+
+      _state = const Unauthenticated(
+        errorMessage: 'Senha alterada. Entre novamente com sua nova senha.',
+        errorCode: 'PASSWORD_CHANGED',
+      );
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      if (e.isUnauthorized && e.errorCode != 'INVALID_CREDENTIALS') {
+        await _authRepository.logout();
+        _state = const Unauthenticated(
+          errorMessage: 'Sua sessão expirou. Faça login novamente.',
+          errorCode: 'SESSION_EXPIRED',
+        );
+      } else if (currentUser != null) {
+        _state = currentUser;
+      } else {
+        _state = Unauthenticated(
+          errorMessage: e.detail,
+          errorCode: e.errorCode,
+          retryAfterSeconds: e.retryAfterSeconds,
+        );
+      }
+      notifyListeners();
+      rethrow;
+    } on NetworkException catch (e) {
+      if (currentUser != null) {
+        _state = currentUser;
+      } else {
+        _state = Unauthenticated(errorMessage: e.message);
+      }
+      notifyListeners();
+      rethrow;
+    } catch (_) {
+      if (currentUser != null) {
+        _state = currentUser;
+      } else {
+        _state = const Unauthenticated(
+          errorMessage: 'Ocorreu um erro inesperado ao alterar a senha.',
+        );
+      }
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   /// Encerra a sessão atual local e remotamente.
   Future<void> logout() async {
     _state = const Authenticating(statusMessage: 'Encerrando sessão...');

@@ -15,6 +15,7 @@ import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.d
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/change_password_screen.dart';
 
 class MockHttpHandler extends http.BaseClient {
   final Future<http.StreamedResponse> Function(http.BaseRequest request) handler;
@@ -126,6 +127,37 @@ class TestMockAuthRepo implements AuthRepository {
           code: status == 429 ? 'RATE_LIMIT_EXCEEDED' : 'INTERNAL_SERVER_ERROR',
         ),
         retryAfterSeconds: deactivateRetryAfter,
+      );
+    }
+  }
+
+  int changePasswordCallCount = 0;
+  String? lastCurrentPassword;
+  String? lastNewPassword;
+  bool shouldThrowApiErrorOnChangePassword = false;
+  int? changePasswordStatusCode;
+  String? changePasswordErrorCode;
+  String? changePasswordErrorDetail;
+  int? changePasswordRetryAfter;
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    changePasswordCallCount++;
+    lastCurrentPassword = currentPassword;
+    lastNewPassword = newPassword;
+    if (shouldThrowApiErrorOnChangePassword) {
+      throw ApiException(
+        ProblemDetail(
+          type: 'about:blank',
+          title: 'Erro',
+          status: changePasswordStatusCode ?? 400,
+          detail: changePasswordErrorDetail ?? 'Erro ao alterar senha',
+          code: changePasswordErrorCode ?? 'BAD_REQUEST',
+        ),
+        retryAfterSeconds: changePasswordRetryAfter,
       );
     }
   }
@@ -543,6 +575,32 @@ void main() {
       expect(find.text('@carla'), findsOneWidget);
       expect(find.text('Gerenciamento da Conta'), findsOneWidget);
       expect(find.text('Desativar minha conta'), findsOneWidget);
+    });
+
+    testWidgets('renderiza seção Segurança com opção de Alterar senha', (tester) async {
+      final repo = TestMockAuthRepo();
+      final notifier = AuthNotifier(authRepository: repo);
+      await notifier.checkAuthStatus();
+
+      await tester.pumpWidget(buildSubject(notifier));
+
+      expect(find.text('Segurança'), findsOneWidget);
+      expect(find.text('Alterar senha'), findsOneWidget);
+      expect(find.byKey(const Key('change_password_tile')), findsOneWidget);
+    });
+
+    testWidgets('tocar em Alterar senha navega para ChangePasswordScreen', (tester) async {
+      final repo = TestMockAuthRepo();
+      final notifier = AuthNotifier(authRepository: repo);
+      await notifier.checkAuthStatus();
+
+      await tester.pumpWidget(buildSubject(notifier));
+
+      await tester.tap(find.byKey(const Key('change_password_tile')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ChangePasswordScreen), findsOneWidget);
+      expect(find.text('Alterar Senha'), findsOneWidget);
     });
 
     testWidgets('abrir diálogo de desativação exibe mensagem explicativa de encerramento e reativação', (tester) async {
