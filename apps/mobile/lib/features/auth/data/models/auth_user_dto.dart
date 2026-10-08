@@ -42,6 +42,26 @@ class AuthUserDto {
     };
   }
 
+  AuthUserDto copyWith({
+    String? id,
+    String? email,
+    String? handle,
+    String? displayName,
+    bool? isVerified,
+    bool? isAnonymousDefault,
+    int? reputationScore,
+  }) {
+    return AuthUserDto(
+      id: id ?? this.id,
+      email: email ?? this.email,
+      handle: handle ?? this.handle,
+      displayName: displayName ?? this.displayName,
+      isVerified: isVerified ?? this.isVerified,
+      isAnonymousDefault: isAnonymousDefault ?? this.isAnonymousDefault,
+      reputationScore: reputationScore ?? this.reputationScore,
+    );
+  }
+
   @override
   String toString() => 'AuthUserDto(id: $id, handle: @$handle, displayName: $displayName)';
 }

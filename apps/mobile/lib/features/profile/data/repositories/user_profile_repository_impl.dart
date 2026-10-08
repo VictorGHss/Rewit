@@ -4,6 +4,7 @@ import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/features/profile/data/models/follow_user_summary_dto.dart';
 import 'package:rewit_mobile/features/profile/data/models/user_profile_dto.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/follow_user_summary.dart';
+import 'package:rewit_mobile/features/profile/domain/entities/update_profile_input.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 
@@ -16,6 +17,17 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
   @override
   Future<UserProfile> getUserProfile(String userId) async {
     final response = await httpClient.get(ApiEndpoints.userProfile(userId));
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final dto = UserProfileDto.fromJson(json);
+    return dto.toEntity();
+  }
+
+  @override
+  Future<UserProfile> updateMyProfile(UpdateProfileInput input) async {
+    final response = await httpClient.patch(
+      ApiEndpoints.meProfile,
+      body: input.toJson(),
+    );
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     final dto = UserProfileDto.fromJson(json);
     return dto.toEntity();

@@ -207,4 +207,24 @@ class AuthNotifier extends ChangeNotifier {
     );
     notifyListeners();
   }
+
+  /// Atualiza os dados de perfil do usuário autenticado após edição bem-sucedida.
+  void updateCurrentUser({
+    String? handle,
+    String? displayName,
+    bool? isAnonymousDefault,
+  }) {
+    if (_state is Authenticated) {
+      final current = _state as Authenticated;
+      _state = Authenticated(
+        user: current.user.copyWith(
+          handle: handle,
+          displayName: displayName,
+          isAnonymousDefault: isAnonymousDefault,
+        ),
+        tokens: current.tokens,
+      );
+      notifyListeners();
+    }
+  }
 }

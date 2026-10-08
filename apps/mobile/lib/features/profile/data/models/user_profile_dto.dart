@@ -35,7 +35,7 @@ class UserStatsDto {
       );
 }
 
-/// DTO para deserialização do perfil público do usuário (/api/v1/users/{id}).
+/// DTO para deserialização do perfil público do usuário (/api/v1/users/{id} e /api/v1/me/profile).
 class UserProfileDto {
   final String id;
   final String handle;
@@ -44,6 +44,7 @@ class UserProfileDto {
   final String? avatarUrl;
   final UserStatsDto stats;
   final bool isFollowing;
+  final bool isAnonymousDefault;
 
   const UserProfileDto({
     required this.id,
@@ -53,6 +54,7 @@ class UserProfileDto {
     this.avatarUrl,
     required this.stats,
     required this.isFollowing,
+    this.isAnonymousDefault = false,
   });
 
   factory UserProfileDto.fromJson(Map<String, dynamic> json) {
@@ -72,6 +74,7 @@ class UserProfileDto {
               helpfulVotesReceived: 0,
             ),
       isFollowing: json['isFollowing'] as bool? ?? false,
+      isAnonymousDefault: json['isAnonymousDefault'] as bool? ?? false,
     );
   }
 
@@ -83,5 +86,6 @@ class UserProfileDto {
         avatarUrl: avatarUrl,
         stats: stats.toEntity(),
         isFollowing: isFollowing,
+        isAnonymousDefault: isAnonymousDefault,
       );
 }

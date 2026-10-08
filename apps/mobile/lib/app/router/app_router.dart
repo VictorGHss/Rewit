@@ -15,8 +15,10 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/product/presentation/screens/product_detail_screen.dart';
+import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
@@ -41,6 +43,7 @@ class AppRouter {
   static const String productDetail = '/product/detail';
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
+  static const String editProfile = '/profile/edit';
   static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
   static const String reviewEdit = '/review/edit';
@@ -296,6 +299,25 @@ class AppRouter {
           builder: (context) => UserProfileScreen(
             userId: userId,
             userProfileRepository: userProfileRepository,
+            authNotifier: authNotifier,
+          ),
+          settings: settings,
+        );
+
+      case editProfile:
+        final initialProfile = settings.arguments as UserProfile?;
+        if (userProfileRepository == null) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Repositório de perfil indisponível.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => EditProfileScreen(
+            initialProfile: initialProfile,
+            repository: userProfileRepository!,
             authNotifier: authNotifier,
           ),
           settings: settings,

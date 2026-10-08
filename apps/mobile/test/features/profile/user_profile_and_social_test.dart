@@ -22,8 +22,10 @@ import 'package:rewit_mobile/features/profile/data/models/follow_user_summary_dt
 import 'package:rewit_mobile/features/profile/data/models/user_profile_dto.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/follow_user_summary.dart';
+import 'package:rewit_mobile/features/profile/domain/entities/update_profile_input.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
@@ -152,6 +154,38 @@ class FakeUserProfileRepository implements UserProfileRepository {
             followingCount: 56,
             helpfulVotesReceived: 78,
           ),
+        );
+  }
+
+  UpdateProfileInput? lastUpdateInput;
+  UserProfile? profileToReturnOnUpdate;
+  bool shouldThrowUpdateError = false;
+  ApiException? updateApiExceptionToThrow;
+
+  @override
+  Future<UserProfile> updateMyProfile(UpdateProfileInput input) async {
+    lastUpdateInput = input;
+    if (updateApiExceptionToThrow != null) {
+      throw updateApiExceptionToThrow!;
+    }
+    if (shouldThrowUpdateError) {
+      throw const ApiException(
+        ProblemDetail(
+          type: 'https://api.rewit.app/errors/internal-error',
+          title: 'Erro',
+          status: 500,
+          detail: 'Falha ao atualizar perfil.',
+        ),
+      );
+    }
+    return profileToReturnOnUpdate ??
+        UserProfile(
+          id: 'my-user-id',
+          handle: input.handle,
+          displayName: input.displayName,
+          bio: input.bio,
+          isAnonymousDefault: input.isAnonymousDefault,
+          stats: const UserStats(),
         );
   }
 
@@ -487,6 +521,130 @@ void main() {
         throwsA(isA<ApiException>().having((e) => e.isNotFound, 'isNotFound', isTrue)),
       );
     });
+
+    test('updateMyProfile realiza PATCH /api/v1/me/profile e deserializa sucesso', () async {
+      mockHttp.responseToReturn = http.Response(
+        jsonEncode({
+          'id': 'my-user-id',
+          'email': 'eu@rewit.app',
+          'handle': 'novohandle',
+          'displayName': 'Novo Nome',
+          'bio': 'Nova biografia culinária',
+          'avatarUrl': 'https://rewit.app/avatar.png',
+          'isVerified': true,
+          'isAnonymousDefault': true,
+          'reputationScore': 120,
+          'createdAt': '2026-10-08T10:00:00Z',
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+
+      const input = UpdateProfileInput(
+        handle: 'novohandle',
+        displayName: 'Novo Nome',
+        bio: 'Nova biografia culinária',
+        isAnonymousDefault: true,
+      );
+
+      final result = await repository.updateMyProfile(input);
+
+      expect(mockHttp.capturedRequest?.method, 'PATCH');
+      expect(mockHttp.capturedRequest?.url.path, '/api/v1/me/profile');
+      final sentBody = jsonDecode(mockHttp.capturedRequest!.body) as Map<String, dynamic>;
+      expect(sentBody['handle'], 'novohandle');
+      expect(sentBody['displayName'], 'Novo Nome');
+      expect(sentBody['bio'], 'Nova biografia culinária');
+      expect(sentBody['isAnonymousDefault'], isTrue);
+
+      expect(result.handle, 'novohandle');
+      expect(result.displayName, 'Novo Nome');
+      expect(result.bio, 'Nova biografia culinária');
+      expect(result.isAnonymousDefault, isTrue);
+    });
+
+    test('updateMyProfile lança ApiException em 400 (dados inválidos)', () async {
+      mockHttp.responseToReturn = http.Response(
+        jsonEncode({
+          'type': 'https://api.rewit.app/errors/validation',
+          'title': 'Requisição Inválida',
+          'status': 400,
+          'detail': 'O nome de exibição deve ter entre 2 e 100 caracteres.',
+        }),
+        400,
+        headers: {'content-type': 'application/json'},
+      );
+
+      const input = UpdateProfileInput(
+        handle: 'h',
+        displayName: '',
+      );
+
+      expect(
+        () => repository.updateMyProfile(input),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 400)),
+      );
+    });
+
+    test('updateMyProfile lança ApiException em 409 (conflito de handle)', () async {
+      mockHttp.responseToReturn = http.Response(
+        jsonEncode({
+          'type': 'https://api.rewit.app/errors/conflict',
+          'title': 'Conflito',
+          'status': 409,
+          'detail': 'Este nome de usuário já está em uso.',
+        }),
+        409,
+        headers: {'content-type': 'application/json'},
+      );
+
+      const input = UpdateProfileInput(
+        handle: 'existing_handle',
+        displayName: 'Meu Nome',
+      );
+
+      expect(
+        () => repository.updateMyProfile(input),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 409)),
+      );
+    });
+
+    test('updateMyProfile lança ApiException em 401 (sessão inválida)', () async {
+      mockHttp.responseToReturn = http.Response(
+        jsonEncode({
+          'type': 'https://api.rewit.app/errors/unauthorized',
+          'title': 'Não Autorizado',
+          'status': 401,
+          'detail': 'Sessão expirada.',
+        }),
+        401,
+        headers: {'content-type': 'application/json'},
+      );
+
+      const input = UpdateProfileInput(
+        handle: 'novohandle',
+        displayName: 'Meu Nome',
+      );
+
+      expect(
+        () => repository.updateMyProfile(input),
+        throwsA(isA<ApiException>().having((e) => e.isUnauthorized, 'isUnauthorized', isTrue)),
+      );
+    });
+
+    test('updateMyProfile propaga NetworkException em falha de conexão', () async {
+      mockHttp.exceptionToThrow = http.ClientException('Sem conexão com o servidor');
+
+      const input = UpdateProfileInput(
+        handle: 'novohandle',
+        displayName: 'Meu Nome',
+      );
+
+      expect(
+        () => repository.updateMyProfile(input),
+        throwsA(isA<NetworkException>()),
+      );
+    });
   });
 
   group('3. UserProfileScreen Widget Tests', () {
@@ -677,6 +835,72 @@ void main() {
       expect(find.text('Usuário excluído'), findsWidgets);
       expect(find.widgetWithText(ElevatedButton, 'Seguir'), findsNothing);
       expect(find.widgetWithText(OutlinedButton, 'Seguindo'), findsNothing);
+    });
+
+    testWidgets('botão Editar Perfil aparece apenas no próprio perfil e abre EditProfileScreen', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: UserProfileScreen(
+          userId: null,
+          userProfileRepository: userProfileRepo,
+          authNotifier: authNotifier,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('edit_profile_button')), findsOneWidget);
+      expect(find.text('Editar Perfil'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('edit_profile_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(EditProfileScreen), findsOneWidget);
+      expect(find.text('Salvar Alterações'), findsOneWidget);
+    });
+
+    testWidgets('botão Editar Perfil NÃO aparece para perfil de terceiro', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: UserProfileScreen(
+          userId: 'other-user-id',
+          userProfileRepository: userProfileRepo,
+          authNotifier: authNotifier,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('edit_profile_button')), findsNothing);
+      expect(find.widgetWithText(ElevatedButton, 'Seguir'), findsOneWidget);
+    });
+
+    testWidgets('retorno da edição atualiza imediatamente os dados exibidos no perfil', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: UserProfileScreen(
+          userId: null,
+          userProfileRepository: userProfileRepo,
+          authNotifier: authNotifier,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('edit_profile_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('edit_profile_display_name_field')), 'Chef Renomado');
+      await tester.enterText(find.byKey(const Key('edit_profile_handle_field')), 'chef_renomado');
+      await tester.enterText(find.byKey(const Key('edit_profile_bio_field')), 'Bio atualizada com sucesso');
+      await tester.tap(find.byKey(const Key('edit_profile_anonymous_switch')));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('edit_profile_submit_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(EditProfileScreen), findsNothing);
+      expect(find.text('Chef Renomado'), findsWidgets);
+      expect(find.text('@chef_renomado'), findsOneWidget);
+      expect(find.text('Bio atualizada com sucesso'), findsOneWidget);
+      expect(find.text('Avaliações anônimas por padrão ativado'), findsOneWidget);
     });
   });
 

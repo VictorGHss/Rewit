@@ -6,6 +6,7 @@ import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
+import 'package:rewit_mobile/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
 
 /// Tela de Perfil Público e factual do usuário no Rewit (Step 18.0).
@@ -217,6 +218,27 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
+  Future<void> _openEditProfile() async {
+    if (widget.userProfileRepository == null) return;
+    final updated = await Navigator.of(context).push<UserProfile>(
+      MaterialPageRoute(
+        builder: (context) => EditProfileScreen(
+          initialProfile: _profile,
+          repository: widget.userProfileRepository!,
+          authNotifier: widget.authNotifier,
+        ),
+      ),
+    );
+
+    if (updated != null && mounted) {
+      setState(() {
+        _profile = updated.copyWith(
+          stats: _profile?.stats ?? updated.stats,
+        );
+      });
+    }
+  }
+
   Widget _buildStatItem({
     required BuildContext context,
     required String label,
@@ -412,6 +434,26 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
           ],
 
+          if (_isMyProfile && profile.isAnonymousDefault) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(
+                  Icons.visibility_off_outlined,
+                  size: 16,
+                  color: theme.colorScheme.onSurface.withAlpha(150),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Avaliações anônimas por padrão ativado',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface.withAlpha(150),
+                  ),
+                ),
+              ],
+            ),
+          ],
+
           const SizedBox(height: 24),
 
           // Painel de Estatísticas Factuais
@@ -489,6 +531,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ],
 
           if (_isMyProfile) ...[
+            FilledButton.icon(
+              key: const Key('edit_profile_button'),
+              onPressed: _openEditProfile,
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Editar Perfil'),
+            ),
+            const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () {
                 Navigator.of(context).pushNamed(AppRouter.accountSettings);

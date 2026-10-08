@@ -1,10 +1,14 @@
 import 'package:rewit_mobile/features/profile/domain/entities/follow_user_summary.dart';
+import 'package:rewit_mobile/features/profile/domain/entities/update_profile_input.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 
 /// Contrato de repositório para perfil público e grafo social no Rewit.
 abstract class UserProfileRepository {
   /// Consulta o perfil público e estatísticas factuais do usuário [userId].
   Future<UserProfile> getUserProfile(String userId);
+
+  /// Atualiza o perfil do usuário autenticado no backend (PATCH /api/v1/me/profile).
+  Future<UserProfile> updateMyProfile(UpdateProfileInput input);
 
   /// Passa a seguir o usuário [userId]. Retorna `true` se a relação for estabelecida.
   Future<bool> followUser(String userId);
