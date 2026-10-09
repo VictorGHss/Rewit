@@ -39,6 +39,13 @@ describe('ReviewContextModal', () => {
           specificComment: null,
         },
         {
+          targetId: 'target-uuid-event-7777',
+          type: 'EVENT',
+          displayName: 'Festival de Primavera 2026',
+          rating: 4.9,
+          specificComment: 'Atrações musicais de excelente qualidade e boa organização.',
+        },
+        {
           targetId: 'target-uuid-unspecialized-9999',
           type: null,
           displayName: null,
@@ -97,11 +104,14 @@ describe('ReviewContextModal', () => {
     expect(screen.getByText(/carregando contexto e histórico da avaliação/i)).toBeInTheDocument();
 
     await waitFor(() => {
-      // Nome e tipo exibidos quando presentes
+      // Nome e tipo exibidos quando presentes (PLACE, PRODUCT, EVENT)
       expect(screen.getByText('Café das Flores')).toBeInTheDocument();
       expect(screen.getByText('PLACE')).toBeInTheDocument();
       expect(screen.getByText('Cappuccino Italiano')).toBeInTheDocument();
       expect(screen.getByText('PRODUCT')).toBeInTheDocument();
+      expect(screen.getByText('Festival de Primavera 2026')).toBeInTheDocument();
+      expect(screen.getByText('EVENT')).toBeInTheDocument();
+      expect(screen.getByText('Atrações musicais de excelente qualidade e boa organização.')).toBeInTheDocument();
 
       // Alvo sem especialização (displayName null, type null) exibe fallback legível
       expect(screen.getByText('Alvo sem especialização')).toBeInTheDocument();
@@ -110,6 +120,48 @@ describe('ReviewContextModal', () => {
       // Não exibe o UUID do alvo como rótulo principal quando há displayName
       expect(screen.queryByText('Alvo: target-uuid-place-1234')).not.toBeInTheDocument();
       expect(screen.queryByText('Alvo: target-uuid-product-5678')).not.toBeInTheDocument();
+      expect(screen.queryByText('Alvo: target-uuid-event-7777')).not.toBeInTheDocument();
+    });
+  });
+
+  it('renderiza corretamente alvos do tipo EVENT com displayName e badge de tipo sem exibir UUID como rótulo principal', async () => {
+    const eventContext: AdminReviewContextResponse = {
+      ...sampleContext,
+      review: {
+        ...sampleContext.review,
+        targets: [
+          {
+            targetId: 'target-event-festival-1',
+            type: 'EVENT',
+            displayName: 'Virada Cultural 2026',
+            rating: 5.0,
+            specificComment: 'Programação impecável e excelente estrutura de palco.',
+          },
+        ],
+      },
+    };
+
+    vi.mocked(moderationApi.getReviewContext).mockResolvedValueOnce(eventContext);
+
+    render(
+      <ReviewContextModal
+        reviewId="review-100"
+        isOpen={true}
+        onClose={vi.fn()}
+        onModerationComplete={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      // Exibe o displayName do evento
+      expect(screen.getByText('Virada Cultural 2026')).toBeInTheDocument();
+      // Exibe a badge do tipo EVENT
+      expect(screen.getByText('EVENT')).toBeInTheDocument();
+      // Exibe a nota e o comentário específico
+      expect(screen.getByText('★ 5.0')).toBeInTheDocument();
+      expect(screen.getByText('Programação impecável e excelente estrutura de palco.')).toBeInTheDocument();
+      // Não exibe o UUID como rótulo principal
+      expect(screen.queryByText(/target-event-festival-1/i)).not.toBeInTheDocument();
     });
   });
 

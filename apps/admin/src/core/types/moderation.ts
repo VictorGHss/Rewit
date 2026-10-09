@@ -16,7 +16,7 @@ export type DiscussionStatus = 'ACTIVE' | 'UNDER_REVIEW' | 'REMOVED';
 
 export type ReviewStatus = 'ACTIVE' | 'UNDER_REVIEW' | 'REMOVED';
 
-export type TargetType = 'PLACE' | 'PRODUCT' | 'SERVICE';
+export type TargetType = 'PLACE' | 'PRODUCT' | 'SERVICE' | 'EVENT';
 
 // ---------------------------------------------------------------------------
 // Denúncias de Avaliações (Review Reports - Listagem)
