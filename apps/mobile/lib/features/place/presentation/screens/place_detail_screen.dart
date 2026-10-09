@@ -10,6 +10,8 @@ import '../../domain/entities/place_detail.dart';
 import '../../domain/repositories/place_repository.dart';
 import '../state/place_detail_notifier.dart';
 import '../state/place_detail_state.dart';
+import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
+import 'package:rewit_mobile/features/business/presentation/widgets/claim_place_bottom_sheet.dart';
 
 /// Tela completa de detalhe de um Local Físico (Place) no catálogo Rewit (C5.2).
 ///
@@ -20,6 +22,7 @@ class PlaceDetailScreen extends StatefulWidget {
   final PlaceRepository? repository;
   final PlaceDetailNotifier? notifier;
   final ProductRepository? productRepository;
+  final BusinessRepository? businessRepository;
 
   const PlaceDetailScreen({
     super.key,
@@ -27,6 +30,7 @@ class PlaceDetailScreen extends StatefulWidget {
     this.repository,
     this.notifier,
     this.productRepository,
+    this.businessRepository,
   });
 
   @override
@@ -344,6 +348,34 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
               ),
             ),
           ),
+
+          if (widget.businessRepository != null) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const Key('claim_place_button'),
+                onPressed: () {
+                  ClaimPlaceBottomSheet.show(
+                    context,
+                    placeId: place.id,
+                    placeName: place.name,
+                    city: place.city,
+                    state: place.state,
+                    repository: widget.businessRepository!,
+                  );
+                },
+                icon: const Icon(Icons.business_outlined),
+                label: const Text('Reivindicar este local'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+          ],
 
           const SizedBox(height: 20),
 

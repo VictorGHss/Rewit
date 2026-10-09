@@ -75,4 +75,19 @@ class ApiEndpoints {
   static String notificationRead(String notificationId) =>
       '/api/v1/me/notifications/$notificationId/read';
   static const String notificationsReadAll = '/api/v1/me/notifications/read-all';
+
+  // Contas Comerciais e Reivindicação de Locais (C9)
+  static const String businessAccounts = '/api/v1/business-accounts';
+  static const String myBusinessAccounts = '/api/v1/business-accounts/mine';
+  static String businessPlaceClaims(String businessAccountId) =>
+      '/api/v1/business-accounts/$businessAccountId/place-claims';
+  static String businessPlaceClaimsPaged(
+    String businessAccountId, {
+    int page = 0,
+    int size = 20,
+    String? status,
+  }) {
+    final statusQuery = status != null && status.isNotEmpty ? '&status=$status' : '';
+    return '/api/v1/business-accounts/$businessAccountId/place-claims?page=$page&size=$size$statusQuery';
+  }
 }

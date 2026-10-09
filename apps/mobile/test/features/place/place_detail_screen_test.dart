@@ -17,6 +17,8 @@ import 'package:rewit_mobile/features/product/domain/entities/products_in_place_
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
+import 'package:rewit_mobile/features/business/domain/entities/business_entities.dart';
+import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
 
 class _FakeProductRepoForPlace implements ProductRepository {
   @override
@@ -55,6 +57,17 @@ class _FakeProductRepoForPlace implements ProductRepository {
   Future<TargetReviewsPage> getProductReviews(String productId, {int page = 0, int size = 10, String sort = 'newest', bool verifiedOnly = false}) async => throw UnimplementedError();
   @override
   Future<Uint8List> getProductImageBytes(String imageUrl) async => throw UnimplementedError();
+}
+
+class _FakeBusinessRepoForPlace implements BusinessRepository {
+  @override
+  Future<List<BusinessAccount>> getMyBusinessAccounts() async => [];
+  @override
+  Future<BusinessAccount> createBusinessAccount({required String corporateName, required String taxId}) async => throw UnimplementedError();
+  @override
+  Future<PlaceClaim> requestPlaceClaim({required String businessAccountId, required String placeId, required String evidenceDescription}) async => throw UnimplementedError();
+  @override
+  Future<List<PlaceClaim>> getBusinessPlaceClaims(String businessAccountId, {int page = 0, int size = 20, String? status}) async => [];
 }
 
 class _FakePlaceRepository implements PlaceRepository {
@@ -468,6 +481,37 @@ void main() {
       final argsMap = receivedProductArgs as Map<String, dynamic>;
       expect(argsMap['productId'], 'prod-croissant');
       expect(argsMap['contextPlace'], isA<PlaceDetail>());
+    });
+
+    testWidgets('exibe botão de reivindicar este local e abre ClaimPlaceBottomSheet ao tocar', (tester) async {
+      final notifier = PlaceDetailNotifier(
+        repository: repository,
+        placeId: 'place-123',
+      );
+
+      final fakeBusinessRepo = _FakeBusinessRepoForPlace();
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          child: PlaceDetailScreen(
+            placeId: 'place-123',
+            notifier: notifier,
+            businessRepository: fakeBusinessRepo,
+          ),
+        ),
+      );
+
+      await notifier.loadPlace();
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('claim_place_button')), findsOneWidget);
+      expect(find.text('Reivindicar este local'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('claim_place_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reivindicar Local'), findsOneWidget);
+      expect(find.text('Padaria Modelo (Curitiba/PR)'), findsOneWidget);
     });
   });
 }

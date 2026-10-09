@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
+import 'package:rewit_mobile/features/business/presentation/screens/my_business_accounts_screen.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
@@ -48,6 +50,7 @@ class AppRouter {
   static const String reviewDetail = '/review/detail';
   static const String accountSettings = '/settings';
   static const String changePassword = '/settings/change-password';
+  static const String businessAccounts = '/settings/business-accounts';
   static const String scanner = '/scanner';
 
   final AuthNotifier authNotifier;
@@ -64,6 +67,7 @@ class AppRouter {
   final ProductRepository? productRepository;
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
+  final BusinessRepository? businessRepository;
 
   const AppRouter({
     required this.authNotifier,
@@ -80,6 +84,7 @@ class AppRouter {
     this.productRepository,
     this.notificationRepository,
     this.notificationsNotifier,
+    this.businessRepository,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -225,6 +230,7 @@ class AppRouter {
             placeId: placeId,
             repository: placeRepository,
             productRepository: productRepository,
+            businessRepository: businessRepository,
           ),
           settings: settings,
         );
@@ -362,6 +368,14 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => ScannerScreen(
             productRepository: productRepository,
+          ),
+          settings: settings,
+        );
+
+      case businessAccounts:
+        return MaterialPageRoute(
+          builder: (context) => MyBusinessAccountsScreen(
+            repository: businessRepository,
           ),
           settings: settings,
         );
