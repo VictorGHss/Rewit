@@ -124,7 +124,9 @@ public class DiscussionService {
                 notificationService.notifyNewDiscussion(review.getId(), review.getUserId(), cmd.authorUserId(), saved.getId());
             } else {
                 boolean maskActor = review.isAnonymous() && isFromOwner;
-                notificationService.notifyDiscussionReply(review.getId(), parent.getUserId(), cmd.authorUserId(), saved.getId(), maskActor);
+                // parent é sempre raiz (o nesting acima recusa resposta de resposta): o id dele é a raiz da thread
+                notificationService.notifyDiscussionReply(review.getId(), parent.getUserId(), cmd.authorUserId(), saved.getId(),
+                        parent.getId(), maskActor);
             }
         }
 

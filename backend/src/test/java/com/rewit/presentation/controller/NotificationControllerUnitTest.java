@@ -67,22 +67,22 @@ class NotificationControllerUnitTest {
                 // 0: NEW_FOLLOWER - sem reviewId, sem discussionId
                 new NotificationView(
                         UUID.randomUUID(), "NEW_FOLLOWER", actorId, actorId,
-                        null, null, null, now
+                        null, null, null, null, now
                 ),
                 // 1: REVIEW_HELPFUL - com reviewId, sem discussionId
                 new NotificationView(
                         UUID.randomUUID(), "REVIEW_HELPFUL", actorId, reviewId1,
-                        reviewId1, null, null, now
+                        reviewId1, null, null, null, now
                 ),
                 // 2: NEW_DISCUSSION - com reviewId e discussionId (raiz)
                 new NotificationView(
                         UUID.randomUUID(), "NEW_DISCUSSION", actorId, reviewId2,
-                        reviewId2, discussionId2, null, now
+                        reviewId2, discussionId2, null, null, now
                 ),
                 // 3: DISCUSSION_REPLY - com reviewId e discussionId (resposta)
                 new NotificationView(
                         UUID.randomUUID(), "DISCUSSION_REPLY", actorId, discussionId3,
-                        reviewId3, discussionId3, null, now
+                        reviewId3, discussionId3, null, null, now
                 )
         );
 

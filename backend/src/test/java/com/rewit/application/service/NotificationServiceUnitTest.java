@@ -54,6 +54,7 @@ class NotificationServiceUnitTest {
     private final UUID userB = UUID.randomUUID();
     private final UUID reviewId = UUID.randomUUID();
     private final UUID discussionId = UUID.randomUUID();
+    private final UUID rootId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -153,7 +154,7 @@ class NotificationServiceUnitTest {
         @Test
         @DisplayName("10. Resposta deve gerar DISCUSSION_REPLY para o autor do comentário pai")
         void shouldGenerateDiscussionReplyNotification() {
-            notificationService.notifyDiscussionReply(reviewId, userB, userA, discussionId, false);
+            notificationService.notifyDiscussionReply(reviewId, userB, userA, discussionId, rootId, false);
 
             ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
             verify(notificationRepository).save(captor.capture());
@@ -168,14 +169,14 @@ class NotificationServiceUnitTest {
         @Test
         @DisplayName("11. Resposta ao próprio comentário não deve gerar notificação")
         void replyingToOwnCommentShouldNotNotify() {
-            notificationService.notifyDiscussionReply(reviewId, userB, userB, discussionId, false);
+            notificationService.notifyDiscussionReply(reviewId, userB, userB, discussionId, rootId, false);
             verify(notificationRepository, never()).save(any());
         }
 
         @Test
         @DisplayName("12. Resposta de autor em Review anônima deve mascarar actorId (actorId = null)")
         void anonymousOwnerReplyShouldMaskActorId() {
-            notificationService.notifyDiscussionReply(reviewId, userB, userA, discussionId, true);
+            notificationService.notifyDiscussionReply(reviewId, userB, userA, discussionId, rootId, true);
 
             ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
             verify(notificationRepository).save(captor.capture());
@@ -340,7 +341,7 @@ class NotificationServiceUnitTest {
         @Test
         @DisplayName("24. Reply enfileira PUSH_NOTIFICATION com payload mínimo")
         void shouldEnqueuePushOnDiscussionReply() {
-            notificationService.notifyDiscussionReply(reviewId, userB, userA, discussionId, false);
+            notificationService.notifyDiscussionReply(reviewId, userB, userA, discussionId, rootId, false);
 
             ArgumentCaptor<Notification> notificationCaptor = ArgumentCaptor.forClass(Notification.class);
             verify(notificationRepository).save(notificationCaptor.capture());
@@ -366,7 +367,7 @@ class NotificationServiceUnitTest {
             notificationService.notifyNewFollower(userA, null);
             notificationService.notifyReviewHelpful(null, userB);
             notificationService.notifyNewDiscussion(reviewId, userA, null, discussionId);
-            notificationService.notifyDiscussionReply(reviewId, userB, null, discussionId, false);
+            notificationService.notifyDiscussionReply(reviewId, userB, null, discussionId, rootId, false);
 
             verify(outboxRepository, never()).save(any());
             verify(notificationRepository, never()).save(any());
@@ -402,6 +403,7 @@ class NotificationServiceUnitTest {
             assertNotEquals(user, view.referenceId());
             assertNotEquals(user, view.reviewId());
             assertNotEquals(user, view.discussionId());
+            assertNotEquals(user, view.rootDiscussionId());
         }
 
         @Test
@@ -413,6 +415,7 @@ class NotificationServiceUnitTest {
             assertEquals(reviewId, view.referenceId());
             assertEquals(reviewId, view.reviewId());
             assertNull(view.discussionId());
+            assertNull(view.rootDiscussionId());
             assertNull(view.actorId());
         }
 
@@ -425,30 +428,33 @@ class NotificationServiceUnitTest {
             assertEquals(reviewId, view.referenceId());
             assertEquals(reviewId, view.reviewId());
             assertEquals(discussionId, view.discussionId());
+            assertNull(view.rootDiscussionId(), "o próprio comentário já é a raiz");
             assertEquals(userB, view.actorId());
         }
 
         @Test
         @DisplayName("DISCUSSION_REPLY: referenceId e discussionId são a resposta; reviewId vem do metadata")
         void discussionReply() {
-            notificationService.notifyDiscussionReply(reviewId, userA, userB, replyId, false);
+            notificationService.notifyDiscussionReply(reviewId, userA, userB, replyId, discussionId, false);
             NotificationView view = listed(saved());
 
             assertEquals(replyId, view.referenceId());
             assertEquals(reviewId, view.reviewId());
             assertEquals(replyId, view.discussionId());
+            assertEquals(discussionId, view.rootDiscussionId(), "raiz da thread, distinta da resposta");
             assertEquals(userB, view.actorId());
         }
 
         @Test
         @DisplayName("DISCUSSION_REPLY com ator mascarado: actorId continua null e nenhum campo novo traz o ator")
         void maskedReplyKeepsActorHidden() {
-            notificationService.notifyDiscussionReply(reviewId, userA, userB, replyId, true);
+            notificationService.notifyDiscussionReply(reviewId, userA, userB, replyId, discussionId, true);
             NotificationView view = listed(saved());
 
             assertNull(view.actorId());
             assertEquals(reviewId, view.reviewId());
             assertEquals(replyId, view.discussionId());
+            assertEquals(discussionId, view.rootDiscussionId());
             assertNoUserUuid(view, userB);
         }
 
@@ -461,16 +467,19 @@ class NotificationServiceUnitTest {
             assertEquals(userB, view.referenceId());
             assertNull(view.reviewId());
             assertNull(view.discussionId());
+            assertNull(view.rootDiscussionId());
         }
 
         @Test
         @DisplayName("NEW_FOLLOWER com metadata legado contendo reviewId/discussionId: campos novos continuam nulos")
         void newFollowerIgnoresContextKeys() {
             NotificationView view = listedWithMetadata("NEW_FOLLOWER", "{\"actorId\":\"" + userB + "\",\"referenceId\":\""
-                    + userB + "\",\"reviewId\":\"" + userB + "\",\"discussionId\":\"" + userB + "\"}");
+                    + userB + "\",\"reviewId\":\"" + userB + "\",\"discussionId\":\"" + userB
+                    + "\",\"rootDiscussionId\":\"" + userB + "\"}");
 
             assertNull(view.reviewId());
             assertNull(view.discussionId());
+            assertNull(view.rootDiscussionId());
         }
 
         @Test
@@ -533,6 +542,7 @@ class NotificationServiceUnitTest {
                 assertNull(view.referenceId(), String.valueOf(metadata));
                 assertNull(view.reviewId(), String.valueOf(metadata));
                 assertNull(view.discussionId(), String.valueOf(metadata));
+                assertNull(view.rootDiscussionId(), String.valueOf(metadata));
             }
         }
 
@@ -590,6 +600,54 @@ class NotificationServiceUnitTest {
             assertEquals(reviewId, view.referenceId());
             assertNull(view.reviewId());
             assertNull(view.discussionId());
+            assertNull(view.rootDiscussionId());
+        }
+
+        @Test
+        @DisplayName("DISCUSSION_REPLY legado (sem rootDiscussionId): listável, raiz nula e demais campos intactos")
+        void legacyReplyWithoutRoot() {
+            NotificationView view = listedWithMetadata("DISCUSSION_REPLY", "{\"actorId\":\"" + userB
+                    + "\",\"referenceId\":\"" + replyId + "\",\"reviewId\":\"" + reviewId + "\"}");
+
+            assertEquals(userB, view.actorId());
+            assertEquals(replyId, view.referenceId());
+            assertEquals(reviewId, view.reviewId());
+            assertEquals(replyId, view.discussionId());
+            assertNull(view.rootDiscussionId());
+        }
+
+        @Test
+        @DisplayName("rootDiscussionId inválido ou nulo anula só a raiz; parcial sem reviewId mantém a raiz")
+        void invalidOrPartialRoot() {
+            for (String root : List.of("\"nao-e-uuid\"", "42", "null", "{}")) {
+                org.mockito.Mockito.reset(notificationRepository);
+                NotificationView view = listedWithMetadata("DISCUSSION_REPLY", "{\"actorId\":\"" + userB
+                        + "\",\"referenceId\":\"" + replyId + "\",\"reviewId\":\"" + reviewId
+                        + "\",\"rootDiscussionId\":" + root + "}");
+
+                assertNull(view.rootDiscussionId(), root);
+                assertEquals(userB, view.actorId(), root);
+                assertEquals(reviewId, view.reviewId(), root);
+                assertEquals(replyId, view.discussionId(), root);
+            }
+
+            org.mockito.Mockito.reset(notificationRepository);
+            NotificationView partial = listedWithMetadata("DISCUSSION_REPLY", "{\"referenceId\":\"" + replyId
+                    + "\",\"rootDiscussionId\":\"" + discussionId + "\"}");
+            assertNull(partial.reviewId());
+            assertEquals(replyId, partial.discussionId());
+            assertEquals(discussionId, partial.rootDiscussionId());
+        }
+
+        @Test
+        @DisplayName("rootDiscussionId só existe em DISCUSSION_REPLY: em NEW_DISCUSSION a chave é ignorada")
+        void rootOnlyForReplies() {
+            NotificationView view = listedWithMetadata("NEW_DISCUSSION", "{\"actorId\":\"" + userB
+                    + "\",\"referenceId\":\"" + reviewId + "\",\"discussionId\":\"" + discussionId
+                    + "\",\"rootDiscussionId\":\"" + rootId + "\"}");
+
+            assertEquals(discussionId, view.discussionId());
+            assertNull(view.rootDiscussionId());
         }
     }
 }

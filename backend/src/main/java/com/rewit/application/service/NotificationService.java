@@ -139,10 +139,13 @@ public class NotificationService {
     /**
      * Dispara notificação de resposta a um comentário (DISCUSSION_REPLY).
      * Se maskActor for true (ex: autor da review respondendo em review anônima), actorId é omitido.
+     *
+     * @param discussionId     a resposta criada (vai em referenceId)
+     * @param rootDiscussionId o comentário raiz respondido, gravado no metadata para a navegação até a thread
      */
     @Transactional
     public void notifyDiscussionReply(UUID reviewId, UUID parentAuthorUserId, UUID replierUserId,
-                                      UUID discussionId, boolean maskActor) {
+                                      UUID discussionId, UUID rootDiscussionId, boolean maskActor) {
         if (reviewId == null || parentAuthorUserId == null || replierUserId == null) {
             return;
         }
@@ -151,7 +154,11 @@ public class NotificationService {
         }
 
         UUID actorId = maskActor ? null : replierUserId;
-        Map<String, Object> extra = reviewId != null ? Map.of("reviewId", reviewId.toString()) : null;
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("reviewId", reviewId.toString());
+        if (rootDiscussionId != null) {
+            extra.put("rootDiscussionId", rootDiscussionId.toString());
+        }
         String metadataJson = buildMetadataJson(actorId, discussionId, extra);
 
         Notification notification = new Notification(
@@ -275,7 +282,8 @@ public class NotificationService {
      */
     private List<NotificationView> withoutDeletedIdentities(List<NotificationView> views) {
         Set<UUID> candidates = views.stream()
-                .flatMap(view -> Stream.of(view.actorId(), view.referenceId(), view.reviewId(), view.discussionId()))
+                .flatMap(view -> Stream.of(view.actorId(), view.referenceId(), view.reviewId(), view.discussionId(),
+                        view.rootDiscussionId()))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Set<UUID> deleted = candidates.isEmpty() ? Set.of() : userRepository.findDeletedUserIds(candidates);
@@ -290,6 +298,7 @@ public class NotificationService {
                         withoutDeleted(view.referenceId(), deleted),
                         withoutDeleted(view.reviewId(), deleted),
                         withoutDeleted(view.discussionId(), deleted),
+                        withoutDeleted(view.rootDiscussionId(), deleted),
                         view.readAt(),
                         view.createdAt()))
                 .toList();
@@ -310,19 +319,21 @@ public class NotificationService {
                 meta.referenceId(),
                 context.reviewId(),
                 context.discussionId(),
+                context.rootDiscussionId(),
                 n.getReadAt(),
                 n.getCreatedAt()
         );
     }
 
-    private record NavigationContext(UUID reviewId, UUID discussionId) {}
+    private record NavigationContext(UUID reviewId, UUID discussionId, UUID rootDiscussionId) {}
 
-    private static final NavigationContext NO_CONTEXT = new NavigationContext(null, null);
+    private static final NavigationContext NO_CONTEXT = new NavigationContext(null, null, null);
 
     /**
      * Avaliação e comentário de destino, a partir do que a criação de cada tipo grava no metadata (sem consulta extra):
      * REVIEW_HELPFUL e NEW_DISCUSSION guardam a avaliação em referenceId e NEW_DISCUSSION o comentário raiz em
-     * discussionId; DISCUSSION_REPLY guarda a resposta em referenceId e a avaliação em reviewId. NEW_FOLLOWER (cujo
+     * discussionId; DISCUSSION_REPLY guarda a resposta em referenceId, a avaliação em reviewId e, a partir do C6, o
+     * comentário raiz em rootDiscussionId (ausente nas respostas antigas: null). NEW_FOLLOWER (cujo
      * referenceId é o seguidor) e tipos desconhecidos não têm contexto: nenhum UUID de pessoa chega a estes campos.
      */
     private static NavigationContext navigationContext(String notificationType, ParsedMetadata meta) {
@@ -331,9 +342,9 @@ public class NotificationService {
             return NO_CONTEXT;
         }
         return switch (type) {
-            case REVIEW_HELPFUL -> new NavigationContext(meta.referenceId(), null);
-            case NEW_DISCUSSION -> new NavigationContext(meta.referenceId(), meta.discussionId());
-            case DISCUSSION_REPLY -> new NavigationContext(meta.reviewId(), meta.referenceId());
+            case REVIEW_HELPFUL -> new NavigationContext(meta.referenceId(), null, null);
+            case NEW_DISCUSSION -> new NavigationContext(meta.referenceId(), meta.discussionId(), null);
+            case DISCUSSION_REPLY -> new NavigationContext(meta.reviewId(), meta.referenceId(), meta.rootDiscussionId());
             case NEW_FOLLOWER -> NO_CONTEXT;
         };
     }
@@ -361,14 +372,15 @@ public class NotificationService {
         }
     }
 
-    private record ParsedMetadata(UUID actorId, UUID referenceId, UUID reviewId, UUID discussionId) {}
+    private record ParsedMetadata(UUID actorId, UUID referenceId, UUID reviewId, UUID discussionId,
+                                  UUID rootDiscussionId) {}
 
-    private static final ParsedMetadata EMPTY_METADATA = new ParsedMetadata(null, null, null, null);
+    private static final ParsedMetadata EMPTY_METADATA = new ParsedMetadata(null, null, null, null, null);
 
     /**
      * Metadata ausente, malformado ou legado nunca quebra a listagem. actorId e referenceId mantêm o comportamento de
-     * antes (um UUID inválido em qualquer dos dois anula ambos); reviewId e discussionId são lidos à parte, de modo que
-     * um valor inválido neles só anula o próprio campo, sem afetar os campos já existentes.
+     * antes (um UUID inválido em qualquer dos dois anula ambos); reviewId, discussionId e rootDiscussionId são lidos à
+     * parte, de modo que um valor inválido neles só anula o próprio campo, sem afetar os campos já existentes.
      */
     private ParsedMetadata parseMetadata(String metadataJson) {
         if (metadataJson == null || metadataJson.isBlank()) {
@@ -392,7 +404,8 @@ public class NotificationService {
             actorId = null;
             referenceId = null;
         }
-        return new ParsedMetadata(actorId, referenceId, optionalUuid(node, "reviewId"), optionalUuid(node, "discussionId"));
+        return new ParsedMetadata(actorId, referenceId, optionalUuid(node, "reviewId"), optionalUuid(node, "discussionId"),
+                optionalUuid(node, "rootDiscussionId"));
     }
 
     private static UUID optionalUuid(JsonNode node, String field) {

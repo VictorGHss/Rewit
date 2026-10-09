@@ -206,6 +206,10 @@ class NotificationEventsIntegrationTest {
         assertEquals(NotificationType.DISCUSSION_REPLY.name(), notifsA.content().get(0).type());
         assertEquals(userB.getId(), notifsA.content().get(0).actorId());
         assertEquals(replyB.id(), notifsA.content().get(0).referenceId());
+        // Contexto de navegação gravado pelo fluxo real DiscussionService -> NotificationService
+        assertEquals(review.id(), notifsA.content().get(0).reviewId());
+        assertEquals(replyB.id(), notifsA.content().get(0).discussionId());
+        assertEquals(commentA.id(), notifsA.content().get(0).rootDiscussionId());
     }
 
     @Test
@@ -251,6 +255,10 @@ class NotificationEventsIntegrationTest {
         NotificationView notif = commenterNotifs.content().get(0);
         assertEquals(NotificationType.DISCUSSION_REPLY.name(), notif.type());
         assertNull(notif.actorId(), "Autor anônimo NÃO deve ter actorId revelado na notificação");
+        assertEquals(review.id(), notif.reviewId());
+        assertEquals(ownerReply.id(), notif.discussionId());
+        assertEquals(comment.id(), notif.rootDiscussionId());
+        assertNotEquals(anonOwner.getId(), notif.rootDiscussionId(), "a raiz é um recurso, nunca o autor anônimo");
     }
 
     @Test
