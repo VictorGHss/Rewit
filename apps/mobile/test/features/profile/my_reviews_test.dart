@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -61,7 +62,7 @@ class MockHttpBaseClient extends http.BaseClient {
 }
 
 class FakeUserProfileRepository implements UserProfileRepository {
-  TargetReviewsPage Function({int page, int size})? getMyReviewsHandler;
+  FutureOr<TargetReviewsPage> Function({int page, int size})? getMyReviewsHandler;
   int getMyReviewsCallCount = 0;
   int? lastRequestedPage;
   int? lastRequestedSize;
@@ -725,6 +726,251 @@ void main() {
 
       notifier.removeReview('rev-2');
       expect(notifier.state, isA<MyReviewsEmpty>());
+    });
+
+    test('removeReview não exibe MyReviewsEmpty prematuramente quando hasMore é true e recarrega página 0 (Item 5)', () async {
+      final rev1 = createSampleReview(id: 'rev-1');
+      final revShifted = createSampleReview(id: 'rev-shifted');
+
+      int page0CallCount = 0;
+      repo.getMyReviewsHandler = ({page = 0, size = 10}) {
+        if (page == 0) {
+          page0CallCount++;
+          if (page0CallCount == 1) {
+            return TargetReviewsPage(
+              reviews: [rev1],
+              pageNumber: 0,
+              pageSize: 1,
+              totalElements: 2,
+              totalPages: 2,
+              isLast: false,
+            );
+          } else {
+            return TargetReviewsPage(
+              reviews: [revShifted],
+              pageNumber: 0,
+              pageSize: 1,
+              totalElements: 1,
+              totalPages: 1,
+              isLast: true,
+            );
+          }
+        }
+        return const TargetReviewsPage(
+          reviews: [],
+          pageNumber: 1,
+          pageSize: 1,
+          totalElements: 2,
+          totalPages: 2,
+          isLast: true,
+        );
+      };
+
+      await notifier.loadInitial();
+      expect(notifier.state, isA<MyReviewsLoaded>());
+      expect((notifier.state as MyReviewsLoaded).hasMore, isTrue);
+
+      // Remove o único item carregado localmente
+      notifier.removeReview('rev-1');
+
+      // Não deve exibir Empty; deve recarregar a partir da primeira página
+      await pumpEventQueue();
+      expect(notifier.state, isA<MyReviewsLoaded>());
+      final loaded = notifier.state as MyReviewsLoaded;
+      expect(loaded.reviews.length, 1);
+      expect(loaded.reviews.first.id, 'rev-shifted');
+    });
+
+    test('concorrência: removeReview durante loadMore em andamento não ressuscita a avaliação excluída (Item 4)', () async {
+      final rev1 = createSampleReview(id: 'rev-1');
+      final rev2 = createSampleReview(id: 'rev-2');
+      final rev3 = createSampleReview(id: 'rev-3');
+
+      final completer = Completer<TargetReviewsPage>();
+
+      repo.getMyReviewsHandler = ({page = 0, size = 10}) {
+        if (page == 0) {
+          return TargetReviewsPage(
+            reviews: [rev1, rev2],
+            pageNumber: 0,
+            pageSize: 2,
+            totalElements: 3,
+            totalPages: 2,
+            isLast: false,
+          );
+        } else {
+          return completer.future;
+        }
+      };
+
+      await notifier.loadInitial();
+      expect((notifier.state as MyReviewsLoaded).reviews.map((r) => r.id), contains('rev-1'));
+
+      // Dispara loadMore em segundo plano
+      final loadMoreFuture = notifier.loadMore();
+
+      // Durante a chamada, remove 'rev-1'
+      notifier.removeReview('rev-1');
+      expect((notifier.state as MyReviewsLoaded).reviews.map((r) => r.id), isNot(contains('rev-1')));
+
+      // Conclui loadMore da página 1 (que retorna 'rev-1' repetido e 'rev-3')
+      completer.complete(TargetReviewsPage(
+        reviews: [rev1, rev3],
+        pageNumber: 1,
+        pageSize: 2,
+        totalElements: 3,
+        totalPages: 2,
+        isLast: true,
+      ));
+      await loadMoreFuture;
+
+      // 'rev-1' NÃO foi ressuscitada
+      final loaded = notifier.state as MyReviewsLoaded;
+      expect(loaded.reviews.map((r) => r.id), isNot(contains('rev-1')));
+      expect(loaded.reviews.map((r) => r.id), contains('rev-2'));
+      expect(loaded.reviews.map((r) => r.id), contains('rev-3'));
+    });
+
+    test('concorrência: updateReview durante loadMore não é sobrescrito por estado obsoleto (Item 4)', () async {
+      final rev1 = createSampleReview(id: 'rev-1', experienceText: 'Texto original');
+      final rev2 = createSampleReview(id: 'rev-2');
+      final rev3 = createSampleReview(id: 'rev-3');
+
+      final completer = Completer<TargetReviewsPage>();
+
+      repo.getMyReviewsHandler = ({page = 0, size = 10}) {
+        if (page == 0) {
+          return TargetReviewsPage(
+            reviews: [rev1, rev2],
+            pageNumber: 0,
+            pageSize: 2,
+            totalElements: 3,
+            totalPages: 2,
+            isLast: false,
+          );
+        } else {
+          return completer.future;
+        }
+      };
+
+      await notifier.loadInitial();
+
+      // Dispara loadMore
+      final loadMoreFuture = notifier.loadMore();
+
+      // Enquanto a requisição corre, atualiza rev-1 localmente
+      notifier.updateReview(rev1.copyWith(experienceText: 'Texto editado localmente'));
+
+      completer.complete(TargetReviewsPage(
+        reviews: [rev3],
+        pageNumber: 1,
+        pageSize: 2,
+        totalElements: 3,
+        totalPages: 2,
+        isLast: true,
+      ));
+      await loadMoreFuture;
+
+      // O texto editado localmente foi preservado
+      final loaded = notifier.state as MyReviewsLoaded;
+      expect(loaded.reviews.firstWhere((r) => r.id == 'rev-1').experienceText, 'Texto editado localmente');
+    });
+
+    test('paginação após remover item deduplica itens e evita duplicatas (Item 4)', () async {
+      final rev1 = createSampleReview(id: 'rev-1');
+      final rev2 = createSampleReview(id: 'rev-2');
+      final rev3 = createSampleReview(id: 'rev-3');
+
+      repo.getMyReviewsHandler = ({page = 0, size = 10}) {
+        if (page == 0) {
+          return TargetReviewsPage(
+            reviews: [rev1, rev2],
+            pageNumber: 0,
+            pageSize: 2,
+            totalElements: 3,
+            totalPages: 2,
+            isLast: false,
+          );
+        } else {
+          // Devido ao deslocamento (offset shift), página 1 repete rev-2 e traz rev-3
+          return TargetReviewsPage(
+            reviews: [rev2, rev3],
+            pageNumber: 1,
+            pageSize: 2,
+            totalElements: 3,
+            totalPages: 2,
+            isLast: true,
+          );
+        }
+      };
+
+      await notifier.loadInitial();
+
+      // Remove rev-1
+      notifier.removeReview('rev-1');
+
+      // Pagina para a página 1
+      await notifier.loadMore();
+
+      final loaded = notifier.state as MyReviewsLoaded;
+      // Não deve ter duplicata de rev-2
+      expect(loaded.reviews.length, 2);
+      expect(loaded.reviews[0].id, 'rev-2');
+      expect(loaded.reviews[1].id, 'rev-3');
+    });
+
+    test('loadMore com erro bloqueia novas chamadas em scroll até chamada deliberada de retry (Item 4)', () async {
+      final rev1 = createSampleReview(id: 'rev-1');
+
+      bool shouldFail = true;
+      repo.getMyReviewsHandler = ({page = 0, size = 10}) {
+        if (page == 0) {
+          return TargetReviewsPage(
+            reviews: [rev1],
+            pageNumber: 0,
+            pageSize: 1,
+            totalElements: 2,
+            totalPages: 2,
+            isLast: false,
+          );
+        } else {
+          if (shouldFail) {
+            throw const ApiException(ProblemDetail(
+              type: 'about:blank',
+              title: 'Erro de Servidor',
+              status: 500,
+              detail: 'Falha temporária ao carregar mais',
+            ));
+          }
+          return TargetReviewsPage(
+            reviews: [createSampleReview(id: 'rev-2')],
+            pageNumber: 1,
+            pageSize: 1,
+            totalElements: 2,
+            totalPages: 2,
+            isLast: true,
+          );
+        }
+      };
+
+      await notifier.loadInitial();
+      expect(repo.getMyReviewsCallCount, 1);
+
+      // Primeiro loadMore falha
+      await notifier.loadMore();
+      expect(repo.getMyReviewsCallCount, 2);
+      expect((notifier.state as MyReviewsLoaded).loadMoreError, isNotNull);
+
+      // Chamada subsequente de scroll NÃO incrementa chamadas ao backend
+      shouldFail = false;
+      await notifier.loadMore();
+      expect(repo.getMyReviewsCallCount, 2); // Não aumentou!
+
+      // retry() deliberado tenta novamente com sucesso
+      await notifier.retry();
+      expect(repo.getMyReviewsCallCount, 3);
+      expect((notifier.state as MyReviewsLoaded).currentPage, 1);
+      expect((notifier.state as MyReviewsLoaded).loadMoreError, isNull);
     });
   });
 

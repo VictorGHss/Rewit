@@ -379,5 +379,88 @@ void main() {
       final afterReviews = (notifier.state as FeedSuccess).reviews;
       expect(afterReviews.length, beforeReviews.length);
     });
+
+    test('removeReview não exibe FeedEmpty prematuramente quando hasMore é true e recarrega itens do servidor (Item 5)', () async {
+      repository.page0Response = FeedPage(
+        items: [repository._makeReview('rev-page0-only')],
+        page: 0,
+        size: 1,
+        windowSize: 2,
+        totalPages: 2,
+      );
+      await notifier.loadInitial();
+      expect(notifier.state, isA<FeedSuccess>());
+      expect((notifier.state as FeedSuccess).hasMore, isTrue);
+
+      // Prepara a resposta do recarregamento que trará os novos itens da página 0
+      repository.page0Response = FeedPage(
+        items: [repository._makeReview('rev-shifted-from-page1')],
+        page: 0,
+        size: 1,
+        windowSize: 1,
+        totalPages: 1,
+      );
+
+      // Remove o único item carregado da página 0
+      notifier.removeReview('rev-page0-only');
+
+      // Não deve exibir FeedEmpty prematuro; deve recarregar e transicionar para FeedSuccess com o novo item
+      await pumpEventQueue();
+      expect(notifier.state, isA<FeedSuccess>());
+      final success = notifier.state as FeedSuccess;
+      expect(success.reviews.length, 1);
+      expect(success.reviews.first.id, 'rev-shifted-from-page1');
+    });
+
+    test('concorrência: removeReview durante loadMore em andamento não ressuscita a avaliação excluída (Item 4)', () async {
+      await notifier.loadInitial();
+      expect(notifier.state, isA<FeedSuccess>());
+      expect((notifier.state as FeedSuccess).reviews.map((r) => r.id), contains('rev-1'));
+
+      final completer = Completer<FeedPage>();
+      repository.delayedPage1Completer = completer;
+
+      // Dispara loadMore em segundo plano
+      final loadMoreFuture = notifier.loadMore();
+
+      // Durante a chamada, remove 'rev-1'
+      notifier.removeReview('rev-1');
+      expect((notifier.state as FeedSuccess).reviews.map((r) => r.id), isNot(contains('rev-1')));
+
+      // Completa o loadMore da página 1 (que retorna 'rev-3' e inadvertidamente repete 'rev-1' devido a shift)
+      completer.complete(FeedPage(
+        items: [repository._makeReview('rev-1'), repository._makeReview('rev-3')],
+        page: 1,
+        size: 10,
+        windowSize: 20,
+        totalPages: 2,
+      ));
+      await loadMoreFuture;
+
+      // 'rev-1' NÃO pode ter sido ressuscitada!
+      final success = notifier.state as FeedSuccess;
+      expect(success.reviews.map((r) => r.id), isNot(contains('rev-1')));
+      expect(success.reviews.map((r) => r.id), contains('rev-3'));
+    });
+
+    test('loadMore com erro bloqueia novas requisições em scroll até que retry seja acionado (Item 4)', () async {
+      await notifier.loadInitial();
+      repository.shouldThrowOnLoadMore = true;
+
+      // Primeiro loadMore falha
+      await notifier.loadMore();
+      final errorState = notifier.state as FeedSuccess;
+      expect(errorState.loadMoreError, isNotNull);
+
+      // Novo loadMore (ex: disparado por listener de scroll) NÃO deve executar chamada
+      repository.shouldThrowOnLoadMore = false;
+      await notifier.loadMore();
+      expect((notifier.state as FeedSuccess).currentPage, 0); // Permanece na página 0
+
+      // Somente retry() deliberado tenta novamente
+      await notifier.retry();
+      expect((notifier.state as FeedSuccess).currentPage, 1);
+      expect((notifier.state as FeedSuccess).loadMoreError, isNull);
+    });
   });
 }

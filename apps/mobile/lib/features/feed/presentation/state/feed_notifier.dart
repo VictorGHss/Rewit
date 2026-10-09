@@ -12,6 +12,7 @@ class FeedNotifier extends ChangeNotifier {
 
   int _currentRequestId = 0;
   final Set<String> _pendingHelpfulReviewIds = {};
+  final Set<String> _removedReviewIds = {};
 
   FeedNotifier({required FeedRepository feedRepository})
       : _feedRepository = feedRepository;
@@ -23,6 +24,7 @@ class FeedNotifier extends ChangeNotifier {
 
   /// Carrega a primeira página do feed (página 0).
   Future<void> loadInitial({int size = 10}) async {
+    _removedReviewIds.clear();
     final requestId = ++_currentRequestId;
     _state = const FeedLoading();
     notifyListeners();
@@ -34,11 +36,13 @@ class FeedNotifier extends ChangeNotifier {
         return; // Resposta obsoleta descartada
       }
 
-      if (feedPage.isEmpty) {
+      final activeReviews = feedPage.items.where((r) => !_removedReviewIds.contains(r.id)).toList();
+
+      if (activeReviews.isEmpty && !feedPage.hasMore) {
         _state = const FeedEmpty();
       } else {
         _state = FeedSuccess(
-          reviews: feedPage.items,
+          reviews: activeReviews,
           currentPage: feedPage.page,
           totalPages: feedPage.totalPages,
           hasMore: feedPage.hasMore,
@@ -73,6 +77,7 @@ class FeedNotifier extends ChangeNotifier {
     final currentState = _state;
     if (currentState is! FeedSuccess) return;
     if (!currentState.hasMore || currentState.isLoadingMore) return;
+    if (currentState.loadMoreError != null) return;
 
     final requestId = _currentRequestId;
     _state = currentState.copyWith(isLoadingMore: true, clearLoadMoreError: true);
@@ -86,38 +91,44 @@ class FeedNotifier extends ChangeNotifier {
         return; // Resposta obsoleta descartada se refresh foi acionado
       }
 
-      // Deduplicação estrita de itens pelo identificador da review
-      final existingIds = currentState.reviews.map((r) => r.id).toSet();
-      final newItems = feedPage.items.where((r) => !existingIds.contains(r.id)).toList();
-      final combined = [...currentState.reviews, ...newItems];
+      final liveState = _state;
+      if (liveState is! FeedSuccess) return;
 
-      _state = currentState.copyWith(
+      // Deduplicação estrita de itens pelo identificador da review e exclusão de itens removidos
+      final existingIds = liveState.reviews.map((r) => r.id).toSet();
+      final newItems = feedPage.items
+          .where((r) => !existingIds.contains(r.id) && !_removedReviewIds.contains(r.id))
+          .toList();
+      final combined = [...liveState.reviews, ...newItems];
+
+      _state = liveState.copyWith(
         reviews: combined,
         currentPage: feedPage.page,
         totalPages: feedPage.totalPages,
         hasMore: feedPage.hasMore,
         isLoadingMore: false,
+        clearLoadMoreError: true,
       );
       notifyListeners();
     } on ApiException catch (e) {
-      if (requestId == _currentRequestId) {
-        _state = currentState.copyWith(
+      if (requestId == _currentRequestId && _state is FeedSuccess) {
+        _state = (_state as FeedSuccess).copyWith(
           isLoadingMore: false,
           loadMoreError: e.detail,
         );
         notifyListeners();
       }
     } on NetworkException catch (e) {
-      if (requestId == _currentRequestId) {
-        _state = currentState.copyWith(
+      if (requestId == _currentRequestId && _state is FeedSuccess) {
+        _state = (_state as FeedSuccess).copyWith(
           isLoadingMore: false,
           loadMoreError: e.message,
         );
         notifyListeners();
       }
     } catch (_) {
-      if (requestId == _currentRequestId) {
-        _state = currentState.copyWith(
+      if (requestId == _currentRequestId && _state is FeedSuccess) {
+        _state = (_state as FeedSuccess).copyWith(
           isLoadingMore: false,
           loadMoreError: 'Erro ao carregar mais avaliações.',
         );
@@ -130,6 +141,7 @@ class FeedNotifier extends ChangeNotifier {
   Future<void> retry() async {
     final currentState = _state;
     if (currentState is FeedSuccess && currentState.loadMoreError != null) {
+      _state = currentState.copyWith(clearLoadMoreError: true);
       await loadMore();
     } else {
       await loadInitial();
@@ -218,6 +230,8 @@ class FeedNotifier extends ChangeNotifier {
 
   /// Remove uma avaliação localmente sem recarregar o feed inteiro.
   void removeReview(String reviewId) {
+    _removedReviewIds.add(reviewId);
+
     final currentState = _state;
     if (currentState is! FeedSuccess) return;
 
@@ -225,6 +239,11 @@ class FeedNotifier extends ChangeNotifier {
     if (updatedList.length == currentState.reviews.length) return;
 
     if (updatedList.isEmpty) {
+      if (currentState.hasMore) {
+        // Existem páginas adicionais no servidor: recarrega para não exibir estado vazio prematuro
+        loadInitial();
+        return;
+      }
       _state = const FeedEmpty();
     } else {
       _state = currentState.copyWith(reviews: updatedList);

@@ -84,7 +84,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final handle = _cleanHandle(_handleController.text);
     final displayName = _displayNameController.text.trim();
     final bioText = _bioController.text.trim();
-    final bio = bioText.isEmpty ? null : bioText;
+    final bio = bioText;
 
     final input = UpdateProfileInput(
       handle: handle,

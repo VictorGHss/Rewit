@@ -98,7 +98,7 @@ class FakeProfileRepoForEdit implements UserProfileRepository {
           id: 'usr-123',
           handle: input.handle,
           displayName: input.displayName,
-          bio: input.bio,
+          bio: (input.bio != null && input.bio!.trim().isEmpty) ? null : input.bio,
           isAnonymousDefault: input.isAnonymousDefault,
           stats: const UserStats(),
         );
@@ -464,6 +464,58 @@ void main() {
       expect(profileRepo.updateCallCount, 1);
       expect(profileRepo.capturedInput?.bio, 'Nova bio atualizada');
       expect(profileRepo.capturedInput?.isAnonymousDefault, isTrue);
+    });
+
+    testWidgets('usuário apaga bio completamente e envia representação de limpeza para o backend', (tester) async {
+      const initialProfile = UserProfile(
+        id: 'usr-123',
+        handle: 'meu_handle',
+        displayName: 'Meu Nome Original',
+        bio: 'Bio existente preenchida',
+        isAnonymousDefault: false,
+        stats: UserStats(),
+      );
+
+      UserProfile? poppedResult;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () async {
+                poppedResult = await Navigator.of(context).push<UserProfile>(
+                  MaterialPageRoute(
+                    builder: (_) => EditProfileScreen(
+                      initialProfile: initialProfile,
+                      repository: profileRepo,
+                      authNotifier: authNotifier,
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Abrir'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Abrir'));
+      await tester.pumpAndSettle();
+
+      // Confirma bio inicial preenchida
+      expect(find.text('Bio existente preenchida'), findsOneWidget);
+
+      // Usuário apaga todo o texto da bio
+      await tester.enterText(find.byKey(const Key('edit_profile_bio_field')), '');
+      await tester.tap(find.byKey(const Key('edit_profile_submit_button')));
+      await tester.pumpAndSettle();
+
+      // Payload contém string vazia (que o backend interpreta como limpeza de campo)
+      expect(profileRepo.updateCallCount, 1);
+      expect(profileRepo.capturedInput?.bio, '');
+
+      // Após salvar, bio permanece vazia (null)
+      expect(poppedResult, isNotNull);
+      expect(poppedResult?.bio, isNull);
     });
   });
 }

@@ -15,6 +15,7 @@ class MyReviewsNotifier extends ChangeNotifier {
 
   int _currentRequestId = 0;
   bool _isLoadingInitial = false;
+  final Set<String> _removedReviewIds = {};
 
   MyReviewsNotifier({required this.repository});
 
@@ -23,6 +24,7 @@ class MyReviewsNotifier extends ChangeNotifier {
     if (_isLoadingInitial) return;
     _isLoadingInitial = true;
 
+    _removedReviewIds.clear();
     final requestId = ++_currentRequestId;
     _state = const MyReviewsLoading();
     notifyListeners();
@@ -34,14 +36,16 @@ class MyReviewsNotifier extends ChangeNotifier {
         return; // Resposta obsoleta descartada
       }
 
-      if (page.isEmpty) {
+      final activeReviews = page.reviews.where((r) => !_removedReviewIds.contains(r.id)).toList();
+
+      if (activeReviews.isEmpty && page.isLast) {
         _state = const MyReviewsEmpty();
       } else {
         _state = MyReviewsLoaded(
-          reviews: page.reviews,
+          reviews: activeReviews,
           currentPage: page.pageNumber,
           totalPages: page.totalPages,
-          totalElements: page.totalElements,
+          totalElements: math.max(0, page.totalElements - (page.reviews.length - activeReviews.length)),
           isLastPage: page.isLast,
         );
       }
@@ -77,6 +81,7 @@ class MyReviewsNotifier extends ChangeNotifier {
     final currentState = _state;
     if (currentState is! MyReviewsLoaded) return;
     if (!currentState.hasMore || currentState.isLoadingMore) return;
+    if (currentState.loadMoreError != null) return; // Não dispara requisições repetidas se houver erro não tratado
 
     final requestId = _currentRequestId;
     _state = currentState.copyWith(isLoadingMore: true, clearLoadMoreError: true);
@@ -90,12 +95,19 @@ class MyReviewsNotifier extends ChangeNotifier {
         return; // Descarte de resposta caso um refresh tenha sido disparado
       }
 
-      // Deduplicação estrita de itens pelo identificador único da avaliação
-      final existingIds = currentState.reviews.map((r) => r.id).toSet();
-      final newItems = page.reviews.where((r) => !existingIds.contains(r.id)).toList();
-      final combined = [...currentState.reviews, ...newItems];
+      final liveState = _state;
+      if (liveState is! MyReviewsLoaded) {
+        return; // Estado mudou (ex: refresh ou logout) durante a requisição
+      }
 
-      _state = currentState.copyWith(
+      // Deduplicação estrita de itens pelo identificador único e filtro de avaliações excluídas
+      final existingIds = liveState.reviews.map((r) => r.id).toSet();
+      final newItems = page.reviews
+          .where((r) => !existingIds.contains(r.id) && !_removedReviewIds.contains(r.id))
+          .toList();
+      final combined = [...liveState.reviews, ...newItems];
+
+      _state = liveState.copyWith(
         reviews: combined,
         currentPage: page.pageNumber,
         totalPages: page.totalPages,
@@ -105,22 +117,22 @@ class MyReviewsNotifier extends ChangeNotifier {
         clearLoadMoreError: true,
       );
     } on ApiException catch (e) {
-      if (requestId == _currentRequestId) {
-        _state = currentState.copyWith(
+      if (requestId == _currentRequestId && _state is MyReviewsLoaded) {
+        _state = (_state as MyReviewsLoaded).copyWith(
           isLoadingMore: false,
           loadMoreError: e.detail,
         );
       }
     } on NetworkException catch (e) {
-      if (requestId == _currentRequestId) {
-        _state = currentState.copyWith(
+      if (requestId == _currentRequestId && _state is MyReviewsLoaded) {
+        _state = (_state as MyReviewsLoaded).copyWith(
           isLoadingMore: false,
           loadMoreError: e.message,
         );
       }
     } catch (_) {
-      if (requestId == _currentRequestId) {
-        _state = currentState.copyWith(
+      if (requestId == _currentRequestId && _state is MyReviewsLoaded) {
+        _state = (_state as MyReviewsLoaded).copyWith(
           isLoadingMore: false,
           loadMoreError: 'Erro ao carregar mais avaliações.',
         );
@@ -134,6 +146,7 @@ class MyReviewsNotifier extends ChangeNotifier {
   Future<void> retry() async {
     final currentState = _state;
     if (currentState is MyReviewsLoaded && currentState.loadMoreError != null) {
+      _state = currentState.copyWith(clearLoadMoreError: true);
       await loadMore();
     } else {
       await loadInitial();
@@ -156,6 +169,8 @@ class MyReviewsNotifier extends ChangeNotifier {
 
   /// Remove uma avaliação da lista localmente após exclusão confirmada.
   void removeReview(String reviewId) {
+    _removedReviewIds.add(reviewId);
+
     final currentState = _state;
     if (currentState is! MyReviewsLoaded) return;
 
@@ -163,6 +178,12 @@ class MyReviewsNotifier extends ChangeNotifier {
     if (updatedList.length == currentState.reviews.length) return;
 
     if (updatedList.isEmpty) {
+      if (currentState.hasMore) {
+        // Existem mais itens no servidor: recarrega a partir da primeira página
+        // para não exibir o estado vazio prematuramente.
+        loadInitial();
+        return;
+      }
       _state = const MyReviewsEmpty();
     } else {
       _state = currentState.copyWith(

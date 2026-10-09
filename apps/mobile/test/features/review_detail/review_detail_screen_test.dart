@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
@@ -25,8 +26,9 @@ class FakeFullFeedRepo implements FeedRepository {
   FeedReview? reviewToReturnOnUpdate;
   FeedReview? reviewToReturnOnGetById;
   bool shouldThrowOnGetById = false;
+  Future<FeedReview> Function(String reviewId)? customGetReviewById;
 
-  final FeedReview sampleReview = FeedReview(
+  late final FeedReview sampleReview = FeedReview(
     id: 'rev-screen-1',
     author: const FeedAuthor(
       id: 'usr-1',
@@ -47,10 +49,10 @@ class FakeFullFeedRepo implements FeedRepository {
         targetId: 'bistro-place',
         rating: 4.8,
         specificComment: 'Atendimento excepcional e ambiente aconchegante',
-        createdAt: DateTime(2026, 10, 6),
+        createdAt: DateTime.now().subtract(const Duration(hours: 1)),
       ),
     ],
-    createdAt: DateTime(2026, 10, 6, 20, 0),
+    createdAt: DateTime.now().subtract(const Duration(hours: 1)),
   );
 
   @override
@@ -66,6 +68,9 @@ class FakeFullFeedRepo implements FeedRepository {
 
   @override
   Future<FeedReview> getReviewById(String reviewId) async {
+    if (customGetReviewById != null) {
+      return customGetReviewById!(reviewId);
+    }
     if (shouldThrowOnGetById) {
       throw const ApiException(ProblemDetail(
         type: 'about:blank',
@@ -720,6 +725,302 @@ void main() {
       final discussionsSection = tester.widget<DiscussionsSection>(find.byType(DiscussionsSection));
       expect(discussionsSection.targetDiscussionId, 'disc-target-1');
       expect(discussionsSection.isReplyTarget, isTrue);
+    });
+
+    group('PopScope e navegação ao voltar (Item 3)', () {
+      testWidgets('gesto de voltar do sistema retorna avaliação editada quando _wasEdited for true', (tester) async {
+        tester.view.physicalSize = const Size(800, 1600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        feedRepo.reviewToReturnOnUpdate = feedRepo.sampleReview.copyWith(
+          experienceText: 'Texto editado e confirmado com sucesso!',
+        );
+
+        FeedReview? poppedResult;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  poppedResult = await Navigator.of(context).push<FeedReview>(
+                    MaterialPageRoute(
+                      builder: (_) => ReviewDetailScreen(
+                        reviewId: 'rev-screen-1',
+                        initialReview: feedRepo.sampleReview,
+                        feedRepository: feedRepo,
+                        currentUserId: 'usr-1',
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Abrir Detalhe'),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Abrir Detalhe'));
+        await tester.pumpAndSettle();
+
+        // Edita a avaliação
+        await tester.tap(find.byKey(const Key('review_detail_edit_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('submit_edit_button')));
+        await tester.pumpAndSettle();
+
+        // Simula gesto de voltar do sistema (Android back)
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+
+        expect(poppedResult, isNotNull);
+        expect(poppedResult?.experienceText, 'Texto editado e confirmado com sucesso!');
+      });
+
+      testWidgets('botão voltar da AppBar retorna avaliação editada quando _wasEdited for true', (tester) async {
+        tester.view.physicalSize = const Size(800, 1600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        feedRepo.reviewToReturnOnUpdate = feedRepo.sampleReview.copyWith(
+          experienceText: 'Texto editado e confirmado com sucesso!',
+        );
+
+        FeedReview? poppedResult;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  poppedResult = await Navigator.of(context).push<FeedReview>(
+                    MaterialPageRoute(
+                      builder: (_) => ReviewDetailScreen(
+                        reviewId: 'rev-screen-1',
+                        initialReview: feedRepo.sampleReview,
+                        feedRepository: feedRepo,
+                        currentUserId: 'usr-1',
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Abrir Detalhe'),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Abrir Detalhe'));
+        await tester.pumpAndSettle();
+
+        // Edita a avaliação
+        await tester.tap(find.byKey(const Key('review_detail_edit_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('submit_edit_button')));
+        await tester.pumpAndSettle();
+
+        // Clica no botão de voltar da AppBar
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+
+        expect(poppedResult, isNotNull);
+        expect(poppedResult?.experienceText, 'Texto editado e confirmado com sucesso!');
+      });
+
+      testWidgets('gesto de voltar do sistema retorna null quando não houve alterações', (tester) async {
+        dynamic poppedResult = 'valor-inicial';
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  poppedResult = await Navigator.of(context).push<FeedReview>(
+                    MaterialPageRoute(
+                      builder: (_) => ReviewDetailScreen(
+                        reviewId: 'rev-screen-1',
+                        initialReview: feedRepo.sampleReview,
+                        feedRepository: feedRepo,
+                        currentUserId: 'usr-1',
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Abrir Detalhe'),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Abrir Detalhe'));
+        await tester.pumpAndSettle();
+
+        // Volta sem editar
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+
+        expect(poppedResult, isNull);
+      });
+    });
+
+    group('Visibilidade de ações (editar e excluir) por estado e tempo (Item 6)', () {
+      testWidgets('ACTIVE dentro da janela de 24h exibe editar e excluir para o autor', (tester) async {
+        final rev = feedRepo.sampleReview.copyWith(
+          status: 'ACTIVE',
+          createdAt: DateTime.now().subtract(const Duration(hours: 2)),
+          isMine: true,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: rev.id,
+              initialReview: rev,
+              currentUserId: 'usr-1',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('review_detail_edit_button')), findsOneWidget);
+        expect(find.byKey(const Key('review_detail_delete_button')), findsOneWidget);
+      });
+
+      testWidgets('ACTIVE fora da janela de 24h oculta editar e exibe excluir para o autor', (tester) async {
+        final rev = feedRepo.sampleReview.copyWith(
+          status: 'ACTIVE',
+          createdAt: DateTime.now().subtract(const Duration(hours: 25)),
+          isMine: true,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: rev.id,
+              initialReview: rev,
+              currentUserId: 'usr-1',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('review_detail_edit_button')), findsNothing);
+        expect(find.byKey(const Key('review_detail_delete_button')), findsOneWidget);
+      });
+
+      testWidgets('UNDER_REVIEW oculta editar e exibe excluir para o autor', (tester) async {
+        final rev = feedRepo.sampleReview.copyWith(
+          status: 'UNDER_REVIEW',
+          createdAt: DateTime.now().subtract(const Duration(hours: 1)),
+          isMine: true,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: rev.id,
+              initialReview: rev,
+              currentUserId: 'usr-1',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('review_detail_edit_button')), findsNothing);
+        expect(find.byKey(const Key('review_detail_delete_button')), findsOneWidget);
+      });
+
+      testWidgets('REMOVED oculta tanto editar quanto excluir para o autor', (tester) async {
+        final rev = feedRepo.sampleReview.copyWith(
+          status: 'REMOVED',
+          createdAt: DateTime.now().subtract(const Duration(hours: 1)),
+          isMine: true,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: rev.id,
+              initialReview: rev,
+              currentUserId: 'usr-1',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('review_detail_edit_button')), findsNothing);
+        expect(find.byKey(const Key('review_detail_delete_button')), findsNothing);
+      });
+
+      testWidgets('avaliação que não pertence ao usuário atual oculta editar e excluir', (tester) async {
+        final rev = feedRepo.sampleReview.copyWith(
+          status: 'ACTIVE',
+          createdAt: DateTime.now().subtract(const Duration(hours: 1)),
+          isMine: false,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: rev.id,
+              initialReview: rev,
+              currentUserId: 'outro-user',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('review_detail_edit_button')), findsNothing);
+        expect(find.byKey(const Key('review_detail_delete_button')), findsNothing);
+      });
+    });
+
+    group('Corrida no reload canônico do detalhe (Item 7)', () {
+      testWidgets('resposta atrasada do getReviewById canônico não sobrescreve mutação mais recente', (tester) async {
+        final completer = Completer<FeedReview>();
+        feedRepo.customGetReviewById = (_) => completer.future;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.lightTheme,
+            home: ReviewDetailScreen(
+              reviewId: 'rev-screen-1',
+              initialReview: feedRepo.sampleReview,
+              feedRepository: feedRepo,
+              currentUserId: 'usr-1',
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Mutação local: usuário altera o voto útil enquanto getReviewById está atrasado
+        final helpfulButton = find.text('Votar útil');
+        await tester.ensureVisible(helpfulButton);
+        await tester.tap(helpfulButton);
+        await tester.pumpAndSettle();
+
+        // Voto útil foi alterado para 6
+        expect(find.text('6 pessoas acharam útil'), findsOneWidget);
+
+        // Resposta atrasada do carregamento canônico chega com dados velhos (helpfulCount = 5)
+        completer.complete(feedRepo.sampleReview.copyWith(
+          helpfulCount: 5,
+          isHelpfulByMe: false,
+          experienceText: 'Texto Antigo Sobrescrito Indevidamente',
+        ));
+        await tester.pumpAndSettle();
+
+        // Mutação mais recente foi preservada
+        expect(find.text('6 pessoas acharam útil'), findsOneWidget);
+        expect(find.text('Texto Antigo Sobrescrito Indevidamente'), findsNothing);
+      });
     });
   });
 }

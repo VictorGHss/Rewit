@@ -42,6 +42,7 @@ class ReviewDetailScreen extends StatefulWidget {
   final FeedNotifier? feedNotifier;
   final String? currentUserId;
   final bool? isAuthor;
+  final DateTime Function()? nowProvider;
 
   const ReviewDetailScreen({
     super.key,
@@ -56,6 +57,7 @@ class ReviewDetailScreen extends StatefulWidget {
     this.feedNotifier,
     this.currentUserId,
     this.isAuthor,
+    this.nowProvider,
   });
 
 
@@ -80,6 +82,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   // Ciclo de vida da própria avaliação (C5.7)
   bool _isDeleting = false;
   bool _wasEdited = false;
+  int _mutationVersion = 0;
 
   // Notifier de Discussões
   DiscussionNotifier? _discussionNotifier;
@@ -96,6 +99,23 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     final currentUserId = widget.currentUserId;
     if (currentUserId == null || currentUserId.isEmpty) return false;
     return currentUserId == authorId;
+  }
+
+  DateTime get _now => widget.nowProvider?.call() ?? DateTime.now();
+
+  bool get _canEdit {
+    if (!_isAuthor) return false;
+    final review = _review;
+    if (review == null) return false;
+    if (review.status.toUpperCase() != 'ACTIVE') return false;
+    return _now.isBefore(review.createdAt.add(const Duration(hours: 24)));
+  }
+
+  bool get _canDelete {
+    if (!_isAuthor) return false;
+    final review = _review;
+    if (review == null) return false;
+    return review.status.toUpperCase() != 'REMOVED';
   }
 
 
@@ -140,16 +160,26 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
       });
     }
 
+    final requestVersion = _mutationVersion;
+
     try {
       final review = await widget.feedRepository!.getReviewById(widget.reviewId);
       if (mounted) {
         setState(() {
-          _review = review.copyWith(
-            mediaItems: _mediaItems.isNotEmpty ? _mediaItems : review.mediaItems,
-            isHelpfulByMe: _isTogglingHelpful ? _review?.isHelpfulByMe : review.isHelpfulByMe,
-            helpfulCount: _isTogglingHelpful ? _review?.helpfulCount : review.helpfulCount,
-            isMine: review.isMine ?? _review?.isMine,
-          );
+          if (requestVersion != _mutationVersion) {
+            // Uma mutação local ocorreu enquanto a requisição canônica estava em andamento.
+            // Preserva a mutação local mais recente, apenas enriquecendo isMine se ainda não definido.
+            if (_review != null && review.isMine != null && _review!.isMine == null) {
+              _review = _review!.copyWith(isMine: review.isMine);
+            }
+          } else {
+            _review = review.copyWith(
+              mediaItems: _mediaItems.isNotEmpty ? _mediaItems : review.mediaItems,
+              isHelpfulByMe: _isTogglingHelpful ? _review?.isHelpfulByMe : review.isHelpfulByMe,
+              helpfulCount: _isTogglingHelpful ? _review?.helpfulCount : review.helpfulCount,
+              isMine: review.isMine ?? _review?.isMine,
+            );
+          }
           _isLoading = false;
         });
         if (!hasInitialReview) {
@@ -239,6 +269,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
       }
       if (mounted) {
         setState(() {
+          _mutationVersion++;
           _mediaItems.removeWhere((m) => m.id == item.id);
           _deletingMediaId = null;
         });
@@ -354,6 +385,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
 
       if (mounted) {
         setState(() {
+          _mutationVersion++;
           _review = review.copyWith(
             isHelpfulByMe: result.helpful,
             helpfulCount: result.helpfulCount,
@@ -388,6 +420,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
 
     if (updatedReview != null && mounted) {
       setState(() {
+        _mutationVersion++;
         _review = updatedReview.copyWith(
           mediaItems: _mediaItems.isNotEmpty ? _mediaItems : updatedReview.mediaItems,
         );
@@ -522,7 +555,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     final author = review.author;
 
     return PopScope(
-      canPop: !_isDeleting,
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         if (!_isDeleting) {
@@ -538,13 +571,15 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           ),
           title: const Text('Avaliação'),
           actions: [
-            if (_isAuthor) ...[
+            if (_canEdit) ...[
               IconButton(
                 key: const Key('review_detail_edit_button'),
                 icon: const Icon(Icons.edit_outlined),
                 tooltip: 'Editar Avaliação',
                 onPressed: _isDeleting ? null : _navigateToEdit,
               ),
+            ],
+            if (_canDelete) ...[
               IconButton(
                 key: const Key('review_detail_delete_button'),
                 icon: _isDeleting
