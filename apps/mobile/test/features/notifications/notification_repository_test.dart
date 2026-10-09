@@ -88,17 +88,21 @@ void main() {
         'referenceId': 'reply-55',
         'reviewId': 'review-99',
         'discussionId': 'reply-55',
+        'rootDiscussionId': 'root-10',
         'readAt': null,
         'createdAt': '2026-10-08T10:15:00Z',
       };
-      final entityReply = NotificationDto.fromJson(jsonReply).toEntity();
+      final dtoReply = NotificationDto.fromJson(jsonReply);
+      final entityReply = dtoReply.toEntity();
       expect(entityReply.type, NotificationType.discussionReply);
       expect(entityReply.referenceId, 'reply-55');
       expect(entityReply.reviewId, 'review-99');
       expect(entityReply.discussionId, 'reply-55');
+      expect(entityReply.rootDiscussionId, 'root-10');
+      expect(dtoReply.toJson()['rootDiscussionId'], 'root-10');
     });
 
-    test('NotificationDto preserva compatibilidade retroativa com payloads legados sem reviewId e discussionId', () {
+    test('NotificationDto preserva compatibilidade retroativa com payloads legados sem reviewId, discussionId e rootDiscussionId', () {
       final legacyJson = {
         'id': 'notif-legacy',
         'type': 'DISCUSSION_REPLY',
@@ -112,7 +116,29 @@ void main() {
       expect(entity.id, 'notif-legacy');
       expect(entity.reviewId, isNull);
       expect(entity.discussionId, isNull);
+      expect(entity.rootDiscussionId, isNull);
       expect(entity.referenceId, 'reply-55');
+    });
+
+    test('InAppNotification suporta copyWith, equality e hashCode com rootDiscussionId', () {
+      final notif = InAppNotification(
+        id: 'n-1',
+        type: NotificationType.discussionReply,
+        actorId: 'u-1',
+        referenceId: 'r-1',
+        reviewId: 'rev-1',
+        discussionId: 'disc-1',
+        rootDiscussionId: 'root-1',
+        createdAt: DateTime.parse('2026-10-09T10:00:00Z'),
+      );
+      final cloned = notif.copyWith();
+      expect(cloned, equals(notif));
+      expect(cloned.hashCode, equals(notif.hashCode));
+      expect(cloned.rootDiscussionId, 'root-1');
+
+      final modified = notif.copyWith(rootDiscussionId: 'root-2');
+      expect(modified.rootDiscussionId, 'root-2');
+      expect(modified, isNot(equals(notif)));
     });
 
     test('NotificationsPageDto deserializa paginação completa', () {

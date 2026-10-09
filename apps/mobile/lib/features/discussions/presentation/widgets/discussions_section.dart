@@ -15,6 +15,7 @@ class DiscussionsSection extends StatefulWidget {
   final DiscussionNotifier notifier;
   final void Function(String authorId)? onAuthorTap;
   final String? targetDiscussionId;
+  final String? rootDiscussionId;
   final bool isReplyTarget;
 
   const DiscussionsSection({
@@ -23,6 +24,7 @@ class DiscussionsSection extends StatefulWidget {
     required this.notifier,
     this.onAuthorTap,
     this.targetDiscussionId,
+    this.rootDiscussionId,
     this.isReplyTarget = false,
   });
 
@@ -36,6 +38,7 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
   String? _highlightedDiscussionId;
   Timer? _highlightTimer;
   bool _hasHandledTarget = false;
+  bool _isSearching = false;
   final Map<String, GlobalKey> _itemKeys = {};
 
   @override
@@ -56,8 +59,10 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
       oldWidget.notifier.removeListener(_checkAndHighlightTarget);
       widget.notifier.addListener(_checkAndHighlightTarget);
     }
-    if (oldWidget.targetDiscussionId != widget.targetDiscussionId) {
+    if (oldWidget.targetDiscussionId != widget.targetDiscussionId ||
+        oldWidget.rootDiscussionId != widget.rootDiscussionId) {
       _hasHandledTarget = false;
+      _isSearching = false;
       _highlightTimer?.cancel();
       _highlightedDiscussionId = null;
       _checkAndHighlightTarget();
@@ -75,9 +80,63 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
     if (!mounted) return;
     if (_hasHandledTarget || widget.targetDiscussionId == null) return;
     final state = widget.notifier.state;
-    if (state is! DiscussionLoaded) return;
+    if (state is! DiscussionLoaded) {
+      if (state is DiscussionEmpty || state is DiscussionError) {
+        _hasHandledTarget = true;
+      }
+      return;
+    }
+
+    if (_isSearching) return;
 
     final targetId = widget.targetDiscussionId!;
+
+    // Caso 1: Alvo é uma resposta com rootDiscussionId explícito (C6)
+    if (widget.isReplyTarget && widget.rootDiscussionId != null && widget.rootDiscussionId!.isNotEmpty) {
+      final rootId = widget.rootDiscussionId!;
+      final rootIndex = state.threads.indexWhere((t) => t.id == rootId);
+
+      if (rootIndex == -1) {
+        // Raiz ainda não carregada: avança páginas de raízes sequencialmente
+        if (state.hasMore && !state.isLoadingMore) {
+          _isSearching = true;
+          widget.notifier.loadMore(widget.reviewId).whenComplete(() {
+            _isSearching = false;
+            if (mounted) _checkAndHighlightTarget();
+          });
+        } else if (!state.hasMore && !state.isLoadingMore) {
+          // Chegou ao fim das raízes e a raiz não foi encontrada
+          _hasHandledTarget = true;
+        }
+        return;
+      }
+
+      // Raiz localizada: verificar se a resposta já está nas replies carregadas
+      final thread = state.threads[rootIndex];
+      final replyFound = thread.replies.any((r) => r.id == targetId);
+
+      if (replyFound) {
+        _highlightAndScroll(targetId);
+        return;
+      }
+
+      // Resposta ainda não carregada: avança respostas da raiz sequencialmente
+      final bool isAlreadyLoadingReplies = state.loadingReplies[rootId] == true;
+      if ((thread.hasMoreReplies || thread.replyCount > thread.replies.length) && !isAlreadyLoadingReplies) {
+        _isSearching = true;
+        widget.notifier.loadMoreReplies(rootId).whenComplete(() {
+          _isSearching = false;
+          if (mounted) _checkAndHighlightTarget();
+        });
+      } else if (!thread.hasMoreReplies && !isAlreadyLoadingReplies) {
+        // Todas as respostas da raiz foram percorridas e o alvo não foi encontrado
+        _hasHandledTarget = true;
+      }
+      return;
+    }
+
+    // Caso 2: Alvo raiz ou resposta legada sem rootDiscussionId
+    // Verifica se já está presente nas threads/replies carregadas
     final bool found;
     if (widget.isReplyTarget) {
       found = state.threads.any((t) => t.replies.any((r) => r.id == targetId)) ||
@@ -86,8 +145,13 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
       found = state.threads.any((t) => t.id == targetId);
     }
 
-    if (!found) return;
+    if (found) {
+      _highlightAndScroll(targetId);
+    }
+    // Se não encontrado, mantém _hasHandledTarget = false para destacar quando carregado
+  }
 
+  void _highlightAndScroll(String targetId) {
     _hasHandledTarget = true;
     setState(() {
       _highlightedDiscussionId = targetId;
@@ -102,6 +166,18 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
           duration: const Duration(milliseconds: 300),
           alignment: 0.1,
         );
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final retryKey = _itemKeys[targetId];
+          if (retryKey?.currentContext != null) {
+            Scrollable.ensureVisible(
+              retryKey!.currentContext!,
+              duration: const Duration(milliseconds: 300),
+              alignment: 0.1,
+            );
+          }
+        });
       }
       _highlightTimer?.cancel();
       _highlightTimer = Timer(const Duration(seconds: 2), () {

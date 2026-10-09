@@ -104,6 +104,19 @@ void main() {
       referenceId: 'reply-50',
       reviewId: 'review-100',
       discussionId: 'reply-50',
+      rootDiscussionId: 'root-99',
+      readAt: null,
+      createdAt: DateTime.now().subtract(const Duration(minutes: 2)),
+    );
+
+    final notifReplyLegacyWithReviewId = InAppNotification(
+      id: 'notif-6',
+      type: NotificationType.discussionReply,
+      actorId: 'user-101',
+      referenceId: 'reply-50',
+      reviewId: 'review-100',
+      discussionId: 'reply-50',
+      rootDiscussionId: null,
       readAt: null,
       createdAt: DateTime.now().subtract(const Duration(minutes: 2)),
     );
@@ -307,8 +320,39 @@ void main() {
       expect(capturedArgs, isNotNull);
       expect(capturedArgs!.reviewId, 'review-100');
       expect(capturedArgs!.targetDiscussionId, 'reply-50');
+      expect(capturedArgs!.rootDiscussionId, 'root-99');
       expect(capturedArgs!.isReplyTarget, isTrue);
       expect(fakeRepo.markedReadIds, contains('notif-5'));
+    });
+
+    testWidgets('clicar em notificação de resposta legada com reviewId navega com rootDiscussionId nulo', (tester) async {
+      ReviewDetailArgs? capturedArgs;
+      fakeRepo.notificationsToReturn = [notifReplyLegacyWithReviewId];
+      fakeRepo.unreadCountToReturn = 1;
+
+      await tester.pumpWidget(createTestWidget(
+        onGenerateRoute: (settings) {
+          if (settings.name == AppRouter.reviewDetail) {
+            capturedArgs = settings.arguments as ReviewDetailArgs?;
+            return MaterialPageRoute(
+              builder: (context) => Scaffold(body: Text('Review: ${capturedArgs?.reviewId}')),
+            );
+          }
+          return null;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Resposta em discussão'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Review: review-100'), findsOneWidget);
+      expect(capturedArgs, isNotNull);
+      expect(capturedArgs!.reviewId, 'review-100');
+      expect(capturedArgs!.targetDiscussionId, 'reply-50');
+      expect(capturedArgs!.rootDiscussionId, isNull);
+      expect(capturedArgs!.isReplyTarget, isTrue);
+      expect(fakeRepo.markedReadIds, contains('notif-6'));
     });
 
     testWidgets('clicar em notificação de resposta legada (sem reviewId) exibe aviso amigável', (tester) async {

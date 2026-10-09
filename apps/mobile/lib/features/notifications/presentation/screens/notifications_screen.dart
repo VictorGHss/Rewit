@@ -122,12 +122,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       case NotificationType.discussionReply:
         final reviewId = item.reviewId;
         final targetDiscussionId = item.discussionId ?? item.referenceId;
+        final rootDiscussionId = item.rootDiscussionId;
         if (reviewId != null && reviewId.isNotEmpty) {
           Navigator.of(context).pushNamed(
             AppRouter.reviewDetail,
             arguments: ReviewDetailArgs(
               reviewId: reviewId,
               targetDiscussionId: targetDiscussionId,
+              rootDiscussionId: rootDiscussionId,
               isReplyTarget: true,
             ),
           );

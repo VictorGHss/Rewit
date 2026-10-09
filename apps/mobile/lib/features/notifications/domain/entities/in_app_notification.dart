@@ -42,6 +42,7 @@ class InAppNotification {
   final String? referenceId;
   final String? reviewId;
   final String? discussionId;
+  final String? rootDiscussionId;
   final DateTime? readAt;
   final DateTime createdAt;
 
@@ -52,6 +53,7 @@ class InAppNotification {
     this.referenceId,
     this.reviewId,
     this.discussionId,
+    this.rootDiscussionId,
     this.readAt,
     required this.createdAt,
   });
@@ -65,6 +67,7 @@ class InAppNotification {
     String? referenceId,
     String? reviewId,
     String? discussionId,
+    String? rootDiscussionId,
     DateTime? readAt,
     DateTime? createdAt,
     bool clearReadAt = false,
@@ -76,6 +79,7 @@ class InAppNotification {
       referenceId: referenceId ?? this.referenceId,
       reviewId: reviewId ?? this.reviewId,
       discussionId: discussionId ?? this.discussionId,
+      rootDiscussionId: rootDiscussionId ?? this.rootDiscussionId,
       readAt: clearReadAt ? null : (readAt ?? this.readAt),
       createdAt: createdAt ?? this.createdAt,
     );
@@ -92,6 +96,7 @@ class InAppNotification {
           referenceId == other.referenceId &&
           reviewId == other.reviewId &&
           discussionId == other.discussionId &&
+          rootDiscussionId == other.rootDiscussionId &&
           readAt == other.readAt &&
           createdAt == other.createdAt;
 
@@ -103,6 +108,7 @@ class InAppNotification {
       referenceId.hashCode ^
       reviewId.hashCode ^
       discussionId.hashCode ^
+      rootDiscussionId.hashCode ^
       readAt.hashCode ^
       createdAt.hashCode;
 }

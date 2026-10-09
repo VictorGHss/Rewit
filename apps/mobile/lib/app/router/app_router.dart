@@ -163,6 +163,7 @@ class AppRouter {
               reviewId: args.reviewId,
               initialReview: args.initialReview,
               targetDiscussionId: args.targetDiscussionId,
+              rootDiscussionId: args.rootDiscussionId,
               isReplyTarget: args.isReplyTarget,
               feedRepository: feedRepository,
               mediaRepository: reviewMediaRepository,

@@ -14,17 +14,19 @@ import 'package:rewit_mobile/features/review_detail/presentation/widgets/authent
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 
-/// Argumentos tipados para abertura contextual da tela de detalhes da avaliação (C5.12).
+/// Argumentos tipados para abertura contextual da tela de detalhes da avaliação (C5.12, C6).
 class ReviewDetailArgs {
   final String reviewId;
   final FeedReview? initialReview;
   final String? targetDiscussionId;
+  final String? rootDiscussionId;
   final bool isReplyTarget;
 
   const ReviewDetailArgs({
     required this.reviewId,
     this.initialReview,
     this.targetDiscussionId,
+    this.rootDiscussionId,
     this.isReplyTarget = false,
   });
 }
@@ -34,6 +36,7 @@ class ReviewDetailScreen extends StatefulWidget {
   final String reviewId;
   final FeedReview? initialReview;
   final String? targetDiscussionId;
+  final String? rootDiscussionId;
   final bool isReplyTarget;
   final FeedRepository? feedRepository;
   final ReviewMediaRepository? mediaRepository;
@@ -49,6 +52,7 @@ class ReviewDetailScreen extends StatefulWidget {
     required this.reviewId,
     this.initialReview,
     this.targetDiscussionId,
+    this.rootDiscussionId,
     this.isReplyTarget = false,
     this.feedRepository,
     this.mediaRepository,
@@ -1030,6 +1034,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
                 reviewId: widget.reviewId,
                 notifier: _discussionNotifier!,
                 targetDiscussionId: widget.targetDiscussionId,
+                rootDiscussionId: widget.rootDiscussionId,
                 isReplyTarget: widget.isReplyTarget,
                 onAuthorTap: (authorId) {
                   Navigator.of(context).pushNamed(

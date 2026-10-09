@@ -9,6 +9,7 @@ class NotificationDto {
   final String? referenceId;
   final String? reviewId;
   final String? discussionId;
+  final String? rootDiscussionId;
   final String? readAt;
   final String createdAt;
 
@@ -19,6 +20,7 @@ class NotificationDto {
     this.referenceId,
     this.reviewId,
     this.discussionId,
+    this.rootDiscussionId,
     this.readAt,
     required this.createdAt,
   });
@@ -31,6 +33,7 @@ class NotificationDto {
       referenceId: json['referenceId'] as String?,
       reviewId: json['reviewId'] as String?,
       discussionId: json['discussionId'] as String?,
+      rootDiscussionId: json['rootDiscussionId'] as String?,
       readAt: json['readAt'] as String?,
       createdAt: json['createdAt'] as String,
     );
@@ -44,6 +47,7 @@ class NotificationDto {
       'referenceId': referenceId,
       'reviewId': reviewId,
       'discussionId': discussionId,
+      'rootDiscussionId': rootDiscussionId,
       'readAt': readAt,
       'createdAt': createdAt,
     };
@@ -57,6 +61,7 @@ class NotificationDto {
       referenceId: referenceId,
       reviewId: reviewId,
       discussionId: discussionId,
+      rootDiscussionId: rootDiscussionId,
       readAt: readAt != null ? DateTime.parse(readAt!) : null,
       createdAt: DateTime.parse(createdAt),
     );

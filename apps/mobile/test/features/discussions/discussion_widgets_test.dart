@@ -653,6 +653,199 @@ void main() {
       );
       expect((container.decoration as BoxDecoration).border!.top.width, 1.0);
     });
+
+    testWidgets('DiscussionsSection com rootDiscussionId busca automaticamente respostas e destaca a resposta alvo (C6)', (tester) async {
+      final repo = _MockDiscussionRepository();
+      repo.threads = [
+        DiscussionThread(
+          id: 'root-c6',
+          reviewId: 'r-1',
+          state: DiscussionViewState.visible,
+          content: 'Discussão raiz C6',
+          author: const DiscussionAuthor(displayName: 'Autor Raiz C6'),
+          isFromOwner: false,
+          createdAt: DateTime(2026, 10, 9, 10, 0),
+          canReply: true,
+          canDelete: false,
+          replies: const [],
+          replyCount: 1,
+          hasMoreReplies: true,
+        ),
+      ];
+      repo.threadReplies = {
+        'root-c6': [
+          DiscussionItem(
+            id: 'reply-c6-target',
+            reviewId: 'r-1',
+            parentId: 'root-c6',
+            state: DiscussionViewState.visible,
+            content: 'Resposta carregada automaticamente pelo C6',
+            author: const DiscussionAuthor(displayName: 'Autor Resposta C6'),
+            isFromOwner: false,
+            createdAt: DateTime(2026, 10, 9, 10, 5),
+            canReply: false,
+            canDelete: false,
+          ),
+        ],
+      };
+
+      final notifier = DiscussionNotifier(repository: repo);
+      await notifier.loadDiscussions('r-1');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: DiscussionsSection(
+                reviewId: 'r-1',
+                notifier: notifier,
+                targetDiscussionId: 'reply-c6-target',
+                rootDiscussionId: 'root-c6',
+                isReplyTarget: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      // Processa microtarefas e respostas assíncronas automáticas
+      await tester.pumpAndSettle();
+
+      expect(find.text('Resposta carregada automaticamente pelo C6'), findsOneWidget);
+      final itemWidgets = tester.widgetList<DiscussionItemWidget>(find.byType(DiscussionItemWidget)).toList();
+      expect(itemWidgets.length, 2);
+      expect(itemWidgets[0].isHighlighted, isFalse);
+      expect(itemWidgets[1].isHighlighted, isTrue);
+    });
+
+    testWidgets('DiscussionsSection com rootDiscussionId na página seguinte avança raízes e respostas automaticamente (C6)', (tester) async {
+      final repo = _MockDiscussionRepository();
+      repo.pages = {
+        0: [
+          DiscussionThread(
+            id: 'root-page-1',
+            reviewId: 'r-1',
+            state: DiscussionViewState.visible,
+            content: 'Raiz da página 1',
+            author: const DiscussionAuthor(displayName: 'Autor 1'),
+            isFromOwner: false,
+            createdAt: DateTime(2026, 10, 9, 10, 0),
+            canReply: true,
+            canDelete: false,
+            replies: const [],
+            replyCount: 0,
+            hasMoreReplies: false,
+          ),
+        ],
+        1: [
+          DiscussionThread(
+            id: 'root-c6-p2',
+            reviewId: 'r-1',
+            state: DiscussionViewState.visible,
+            content: 'Raiz encontrada na página 2',
+            author: const DiscussionAuthor(displayName: 'Autor 2'),
+            isFromOwner: false,
+            createdAt: DateTime(2026, 10, 9, 10, 5),
+            canReply: true,
+            canDelete: false,
+            replies: const [],
+            replyCount: 1,
+            hasMoreReplies: true,
+          ),
+        ],
+      };
+      repo.threadReplies = {
+        'root-c6-p2': [
+          DiscussionItem(
+            id: 'reply-c6-deep-target',
+            reviewId: 'r-1',
+            parentId: 'root-c6-p2',
+            state: DiscussionViewState.visible,
+            content: 'Resposta profunda da raiz da página 2',
+            author: const DiscussionAuthor(displayName: 'Autor Resposta Profunda'),
+            isFromOwner: false,
+            createdAt: DateTime(2026, 10, 9, 10, 10),
+            canReply: false,
+            canDelete: false,
+          ),
+        ],
+      };
+
+      final notifier = DiscussionNotifier(repository: repo);
+      await notifier.loadDiscussions('r-1');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: DiscussionsSection(
+                reviewId: 'r-1',
+                notifier: notifier,
+                targetDiscussionId: 'reply-c6-deep-target',
+                rootDiscussionId: 'root-c6-p2',
+                isReplyTarget: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      // pumpAndSettle percorre loadMore de raízes e loadMoreReplies de respostas
+      await tester.pumpAndSettle();
+
+      expect(find.text('Raiz encontrada na página 2'), findsOneWidget);
+      expect(find.text('Resposta profunda da raiz da página 2'), findsOneWidget);
+
+      final itemWidgets = tester.widgetList<DiscussionItemWidget>(find.byType(DiscussionItemWidget)).toList();
+      final targetWidget = itemWidgets.firstWhere((w) => w.item.id == 'reply-c6-deep-target');
+      expect(targetWidget.isHighlighted, isTrue);
+    });
+
+    testWidgets('DiscussionsSection com rootDiscussionId encerra graciosamente quando resposta não existe (C6)', (tester) async {
+      final repo = _MockDiscussionRepository();
+      repo.threads = [
+        DiscussionThread(
+          id: 'root-c6-empty',
+          reviewId: 'r-1',
+          state: DiscussionViewState.visible,
+          content: 'Raiz sem respostas',
+          author: const DiscussionAuthor(displayName: 'Autor Vazio'),
+          isFromOwner: false,
+          createdAt: DateTime(2026, 10, 9, 10, 0),
+          canReply: true,
+          canDelete: false,
+          replies: const [],
+          replyCount: 0,
+          hasMoreReplies: false,
+        ),
+      ];
+
+      final notifier = DiscussionNotifier(repository: repo);
+      await notifier.loadDiscussions('r-1');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: DiscussionsSection(
+                reviewId: 'r-1',
+                notifier: notifier,
+                targetDiscussionId: 'reply-non-existent',
+                rootDiscussionId: 'root-c6-empty',
+                isReplyTarget: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Raiz sem respostas'), findsOneWidget);
+      final itemWidgets = tester.widgetList<DiscussionItemWidget>(find.byType(DiscussionItemWidget)).toList();
+      expect(itemWidgets.length, 1);
+      expect(itemWidgets[0].isHighlighted, isFalse);
+    });
   });
 }
 
