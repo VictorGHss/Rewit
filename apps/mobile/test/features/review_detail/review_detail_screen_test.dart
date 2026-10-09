@@ -915,7 +915,7 @@ void main() {
         expect(find.byKey(const Key('review_detail_delete_button')), findsOneWidget);
       });
 
-      testWidgets('UNDER_REVIEW oculta editar e exibe excluir para o autor', (tester) async {
+      testWidgets('UNDER_REVIEW oculta tanto editar quanto excluir para o autor', (tester) async {
         final rev = feedRepo.sampleReview.copyWith(
           status: 'UNDER_REVIEW',
           createdAt: DateTime.now().subtract(const Duration(hours: 1)),
@@ -934,7 +934,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byKey(const Key('review_detail_edit_button')), findsNothing);
-        expect(find.byKey(const Key('review_detail_delete_button')), findsOneWidget);
+        expect(find.byKey(const Key('review_detail_delete_button')), findsNothing);
       });
 
       testWidgets('REMOVED oculta tanto editar quanto excluir para o autor', (tester) async {

@@ -881,24 +881,37 @@ void main() {
       final rev2 = createSampleReview(id: 'rev-2');
       final rev3 = createSampleReview(id: 'rev-3');
 
+      int callCountPage0 = 0;
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
         if (page == 0) {
-          return TargetReviewsPage(
-            reviews: [rev1, rev2],
-            pageNumber: 0,
-            pageSize: 2,
-            totalElements: 3,
-            totalPages: 2,
-            isLast: false,
-          );
+          callCountPage0++;
+          if (callCountPage0 == 1) {
+            return TargetReviewsPage(
+              reviews: [rev1, rev2],
+              pageNumber: 0,
+              pageSize: 2,
+              totalElements: 3,
+              totalPages: 2,
+              isLast: false,
+            );
+          } else {
+            // Após remoção de rev1 no servidor, página 0 contém rev2 e rev3
+            return TargetReviewsPage(
+              reviews: [rev2, rev3],
+              pageNumber: 0,
+              pageSize: 2,
+              totalElements: 2,
+              totalPages: 1,
+              isLast: true,
+            );
+          }
         } else {
-          // Devido ao deslocamento (offset shift), página 1 repete rev-2 e traz rev-3
           return TargetReviewsPage(
-            reviews: [rev2, rev3],
+            reviews: [rev3],
             pageNumber: 1,
             pageSize: 2,
-            totalElements: 3,
-            totalPages: 2,
+            totalElements: 2,
+            totalPages: 1,
             isLast: true,
           );
         }
@@ -917,6 +930,77 @@ void main() {
       expect(loaded.reviews.length, 2);
       expect(loaded.reviews[0].id, 'rev-2');
       expect(loaded.reviews[1].id, 'rev-3');
+    });
+
+    test('exclusão seguida de carregamento da próxima página não pula avaliação deslocada pelo offset shift', () async {
+      // 1. A primeira página possui 10 avaliações (r1 a r10).
+      final page0Initial = List.generate(10, (i) => createSampleReview(id: 'rev-${i + 1}'));
+
+      // 3. r3 é excluído no servidor.
+      // No servidor, página 0 agora tem: r1, r2, r4..r10, e r11 (deslocado do índice 10 para 9).
+      final page0AfterDelete = [
+        ...page0Initial.where((r) => r.id != 'rev-3'),
+        createSampleReview(id: 'rev-11'),
+      ];
+      // E página 1 no servidor tem r12..r15.
+      final page1AfterDelete = List.generate(4, (i) => createSampleReview(id: 'rev-${i + 12}'));
+
+      int callCountPage0 = 0;
+      repo.getMyReviewsHandler = ({page = 0, size = 10}) {
+        if (page == 0) {
+          callCountPage0++;
+          if (callCountPage0 == 1) {
+            return TargetReviewsPage(
+              reviews: page0Initial,
+              pageNumber: 0,
+              pageSize: 10,
+              totalElements: 15,
+              totalPages: 2,
+              isLast: false,
+            );
+          } else {
+            return TargetReviewsPage(
+              reviews: page0AfterDelete,
+              pageNumber: 0,
+              pageSize: 10,
+              totalElements: 14,
+              totalPages: 2,
+              isLast: false,
+            );
+          }
+        } else {
+          return TargetReviewsPage(
+            reviews: page1AfterDelete,
+            pageNumber: 1,
+            pageSize: 10,
+            totalElements: 14,
+            totalPages: 2,
+            isLast: true,
+          );
+        }
+      };
+
+      // Carrega página 0 inicial
+      await notifier.loadInitial();
+      expect((notifier.state as MyReviewsLoaded).reviews.length, 10);
+
+      // Exclusão no cliente após remoção no servidor
+      notifier.removeReview('rev-3');
+      expect((notifier.state as MyReviewsLoaded).reviews.length, 9);
+
+      // Usuário solicita mais itens (loadMore)
+      await notifier.loadMore();
+
+      final loadedAfterMore = notifier.state as MyReviewsLoaded;
+      // rev-11 NÃO foi pulado!
+      expect(loadedAfterMore.reviews.map((r) => r.id), contains('rev-11'));
+      expect(loadedAfterMore.reviews.length, 10); // 9 anteriores + rev-11
+
+      // Próxima busca avança para a página 1 normalmente
+      await notifier.loadMore();
+      final loadedFinal = notifier.state as MyReviewsLoaded;
+      expect(loadedFinal.reviews.length, 14);
+      expect(loadedFinal.reviews.map((r) => r.id), containsAll(['rev-11', 'rev-12', 'rev-13', 'rev-14', 'rev-15']));
     });
 
     test('loadMore com erro bloqueia novas chamadas em scroll até chamada deliberada de retry (Item 4)', () async {

@@ -18,6 +18,7 @@ class FakeFeedRepository implements FeedRepository {
   bool shouldThrowOnHelpful = false;
   Completer<HelpfulResult>? toggleHelpfulCompleter;
   Completer<FeedPage>? delayedPage1Completer;
+  Future<FeedPage> Function({int page, int size})? customGetFeedHandler;
 
   FeedReview _makeReview(String id, {bool isHelpful = false, int helpfulCount = 0}) {
     return FeedReview(
@@ -33,6 +34,9 @@ class FakeFeedRepository implements FeedRepository {
 
   @override
   Future<FeedPage> getFeed({int page = 0, int size = 10}) async {
+    if (customGetFeedHandler != null) {
+      return customGetFeedHandler!(page: page, size: size);
+    }
     if (page == 0 && shouldThrowOnInitial) {
       throw const NetworkException('Sem conexão com o servidor');
     }
@@ -461,6 +465,69 @@ void main() {
       await notifier.retry();
       expect((notifier.state as FeedSuccess).currentPage, 1);
       expect((notifier.state as FeedSuccess).loadMoreError, isNull);
+    });
+
+    test('exclusão seguida de carregamento da próxima página não pula avaliação deslocada pelo offset shift', () async {
+      final page0Initial = List.generate(10, (i) => repository._makeReview('rev-${i + 1}'));
+      final page0AfterDelete = [
+        ...page0Initial.where((r) => r.id != 'rev-3'),
+        repository._makeReview('rev-11'),
+      ];
+      final page1AfterDelete = List.generate(4, (i) => repository._makeReview('rev-${i + 12}'));
+
+      int callCountPage0 = 0;
+      repository.customGetFeedHandler = ({page = 0, size = 10}) async {
+        if (page == 0) {
+          callCountPage0++;
+          if (callCountPage0 == 1) {
+            return FeedPage(
+              items: page0Initial,
+              page: 0,
+              size: 10,
+              windowSize: 20,
+              totalPages: 2,
+            );
+          } else {
+            return FeedPage(
+              items: page0AfterDelete,
+              page: 0,
+              size: 10,
+              windowSize: 20,
+              totalPages: 2,
+            );
+          }
+        } else {
+          return FeedPage(
+            items: page1AfterDelete,
+            page: 1,
+            size: 10,
+            windowSize: 20,
+            totalPages: 2,
+          );
+        }
+      };
+
+      // Carrega página 0 inicial
+      await notifier.loadInitial();
+      expect((notifier.state as FeedSuccess).reviews.length, 10);
+
+      // Exclusão no cliente após remoção no servidor
+      notifier.removeReview('rev-3');
+      expect((notifier.state as FeedSuccess).reviews.length, 9);
+
+      // Usuário solicita mais itens (loadMore)
+      await notifier.loadMore();
+
+      final successAfterMore = notifier.state as FeedSuccess;
+      // rev-11 NÃO foi pulado!
+      expect(successAfterMore.reviews.map((r) => r.id), contains('rev-11'));
+      expect(successAfterMore.reviews.length, 10); // 9 anteriores + rev-11
+
+      // Próxima busca avança para a página 1 normalmente
+      await notifier.loadMore();
+      final successFinal = notifier.state as FeedSuccess;
+      expect(successFinal.reviews.length, 14);
+      expect(successFinal.reviews.map((r) => r.id), containsAll(['rev-11', 'rev-12', 'rev-13', 'rev-14', 'rev-15']));
     });
   });
 }

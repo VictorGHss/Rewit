@@ -16,6 +16,7 @@ class MyReviewsNotifier extends ChangeNotifier {
   int _currentRequestId = 0;
   bool _isLoadingInitial = false;
   final Set<String> _removedReviewIds = {};
+  bool _needsPaginationReset = false;
 
   MyReviewsNotifier({required this.repository});
 
@@ -25,6 +26,7 @@ class MyReviewsNotifier extends ChangeNotifier {
     _isLoadingInitial = true;
 
     _removedReviewIds.clear();
+    _needsPaginationReset = false;
     final requestId = ++_currentRequestId;
     _state = const MyReviewsLoading();
     notifyListeners();
@@ -88,17 +90,18 @@ class MyReviewsNotifier extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final nextPage = currentState.currentPage + 1;
+      final nextPage = _needsPaginationReset ? 0 : currentState.currentPage + 1;
+      _needsPaginationReset = false;
       final page = await repository.getMyReviews(page: nextPage, size: size);
 
       if (requestId != _currentRequestId) {
         return; // Descarte de resposta caso um refresh tenha sido disparado
       }
 
-      final liveState = _state;
-      if (liveState is! MyReviewsLoaded) {
+      if (_state is! MyReviewsLoaded) {
         return; // Estado mudou (ex: refresh ou logout) durante a requisição
       }
+      final liveState = _state as MyReviewsLoaded;
 
       // Deduplicação estrita de itens pelo identificador único e filtro de avaliações excluídas
       final existingIds = liveState.reviews.map((r) => r.id).toSet();
@@ -176,6 +179,8 @@ class MyReviewsNotifier extends ChangeNotifier {
 
     final updatedList = currentState.reviews.where((r) => r.id != reviewId).toList();
     if (updatedList.length == currentState.reviews.length) return;
+
+    _needsPaginationReset = true;
 
     if (updatedList.isEmpty) {
       if (currentState.hasMore) {

@@ -115,7 +115,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     if (!_isAuthor) return false;
     final review = _review;
     if (review == null) return false;
-    return review.status.toUpperCase() != 'REMOVED';
+    return review.status.toUpperCase() == 'ACTIVE';
   }
 
 
@@ -319,7 +319,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
             AppBar(
               title: Text(item.mimeType.split('/').last.toUpperCase()),
               actions: [
-                if (_isAuthor)
+                if (_canDelete)
                   IconButton(
                     icon: const Icon(Icons.delete_outline),
                     tooltip: 'Excluir Foto',
@@ -924,8 +924,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
                                   ),
                                 ),
                               ),
-                            // Botão de exclusão (apenas para o autor)
-                            if (_isAuthor)
+                            // Botão de exclusão (apenas para o autor em ACTIVE)
+                            if (_canDelete)
                               Positioned(
                                 top: 4,
                                 right: 4,

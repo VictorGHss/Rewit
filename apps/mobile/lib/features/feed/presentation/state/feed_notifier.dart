@@ -13,6 +13,7 @@ class FeedNotifier extends ChangeNotifier {
   int _currentRequestId = 0;
   final Set<String> _pendingHelpfulReviewIds = {};
   final Set<String> _removedReviewIds = {};
+  bool _needsPaginationReset = false;
 
   FeedNotifier({required FeedRepository feedRepository})
       : _feedRepository = feedRepository;
@@ -25,6 +26,7 @@ class FeedNotifier extends ChangeNotifier {
   /// Carrega a primeira página do feed (página 0).
   Future<void> loadInitial({int size = 10}) async {
     _removedReviewIds.clear();
+    _needsPaginationReset = false;
     final requestId = ++_currentRequestId;
     _state = const FeedLoading();
     notifyListeners();
@@ -84,15 +86,17 @@ class FeedNotifier extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final nextPage = currentState.currentPage + 1;
+      final nextPage = _needsPaginationReset ? 0 : currentState.currentPage + 1;
+      _needsPaginationReset = false;
+
       final feedPage = await _feedRepository.getFeed(page: nextPage, size: size);
 
       if (requestId != _currentRequestId) {
         return; // Resposta obsoleta descartada se refresh foi acionado
       }
 
-      final liveState = _state;
-      if (liveState is! FeedSuccess) return;
+      if (_state is! FeedSuccess) return;
+      final liveState = _state as FeedSuccess;
 
       // Deduplicação estrita de itens pelo identificador da review e exclusão de itens removidos
       final existingIds = liveState.reviews.map((r) => r.id).toSet();
@@ -237,6 +241,8 @@ class FeedNotifier extends ChangeNotifier {
 
     final updatedList = currentState.reviews.where((r) => r.id != reviewId).toList();
     if (updatedList.length == currentState.reviews.length) return;
+
+    _needsPaginationReset = true;
 
     if (updatedList.isEmpty) {
       if (currentState.hasMore) {
