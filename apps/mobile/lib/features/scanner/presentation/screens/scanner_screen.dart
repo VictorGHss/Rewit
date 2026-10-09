@@ -218,13 +218,13 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                       if (_notifier.state is! ScannerPermissionDenied) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (mounted && _notifier.state is! ScannerPermissionDenied) {
-                            _notifier.onPermissionDenied(permanentlyDenied: true);
+                            _notifier.onPermissionDenied(permanentlyDenied: false);
                           }
                         });
                       }
                       return _buildPermissionDeniedView(
                         context,
-                        const ScannerPermissionDenied(permanentlyDenied: true),
+                        const ScannerPermissionDenied(permanentlyDenied: false),
                       );
                     }
                     return Center(
@@ -702,20 +702,24 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Para escanear códigos de barras e QR Codes de produtos, o Rewit precisa de permissão de acesso à câmera.',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
+            Text(
+              state.permanentlyDenied
+                  ? 'A permissão de acesso à câmera foi negada permanentemente. Para escanear códigos, habilite a câmera nas configurações do dispositivo.'
+                  : 'Para escanear códigos de barras e QR Codes de produtos, o Rewit precisa de permissão de acesso à câmera.',
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () {
-                _notifier.startScanning();
-                _cameraController?.start();
-              },
-              child: const Text('Tentar novamente'),
-            ),
-            const SizedBox(height: 12),
+            if (!state.permanentlyDenied) ...[
+              ElevatedButton(
+                onPressed: () {
+                  _notifier.startScanning();
+                  _cameraController?.start();
+                },
+                child: const Text('Tentar novamente'),
+              ),
+              const SizedBox(height: 12),
+            ],
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text(

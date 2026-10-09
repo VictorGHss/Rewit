@@ -400,7 +400,7 @@ void main() {
     expect(mobileScannerWidget.controller?.formats, contains(BarcodeFormat.qrCode));
   });
 
-  testWidgets('errorBuilder de MobileScanner com permissionDenied atualiza notifier e exibe view de permissao negada', (tester) async {
+  testWidgets('errorBuilder de MobileScanner com permissionDenied atualiza notifier sem permanentemente negado e permite tentar novamente', (tester) async {
     final notifier = ScannerNotifier(productRepository: fakeRepository);
 
     await tester.pumpWidget(
@@ -431,8 +431,34 @@ void main() {
       find.text('Para escanear códigos de barras e QR Codes de produtos, o Rewit precisa de permissão de acesso à câmera.'),
       findsOneWidget,
     );
+    expect(find.text('Tentar novamente'), findsOneWidget);
     expect(notifier.state, isA<ScannerPermissionDenied>());
-    expect((notifier.state as ScannerPermissionDenied).permanentlyDenied, isTrue);
+    expect((notifier.state as ScannerPermissionDenied).permanentlyDenied, isFalse);
+
+    notifier.dispose();
+  });
+
+  testWidgets('exibe tela de aviso com instrucao de configuracoes quando permissao e permanentemente negada', (tester) async {
+    final notifier = ScannerNotifier(productRepository: fakeRepository);
+    notifier.onPermissionDenied(permanentlyDenied: true);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerScreen(
+          notifier: notifier,
+          cameraBuilder: (ctx, onDetect) => const SizedBox.shrink(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Acesso à câmera necessário'), findsOneWidget);
+    expect(
+      find.text('A permissão de acesso à câmera foi negada permanentemente. Para escanear códigos, habilite a câmera nas configurações do dispositivo.'),
+      findsOneWidget,
+    );
+    expect(find.text('Tentar novamente'), findsNothing);
+    expect(find.text('Voltar'), findsOneWidget);
 
     notifier.dispose();
   });
