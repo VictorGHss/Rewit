@@ -15,11 +15,9 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/product/presentation/screens/product_detail_screen.dart';
-import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/change_password_screen.dart';
-import 'package:rewit_mobile/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/my_reviews_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
@@ -29,7 +27,6 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
-import 'package:rewit_mobile/features/review_detail/presentation/screens/review_edit_screen.dart';
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
@@ -46,11 +43,9 @@ class AppRouter {
   static const String productDetail = '/product/detail';
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
-  static const String editProfile = '/profile/edit';
   static const String myReviews = '/profile/my-reviews';
   static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
-  static const String reviewEdit = '/review/edit';
   static const String accountSettings = '/settings';
   static const String changePassword = '/settings/change-password';
   static const String scanner = '/scanner';
@@ -207,25 +202,6 @@ class AppRouter {
           settings: settings,
         );
 
-      case reviewEdit:
-        final args = settings.arguments;
-        if (args is FeedReview && feedRepository != null) {
-          return MaterialPageRoute(
-            builder: (context) => ReviewEditScreen(
-              review: args,
-              feedRepository: feedRepository!,
-            ),
-            settings: settings,
-          );
-        }
-        return MaterialPageRoute(
-          builder: (context) => const Scaffold(
-            body: Center(child: Text('Avaliação para edição não fornecida.')),
-          ),
-          settings: settings,
-        );
-
-
       case search:
         return MaterialPageRoute(
           builder: (context) => SearchScreen(
@@ -324,25 +300,6 @@ class AppRouter {
           builder: (context) => UserProfileScreen(
             userId: userId,
             userProfileRepository: userProfileRepository,
-            authNotifier: authNotifier,
-          ),
-          settings: settings,
-        );
-
-      case editProfile:
-        final initialProfile = settings.arguments as UserProfile?;
-        if (userProfileRepository == null) {
-          return MaterialPageRoute(
-            builder: (context) => const Scaffold(
-              body: Center(child: Text('Repositório de perfil indisponível.')),
-            ),
-            settings: settings,
-          );
-        }
-        return MaterialPageRoute(
-          builder: (context) => EditProfileScreen(
-            initialProfile: initialProfile,
-            repository: userProfileRepository!,
             authNotifier: authNotifier,
           ),
           settings: settings,

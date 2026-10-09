@@ -120,39 +120,5 @@ public final class ReviewPresentationDtos {
             long helpfulCount,
             boolean isHelpfulByMe,
             boolean isMine
-    ) {
-        public ReviewResponse(
-                UUID id,
-                ReviewAuthorResponse author,
-                UUID contextPlaceId,
-                String experienceText,
-                boolean isAnonymous,
-                boolean isVerifiedOnSite,
-                String visibility,
-                String status,
-                Instant createdAt,
-                Instant updatedAt,
-                List<ReviewTargetResponse> targets,
-                long helpfulCount,
-                boolean isHelpfulByMe
-        ) {
-            this(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite, visibility, status, createdAt, updatedAt, targets, helpfulCount, isHelpfulByMe, false);
-        }
-
-        public ReviewResponse(
-                UUID id,
-                ReviewAuthorResponse author,
-                UUID contextPlaceId,
-                String experienceText,
-                boolean isAnonymous,
-                boolean isVerifiedOnSite,
-                String visibility,
-                String status,
-                Instant createdAt,
-                Instant updatedAt,
-                List<ReviewTargetResponse> targets
-        ) {
-            this(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite, visibility, status, createdAt, updatedAt, targets, 0L, false, false);
-        }
-    }
+    ) {}
 }

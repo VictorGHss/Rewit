@@ -556,6 +556,11 @@ void main() {
     Widget buildSubject(AuthNotifier notifier, {VoidCallback? onDeactivated}) {
       return MaterialApp(
         theme: AppTheme.lightTheme,
+        routes: {
+          AppRouter.changePassword: (context) => ChangePasswordScreen(
+            authNotifier: notifier,
+          ),
+        },
         home: AccountSettingsScreen(
           authNotifier: notifier,
           onDeactivated: onDeactivated,

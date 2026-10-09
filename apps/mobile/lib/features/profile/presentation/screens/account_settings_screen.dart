@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
-import 'change_password_screen.dart';
 
 /// Tela de configurações e gerenciamento de conta do usuário autenticado.
 class AccountSettingsScreen extends StatefulWidget {
@@ -254,13 +254,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                       ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => ChangePasswordScreen(
-                              authNotifier: widget.authNotifier,
-                            ),
-                          ),
-                        );
+                        Navigator.of(context).pushNamed(AppRouter.changePassword);
                       },
                     ),
                   ],
