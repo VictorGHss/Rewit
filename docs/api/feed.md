@@ -22,6 +22,7 @@ O **Feed Social V1** é uma **timeline social estritamente cronológica** das av
   * Status `UNDER_REVIEW` e `REMOVED`: **Nunca** entram no feed.
 * **Anonimização Estrita**: Se uma avaliação possuir `isAnonymous = true`, o autor tem sua identidade mascarada para terceiros (`authorHandle = "Anônimo"`, `authorDisplayName = "Anônimo"`). Seguir um autor não concede privilégio de desanonimizá-lo.
 * **Autor com conta excluída (`DELETED`)**: a avaliação continua no feed, com o autor sem `id`, `handle` e `avatarUrl` e `displayName = "Usuário excluído"` (ver `reviews.md` §1.2).
+* **Autoria Contextual (`isMine`)**: O campo booleano `isMine` presente em cada item retornado (`ReviewResponse`) indica se a avaliação pertence ao usuário autenticado solicitante (`requesterUserId == review.userId`). Para avaliações de terceiros seguidos, é retornado como `false`. Se uma avaliação do próprio usuário estiver presente no feed (inclusive quando `isAnonymous: true`), `isMine` é retornado como `true` sem revelar os dados de autoria pública da avaliação anônima para outros usuários.
 * **Ordenação Determinística**:
   * Fixa em: `created_at DESC, id ASC`.
   * Nenhum outro critério de ordenação é aceito no V1 (e.g., `sort=rating`, `sort=helpful`, `sort=trending`).
@@ -77,6 +78,7 @@ Authorization: Bearer <jwt-token>
       "isVerifiedOnSite": true,
       "helpfulCount": 3,
       "isHelpfulByMe": true,
+      "isMine": false,
       "targets": [
         {
           "targetType": "PLACE",
@@ -107,6 +109,7 @@ Authorization: Bearer <jwt-token>
       "isVerifiedOnSite": false,
       "helpfulCount": 0,
       "isHelpfulByMe": false,
+      "isMine": false,
       "targets": [
         {
           "targetType": "PLACE",

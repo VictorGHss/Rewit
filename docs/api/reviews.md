@@ -20,13 +20,17 @@ ReviewController (presentation)
 * Não é aceito `userId` no payload de requisição; tentativas de suplantar identidade são impedidas na fronteira do controller.
 * O `user_id` do `CheckIn` é sempre idêntico ao `user_id` da `Review`.
 
-### 1.2 Anonimização (`isAnonymous`)
+### 1.2 Anonimização (`isAnonymous`) e Autoria Contextual (`isMine`)
 * O vínculo relacional interno com a conta do usuário (`reviews.user_id`) é **sempre preservado** no banco de dados para integridade, auditoria e moderação.
 * Quando `isAnonymous: true`:
   * O objeto `author` na representação pública não expõe `id`, `handle` ou `avatarUrl`.
   * O campo `displayName` é retornado como `"Anônimo"`.
   * `isAnonymous` é retornado como `true`.
 * **Autor com conta excluída (`DELETED`, C2)**: a avaliação, as notas, o helpful e os agregados continuam; o objeto `author` vem sem `id`, `handle` e `avatarUrl`, com `displayName = "Usuário excluído"` e `author.isAnonymous = true` (o `isAnonymous` da avaliação não muda). Vale para detalhe, listagem por alvo, Feed V1 e Feed V2. Contas `DEACTIVATED` e `SUSPENDED` não são afetadas.
+* **Autoria contextual (`isMine`)**: O campo booleano `isMine` presente em `ReviewResponse` indica se a avaliação pertence ao usuário autenticado identificado pelo token JWT (`requesterUserId == review.userId`):
+  * É calculado dinamicamente por requisição: `true` quando o solicitante for o autor da avaliação, inclusive quando `isAnonymous: true` (permitindo ao cliente habilitar ações exclusivas de autor, como editar ou excluir, preservando o anonimato público perante terceiros);
+  * É retornado como `false` para avaliações de outros usuários e para consultas desautenticadas;
+  * Em `GET /api/v1/me/reviews`, `isMine` é invariavelmente `true`.
 
 ### 1.3 Controle de Visibilidade (`visibility`)
 * **`PUBLIC`**: A avaliação pode ser consultada por usuários autenticados.
@@ -159,6 +163,9 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
   "isVerifiedOnSite": true,
   "visibility": "PUBLIC",
   "status": "ACTIVE",
+  "helpfulCount": 0,
+  "isHelpfulByMe": false,
+  "isMine": true,
   "createdAt": "2026-09-28T15:10:00Z",
   "updatedAt": "2026-09-28T15:10:00Z",
   "targets": [
@@ -218,6 +225,7 @@ Retorna a representação pública da avaliação com alvos, notas, comentários
   "status": "ACTIVE",
   "helpfulCount": 12,
   "isHelpfulByMe": true,
+  "isMine": false,
   "createdAt": "2026-09-28T15:10:00Z",
   "updatedAt": "2026-09-28T15:10:00Z",
   "targets": [
@@ -315,6 +323,7 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
       "status": "ACTIVE",
       "helpfulCount": 3,
       "isHelpfulByMe": true,
+      "isMine": false,
       "createdAt": "2026-09-28T15:10:00Z",
       "updatedAt": "2026-09-28T15:10:00Z",
       "targets": [
@@ -379,6 +388,7 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
       "status": "ACTIVE",
       "helpfulCount": 0,
       "isHelpfulByMe": false,
+      "isMine": true,
       "createdAt": "2026-09-28T16:00:00Z",
       "updatedAt": "2026-09-28T16:00:00Z",
       "targets": [

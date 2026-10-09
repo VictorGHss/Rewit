@@ -18,6 +18,11 @@ Este documento estabelece as diretrizes de proteção de dados, privacidade por 
   - As coordenadas geográficas do usuário só são lidas no instante da submissão de uma ação que requer geolocalização.
   - Uma vez calculada a distância em relação ao estabelecimento para fins de verificação do check-in, as coordenadas da residência ou do trânsito do usuário são descartadas da memória de trabalho.
   - Apenas as coordenadas do evento de check-in (atestando que o usuário esteve no estabelecimento comercial) são persistidas.
+- **Dependência de Geolocalização Mobile (`geolocator: ^14.1.1`)**:
+  - **Necessidade**: obtenção de coordenadas exclusivamente em primeiro plano, sob demanda e com consentimento explícito do usuário, estritamente para validação de presença no local avaliado (check-in verificado).
+  - **Compatibilidade**: Android (SDK >= 21) e iOS (iOS >= 12.0).
+  - **Impacto de privacidade**: requer apenas permissões em primeiro plano (`ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` no Android; `NSLocationWhenInUseUsageDescription` no iOS). **Não** utiliza nem declara permissão em segundo plano (`ACCESS_BACKGROUND_LOCATION`). Coordenadas brutas nunca são persistidas em cache local ou storage do dispositivo móvel.
+  - **Alternativas consideradas**: plugin `location` e implementação manual via `MethodChannel`. O `geolocator` foi selecionado por manutenção ativa, compatibilidade com Flutter 3.47+ e suporte nativo a permissões granulares e verificação de serviços de localização em primeiro plano.
 
 ---
 
