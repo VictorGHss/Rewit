@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -228,7 +229,7 @@ class NotificationControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("8. Deve expor reviewId e discussionId conforme o tipo e metadados da notificação (C5.12)")
+    @DisplayName("8. Deve expor reviewId, discussionId e rootDiscussionId conforme o tipo e metadados da notificação (C5.12, C6)")
     void shouldExposeReviewIdAndDiscussionIdInNotificationResponse() throws Exception {
         TestUser user = registerUser("notif_context");
 
@@ -238,32 +239,48 @@ class NotificationControllerIntegrationTest {
         UUID reviewId3 = UUID.randomUUID();
         UUID discussionId2 = UUID.randomUUID();
         UUID discussionId3 = UUID.randomUUID();
+        UUID rootDiscussionId3 = UUID.randomUUID();
+        UUID reviewId4 = UUID.randomUUID();
+        UUID discussionId4 = UUID.randomUUID();
+        Instant baseTime = Instant.parse("2026-10-09T10:00:00Z");
 
         // 1. REVIEW_HELPFUL com reviewId
         notificationRepository.save(new Notification(
                 null, user.userId(), NotificationType.REVIEW_HELPFUL.name(),
                 "Avaliação útil", "Alguém achou útil", null,
-                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + reviewId1 + "\"}"
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + reviewId1 + "\"}",
+                null, baseTime.plusSeconds(10)
         ));
 
         // 2. NEW_DISCUSSION com reviewId (como referenceId) e discussionId raiz no metadata
         notificationRepository.save(new Notification(
                 null, user.userId(), NotificationType.NEW_DISCUSSION.name(),
                 "Nova discussão", "Novo comentário", null,
-                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + reviewId2 + "\",\"discussionId\":\"" + discussionId2 + "\"}"
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + reviewId2 + "\",\"discussionId\":\"" + discussionId2 + "\"}",
+                null, baseTime.plusSeconds(20)
         ));
 
-        // 3. DISCUSSION_REPLY com discussionId (como referenceId) e reviewId no metadata
+        // 3. DISCUSSION_REPLY com discussionId (como referenceId), reviewId e rootDiscussionId no metadata
         notificationRepository.save(new Notification(
                 null, user.userId(), NotificationType.DISCUSSION_REPLY.name(),
                 "Resposta", "Responderam você", null,
-                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + discussionId3 + "\",\"reviewId\":\"" + reviewId3 + "\"}"
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + discussionId3 + "\",\"reviewId\":\"" + reviewId3 + "\",\"rootDiscussionId\":\"" + rootDiscussionId3 + "\"}",
+                null, baseTime.plusSeconds(30)
         ));
 
-        // 4. Legacy sem reviewId/discussionId (e metadata nulo)
+        // 4. DISCUSSION_REPLY legada com discussionId (como referenceId), reviewId, mas sem rootDiscussionId
+        notificationRepository.save(new Notification(
+                null, user.userId(), NotificationType.DISCUSSION_REPLY.name(),
+                "Resposta legada", "Responderam você no passado", null,
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + discussionId4 + "\",\"reviewId\":\"" + reviewId4 + "\"}",
+                null, baseTime.plusSeconds(40)
+        ));
+
+        // 5. Legacy sem reviewId/discussionId (e metadata nulo)
         notificationRepository.save(new Notification(
                 null, user.userId(), NotificationType.NEW_FOLLOWER.name(),
-                "Legado", "Sem metadata", null, null
+                "Legado", "Sem metadata", null, null,
+                null, baseTime.plusSeconds(50)
         ));
 
         mockMvc.perform(get("/api/v1/me/notifications")
@@ -271,23 +288,32 @@ class NotificationControllerIntegrationTest {
                         .param("page", "0")
                         .param("size", "10"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.totalElements").value(5))
                 // Notificações vêm ordenadas por createdAt DESC:
-                // [0]: Legacy NEW_FOLLOWER
+                // [0]: Legacy NEW_FOLLOWER (50s)
                 .andExpect(jsonPath("$.content[0].type").value("NEW_FOLLOWER"))
                 .andExpect(jsonPath("$.content[0].reviewId").doesNotExist())
                 .andExpect(jsonPath("$.content[0].discussionId").doesNotExist())
-                // [1]: DISCUSSION_REPLY
+                .andExpect(jsonPath("$.content[0].rootDiscussionId").doesNotExist())
+                // [1]: DISCUSSION_REPLY legada (40s)
                 .andExpect(jsonPath("$.content[1].type").value("DISCUSSION_REPLY"))
-                .andExpect(jsonPath("$.content[1].reviewId").value(reviewId3.toString()))
-                .andExpect(jsonPath("$.content[1].discussionId").value(discussionId3.toString()))
-                // [2]: NEW_DISCUSSION
-                .andExpect(jsonPath("$.content[2].type").value("NEW_DISCUSSION"))
-                .andExpect(jsonPath("$.content[2].reviewId").value(reviewId2.toString()))
-                .andExpect(jsonPath("$.content[2].discussionId").value(discussionId2.toString()))
-                // [3]: REVIEW_HELPFUL
-                .andExpect(jsonPath("$.content[3].type").value("REVIEW_HELPFUL"))
-                .andExpect(jsonPath("$.content[3].reviewId").value(reviewId1.toString()))
-                .andExpect(jsonPath("$.content[3].discussionId").doesNotExist());
+                .andExpect(jsonPath("$.content[1].reviewId").value(reviewId4.toString()))
+                .andExpect(jsonPath("$.content[1].discussionId").value(discussionId4.toString()))
+                .andExpect(jsonPath("$.content[1].rootDiscussionId").doesNotExist())
+                // [2]: DISCUSSION_REPLY com rootDiscussionId (30s)
+                .andExpect(jsonPath("$.content[2].type").value("DISCUSSION_REPLY"))
+                .andExpect(jsonPath("$.content[2].reviewId").value(reviewId3.toString()))
+                .andExpect(jsonPath("$.content[2].discussionId").value(discussionId3.toString()))
+                .andExpect(jsonPath("$.content[2].rootDiscussionId").value(rootDiscussionId3.toString()))
+                // [3]: NEW_DISCUSSION (20s)
+                .andExpect(jsonPath("$.content[3].type").value("NEW_DISCUSSION"))
+                .andExpect(jsonPath("$.content[3].reviewId").value(reviewId2.toString()))
+                .andExpect(jsonPath("$.content[3].discussionId").value(discussionId2.toString()))
+                .andExpect(jsonPath("$.content[3].rootDiscussionId").doesNotExist())
+                // [4]: REVIEW_HELPFUL (10s)
+                .andExpect(jsonPath("$.content[4].type").value("REVIEW_HELPFUL"))
+                .andExpect(jsonPath("$.content[4].reviewId").value(reviewId1.toString()))
+                .andExpect(jsonPath("$.content[4].discussionId").doesNotExist())
+                .andExpect(jsonPath("$.content[4].rootDiscussionId").doesNotExist());
     }
 }

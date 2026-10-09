@@ -75,13 +75,25 @@ Recupera a lista paginada de notificações do usuário autenticado em ordem cro
       "type": "REVIEW_HELPFUL",
       "actorId": null,
       "referenceId": "a12bc34d-56ef-7890-abcd-ef1234567890",
+      "reviewId": "a12bc34d-56ef-7890-abcd-ef1234567890",
       "readAt": "2026-09-30T12:30:00Z",
       "createdAt": "2026-09-30T12:15:00Z"
+    },
+    {
+      "id": "9d7a919b-3f6a-4b50-1ae3-5h60c3f9e56d",
+      "type": "DISCUSSION_REPLY",
+      "actorId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "referenceId": "c34de56f-78ab-9012-cdef-123456789012",
+      "reviewId": "a12bc34d-56ef-7890-abcd-ef1234567890",
+      "discussionId": "c34de56f-78ab-9012-cdef-123456789012",
+      "rootDiscussionId": "b23cd45e-67fa-8901-bcde-012345678901",
+      "readAt": null,
+      "createdAt": "2026-09-30T12:45:00Z"
     }
   ],
   "pageNumber": 0,
   "pageSize": 20,
-  "totalElements": 2,
+  "totalElements": 3,
   "totalPages": 1,
   "isLast": true
 }
@@ -171,6 +183,7 @@ O campo `metadata_json` contém **exclusivamente** dados necessários para rende
 | `referenceId`      | Todos os tipos                                 | ID da Review, Follow ou Discussion conforme o tipo  |
 | `discussionId`     | `NEW_DISCUSSION`                               | ID do comentário raiz criado                        |
 | `reviewId`         | `DISCUSSION_REPLY`                             | ID da Review à qual o comentário pertence           |
+| `rootDiscussionId` | `DISCUSSION_REPLY`                             | ID do comentário raiz da thread de respostas (C6)    |
 
 **Nunca armazenado em `metadata_json`**:
 - E-mail, senha, token JWT ou session ID

@@ -23,6 +23,8 @@ public record NotificationResponse(
         UUID reviewId,
         @Schema(description = "Identificador do comentário ou resposta associada ao contexto de navegação (nullable)")
         UUID discussionId,
+        @Schema(description = "Identificador da discussão raiz quando o tipo for DISCUSSION_REPLY (nullable)")
+        UUID rootDiscussionId,
         @Schema(description = "Momento em que a notificação foi marcada como lida (nullable)")
         Instant readAt,
         @Schema(description = "Momento de criação da notificação")
@@ -39,6 +41,7 @@ public record NotificationResponse(
                 view.referenceId(),
                 view.reviewId(),
                 view.discussionId(),
+                view.rootDiscussionId(),
                 view.readAt(),
                 view.createdAt()
         );

@@ -61,32 +61,40 @@ class NotificationControllerUnitTest {
         UUID discussionId2 = UUID.randomUUID();
         UUID discussionId3 = UUID.randomUUID();
         UUID reviewId3 = UUID.randomUUID();
+        UUID rootDiscussionId3 = UUID.randomUUID();
+        UUID discussionId4 = UUID.randomUUID();
+        UUID reviewId4 = UUID.randomUUID();
         Instant now = Instant.parse("2026-10-09T10:00:00Z");
 
         List<NotificationView> items = List.of(
-                // 0: NEW_FOLLOWER - sem reviewId, sem discussionId
+                // 0: NEW_FOLLOWER - sem reviewId, sem discussionId, sem rootDiscussionId
                 new NotificationView(
                         UUID.randomUUID(), "NEW_FOLLOWER", actorId, actorId,
                         null, null, null, null, now
                 ),
-                // 1: REVIEW_HELPFUL - com reviewId, sem discussionId
+                // 1: REVIEW_HELPFUL - com reviewId, sem discussionId, sem rootDiscussionId
                 new NotificationView(
                         UUID.randomUUID(), "REVIEW_HELPFUL", actorId, reviewId1,
                         reviewId1, null, null, null, now
                 ),
-                // 2: NEW_DISCUSSION - com reviewId e discussionId (raiz)
+                // 2: NEW_DISCUSSION - com reviewId e discussionId (raiz), sem rootDiscussionId
                 new NotificationView(
                         UUID.randomUUID(), "NEW_DISCUSSION", actorId, reviewId2,
                         reviewId2, discussionId2, null, null, now
                 ),
-                // 3: DISCUSSION_REPLY - com reviewId e discussionId (resposta)
+                // 3: DISCUSSION_REPLY - com reviewId, discussionId (resposta) e rootDiscussionId
                 new NotificationView(
                         UUID.randomUUID(), "DISCUSSION_REPLY", actorId, discussionId3,
-                        reviewId3, discussionId3, null, null, now
+                        reviewId3, discussionId3, rootDiscussionId3, null, now
+                ),
+                // 4: DISCUSSION_REPLY (legado) - com reviewId e discussionId (resposta), sem rootDiscussionId
+                new NotificationView(
+                        UUID.randomUUID(), "DISCUSSION_REPLY", actorId, discussionId4,
+                        reviewId4, discussionId4, null, null, now
                 )
         );
 
-        PageResult<NotificationView> pageResult = new PageResult<>(items, 0, 10, 4, 1, true);
+        PageResult<NotificationView> pageResult = new PageResult<>(items, 0, 10, 5, 1, true);
         when(notificationService.findMyNotifications(userId, 0, 10)).thenReturn(pageResult);
 
         mockMvc.perform(get("/api/v1/me/notifications")
@@ -96,24 +104,33 @@ class NotificationControllerUnitTest {
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
-                .andExpect(jsonPath("$.content.length()").value(4))
+                .andExpect(jsonPath("$.content.length()").value(5))
                 // NEW_FOLLOWER
                 .andExpect(jsonPath("$.content[0].type").value("NEW_FOLLOWER"))
                 .andExpect(jsonPath("$.content[0].actorId").value(actorId.toString()))
                 .andExpect(jsonPath("$.content[0].reviewId").doesNotExist())
                 .andExpect(jsonPath("$.content[0].discussionId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].rootDiscussionId").doesNotExist())
                 // REVIEW_HELPFUL
                 .andExpect(jsonPath("$.content[1].type").value("REVIEW_HELPFUL"))
                 .andExpect(jsonPath("$.content[1].reviewId").value(reviewId1.toString()))
                 .andExpect(jsonPath("$.content[1].discussionId").doesNotExist())
+                .andExpect(jsonPath("$.content[1].rootDiscussionId").doesNotExist())
                 // NEW_DISCUSSION
                 .andExpect(jsonPath("$.content[2].type").value("NEW_DISCUSSION"))
                 .andExpect(jsonPath("$.content[2].reviewId").value(reviewId2.toString()))
                 .andExpect(jsonPath("$.content[2].discussionId").value(discussionId2.toString()))
-                // DISCUSSION_REPLY
+                .andExpect(jsonPath("$.content[2].rootDiscussionId").doesNotExist())
+                // DISCUSSION_REPLY (com rootDiscussionId)
                 .andExpect(jsonPath("$.content[3].type").value("DISCUSSION_REPLY"))
                 .andExpect(jsonPath("$.content[3].reviewId").value(reviewId3.toString()))
-                .andExpect(jsonPath("$.content[3].discussionId").value(discussionId3.toString()));
+                .andExpect(jsonPath("$.content[3].discussionId").value(discussionId3.toString()))
+                .andExpect(jsonPath("$.content[3].rootDiscussionId").value(rootDiscussionId3.toString()))
+                // DISCUSSION_REPLY (legado sem rootDiscussionId)
+                .andExpect(jsonPath("$.content[4].type").value("DISCUSSION_REPLY"))
+                .andExpect(jsonPath("$.content[4].reviewId").value(reviewId4.toString()))
+                .andExpect(jsonPath("$.content[4].discussionId").value(discussionId4.toString()))
+                .andExpect(jsonPath("$.content[4].rootDiscussionId").doesNotExist());
     }
 
     @Test
