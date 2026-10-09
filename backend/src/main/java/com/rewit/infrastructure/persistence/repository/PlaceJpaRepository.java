@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -78,4 +79,12 @@ public interface PlaceJpaRepository extends JpaRepository<PlaceJpaEntity, UUID> 
             @Param("latitude") double latitude,
             @Param("longitude") double longitude
     );
+
+    /** Vincula o local à conta só se ainda livre: a condição no próprio UPDATE impede vínculo duplo. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            UPDATE places SET claimed_by_business_id = :businessAccountId, updated_at = NOW()
+            WHERE id = :placeId AND claimed_by_business_id IS NULL
+            """, nativeQuery = true)
+    int assignClaimedBusiness(@Param("placeId") UUID placeId, @Param("businessAccountId") UUID businessAccountId);
 }

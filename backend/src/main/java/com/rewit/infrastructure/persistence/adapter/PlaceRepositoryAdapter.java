@@ -17,6 +17,9 @@ import com.rewit.infrastructure.persistence.entity.RateableTargetJpaEntity;
 import com.rewit.infrastructure.persistence.repository.PlaceJpaRepository;
 import com.rewit.infrastructure.persistence.repository.RateableTargetJpaRepository;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.Tuple;
 
 /**
@@ -28,11 +31,14 @@ public class PlaceRepositoryAdapter implements PlaceRepository {
 
     private final PlaceJpaRepository placeJpaRepository;
     private final RateableTargetJpaRepository rateableTargetJpaRepository;
+    private final EntityManager entityManager;
 
     public PlaceRepositoryAdapter(PlaceJpaRepository placeJpaRepository,
-                                  RateableTargetJpaRepository rateableTargetJpaRepository) {
+                                  RateableTargetJpaRepository rateableTargetJpaRepository,
+                                  EntityManager entityManager) {
         this.placeJpaRepository = Objects.requireNonNull(placeJpaRepository, "PlaceJpaRepository must not be null");
         this.rateableTargetJpaRepository = Objects.requireNonNull(rateableTargetJpaRepository, "RateableTargetJpaRepository must not be null");
+        this.entityManager = Objects.requireNonNull(entityManager, "EntityManager must not be null");
     }
 
     @Override
@@ -62,6 +68,32 @@ public class PlaceRepositoryAdapter implements PlaceRepository {
                     PlaceJpaEntity saved = placeJpaRepository.saveAndFlush(newEntity);
                     return Objects.requireNonNull(saved, "Saved PlaceJpaEntity cannot be null").toDomain();
                 });
+    }
+
+    @Override
+    public Optional<Place> findByIdForUpdate(UUID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        PlaceJpaEntity entity = entityManager.find(PlaceJpaEntity.class, id);
+        if (entity == null) {
+            return Optional.empty();
+        }
+        // refresh com lock: trava a linha e recarrega o estado confirmado mesmo se o local já estiver gerenciado
+        try {
+            entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE);
+        } catch (EntityNotFoundException removedMeanwhile) {
+            return Optional.empty();
+        }
+        return Optional.of(entity.toDomain());
+    }
+
+    @Override
+    @Transactional
+    public boolean assignClaimedBusiness(UUID placeId, UUID businessAccountId) {
+        Objects.requireNonNull(placeId, "placeId must not be null");
+        Objects.requireNonNull(businessAccountId, "businessAccountId must not be null");
+        return placeJpaRepository.assignClaimedBusiness(placeId, businessAccountId) == 1;
     }
 
     @Override

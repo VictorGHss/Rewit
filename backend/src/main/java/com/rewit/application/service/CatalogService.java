@@ -46,7 +46,7 @@ import com.rewit.domain.model.ProductPresence;
 public class CatalogService {
 
     /** Único status de place/product exposto em leituras públicas (busca e detalhe). */
-    static final String PUBLIC_CATALOG_STATUS = "ACTIVE";
+    public static final String PUBLIC_CATALOG_STATUS = "ACTIVE";
 
     private final PlaceRepository placeRepository;
     private final ProductRepository productRepository;
