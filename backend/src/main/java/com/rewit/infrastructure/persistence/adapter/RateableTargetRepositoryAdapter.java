@@ -1,11 +1,14 @@
 package com.rewit.infrastructure.persistence.adapter;
 
 import com.rewit.application.port.RateableTargetRepository;
+import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.RateableTarget;
 import com.rewit.infrastructure.persistence.entity.RateableTargetJpaEntity;
 import com.rewit.infrastructure.persistence.repository.RateableTargetJpaRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -52,6 +55,19 @@ public class RateableTargetRepositoryAdapter implements RateableTargetRepository
             return false;
         }
         return repository.existsPubliclyVisibleById(id);
+    }
+
+    @Override
+    public List<TargetDisplay> findDisplaysByIds(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return repository.findDisplaysByIds(ids).stream()
+                .map(row -> new TargetDisplay(
+                        UUID.fromString(row[0].toString()),
+                        TargetType.valueOf(row[1].toString()),
+                        row[2] != null ? row[2].toString() : null))
+                .toList();
     }
 
     private static RateableTarget toDomain(RateableTargetJpaEntity entity) {

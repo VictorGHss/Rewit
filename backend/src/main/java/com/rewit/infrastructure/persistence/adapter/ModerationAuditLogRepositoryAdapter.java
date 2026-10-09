@@ -6,7 +6,9 @@ import com.rewit.infrastructure.persistence.entity.ModerationAuditLogJpaEntity;
 import com.rewit.infrastructure.persistence.repository.ModerationAuditLogJpaRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Adaptador de persistência para ModerationAuditLogRepository (Step 26.1).
@@ -26,5 +28,15 @@ public class ModerationAuditLogRepositoryAdapter implements ModerationAuditLogRe
         ModerationAuditLogJpaEntity entity = ModerationAuditLogJpaEntity.fromDomain(auditLog);
         ModerationAuditLogJpaEntity saved = jpaRepository.saveAndFlush(entity);
         return saved.toDomain();
+    }
+
+    @Override
+    public List<ModerationAuditLog> findByReviewId(UUID reviewId) {
+        if (reviewId == null) {
+            return List.of();
+        }
+        return jpaRepository.findByReviewIdOrderByCreatedAtAscIdAsc(reviewId).stream()
+                .map(entity -> entity.toDomain())
+                .toList();
     }
 }

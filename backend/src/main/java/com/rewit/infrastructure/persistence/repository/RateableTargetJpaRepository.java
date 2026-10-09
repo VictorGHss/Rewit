@@ -5,6 +5,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -25,4 +27,16 @@ public interface RateableTargetJpaRepository extends JpaRepository<RateableTarge
             )
             """, nativeQuery = true)
     boolean existsPubliclyVisibleById(@Param("id") UUID id);
+
+    /** id, target_type e nome da especialização de cada alvo; uma consulta por chave primária em lote. */
+    @Query(value = """
+            SELECT t.id, t.target_type, COALESCE(p.name, pr.name, s.name, e.title)
+            FROM rateable_targets t
+            LEFT JOIN places p ON p.id = t.id
+            LEFT JOIN products pr ON pr.id = t.id
+            LEFT JOIN services s ON s.id = t.id
+            LEFT JOIN events e ON e.id = t.id
+            WHERE t.id IN (:ids)
+            """, nativeQuery = true)
+    List<Object[]> findDisplaysByIds(@Param("ids") Collection<UUID> ids);
 }

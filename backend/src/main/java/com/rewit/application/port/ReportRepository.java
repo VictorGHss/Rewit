@@ -22,6 +22,9 @@ public interface ReportRepository {
 
     List<Report> findPendingByReviewId(UUID reviewId);
 
+    /** Todas as denúncias da avaliação, em qualquer status, em ordem cronológica (created_at, id). */
+    List<Report> findByReviewId(UUID reviewId);
+
     long countPendingByReviewId(UUID reviewId);
 
     boolean existsByReviewIdAndReporterUserId(UUID reviewId, UUID reporterUserId);

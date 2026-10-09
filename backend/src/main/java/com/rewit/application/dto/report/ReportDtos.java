@@ -4,11 +4,14 @@ import com.rewit.domain.enums.ModerationAction;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewStatus;
+import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.ModerationAuditLog;
 import com.rewit.domain.model.Report;
 import com.rewit.domain.model.Review;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -79,6 +82,69 @@ public final class ReportDtos {
                 String justification
         ) {
             this(reviewId, moderatorUserId, action, reasonCode, justification, null);
+        }
+    }
+
+    /**
+     * Contexto para decidir a moderação de uma avaliação (somente MODERATOR e ADMIN). Expõe o conteúdo e o status
+     * interno, inclusive de avaliação removida, mas nenhuma identidade: nem autor, nem denunciantes, nem moderadores.
+     */
+    public record AdminReviewContextView(
+            AdminReviewView review,
+            long pendingReportCount,
+            List<AdminReviewReportView> reports,
+            List<AdminReviewAuditView> auditHistory
+    ) {}
+
+    /** A avaliação sem autor, coordenadas ou check-in: só o necessário à decisão. */
+    public record AdminReviewView(
+            UUID id,
+            String experienceText,
+            ReviewStatus status,
+            String visibility,
+            boolean isAnonymous,
+            boolean isVerifiedOnSite,
+            Instant createdAt,
+            Instant updatedAt,
+            List<AdminReviewTargetView> targets
+    ) {}
+
+    /** @param displayName nome do place/product/service ou título do event; null se a especialização não existir */
+    public record AdminReviewTargetView(
+            UUID targetId,
+            TargetType type,
+            String displayName,
+            BigDecimal rating,
+            String specificComment
+    ) {}
+
+    /** Denúncia sem o denunciante. */
+    public record AdminReviewReportView(
+            UUID id,
+            ReportReason reason,
+            String detail,
+            ReportStatus status,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        public static AdminReviewReportView fromDomain(Report report) {
+            return new AdminReviewReportView(report.getId(), report.getReason(), report.getDetail(), report.getStatus(),
+                    report.getCreatedAt(), report.getUpdatedAt());
+        }
+    }
+
+    /** Decisão registrada na auditoria, sem o moderador. */
+    public record AdminReviewAuditView(
+            ModerationAction action,
+            String reasonCode,
+            String justification,
+            ReviewStatus previousStatus,
+            ReviewStatus newStatus,
+            Instant createdAt
+    ) {
+        public static AdminReviewAuditView fromDomain(ModerationAuditLog log) {
+            return new AdminReviewAuditView(log.getAction(), log.getReasonCode(), log.getJustification(),
+                    log.getPreviousReviewStatus(), log.getNewReviewStatus(), log.getCreatedAt());
         }
     }
 

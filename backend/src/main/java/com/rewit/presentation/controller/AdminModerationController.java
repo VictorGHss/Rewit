@@ -4,12 +4,14 @@ import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.report.ReportDtos.AdminReportView;
 import com.rewit.application.dto.report.ReportDtos.ModerateReviewCommand;
 import com.rewit.application.dto.report.ReportDtos.ModerateReviewResult;
+import com.rewit.application.usecase.GetAdminReviewContextUseCase;
 import com.rewit.application.usecase.ModerateReviewUseCase;
 import com.rewit.application.usecase.QueryAdminReportsUseCase;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.presentation.dto.admin.AdminModerationDtos.AdminReportResponse;
+import com.rewit.presentation.dto.admin.AdminModerationDtos.AdminReviewContextResponse;
 import com.rewit.presentation.dto.admin.AdminModerationDtos.ModerateReviewRequest;
 import com.rewit.presentation.dto.admin.AdminModerationDtos.ModerateReviewResponse;
 import com.rewit.presentation.dto.common.PagedResponse;
@@ -48,13 +50,17 @@ public class AdminModerationController {
 
     private final ModerateReviewUseCase moderateReviewUseCase;
     private final QueryAdminReportsUseCase queryAdminReportsUseCase;
+    private final GetAdminReviewContextUseCase getAdminReviewContextUseCase;
 
     public AdminModerationController(
             ModerateReviewUseCase moderateReviewUseCase,
-            QueryAdminReportsUseCase queryAdminReportsUseCase
+            QueryAdminReportsUseCase queryAdminReportsUseCase,
+            GetAdminReviewContextUseCase getAdminReviewContextUseCase
     ) {
         this.moderateReviewUseCase = Objects.requireNonNull(moderateReviewUseCase, "moderateReviewUseCase must not be null");
         this.queryAdminReportsUseCase = Objects.requireNonNull(queryAdminReportsUseCase, "queryAdminReportsUseCase must not be null");
+        this.getAdminReviewContextUseCase = Objects.requireNonNull(getAdminReviewContextUseCase,
+                "getAdminReviewContextUseCase must not be null");
     }
 
     /**
@@ -96,6 +102,25 @@ public class AdminModerationController {
         );
 
         return ResponseEntity.ok(pagedResponse);
+    }
+
+    /**
+     * GET /api/v1/admin/reviews/{reviewId}/context
+     * Contexto para decidir a moderação de uma avaliação: conteúdo e status interno, alvos, denúncias e histórico de
+     * moderação, sem identidades. Somente leitura.
+     */
+    @GetMapping("/reviews/{reviewId}/context")
+    @PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")
+    @Operation(
+            summary = "Obter contexto de moderação de uma avaliação",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    public ResponseEntity<AdminReviewContextResponse> getReviewContext(
+            @PathVariable("reviewId") UUID reviewId,
+            Authentication authentication
+    ) {
+        extractAuthenticatedUserId(authentication);
+        return ResponseEntity.ok(AdminReviewContextResponse.fromView(getAdminReviewContextUseCase.execute(reviewId)));
     }
 
     /**

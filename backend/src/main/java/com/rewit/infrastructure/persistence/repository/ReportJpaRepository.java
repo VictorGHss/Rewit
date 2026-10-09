@@ -26,6 +26,8 @@ public interface ReportJpaRepository extends JpaRepository<ReportJpaEntity, UUID
     @Query("SELECT r FROM ReportJpaEntity r WHERE r.reviewId = :reviewId AND r.status = 'PENDING'")
     List<ReportJpaEntity> findPendingByReviewId(@Param("reviewId") UUID reviewId);
 
+    List<ReportJpaEntity> findByReviewIdOrderByCreatedAtAscIdAsc(UUID reviewId);
+
     @Query(value = """
         SELECT r FROM ReportJpaEntity r
         WHERE (:status IS NULL OR r.status = :status)

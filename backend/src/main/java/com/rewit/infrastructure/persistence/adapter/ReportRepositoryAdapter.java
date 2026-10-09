@@ -78,6 +78,17 @@ public class ReportRepositoryAdapter implements ReportRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public List<Report> findByReviewId(UUID reviewId) {
+        if (reviewId == null) {
+            return List.of();
+        }
+        return reportJpaRepository.findByReviewIdOrderByCreatedAtAscIdAsc(reviewId).stream()
+                .map(entity -> entity.toDomain())
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public long countPendingByReviewId(UUID reviewId) {
         if (reviewId == null) {
             return 0;
