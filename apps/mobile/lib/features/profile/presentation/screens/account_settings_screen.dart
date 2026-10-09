@@ -3,6 +3,7 @@ import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/shared/widgets/error_banner.dart';
 
 /// Tela de configurações e gerenciamento de conta do usuário autenticado.
 class AccountSettingsScreen extends StatefulWidget {
@@ -119,46 +120,10 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
           children: [
             // Banner de erro RFC 7807 caso ocorra falha na desativação
             if (_errorMessage != null) ...[
-              Container(
+              ErrorBanner(
                 margin: const EdgeInsets.only(bottom: 16),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.errorContainer.withAlpha(120),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: theme.colorScheme.error.withAlpha(80)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.error_outline, size: 20, color: theme.colorScheme.error),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _errorMessage!,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: theme.colorScheme.onErrorContainer,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_retryAfterSeconds != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'Aguarde $_retryAfterSeconds segundos antes de tentar novamente.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.error,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                message: _errorMessage!,
+                retryAfterSeconds: _retryAfterSeconds,
               ),
             ],
 

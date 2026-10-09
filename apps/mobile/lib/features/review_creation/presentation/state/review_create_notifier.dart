@@ -5,6 +5,7 @@ import 'package:rewit_mobile/features/review_creation/domain/services/location_s
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
+import '../../domain/entities/device_location.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/repositories/review_creation_repository.dart';
 import 'review_create_state.dart';
@@ -116,7 +117,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
   bool get hasValidCheckin => hasContextPlace && hasLocation;
   bool get isRequestingLocation => _locationStatus == LocationCaptureStatus.requesting;
   bool get isApproximateLocation =>
-      _locationAccuracyMeters != null && _locationAccuracyMeters! > 100.0;
+      DeviceLocation.isAccuracyApproximate(_locationAccuracyMeters);
 
   /// Adiciona um novo alvo para avaliação multi-alvo (Step 11.0).
   void addTarget({

@@ -50,6 +50,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('GeolocatorLocationService Tests', () {
+    final originalPlatform = GeolocatorPlatform.instance;
     late FakeGeolocatorPlatform fakePlatform;
     late GeolocatorLocationService service;
 
@@ -57,6 +58,10 @@ void main() {
       fakePlatform = FakeGeolocatorPlatform();
       GeolocatorPlatform.instance = fakePlatform;
       service = const GeolocatorLocationService();
+    });
+
+    tearDown(() {
+      GeolocatorPlatform.instance = originalPlatform;
     });
 
     test('retorna LocationSuccess com DeviceLocation pontual quando serviço e permissão estão ativos', () async {
@@ -85,12 +90,29 @@ void main() {
       expect(success.location.isApproximate, isFalse);
     });
 
-    test('DeviceLocation identifica acurácia aproximada quando > 100m', () {
-      const accurate = DeviceLocation(latitude: 0, longitude: 0, accuracyMeters: 25.0);
-      const approximate = DeviceLocation(latitude: 0, longitude: 0, accuracyMeters: 150.0);
+    test('DeviceLocation identifica acurácia aproximada respeitando o limiar exato (100m)', () {
+      // Abaixo do limiar (< 100.0) -> precisa (não aproximada)
+      const belowThreshold = DeviceLocation(latitude: 0, longitude: 0, accuracyMeters: 99.9);
+      expect(belowThreshold.isApproximate, isFalse);
+      expect(DeviceLocation.isAccuracyApproximate(99.9), isFalse);
 
-      expect(accurate.isApproximate, isFalse);
-      expect(approximate.isApproximate, isTrue);
+      // Exatamente no limiar (100.0) -> precisa (não aproximada, regra é > 100.0)
+      const atThreshold = DeviceLocation(latitude: 0, longitude: 0, accuracyMeters: 100.0);
+      expect(atThreshold.isApproximate, isFalse);
+      expect(DeviceLocation.isAccuracyApproximate(100.0), isFalse);
+      expect(DeviceLocation.approximateAccuracyThresholdMeters, 100.0);
+
+      // Acima do limiar (> 100.0) -> aproximada
+      const aboveThreshold = DeviceLocation(latitude: 0, longitude: 0, accuracyMeters: 100.1);
+      expect(aboveThreshold.isApproximate, isTrue);
+      expect(DeviceLocation.isAccuracyApproximate(100.1), isTrue);
+
+      const highInaccurate = DeviceLocation(latitude: 0, longitude: 0, accuracyMeters: 500.0);
+      expect(highInaccurate.isApproximate, isTrue);
+      expect(DeviceLocation.isAccuracyApproximate(500.0), isTrue);
+
+      // Null safety
+      expect(DeviceLocation.isAccuracyApproximate(null), isFalse);
     });
 
     test('retorna serviceDisabled quando o GPS/serviço está desligado no dispositivo', () async {
