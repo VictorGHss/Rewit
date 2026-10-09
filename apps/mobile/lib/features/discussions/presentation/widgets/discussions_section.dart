@@ -56,6 +56,12 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
       oldWidget.notifier.removeListener(_checkAndHighlightTarget);
       widget.notifier.addListener(_checkAndHighlightTarget);
     }
+    if (oldWidget.targetDiscussionId != widget.targetDiscussionId) {
+      _hasHandledTarget = false;
+      _highlightTimer?.cancel();
+      _highlightedDiscussionId = null;
+      _checkAndHighlightTarget();
+    }
   }
 
   @override
@@ -66,6 +72,7 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
   }
 
   void _checkAndHighlightTarget() {
+    if (!mounted) return;
     if (_hasHandledTarget || widget.targetDiscussionId == null) return;
     final state = widget.notifier.state;
     if (state is! DiscussionLoaded) return;
@@ -79,33 +86,32 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
       found = state.threads.any((t) => t.id == targetId);
     }
 
+    if (!found) return;
+
     _hasHandledTarget = true;
-    if (found) {
-      if (mounted) {
-        setState(() {
-          _highlightedDiscussionId = targetId;
-        });
+    setState(() {
+      _highlightedDiscussionId = targetId;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final key = _itemKeys[targetId];
+      if (key?.currentContext != null) {
+        Scrollable.ensureVisible(
+          key!.currentContext!,
+          duration: const Duration(milliseconds: 300),
+          alignment: 0.1,
+        );
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final key = _itemKeys[targetId];
-        if (key?.currentContext != null) {
-          Scrollable.ensureVisible(
-            key!.currentContext!,
-            duration: const Duration(milliseconds: 300),
-            alignment: 0.1,
-          );
+      _highlightTimer?.cancel();
+      _highlightTimer = Timer(const Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() {
+            _highlightedDiscussionId = null;
+          });
         }
-        _highlightTimer?.cancel();
-        _highlightTimer = Timer(const Duration(seconds: 2), () {
-          if (mounted) {
-            setState(() {
-              _highlightedDiscussionId = null;
-            });
-          }
-        });
       });
-    }
+    });
   }
 
   GlobalKey _getKeyFor(String id) {

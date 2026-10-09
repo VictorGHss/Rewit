@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/shared/widgets/app_button.dart';
 
@@ -28,20 +30,65 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool _obscureNewPassword = true;
   bool _obscureConfirmPassword = true;
   bool _isSubmitting = false;
+  bool _hasNavigatedAway = false;
 
   String? _errorMessage;
   int? _retryAfterSeconds;
 
   @override
+  void initState() {
+    super.initState();
+    widget.authNotifier.addListener(_onAuthStateChanged);
+    if (widget.authNotifier.state is Unauthenticated &&
+        (widget.authNotifier.state as Unauthenticated).errorCode != 'PASSWORD_CHANGED') {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _returnToAuthFlow());
+    }
+  }
+
+  @override
+  void didUpdateWidget(ChangePasswordScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.authNotifier != widget.authNotifier) {
+      oldWidget.authNotifier.removeListener(_onAuthStateChanged);
+      widget.authNotifier.addListener(_onAuthStateChanged);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.authNotifier.removeListener(_onAuthStateChanged);
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
   }
 
+  void _onAuthStateChanged() {
+    if (!mounted || _hasNavigatedAway) return;
+    final state = widget.authNotifier.state;
+    if (state is Unauthenticated && state.errorCode != 'PASSWORD_CHANGED') {
+      _returnToAuthFlow();
+    }
+  }
+
+  void _returnToAuthFlow() {
+    if (!mounted || _hasNavigatedAway) return;
+    _hasNavigatedAway = true;
+
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.popUntil((route) => route.isFirst);
+    } else {
+      try {
+        navigator.pushReplacementNamed(AppRouter.root);
+      } catch (_) {
+        // Fallback seguro caso rotas nomeadas não estejam configuradas em testes unitários
+      }
+    }
+  }
+
   Future<void> _submit() async {
-    if (_isSubmitting) return;
+    if (_isSubmitting || _hasNavigatedAway) return;
 
     setState(() {
       _errorMessage = null;
@@ -62,7 +109,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         newPassword: _newPasswordController.text,
       );
 
-      if (success && mounted) {
+      if (success && mounted && !_hasNavigatedAway) {
         setState(() {
           _isSubmitting = false;
         });
@@ -80,13 +127,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
         widget.onPasswordChanged?.call();
 
-        // Encerra telas abertas e retorna para a raiz (onde o AppRouter exibe LoginScreen)
-        if (Navigator.of(context).canPop()) {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
+        _returnToAuthFlow();
       }
     } on ApiException catch (e) {
-      if (mounted) {
+      if (e.isUnauthorized && e.errorCode != 'INVALID_CREDENTIALS') {
+        _returnToAuthFlow();
+        return;
+      }
+      if (mounted && !_hasNavigatedAway) {
         setState(() {
           _isSubmitting = false;
           _errorMessage = e.detail;
@@ -94,14 +142,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         });
       }
     } on NetworkException catch (e) {
-      if (mounted) {
+      if (mounted && !_hasNavigatedAway) {
         setState(() {
           _isSubmitting = false;
           _errorMessage = e.message;
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && !_hasNavigatedAway) {
         setState(() {
           _isSubmitting = false;
           _errorMessage = 'Ocorreu um erro inesperado ao alterar sua senha.';
@@ -112,6 +160,13 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.authNotifier.state is Unauthenticated &&
+        (widget.authNotifier.state as Unauthenticated).errorCode != 'PASSWORD_CHANGED') {
+      return const Scaffold(
+        body: SizedBox.shrink(),
+      );
+    }
+
     final theme = Theme.of(context);
 
     return Scaffold(

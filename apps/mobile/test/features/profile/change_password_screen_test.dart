@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/change_password_screen.dart';
 
 class FakeAuthRepoForChangePassword implements AuthRepository {
@@ -351,6 +354,112 @@ void main() {
       expect(authNotifier.state, isA<Unauthenticated>());
       final unauth = authNotifier.state as Unauthenticated;
       expect(unauth.errorCode, 'PASSWORD_CHANGED');
+    });
+
+    testWidgets('expiração da sessão (401 SESSION_EXPIRED) durante alteração de senha retorna ao fluxo de login e oculta formulário protegido', (tester) async {
+      fakeRepo.apiExceptionToThrow = const ApiException(
+        ProblemDetail(
+          type: 'https://api.rewit.app/errors/session-expired',
+          title: 'Sessão expirada',
+          status: 401,
+          detail: 'Sessão encerrada por inatividade.',
+          code: 'SESSION_EXPIRED',
+        ),
+      );
+
+      final router = AppRouter(authNotifier: authNotifier);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          initialRoute: AppRouter.root,
+          onGenerateRoute: router.onGenerateRoute,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final BuildContext currentContext = tester.element(find.byType(HomeScreen));
+      Navigator.of(currentContext).pushNamed(AppRouter.changePassword);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ChangePasswordScreen), findsOneWidget);
+      expect(find.byKey(const Key('change_password_button')), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('current_password_field')), 'senhaAtual');
+      await tester.enterText(find.byKey(const Key('new_password_field')), 'novaSenhaValida123');
+      await tester.enterText(find.byKey(const Key('confirm_new_password_field')), 'novaSenhaValida123');
+
+      await tester.tap(find.byKey(const Key('change_password_button')));
+      await tester.pumpAndSettle();
+
+      // Confirma que a sessão foi invalidada
+      expect(authNotifier.isAuthenticated, isFalse);
+      expect(authNotifier.state, isA<Unauthenticated>());
+
+      // Confirma que a ChangePasswordScreen foi descartada e não há formulário protegido aberto
+      expect(find.byType(ChangePasswordScreen), findsNothing);
+      expect(find.byKey(const Key('change_password_button')), findsNothing);
+
+      // Confirma que retornou para LoginScreen e que a mensagem de sessão expirada é exibida
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(find.text('Sua sessão expirou. Faça login novamente.'), findsOneWidget);
+    });
+
+    testWidgets('invalidação de sessão em segundo plano remove ChangePasswordScreen e retorna ao login', (tester) async {
+      final router = AppRouter(authNotifier: authNotifier);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          initialRoute: AppRouter.root,
+          onGenerateRoute: router.onGenerateRoute,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final BuildContext currentContext = tester.element(find.byType(HomeScreen));
+      Navigator.of(currentContext).pushNamed(AppRouter.changePassword);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ChangePasswordScreen), findsOneWidget);
+
+      // Simula expiração assíncrona da sessão
+      authNotifier.handleSessionExpired();
+      await tester.pumpAndSettle();
+
+      expect(authNotifier.isAuthenticated, isFalse);
+      expect(find.byType(ChangePasswordScreen), findsNothing);
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(find.text('Sua sessão expirou. Faça login novamente.'), findsOneWidget);
+    });
+
+    testWidgets('submissão com sucesso através do AppRouter redireciona para LoginScreen com banner verde de confirmação', (tester) async {
+      final router = AppRouter(authNotifier: authNotifier);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          initialRoute: AppRouter.root,
+          onGenerateRoute: router.onGenerateRoute,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final BuildContext currentContext = tester.element(find.byType(HomeScreen));
+      Navigator.of(currentContext).pushNamed(AppRouter.changePassword);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('current_password_field')), 'senhaAtualAntiga');
+      await tester.enterText(find.byKey(const Key('new_password_field')), 'novaSenhaForte123');
+      await tester.enterText(find.byKey(const Key('confirm_new_password_field')), 'novaSenhaForte123');
+
+      await tester.tap(find.byKey(const Key('change_password_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ChangePasswordScreen), findsNothing);
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(find.text('Senha alterada. Entre novamente com sua nova senha.'), findsOneWidget);
+      expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
     });
   });
 }
