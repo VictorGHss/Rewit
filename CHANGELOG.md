@@ -5,6 +5,31 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 ---
 
+## [0.2.0] - 2026-10-09
+
+### Adicionado
+- **Painel Administrativo Web de Moderação (`apps/admin`)**:
+  - Implementação da interface web completa em React 18, TypeScript e Vite, substituindo scaffolds e dados fixos por integração com a API REST real do Rewit.
+  - Autenticação administrativa via `POST /api/v1/auth/login` com armazenamento seguro exclusivo em `sessionStorage` (sem uso de `localStorage` ou logs de credenciais).
+  - Renovação automática de tokens via `POST /api/v1/auth/refresh` com rotação, trava para refreshes concorrentes e retry único da requisição original.
+  - Verificação de privilégios de moderação (`MODERATOR` / `ADMIN`) após autenticação, exibindo tela de Acesso Restrito e limpando a sessão em caso de HTTP 403.
+  - Dashboard operacional com agregação em tempo real de casos pendentes de avaliações e discussões e atalhos diretos para as filas.
+  - Fila de moderação de avaliações (`/api/v1/admin/reports`) com filtros por status e motivo, paginação e visualização contextual completa.
+  - Fila de moderação de discussões (`/api/v1/admin/discussion-reports`) com indicação de raiz versus respostas e filtros estruturados.
+  - Modais de contexto exibindo relatos, notas por alvo, contexto da mensagem-pai em discussões, histórico de auditoria e lista de denúncias.
+  - Ações formais de moderação auditadas (`REMOVE_REVIEW`, `RESTORE_REVIEW`, `REMOVE_DISCUSSION`, `RESTORE_DISCUSSION`) com exigência de código de motivo, justificativa formal (15 a 1.000 caracteres) e diálogo de confirmação.
+  - Preservação estrita de privacidade, ocultando identificadores de autores e denunciantes em todas as telas.
+  - Suíte completa de testes automatizados com Vitest e `@testing-library/react` cobrindo cliente HTTP, storage de tokens, autenticação, dashboard, filas e modais.
+- **Scanner Mobile Inteligente (`apps/mobile`)**:
+  - Leitura óptica de códigos de barras (EAN/UPC) e QR Codes com validação restritiva de tipos permitidos e tratamento de ciclo de vida e permissões de câmera.
+- **Discussões e Notificações Contextuais**:
+  - Exposição de `rootDiscussionId` nas respostas de notificação para navegação direta e precisa.
+
+### Removido
+- Abas e referências a funcionalidades não implementadas no painel administrativo ("Locais (Fase 2)", "Catálogo Global", "Empresas & Contas").
+
+---
+
 ## [0.1.0] - 2026-09-27
 
 ### Adicionado

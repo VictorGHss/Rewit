@@ -176,13 +176,41 @@ flutter run
 
 ---
 
-## 7. Itens Deixados Deliberadamente para os Próximos Prompts
+## 7. Status das Funcionalidades
 
-Em estrito cumprimento às regras da etapa de fundação:
-- Implementação dos fluxos de autenticação (OAuth2 Google / JWT completo);
-- Algoritmo de cálculo e agregação contínua de médias de notas;
-- Mecanismo do scanner de código de barras e OCR no Flutter;
-- Feed dinâmico com ordenação por relevância e proximidade;
-- Regras de avanço de reputação, rankings de check-in e badges cosméticos;
-- CRUDs completos e interfaces de usuário detalhadas;
-- Modelos neurais do serviço de visão computacional em Python.
+### 7.1 Funcionalidades Implementadas
+
+- **Autenticação e Sessão Segura**:
+  - Fluxo completo de autenticação JWT (`/api/v1/auth/login`, `/api/v1/auth/refresh`, `/api/v1/auth/logout`);
+  - Rotação estrita de refresh tokens e controle de sessão;
+  - Armazenamento seguro de credenciais (`sessionStorage` no painel web, `FlutterSecureStorage` no app mobile);
+  - Tratamento padronizado de erros RFC 7807 sem exposição de detalhes internos.
+
+- **Feed Social e Avaliações Multi-Alvo**:
+  - Criação de avaliações avaliando simultaneamente múltiplos alvos (`Place`, `Product`, `Service`, `Experience`);
+  - Validação de presença física no estabelecimento via PostGIS para emissão do selo de *Check-in Verificado*;
+  - Listagens paginadas, filtros dinâmicos, anonimato de autoria e reações da comunidade.
+
+- **Discussões e Notificações**:
+  - Discussões encadeadas com suporte a respostas aninhadas e indicadores de autoria do proprietário;
+  - Notificações de resposta com metadados estruturados (`rootDiscussionId`) e navegação contextual direta.
+
+- **Scanner Inteligente Mobile (Flutter)**:
+  - Leitura óptica em tempo real via câmera para códigos de barras (EAN/UPC) e QR Codes;
+  - Validação estrita de identificadores contra enumeração fechada de tipos permitidos;
+  - Fallback manual com normalização de entrada e tratamento refinado de permissões de câmera.
+
+- **Painel Administrativo Web de Moderação (React + TypeScript + Vite)**:
+  - Autenticação com verificação de papéis de acesso (`MODERATOR` / `ADMIN`) e bloqueio de acesso restrito (403);
+  - Dashboard operacional com contadores em tempo real de denúncias pendentes de avaliações e discussões;
+  - Filas de triagem administrativa com paginação e filtros estruturados por status e motivo;
+  - Visualização de contexto completo (relatos, notas por alvo, contexto pai de discussões, denúncias e histórico de auditoria);
+  - Execução de ações formais de moderação auditadas (`REMOVE_REVIEW`, `RESTORE_REVIEW`, `REMOVE_DISCUSSION`, `RESTORE_DISCUSSION`) com justificativa obrigatória (15 a 1.000 caracteres) e diálogo de confirmação;
+  - Proteção integral de privacidade, sem expor IDs de autores ou denunciantes.
+
+### 7.2 Funcionalidades Planejadas (Fases Futuras)
+
+- Reivindicação e gestão de estabelecimentos por proprietários (Fase 2);
+- Catálogo global e curadoria de marcas e produtos (Fase 2);
+- Perfis corporativos, métricas comerciais e anúncios patrocinados (Fase 3);
+- Microserviço autônomo de visão computacional em Python com embeddings visuais (`services/vision`).
