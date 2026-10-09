@@ -5,6 +5,7 @@ import { App } from './App';
 import { authApi } from './core/api/auth';
 import { tokenStorage } from './core/storage/tokenStorage';
 import { moderationApi } from './core/api/moderation';
+import { claimsApi } from './core/api/claims';
 
 vi.mock('./core/api/auth', () => ({
   authApi: {
@@ -12,6 +13,13 @@ vi.mock('./core/api/auth', () => ({
     login: vi.fn(),
     verifyAdminAccess: vi.fn(),
     logout: vi.fn(),
+  },
+}));
+
+vi.mock('./core/api/claims', () => ({
+  claimsApi: {
+    listPlaceClaims: vi.fn(),
+    decidePlaceClaim: vi.fn(),
   },
 }));
 
@@ -88,6 +96,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /denúncias de avaliações/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /denúncias de discussões/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reivindicações de locais/i })).toBeInTheDocument();
 
     // Abas de funcionalidades não implementadas DEVEM TER SIDO REMOVIDAS
     expect(screen.queryByText(/locais \(fase 2\)/i)).not.toBeInTheDocument();
@@ -125,6 +134,43 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/fila de denúncias de discussões/i)).toBeInTheDocument();
+    });
+  });
+
+  it('alterna para a fila de reivindicações de locais ao clicar no menu', async () => {
+    const user = userEvent.setup();
+    vi.mocked(authApi.isAuthenticated).mockReturnValue(true);
+    vi.mocked(moderationApi.listReviewReports).mockResolvedValue({
+      content: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    });
+    vi.mocked(moderationApi.listDiscussionReports).mockResolvedValue({
+      content: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    });
+    vi.mocked(claimsApi.listPlaceClaims).mockResolvedValue({
+      content: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: /reivindicações de locais/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/fila de reivindicações de locais/i)).toBeInTheDocument();
     });
   });
 

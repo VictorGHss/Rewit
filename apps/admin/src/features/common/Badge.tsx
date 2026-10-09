@@ -81,3 +81,29 @@ export const ReasonBadge: React.FC<{ reason: ReportReason | string }> = ({ reaso
     </span>
   );
 };
+
+export function getClaimStatusLabel(status: string): string {
+  switch (status) {
+    case 'PENDING':
+      return 'Pendente';
+    case 'APPROVED':
+      return 'Aprovada';
+    case 'REJECTED':
+      return 'Rejeitada';
+    default:
+      return status;
+  }
+}
+
+export const ClaimStatusBadge: React.FC<{ status: string }> = ({ status }) => {
+  let badgeClass = 'badge';
+  if (status === 'PENDING') {
+    badgeClass += ' badge-warning';
+  } else if (status === 'APPROVED') {
+    badgeClass += ' badge-success';
+  } else if (status === 'REJECTED') {
+    badgeClass += ' badge-danger';
+  }
+
+  return <span className={badgeClass}>{getClaimStatusLabel(status)}</span>;
+};

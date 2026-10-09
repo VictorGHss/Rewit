@@ -6,9 +6,10 @@ import { LoginScreen } from './features/auth/LoginScreen';
 import { Dashboard } from './features/dashboard/Dashboard';
 import { ReviewReportsQueue } from './features/reviews/ReviewReportsQueue';
 import { DiscussionReportsQueue } from './features/discussions/DiscussionReportsQueue';
+import { PlaceClaimsQueue } from './features/claims/PlaceClaimsQueue';
 import type { AuthUser } from './core/types';
 
-export type NavigationTab = 'dashboard' | 'reviews' | 'discussions';
+export type NavigationTab = 'dashboard' | 'reviews' | 'discussions' | 'claims';
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => authApi.isAuthenticated());
@@ -86,6 +87,16 @@ export const App: React.FC = () => {
                   <span>Denúncias de Discussões</span>
                 </button>
               </li>
+              <li>
+                <button
+                  type="button"
+                  className={`nav-item ${activeTab === 'claims' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('claims')}
+                >
+                  <span>🏢</span>
+                  <span>Reivindicações de Locais</span>
+                </button>
+              </li>
             </ul>
           </nav>
         </div>
@@ -121,6 +132,7 @@ export const App: React.FC = () => {
         )}
         {activeTab === 'reviews' && <ReviewReportsQueue />}
         {activeTab === 'discussions' && <DiscussionReportsQueue />}
+        {activeTab === 'claims' && <PlaceClaimsQueue />}
       </main>
     </div>
   );
