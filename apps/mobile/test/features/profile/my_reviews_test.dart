@@ -14,7 +14,7 @@ import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
-import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
+import 'package:rewit_mobile/features/profile/domain/entities/user_reviews_page.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/follow_user_summary.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/update_profile_input.dart';
@@ -62,20 +62,20 @@ class MockHttpBaseClient extends http.BaseClient {
 }
 
 class FakeUserProfileRepository implements UserProfileRepository {
-  FutureOr<TargetReviewsPage> Function({int page, int size})? getMyReviewsHandler;
+  FutureOr<UserReviewsPage> Function({int page, int size})? getMyReviewsHandler;
   int getMyReviewsCallCount = 0;
   int? lastRequestedPage;
   int? lastRequestedSize;
 
   @override
-  Future<TargetReviewsPage> getMyReviews({int page = 0, int size = 10}) async {
+  Future<UserReviewsPage> getMyReviews({int page = 0, int size = 10}) async {
     getMyReviewsCallCount++;
     lastRequestedPage = page;
     lastRequestedSize = size;
     if (getMyReviewsHandler != null) {
       return getMyReviewsHandler!(page: page, size: size);
     }
-    return const TargetReviewsPage(
+    return const UserReviewsPage(
       reviews: [],
       pageNumber: 0,
       pageSize: 10,
@@ -440,7 +440,7 @@ void main() {
     test('loadInitial com sucesso transiciona para MyReviewsLoaded', () async {
       final sample = createSampleReview();
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [sample],
           pageNumber: 0,
           pageSize: 10,
@@ -466,7 +466,7 @@ void main() {
 
     test('loadInitial com lista vazia transiciona para MyReviewsEmpty', () async {
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return const TargetReviewsPage(
+        return const UserReviewsPage(
           reviews: [],
           pageNumber: 0,
           pageSize: 10,
@@ -514,7 +514,7 @@ void main() {
       final rev2 = createSampleReview(id: 'rev-2');
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
         if (page == 0) {
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: [rev1],
             pageNumber: 0,
             pageSize: 1,
@@ -524,7 +524,7 @@ void main() {
           );
         } else {
           // Retorna rev1 (duplicata acidental) e rev2 (novo)
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: [rev1, rev2],
             pageNumber: 1,
             pageSize: 1,
@@ -550,7 +550,7 @@ void main() {
     test('loadMore não executa chamadas quando hasMore é falso ou isLastPage é true', () async {
       final rev1 = createSampleReview(id: 'rev-1');
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [rev1],
           pageNumber: 0,
           pageSize: 10,
@@ -569,7 +569,7 @@ void main() {
 
     test('proteção contra chamadas duplicadas concorrentes de loadInitial e loadMore', () async {
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [createSampleReview()],
           pageNumber: 0,
           pageSize: 10,
@@ -595,7 +595,7 @@ void main() {
     test('refresh recarrega da página 0 e descarta respostas obsoletas de paginação', () async {
       final rev1 = createSampleReview(id: 'rev-1');
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [rev1],
           pageNumber: 0,
           pageSize: 10,
@@ -619,7 +619,7 @@ void main() {
         if (shouldFail) {
           throw const NetworkException('Erro de rede inicial');
         }
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [createSampleReview()],
           pageNumber: 0,
           pageSize: 10,
@@ -641,7 +641,7 @@ void main() {
       bool shouldFail = false;
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
         if (page == 0) {
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: [createSampleReview(id: 'rev-1')],
             pageNumber: 0,
             pageSize: 1,
@@ -653,7 +653,7 @@ void main() {
         if (shouldFail) {
           throw const NetworkException('Erro no load-more');
         }
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [createSampleReview(id: 'rev-2')],
           pageNumber: 1,
           pageSize: 1,
@@ -682,7 +682,7 @@ void main() {
       final rev1 = createSampleReview(id: 'rev-1', experienceText: 'Texto antigo');
       final rev2 = createSampleReview(id: 'rev-2', experienceText: 'Outro');
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [rev1, rev2],
           pageNumber: 0,
           pageSize: 2,
@@ -706,7 +706,7 @@ void main() {
       final rev1 = createSampleReview(id: 'rev-1');
       final rev2 = createSampleReview(id: 'rev-2');
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [rev1, rev2],
           pageNumber: 0,
           pageSize: 2,
@@ -737,7 +737,7 @@ void main() {
         if (page == 0) {
           page0CallCount++;
           if (page0CallCount == 1) {
-            return TargetReviewsPage(
+            return UserReviewsPage(
               reviews: [rev1],
               pageNumber: 0,
               pageSize: 1,
@@ -746,7 +746,7 @@ void main() {
               isLast: false,
             );
           } else {
-            return TargetReviewsPage(
+            return UserReviewsPage(
               reviews: [revShifted],
               pageNumber: 0,
               pageSize: 1,
@@ -756,7 +756,7 @@ void main() {
             );
           }
         }
-        return const TargetReviewsPage(
+        return const UserReviewsPage(
           reviews: [],
           pageNumber: 1,
           pageSize: 1,
@@ -786,11 +786,11 @@ void main() {
       final rev2 = createSampleReview(id: 'rev-2');
       final rev3 = createSampleReview(id: 'rev-3');
 
-      final completer = Completer<TargetReviewsPage>();
+      final completer = Completer<UserReviewsPage>();
 
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
         if (page == 0) {
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: [rev1, rev2],
             pageNumber: 0,
             pageSize: 2,
@@ -814,7 +814,7 @@ void main() {
       expect((notifier.state as MyReviewsLoaded).reviews.map((r) => r.id), isNot(contains('rev-1')));
 
       // Conclui loadMore da página 1 (que retorna 'rev-1' repetido e 'rev-3')
-      completer.complete(TargetReviewsPage(
+      completer.complete(UserReviewsPage(
         reviews: [rev1, rev3],
         pageNumber: 1,
         pageSize: 2,
@@ -836,11 +836,11 @@ void main() {
       final rev2 = createSampleReview(id: 'rev-2');
       final rev3 = createSampleReview(id: 'rev-3');
 
-      final completer = Completer<TargetReviewsPage>();
+      final completer = Completer<UserReviewsPage>();
 
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
         if (page == 0) {
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: [rev1, rev2],
             pageNumber: 0,
             pageSize: 2,
@@ -861,7 +861,7 @@ void main() {
       // Enquanto a requisição corre, atualiza rev-1 localmente
       notifier.updateReview(rev1.copyWith(experienceText: 'Texto editado localmente'));
 
-      completer.complete(TargetReviewsPage(
+      completer.complete(UserReviewsPage(
         reviews: [rev3],
         pageNumber: 1,
         pageSize: 2,
@@ -886,7 +886,7 @@ void main() {
         if (page == 0) {
           callCountPage0++;
           if (callCountPage0 == 1) {
-            return TargetReviewsPage(
+            return UserReviewsPage(
               reviews: [rev1, rev2],
               pageNumber: 0,
               pageSize: 2,
@@ -896,7 +896,7 @@ void main() {
             );
           } else {
             // Após remoção de rev1 no servidor, página 0 contém rev2 e rev3
-            return TargetReviewsPage(
+            return UserReviewsPage(
               reviews: [rev2, rev3],
               pageNumber: 0,
               pageSize: 2,
@@ -906,7 +906,7 @@ void main() {
             );
           }
         } else {
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: [rev3],
             pageNumber: 1,
             pageSize: 2,
@@ -950,7 +950,7 @@ void main() {
         if (page == 0) {
           callCountPage0++;
           if (callCountPage0 == 1) {
-            return TargetReviewsPage(
+            return UserReviewsPage(
               reviews: page0Initial,
               pageNumber: 0,
               pageSize: 10,
@@ -959,7 +959,7 @@ void main() {
               isLast: false,
             );
           } else {
-            return TargetReviewsPage(
+            return UserReviewsPage(
               reviews: page0AfterDelete,
               pageNumber: 0,
               pageSize: 10,
@@ -969,7 +969,7 @@ void main() {
             );
           }
         } else {
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: page1AfterDelete,
             pageNumber: 1,
             pageSize: 10,
@@ -1009,7 +1009,7 @@ void main() {
       bool shouldFail = true;
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
         if (page == 0) {
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: [rev1],
             pageNumber: 0,
             pageSize: 1,
@@ -1026,7 +1026,7 @@ void main() {
               detail: 'Falha temporária ao carregar mais',
             ));
           }
-          return TargetReviewsPage(
+          return UserReviewsPage(
             reviews: [createSampleReview(id: 'rev-2')],
             pageNumber: 1,
             pageSize: 1,
@@ -1068,7 +1068,7 @@ void main() {
     testWidgets('renderiza estado de loading e em seguida lista com avaliações', (tester) async {
       final rev = createSampleReview(id: 'rev-1', experienceText: 'Pizza fantástica!');
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [rev],
           pageNumber: 0,
           pageSize: 10,
@@ -1095,7 +1095,7 @@ void main() {
 
     testWidgets('renderiza estado vazio com mensagem apropriada', (tester) async {
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return const TargetReviewsPage(
+        return const UserReviewsPage(
           reviews: [],
           pageNumber: 0,
           pageSize: 10,
@@ -1125,7 +1125,7 @@ void main() {
         if (fail) {
           throw const NetworkException('Sem conexão com a internet');
         }
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [createSampleReview(id: 'rev-recuperada')],
           pageNumber: 0,
           pageSize: 10,
@@ -1157,7 +1157,7 @@ void main() {
     testWidgets('tocar no card navega para AppRouter.reviewDetail e remove item se excluído', (tester) async {
       final rev = createSampleReview(id: 'rev-to-delete', experienceText: 'Será excluída');
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [rev],
           pageNumber: 0,
           pageSize: 10,
@@ -1213,7 +1213,7 @@ void main() {
     testWidgets('tocar no card navega para AppRouter.reviewDetail e atualiza item se editado', (tester) async {
       final rev = createSampleReview(id: 'rev-to-edit', experienceText: 'Texto Original');
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [rev],
           pageNumber: 0,
           pageSize: 10,
@@ -1284,7 +1284,7 @@ void main() {
       );
 
       repo.getMyReviewsHandler = ({page = 0, size = 10}) {
-        return TargetReviewsPage(
+        return UserReviewsPage(
           reviews: [revAnon],
           pageNumber: 0,
           pageSize: 10,

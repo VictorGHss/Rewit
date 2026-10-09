@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'package:rewit_mobile/core/network/api_endpoints.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
-import 'package:rewit_mobile/features/place/data/models/place_dtos.dart';
-import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/profile/data/models/follow_user_summary_dto.dart';
 import 'package:rewit_mobile/features/profile/data/models/user_profile_dto.dart';
+import 'package:rewit_mobile/features/profile/data/models/user_reviews_page_dto.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/follow_user_summary.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/update_profile_input.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
+import 'package:rewit_mobile/features/profile/domain/entities/user_reviews_page.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 
 /// Implementação do repositório de perfil público e grafo social consumindo a API REST.
@@ -66,7 +66,7 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
   }
 
   @override
-  Future<TargetReviewsPage> getMyReviews({int page = 0, int size = 10}) async {
+  Future<UserReviewsPage> getMyReviews({int page = 0, int size = 10}) async {
     final response = await httpClient.get(
       ApiEndpoints.myReviewsPath,
       queryParameters: {
@@ -78,6 +78,6 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Resposta inválida do servidor ao listar minhas avaliações.');
     }
-    return TargetReviewsPageDto.fromJson(decoded).toEntity();
+    return UserReviewsPageDto.fromJson(decoded).toEntity();
   }
 }

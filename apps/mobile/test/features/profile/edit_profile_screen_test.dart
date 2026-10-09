@@ -7,10 +7,10 @@ import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
-import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/follow_user_summary.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/update_profile_input.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
+import 'package:rewit_mobile/features/profile/domain/entities/user_reviews_page.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/edit_profile_screen.dart';
 
@@ -126,7 +126,7 @@ class FakeProfileRepoForEdit implements UserProfileRepository {
   }
 
   @override
-  Future<TargetReviewsPage> getMyReviews({int page = 0, int size = 10}) async {
+  Future<UserReviewsPage> getMyReviews({int page = 0, int size = 10}) async {
     throw UnimplementedError();
   }
 }
