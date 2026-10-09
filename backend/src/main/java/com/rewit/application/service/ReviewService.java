@@ -365,7 +365,8 @@ public class ReviewService {
                 detail.targets(),
                 0L,
                 false,
-                cmd.authorUserId() != null && cmd.authorUserId().equals(detail.userId())
+                // createReview exige cmd.authorUserId() e grava a avaliação com esse autor: quem cria é sempre o dono
+                true
         );
     }
 
