@@ -111,6 +111,19 @@ void main() {
       expect(notifier.state, isA<ScannerPermissionDenied>());
       expect((notifier.state as ScannerPermissionDenied).permanentlyDenied, isTrue);
     });
+
+    test('dispose durante chamada assincrona nao dispara notifyListeners e nao lanca erro', () async {
+      final customRepo = _FakeProductRepository();
+      final customNotifier = ScannerNotifier(productRepository: customRepo);
+
+      // Inicia chamada assíncrona
+      final future = customNotifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+      // Descarta imediatamente enquanto requisição está em trânsito
+      customNotifier.dispose();
+
+      expect(customNotifier.isDisposed, isTrue);
+      await expectLater(future, completes);
+    });
   });
 
   group('ScannerNotifier - Detecção de Barcodes e Consulta ao Catálogo', () {
@@ -236,6 +249,25 @@ void main() {
 
       unconfiguredNotifier.dispose();
     });
+    test('consulta GTIN-14 com tipo GTIN e 14 digitos', () async {
+      await notifier.onCodeDetected('17891234567897', format: BarcodeFormat.itf14);
+
+      expect(fakeRepository.lookupCallCount, equals(1));
+      expect(fakeRepository.lastLookupType, equals('GTIN'));
+      expect(fakeRepository.lastLookupValue, equals('17891234567897'));
+      expect(notifier.state, isA<ScannerFound>());
+    });
+
+    test('rejeita lookup de produto se tipo nao estiver na whitelist do catalogo', () async {
+      await notifier.onCodeDetected(
+        'rewit://products/identifiers/CUSTOM_CODE/12345',
+        format: BarcodeFormat.qrCode,
+      );
+
+      // Não deve chamar o repositório pois tipo é rejeitado antes da consulta
+      expect(fakeRepository.lookupCallCount, equals(0));
+      expect(notifier.state, isA<ScannerQrExternal>());
+    });
   });
 
   group('ScannerNotifier - Desduplicação e Trava Concorrente', () {
@@ -251,6 +283,29 @@ void main() {
       notifier.resumeScanning();
       await notifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
       expect(fakeRepository.lookupCallCount, equals(2));
+    });
+
+    test('impede que novo frame da camera sobrescreva resultado visivel ate resumeScanning ser acionado', () async {
+      await notifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+      expect(fakeRepository.lookupCallCount, equals(1));
+      expect(notifier.state, isA<ScannerFound>());
+      expect((notifier.state as ScannerFound).scannedCode.normalizedValue, equals('7891234567890'));
+
+      // Código DIFERENTE detectado enquanto o resultado anterior é exibido
+      await notifier.onCodeDetected('012345678905', format: BarcodeFormat.upcA);
+      // Deve ser ignorado: repositório não é chamado e estado não é sobrescrito
+      expect(fakeRepository.lookupCallCount, equals(1));
+      expect((notifier.state as ScannerFound).scannedCode.normalizedValue, equals('7891234567890'));
+
+      // Usuário toca em 'Escanear novamente'
+      notifier.resumeScanning();
+      expect(notifier.state, isA<ScannerScanning>());
+
+      // Agora a leitura do novo código é processada
+      await notifier.onCodeDetected('012345678905', format: BarcodeFormat.upcA);
+      expect(fakeRepository.lookupCallCount, equals(2));
+      expect(fakeRepository.lastLookupType, equals('UPC'));
+      expect((notifier.state as ScannerFound).scannedCode.normalizedValue, equals('012345678905'));
     });
   });
 

@@ -15,6 +15,7 @@ import 'package:rewit_mobile/features/product/domain/entities/product_detail.dar
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
+import 'package:rewit_mobile/features/scanner/domain/entities/scanner_state.dart';
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:rewit_mobile/features/scanner/presentation/state/scanner_notifier.dart';
 
@@ -341,7 +342,11 @@ void main() {
     await tester.tap(find.byKey(const Key('btn_simulate_detect')));
     await tester.pumpAndSettle();
 
-    // Redefine com recurso interno
+    // Toca para escanear novamente para permitir nova leitura
+    await tester.tap(find.text('Escanear novamente'));
+    await tester.pumpAndSettle();
+
+    // Detecta recurso interno
     await notifier.onCodeDetected('rewit://places/place-cafe-central', format: BarcodeFormat.qrCode);
     await tester.pumpAndSettle();
 
@@ -373,6 +378,61 @@ void main() {
 
     expect(find.text('Acesso à câmera necessário'), findsOneWidget);
     expect(find.text('Tentar novamente'), findsOneWidget);
+
+    notifier.dispose();
+  });
+
+  testWidgets('ScannerScreen instancia MobileScanner com formatos incluindo itf14', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerScreen(
+          productRepository: fakeRepository,
+          autoStartCamera: false,
+        ),
+      ),
+    );
+
+    final mobileScannerFinder = find.byType(MobileScanner);
+    expect(mobileScannerFinder, findsOneWidget);
+    final mobileScannerWidget = tester.widget<MobileScanner>(mobileScannerFinder);
+    expect(mobileScannerWidget.controller?.formats, contains(BarcodeFormat.itf14));
+    expect(mobileScannerWidget.controller?.formats, contains(BarcodeFormat.ean13));
+    expect(mobileScannerWidget.controller?.formats, contains(BarcodeFormat.qrCode));
+  });
+
+  testWidgets('errorBuilder de MobileScanner com permissionDenied atualiza notifier e exibe view de permissao negada', (tester) async {
+    final notifier = ScannerNotifier(productRepository: fakeRepository);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScannerScreen(
+          notifier: notifier,
+          autoStartCamera: false,
+        ),
+      ),
+    );
+
+    final mobileScannerFinder = find.byType(MobileScanner);
+    expect(mobileScannerFinder, findsOneWidget);
+    final mobileScannerWidget = tester.widget<MobileScanner>(mobileScannerFinder);
+
+    mobileScannerWidget.errorBuilder!(
+      tester.element(mobileScannerFinder),
+      const MobileScannerException(
+        errorCode: MobileScannerErrorCode.permissionDenied,
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Acesso à câmera necessário'), findsOneWidget);
+    expect(
+      find.text('Para escanear códigos de barras e QR Codes de produtos, o Rewit precisa de permissão de acesso à câmera.'),
+      findsOneWidget,
+    );
+    expect(notifier.state, isA<ScannerPermissionDenied>());
+    expect((notifier.state as ScannerPermissionDenied).permanentlyDenied, isTrue);
 
     notifier.dispose();
   });

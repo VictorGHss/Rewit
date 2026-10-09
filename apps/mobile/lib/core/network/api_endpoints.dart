@@ -39,7 +39,7 @@ class ApiEndpoints {
   static String productDetail(String id) => '/api/v1/products/$id';
   static String productIdentifiers(String id) => '/api/v1/products/$id/identifiers';
   static String productByIdentifier(String type, String value) =>
-      '/api/v1/products/identifiers/$type/$value';
+      '/api/v1/products/identifiers/${Uri.encodeComponent(type)}/${Uri.encodeComponent(value)}';
   static String placeProductsPath(String placeId) => '/api/v1/places/$placeId/products';
   static String placeProducts(String placeId, {int page = 0, int size = 20}) =>
       '/api/v1/places/$placeId/products?page=$page&size=$size';

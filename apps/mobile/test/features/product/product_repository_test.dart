@@ -217,6 +217,56 @@ void main() {
       expect(product.id, 'prod-100');
     });
 
+    test('getProductByIdentifier rejeita tipo fora da whitelist e tentativas de path traversal', () async {
+      expect(
+        () => repository.getProductByIdentifier(type: 'UNKNOWN_TYPE', value: '12345'),
+        throwsA(isA<ArgumentError>()),
+      );
+
+      expect(
+        () => repository.getProductByIdentifier(type: '..', value: '12345'),
+        throwsA(isA<ArgumentError>()),
+      );
+
+      expect(
+        () => repository.getProductByIdentifier(type: 'EAN', value: '../traversal'),
+        throwsA(isA<ArgumentError>()),
+      );
+
+      expect(
+        () => repository.getProductByIdentifier(type: 'EAN', value: '123/456'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('getProductByIdentifier aceita tipos validos GTIN, UPC e ISBN', () async {
+      mockBaseClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': 'prod-200',
+          'name': 'Livro Arquitetura Limpa',
+          'brand': 'Alta Books',
+          'category': 'LIVROS',
+          'status': 'ACTIVE',
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+
+      final productGtin = await repository.getProductByIdentifier(
+        type: 'GTIN',
+        value: '17891234567897',
+      );
+      expect(mockBaseClient.capturedRequest?.url.path, '/api/v1/products/identifiers/GTIN/17891234567897');
+      expect(productGtin.id, 'prod-200');
+
+      final productIsbn = await repository.getProductByIdentifier(
+        type: 'ISBN',
+        value: '9788550804606',
+      );
+      expect(mockBaseClient.capturedRequest?.url.path, '/api/v1/products/identifiers/ISBN/9788550804606');
+      expect(productIsbn.id, 'prod-200');
+    });
+
     test('getProductsInPlace requisita produtos do local com parâmetros de paginação', () async {
       mockBaseClient.responseToReturn = http.Response(
         jsonEncode({

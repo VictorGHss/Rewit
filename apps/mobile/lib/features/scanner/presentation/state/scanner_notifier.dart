@@ -13,47 +13,74 @@ class ScannerNotifier extends ChangeNotifier {
   ScannerState _state = const ScannerInitial();
   bool _isProcessing = false;
   String? _lastScannedValue;
+  bool _isDisposed = false;
 
   ScannerNotifier({ProductRepository? productRepository})
       : _productRepository = productRepository;
 
   ScannerState get state => _state;
   bool get isProcessing => _isProcessing;
+  bool get isDisposed => _isDisposed;
+
+  /// Retorna se o scanner está em modo de captura ativa da câmera.
+  bool get isScanning => _state is ScannerScanning || _state is ScannerInitial;
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    super.dispose();
+  }
+
+  void _safeNotifyListeners() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
 
   /// Inicia o modo de escaneamento ativo da câmera.
   void startScanning() {
+    if (_isDisposed) return;
     _isProcessing = false;
     _state = const ScannerScanning();
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Retoma o escaneamento ativo limpando a trava do último código lido.
   void resumeScanning() {
+    if (_isDisposed) return;
     _isProcessing = false;
     _lastScannedValue = null;
     _state = const ScannerScanning();
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Registra que a permissão de câmera foi negada.
   void onPermissionDenied({bool permanentlyDenied = false}) {
+    if (_isDisposed) return;
     _isProcessing = false;
     _state = ScannerPermissionDenied(permanentlyDenied: permanentlyDenied);
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
-  /// Processa a detecção de um código garantindo proteção contra leituras duplicadas.
+  /// Processa a detecção de um código garantindo proteção contra leituras duplicadas
+  /// e impedindo que novos frames da câmera sobrescrevam silenciosamente o resultado visível.
   Future<void> onCodeDetected(String rawValue, {BarcodeFormat? format}) async {
-    final trimmed = rawValue.trim();
+    if (_isDisposed) return;
 
-    // Proteção contra detecções repetidas concorrentes ou durante exibição do resultado
-    if (_isProcessing) return;
-    if (_lastScannedValue == trimmed && _state is! ScannerScanning) return;
+    // Proteção contra novas detecções enquanto um resultado ativo estiver sendo exibido
+    // ou enquanto uma consulta estiver em processamento. O usuário deve tocar explicitamente
+    // em "Escanear novamente" para reativar o modo de leitura.
+    if (_isProcessing || !isScanning) return;
+
+    final trimmed = rawValue.trim();
+    if (_lastScannedValue == trimmed) return;
 
     _isProcessing = true;
     _lastScannedValue = trimmed;
 
     final code = BarcodeNormalizer.normalize(rawValue: rawValue, format: format);
+
+    if (_isDisposed) return;
 
     // 1. Formato não suportado
     if (code.isUnsupported) {
@@ -62,7 +89,7 @@ class ScannerNotifier extends ChangeNotifier {
         message: code.unsupportedReason ?? 'Formato de código não suportado.',
       );
       _isProcessing = false;
-      notifyListeners();
+      _safeNotifyListeners();
       return;
     }
 
@@ -70,7 +97,7 @@ class ScannerNotifier extends ChangeNotifier {
     if (code.isQrExternal) {
       _state = ScannerQrExternal(scannedCode: code);
       _isProcessing = false;
-      notifyListeners();
+      _safeNotifyListeners();
       return;
     }
 
@@ -80,7 +107,7 @@ class ScannerNotifier extends ChangeNotifier {
       if (resource.type == InternalResourceType.productLookup &&
           resource.lookupType != null &&
           resource.lookupValue != null) {
-        // Tratar lookup de produto via QR específico
+        // Tratar lookup de produto via QR específico diretamente
         await _performProductLookup(
           code: code,
           type: resource.lookupType!,
@@ -89,7 +116,7 @@ class ScannerNotifier extends ChangeNotifier {
       } else {
         _state = ScannerQrInternal(scannedCode: code, resource: resource);
         _isProcessing = false;
-        notifyListeners();
+        _safeNotifyListeners();
       }
       return;
     }
@@ -109,26 +136,40 @@ class ScannerNotifier extends ChangeNotifier {
     required String type,
     required String value,
   }) async {
+    if (_isDisposed) return;
+
+    final normalizedType = type.trim().toUpperCase();
+    if (!BarcodeNormalizer.supportedIdentifierTypes.contains(normalizedType)) {
+      _isProcessing = false;
+      _state = ScannerError(
+        message: 'Tipo de identificador não suportado pelo catálogo: $type',
+      );
+      _safeNotifyListeners();
+      return;
+    }
+
     _state = ScannerProcessing(scannedCode: code);
-    notifyListeners();
+    _safeNotifyListeners();
 
     if (_productRepository == null) {
       _isProcessing = false;
       _state = const ScannerError(
         message: 'Repositório de produtos não configurado para consulta.',
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return;
     }
 
     try {
       final product = await _productRepository.getProductByIdentifier(
-        type: type,
-        value: value,
+        type: normalizedType,
+        value: value.trim(),
       );
 
+      if (_isDisposed) return;
       _state = ScannerFound(product: product, scannedCode: code);
     } on ApiException catch (e) {
+      if (_isDisposed) return;
       if (e.statusCode == 404) {
         _state = ScannerNotFound(
           scannedCode: code,
@@ -157,14 +198,18 @@ class ScannerNotifier extends ChangeNotifier {
         );
       }
     } on NetworkException catch (e) {
+      if (_isDisposed) return;
       _state = ScannerError(message: e.message);
     } catch (_) {
+      if (_isDisposed) return;
       _state = const ScannerError(
         message: 'Ocorreu um erro inesperado ao consultar o produto.',
       );
     } finally {
       _isProcessing = false;
-      notifyListeners();
+      if (!_isDisposed) {
+        _safeNotifyListeners();
+      }
     }
   }
 }

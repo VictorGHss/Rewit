@@ -17,6 +17,14 @@ class BarcodeNormalizer {
     'api.rewit.com',
   };
 
+  /// Whitelist fechada de tipos de identificador comercial suportados pelo catálogo Rewit.
+  static const Set<String> supportedIdentifierTypes = {
+    'EAN',
+    'UPC',
+    'GTIN',
+    'ISBN',
+  };
+
   static final RegExp _validIdPattern = RegExp(r'^[a-zA-Z0-9\-_]+$');
   static final RegExp _digitsOnlyPattern = RegExp(r'^\d+$');
 
@@ -74,6 +82,15 @@ class BarcodeNormalizer {
 
     // 4. Mapeamento por comprimento do código comercial (EAN-13, EAN-8, UPC-A, GTIN-14)
     final length = trimmed.length;
+
+    if (format == BarcodeFormat.itf14 && length != 14) {
+      return ScannedCode(
+        rawValue: rawValue,
+        format: format,
+        category: ScannedCodeCategory.unsupported,
+        unsupportedReason: 'Código ITF-14 deve conter exatamente 14 dígitos numéricos.',
+      );
+    }
 
     if (length == 13) {
       // EAN-13 canônico
@@ -139,7 +156,6 @@ class BarcodeNormalizer {
         format == BarcodeFormat.dataMatrix ||
         format == BarcodeFormat.pdf417 ||
         format == BarcodeFormat.aztec ||
-        format == BarcodeFormat.itf14 ||
         format == BarcodeFormat.itf2of5;
   }
 
@@ -158,6 +174,16 @@ class BarcodeNormalizer {
     final uri = Uri.tryParse(content);
 
     if (uri != null) {
+      // Rejeita explicitamente tentativas de path traversal em URLs do Rewit
+      if (content.contains('..') || content.toLowerCase().contains('%2e')) {
+        return ScannedCode(
+          rawValue: rawValue,
+          format: format,
+          category: ScannedCodeCategory.qrExternal,
+          normalizedValue: content,
+        );
+      }
+
       final isRewitScheme = uri.scheme.toLowerCase() == 'rewit';
       final isRewitHost = uri.hasAuthority && _isRewitHost(uri.host);
 
@@ -222,6 +248,7 @@ class BarcodeNormalizer {
 
       if ((section == 'products' || section == 'product') &&
           sub == 'identifiers' &&
+          supportedIdentifierTypes.contains(type) &&
           _validIdPattern.hasMatch(value)) {
         return InternalResource(
           type: InternalResourceType.productLookup,

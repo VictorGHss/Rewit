@@ -37,13 +37,30 @@ class ProductRepositoryImpl implements ProductRepository {
     return ProductIdentifiersResponseDto.fromJson(decoded).toEntityList();
   }
 
+  static const Set<String> _validIdentifierTypes = {
+    'EAN',
+    'UPC',
+    'GTIN',
+    'ISBN',
+  };
+
   @override
   Future<ProductDetail> getProductByIdentifier({
     required String type,
     required String value,
   }) async {
+    final cleanType = type.trim();
+    final cleanValue = value.trim();
+
+    if (!_validIdentifierTypes.contains(cleanType.toUpperCase())) {
+      throw ArgumentError('Tipo de identificador não suportado: $type');
+    }
+    if (cleanValue.isEmpty || cleanValue.contains('/') || cleanValue.contains('\\')) {
+      throw ArgumentError('Valor de identificador inválido: $value');
+    }
+
     final response = await httpClient.get(
-      ApiEndpoints.productByIdentifier(type.trim(), value.trim()),
+      ApiEndpoints.productByIdentifier(cleanType, cleanValue),
     );
     final dynamic decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {

@@ -55,6 +55,7 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
           BarcodeFormat.ean13,
           BarcodeFormat.ean8,
           BarcodeFormat.upcA,
+          BarcodeFormat.itf14,
           BarcodeFormat.qrCode,
         ],
       );
@@ -149,6 +150,9 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         break;
       case InternalResourceType.product:
       case InternalResourceType.productLookup:
+        // Nota: QR codes do tipo productLookup normalmente disparam a consulta
+        // automática no ScannerNotifier antes de exibir o card de produto encontrado.
+        // O tratamento aqui é preservado como fallback defensivo caso chegue como ScannerQrInternal.
         await Navigator.of(context).pushNamed(
           AppRouter.productDetail,
           arguments: resource.id,
@@ -211,6 +215,13 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                   onDetect: _onBarcodeDetected,
                   errorBuilder: (context, error) {
                     if (error.errorCode == MobileScannerErrorCode.permissionDenied) {
+                      if (_notifier.state is! ScannerPermissionDenied) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted && _notifier.state is! ScannerPermissionDenied) {
+                            _notifier.onPermissionDenied(permanentlyDenied: true);
+                          }
+                        });
+                      }
                       return _buildPermissionDeniedView(
                         context,
                         const ScannerPermissionDenied(permanentlyDenied: true),

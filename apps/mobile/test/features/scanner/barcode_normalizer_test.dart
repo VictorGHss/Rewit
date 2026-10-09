@@ -52,6 +52,36 @@ void main() {
       expect(code.isBarcode, isTrue);
     });
 
+    test('normaliza código com formato BarcodeFormat.itf14 de 14 dígitos como GTIN (ADR-007)', () {
+      final code = BarcodeNormalizer.normalize(
+        rawValue: '17891234567897',
+        format: BarcodeFormat.itf14,
+      );
+
+      expect(code.category, equals(ScannedCodeCategory.barcode));
+      expect(code.normalizedValue, equals('17891234567897'));
+      expect(code.barcodeType, equals('GTIN'));
+      expect(code.isBarcode, isTrue);
+    });
+
+    test('rejeita código com formato BarcodeFormat.itf14 com comprimento diferente de 14 dígitos', () {
+      final code12 = BarcodeNormalizer.normalize(
+        rawValue: '123456789012',
+        format: BarcodeFormat.itf14,
+      );
+
+      expect(code12.category, equals(ScannedCodeCategory.unsupported));
+      expect(code12.unsupportedReason, contains('ITF-14 deve conter exatamente 14 dígitos'));
+
+      final code13 = BarcodeNormalizer.normalize(
+        rawValue: '1234567890123',
+        format: BarcodeFormat.itf14,
+      );
+
+      expect(code13.category, equals(ScannedCodeCategory.unsupported));
+      expect(code13.unsupportedReason, contains('ITF-14 deve conter exatamente 14 dígitos'));
+    });
+
     test('infere tipo de identificador baseado no tamanho quando format não é fornecido', () {
       final ean13 = BarcodeNormalizer.normalize(rawValue: '7891234567890');
       expect(ean13.barcodeType, equals('EAN'));
@@ -143,17 +173,82 @@ void main() {
       expect(code.internalResource!.id, equals('rev-uuid-789'));
     });
 
-    test('identifica QR Code interno de lookup por identificador', () {
-      final code = BarcodeNormalizer.normalize(
+    test('identifica QR Code interno de lookup por identificador para tipos na whitelist', () {
+      final ean = BarcodeNormalizer.normalize(
         rawValue: 'rewit://products/identifiers/EAN/7891234567890',
         format: BarcodeFormat.qrCode,
       );
+      expect(ean.category, equals(ScannedCodeCategory.qrInternal));
+      expect(ean.internalResource!.type, equals(InternalResourceType.productLookup));
+      expect(ean.internalResource!.lookupType, equals('EAN'));
+      expect(ean.internalResource!.lookupValue, equals('7891234567890'));
 
-      expect(code.category, equals(ScannedCodeCategory.qrInternal));
-      expect(code.internalResource, isNotNull);
-      expect(code.internalResource!.type, equals(InternalResourceType.productLookup));
-      expect(code.internalResource!.lookupType, equals('EAN'));
-      expect(code.internalResource!.lookupValue, equals('7891234567890'));
+      final upc = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/UPC/012345678905',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(upc.category, equals(ScannedCodeCategory.qrInternal));
+      expect(upc.internalResource!.lookupType, equals('UPC'));
+
+      final gtin = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/GTIN/17891234567897',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(gtin.category, equals(ScannedCodeCategory.qrInternal));
+      expect(gtin.internalResource!.lookupType, equals('GTIN'));
+
+      final isbn = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/ISBN/9788550804606',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(isbn.category, equals(ScannedCodeCategory.qrInternal));
+      expect(isbn.internalResource!.lookupType, equals('ISBN'));
+    });
+
+    test('rejeita QR Code de lookup com tipo fora da whitelist e classifica como qrExternal', () {
+      final custom = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/CUSTOM/12345',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(custom.category, equals(ScannedCodeCategory.qrExternal));
+      expect(custom.internalResource, isNull);
+
+      final uuid = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/INTERNAL_UUID/12345',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(uuid.category, equals(ScannedCodeCategory.qrExternal));
+      expect(uuid.internalResource, isNull);
+    });
+
+    test('rejeita QR Code com tentativa de path traversal ou injeção em tipo ou valor', () {
+      final dotDotType = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/../admin',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(dotDotType.category, equals(ScannedCodeCategory.qrExternal));
+      expect(dotDotType.internalResource, isNull);
+
+      final slashInType = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/EAN%2Fevil/12345',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(slashInType.category, equals(ScannedCodeCategory.qrExternal));
+      expect(slashInType.internalResource, isNull);
+
+      final traversalValue = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/EAN/../secrets',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(traversalValue.category, equals(ScannedCodeCategory.qrExternal));
+      expect(traversalValue.internalResource, isNull);
+
+      final slashValue = BarcodeNormalizer.normalize(
+        rawValue: 'rewit://products/identifiers/EAN/123/456',
+        format: BarcodeFormat.qrCode,
+      );
+      expect(slashValue.category, equals(ScannedCodeCategory.qrExternal));
+      expect(slashValue.internalResource, isNull);
     });
 
     test('identifica QR Code HTTPS de domínio oficial rewit.app', () {
