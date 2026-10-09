@@ -243,21 +243,21 @@ class NotificationControllerIntegrationTest {
         notificationRepository.save(new Notification(
                 null, user.userId(), NotificationType.REVIEW_HELPFUL.name(),
                 "Avaliação útil", "Alguém achou útil", null,
-                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + reviewId1 + "\",\"reviewId\":\"" + reviewId1 + "\"}"
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + reviewId1 + "\"}"
         ));
 
-        // 2. NEW_DISCUSSION com reviewId e discussionId
+        // 2. NEW_DISCUSSION com reviewId (como referenceId) e discussionId raiz no metadata
         notificationRepository.save(new Notification(
                 null, user.userId(), NotificationType.NEW_DISCUSSION.name(),
                 "Nova discussão", "Novo comentário", null,
-                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + discussionId2 + "\",\"reviewId\":\"" + reviewId2 + "\",\"discussionId\":\"" + discussionId2 + "\"}"
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + reviewId2 + "\",\"discussionId\":\"" + discussionId2 + "\"}"
         ));
 
-        // 3. DISCUSSION_REPLY com reviewId e discussionId
+        // 3. DISCUSSION_REPLY com discussionId (como referenceId) e reviewId no metadata
         notificationRepository.save(new Notification(
                 null, user.userId(), NotificationType.DISCUSSION_REPLY.name(),
                 "Resposta", "Responderam você", null,
-                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + discussionId3 + "\",\"reviewId\":\"" + reviewId3 + "\",\"discussionId\":\"" + discussionId3 + "\"}"
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + discussionId3 + "\",\"reviewId\":\"" + reviewId3 + "\"}"
         ));
 
         // 4. Legacy sem reviewId/discussionId (e metadata nulo)

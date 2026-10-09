@@ -76,7 +76,7 @@ class NotificationControllerUnitTest {
                 ),
                 // 2: NEW_DISCUSSION - com reviewId e discussionId (raiz)
                 new NotificationView(
-                        UUID.randomUUID(), "NEW_DISCUSSION", actorId, discussionId2,
+                        UUID.randomUUID(), "NEW_DISCUSSION", actorId, reviewId2,
                         reviewId2, discussionId2, null, now
                 ),
                 // 3: DISCUSSION_REPLY - com reviewId e discussionId (resposta)
