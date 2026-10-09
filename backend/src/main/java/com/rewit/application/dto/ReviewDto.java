@@ -131,41 +131,7 @@ public final class ReviewDto {
              * review anônima sem que o id do autor seja exposto; a autorização continua no backend.
              */
             boolean isMine
-    ) {
-        public ReviewPublicView(
-                UUID id,
-                PublicAuthorView author,
-                UUID contextPlaceId,
-                String experienceText,
-                boolean isAnonymous,
-                boolean isVerifiedOnSite,
-                String visibility,
-                String status,
-                Instant createdAt,
-                Instant updatedAt,
-                List<ReviewTargetView> targets,
-                long helpfulCount,
-                boolean isHelpfulByMe
-        ) {
-            this(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite, visibility, status, createdAt, updatedAt, targets, helpfulCount, isHelpfulByMe, false);
-        }
-
-        public ReviewPublicView(
-                UUID id,
-                PublicAuthorView author,
-                UUID contextPlaceId,
-                String experienceText,
-                boolean isAnonymous,
-                boolean isVerifiedOnSite,
-                String visibility,
-                String status,
-                Instant createdAt,
-                Instant updatedAt,
-                List<ReviewTargetView> targets
-        ) {
-            this(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite, visibility, status, createdAt, updatedAt, targets, 0L, false, false);
-        }
-    }
+    ) {}
 
     public record ReviewView(
             UUID id,

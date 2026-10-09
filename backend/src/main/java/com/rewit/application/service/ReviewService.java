@@ -583,7 +583,9 @@ public class ReviewService {
                             review.getUpdatedAt(),
                             targetViews,
                             helpfulCount,
-                            isHelpfulByMe
+                            isHelpfulByMe,
+                            // Autoria contextual (autor real == requester), mesmo em review anônima; sem requester, false
+                            requesterUserId != null && requesterUserId.equals(review.getUserId())
                     );
                 })
                 .toList();
@@ -675,7 +677,9 @@ public class ReviewService {
                             review.getUpdatedAt(),
                             targetViews,
                             helpfulCount,
-                            isHelpfulByMe
+                            isHelpfulByMe,
+                            // Autoria contextual (autor real == requester), mesmo em review anônima; sem requester, false
+                            authenticatedUserId != null && authenticatedUserId.equals(review.getUserId())
                     );
                 })
                 .toList();
@@ -783,7 +787,9 @@ public class ReviewService {
                             review.getUpdatedAt(),
                             targetViews,
                             helpfulCount,
-                            isHelpfulByMe
+                            isHelpfulByMe,
+                            // Autoria contextual (autor real == requester), mesmo em review anônima; sem requester, false
+                            requesterUserId != null && requesterUserId.equals(review.getUserId())
                     );
                 })
                 .toList();

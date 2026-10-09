@@ -309,4 +309,25 @@ class ReviewFeedUnitTest {
         assertEquals(rFollowed.getId(), result.content().get(0).id());
         assertFalse(result.content().stream().anyMatch(r -> r.author().id() != null && r.author().id().equals(requesterUserId)));
     }
+
+    @Test
+    @DisplayName("isMine no feed: própria true, de terceiro false, própria anônima true sem author.id")
+    void feedComputesIsMinePerReview() {
+        Review mine = createReview(requesterUserId, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now());
+        Review thirdParty = createReview(followedUserA, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().minusSeconds(5));
+        Review mineAnonymous = createReview(requesterUserId, "PUBLIC", ReviewStatus.ACTIVE, true, Instant.now().minusSeconds(10));
+        when(reviewRepository.findFeedByFollowing(requesterUserId, 0, 10))
+                .thenReturn(PageResult.of(List.of(mine, thirdParty, mineAnonymous), 0, 10, 3));
+        when(profileRepository.findByUserIdIn(any())).thenReturn(List.of(
+                new Profile(UUID.randomUUID(), requesterUserId, "eu", "Eu", null, null),
+                new Profile(UUID.randomUUID(), followedUserA, "user_a", "User A", null, null)));
+
+        List<ReviewPublicView> views = reviewService.findFeed(requesterUserId, 0, 10, null).content();
+
+        assertTrue(views.get(0).isMine());
+        assertFalse(views.get(1).isMine());
+        assertEquals(followedUserA, views.get(1).author().id());
+        assertTrue(views.get(2).isMine());
+        assertNull(views.get(2).author().id(), "isMine não revela o autor da review anônima");
+    }
 }

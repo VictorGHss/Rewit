@@ -398,4 +398,77 @@ class ReviewListingUnitTest {
 
         assertFalse(reviewService.getReviewPublicView(reviewId, null).isMine());
     }
+
+    // -----------------------------------------------------------------------------------------------------------
+    // isMine contextual nas listagens
+    // -----------------------------------------------------------------------------------------------------------
+
+    private Review reviewBy(UUID authorId, boolean anonymous) {
+        return new Review(UUID.randomUUID(), authorId, null, "Texto", anonymous, false, ReviewStatus.ACTIVE, "PUBLIC",
+                null, null, null, Instant.now(), Instant.now());
+    }
+
+    private ReviewWithTarget onTarget(Review review) {
+        return new ReviewWithTarget(review, new ReviewTarget(UUID.randomUUID(), review.getId(), targetId,
+                new BigDecimal("4.0"), null));
+    }
+
+    @Test
+    @DisplayName("isMine por alvo: própria true, de outro autor false, própria anônima true sem author.id")
+    void targetListingComputesIsMinePerReview() {
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
+        Review mine = reviewBy(requesterUserId, false);
+        Review others = reviewBy(authorUserId, false);
+        Review mineAnonymous = reviewBy(requesterUserId, true);
+        when(reviewRepository.findByTarget(eq(targetId), eq(requesterUserId), eq(false), eq("newest"), eq(0), eq(10)))
+                .thenReturn(PageResult.of(List.of(onTarget(mine), onTarget(others), onTarget(mineAnonymous)), 0, 10, 3));
+        when(profileRepository.findByUserIdIn(any())).thenReturn(List.of(
+                new Profile(UUID.randomUUID(), requesterUserId, "eu", "Eu", null, null),
+                new Profile(UUID.randomUUID(), authorUserId, "outro", "Outro", null, null)));
+
+        List<ReviewPublicView> views = reviewService.findReviewsByTarget(targetId, 0, 10, "newest", false, requesterUserId)
+                .content();
+
+        assertTrue(views.get(0).isMine());
+        assertEquals(requesterUserId, views.get(0).author().id());
+        assertFalse(views.get(1).isMine());
+        assertEquals(authorUserId, views.get(1).author().id());
+        assertTrue(views.get(2).isMine(), "a própria review anônima é reconhecida pelo requester");
+        assertTrue(views.get(2).isAnonymous());
+        assertNull(views.get(2).author().id(), "isMine não revela o autor da review anônima");
+        assertNull(views.get(2).author().handle());
+    }
+
+    @Test
+    @DisplayName("isMine por alvo sem requester: false para todas, sem presumir autoria")
+    void targetListingWithoutRequesterIsNeverMine() {
+        when(rateableTargetRepository.existsPubliclyVisibleById(targetId)).thenReturn(true);
+        Review review = reviewBy(authorUserId, false);
+        when(reviewRepository.findByTarget(eq(targetId), isNull(), eq(false), eq("newest"), eq(0), eq(10)))
+                .thenReturn(PageResult.of(List.of(onTarget(review)), 0, 10, 1));
+
+        List<ReviewPublicView> views = reviewService.findReviewsByTarget(targetId, 0, 10, "newest", false, null).content();
+
+        assertFalse(views.getFirst().isMine());
+    }
+
+    @Test
+    @DisplayName("isMine em /me/reviews: true em todas, inclusive na anônima, que segue sem author.id")
+    void myReviewsAreAlwaysMine() {
+        Review publicReview = reviewBy(authorUserId, false);
+        Review anonymousReview = reviewBy(authorUserId, true);
+        when(reviewRepository.findByUserIdPaged(eq(authorUserId), eq(0), eq(10)))
+                .thenReturn(PageResult.of(List.of(publicReview, anonymousReview), 0, 10, 2));
+        when(reviewTargetRepository.findByReviewIdIn(any())).thenReturn(List.of());
+        when(profileRepository.findByUserId(authorUserId))
+                .thenReturn(Optional.of(new Profile(UUID.randomUUID(), authorUserId, "me_user", "Meu Nome", null, null)));
+
+        List<ReviewPublicView> views = reviewService.findMyReviews(authorUserId, 0, 10).content();
+
+        assertEquals(2, views.size());
+        assertTrue(views.get(0).isMine());
+        assertEquals(authorUserId, views.get(0).author().id());
+        assertTrue(views.get(1).isMine());
+        assertNull(views.get(1).author().id(), "a review anônima não expõe o autor nem para o próprio dono");
+    }
 }
