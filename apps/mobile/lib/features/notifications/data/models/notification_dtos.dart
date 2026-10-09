@@ -7,6 +7,8 @@ class NotificationDto {
   final String type;
   final String? actorId;
   final String? referenceId;
+  final String? reviewId;
+  final String? discussionId;
   final String? readAt;
   final String createdAt;
 
@@ -15,6 +17,8 @@ class NotificationDto {
     required this.type,
     this.actorId,
     this.referenceId,
+    this.reviewId,
+    this.discussionId,
     this.readAt,
     required this.createdAt,
   });
@@ -25,6 +29,8 @@ class NotificationDto {
       type: json['type'] as String,
       actorId: json['actorId'] as String?,
       referenceId: json['referenceId'] as String?,
+      reviewId: json['reviewId'] as String?,
+      discussionId: json['discussionId'] as String?,
       readAt: json['readAt'] as String?,
       createdAt: json['createdAt'] as String,
     );
@@ -36,6 +42,8 @@ class NotificationDto {
       'type': type,
       'actorId': actorId,
       'referenceId': referenceId,
+      'reviewId': reviewId,
+      'discussionId': discussionId,
       'readAt': readAt,
       'createdAt': createdAt,
     };
@@ -47,6 +55,8 @@ class NotificationDto {
       type: NotificationType.fromString(type),
       actorId: actorId,
       referenceId: referenceId,
+      reviewId: reviewId,
+      discussionId: discussionId,
       readAt: readAt != null ? DateTime.parse(readAt!) : null,
       createdAt: DateTime.parse(createdAt),
     );

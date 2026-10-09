@@ -11,6 +11,7 @@ import 'package:rewit_mobile/features/feed/presentation/state/feed_state.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
+import 'package:rewit_mobile/features/discussions/presentation/widgets/discussions_section.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 
@@ -695,6 +696,30 @@ void main() {
       // Voltou para a tela de detalhe com o texto atualizado
       expect(find.text('Texto editado e confirmado com sucesso!'), findsOneWidget);
       expect(find.text('Avaliação atualizada com sucesso!'), findsOneWidget);
+    });
+
+    testWidgets('ReviewDetailScreen repassa targetDiscussionId e isReplyTarget para DiscussionsSection (C5.12)', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: feedRepo.sampleReview,
+            targetDiscussionId: 'disc-target-1',
+            isReplyTarget: true,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            currentUserId: 'usr-1',
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      final discussionsSection = tester.widget<DiscussionsSection>(find.byType(DiscussionsSection));
+      expect(discussionsSection.targetDiscussionId, 'disc-target-1');
+      expect(discussionsSection.isReplyTarget, isTrue);
     });
   });
 }

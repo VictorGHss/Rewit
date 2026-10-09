@@ -226,4 +226,68 @@ class NotificationControllerIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("PAGE_SIZE_EXCEEDED"));
     }
+
+    @Test
+    @DisplayName("8. Deve expor reviewId e discussionId conforme o tipo e metadados da notificação (C5.12)")
+    void shouldExposeReviewIdAndDiscussionIdInNotificationResponse() throws Exception {
+        TestUser user = registerUser("notif_context");
+
+        UUID actorId = UUID.randomUUID();
+        UUID reviewId1 = UUID.randomUUID();
+        UUID reviewId2 = UUID.randomUUID();
+        UUID reviewId3 = UUID.randomUUID();
+        UUID discussionId2 = UUID.randomUUID();
+        UUID discussionId3 = UUID.randomUUID();
+
+        // 1. REVIEW_HELPFUL com reviewId
+        notificationRepository.save(new Notification(
+                null, user.userId(), NotificationType.REVIEW_HELPFUL.name(),
+                "Avaliação útil", "Alguém achou útil", null,
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + reviewId1 + "\",\"reviewId\":\"" + reviewId1 + "\"}"
+        ));
+
+        // 2. NEW_DISCUSSION com reviewId e discussionId
+        notificationRepository.save(new Notification(
+                null, user.userId(), NotificationType.NEW_DISCUSSION.name(),
+                "Nova discussão", "Novo comentário", null,
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + discussionId2 + "\",\"reviewId\":\"" + reviewId2 + "\",\"discussionId\":\"" + discussionId2 + "\"}"
+        ));
+
+        // 3. DISCUSSION_REPLY com reviewId e discussionId
+        notificationRepository.save(new Notification(
+                null, user.userId(), NotificationType.DISCUSSION_REPLY.name(),
+                "Resposta", "Responderam você", null,
+                "{\"actorId\":\"" + actorId + "\",\"referenceId\":\"" + discussionId3 + "\",\"reviewId\":\"" + reviewId3 + "\",\"discussionId\":\"" + discussionId3 + "\"}"
+        ));
+
+        // 4. Legacy sem reviewId/discussionId (e metadata nulo)
+        notificationRepository.save(new Notification(
+                null, user.userId(), NotificationType.NEW_FOLLOWER.name(),
+                "Legado", "Sem metadata", null, null
+        ));
+
+        mockMvc.perform(get("/api/v1/me/notifications")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.accessToken())
+                        .param("page", "0")
+                        .param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                // Notificações vêm ordenadas por createdAt DESC:
+                // [0]: Legacy NEW_FOLLOWER
+                .andExpect(jsonPath("$.content[0].type").value("NEW_FOLLOWER"))
+                .andExpect(jsonPath("$.content[0].reviewId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].discussionId").doesNotExist())
+                // [1]: DISCUSSION_REPLY
+                .andExpect(jsonPath("$.content[1].type").value("DISCUSSION_REPLY"))
+                .andExpect(jsonPath("$.content[1].reviewId").value(reviewId3.toString()))
+                .andExpect(jsonPath("$.content[1].discussionId").value(discussionId3.toString()))
+                // [2]: NEW_DISCUSSION
+                .andExpect(jsonPath("$.content[2].type").value("NEW_DISCUSSION"))
+                .andExpect(jsonPath("$.content[2].reviewId").value(reviewId2.toString()))
+                .andExpect(jsonPath("$.content[2].discussionId").value(discussionId2.toString()))
+                // [3]: REVIEW_HELPFUL
+                .andExpect(jsonPath("$.content[3].type").value("REVIEW_HELPFUL"))
+                .andExpect(jsonPath("$.content[3].reviewId").value(reviewId1.toString()))
+                .andExpect(jsonPath("$.content[3].discussionId").doesNotExist());
+    }
 }

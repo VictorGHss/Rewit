@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
@@ -13,12 +14,16 @@ class DiscussionsSection extends StatefulWidget {
   final String reviewId;
   final DiscussionNotifier notifier;
   final void Function(String authorId)? onAuthorTap;
+  final String? targetDiscussionId;
+  final bool isReplyTarget;
 
   const DiscussionsSection({
     super.key,
     required this.reviewId,
     required this.notifier,
     this.onAuthorTap,
+    this.targetDiscussionId,
+    this.isReplyTarget = false,
   });
 
   @override
@@ -28,13 +33,83 @@ class DiscussionsSection extends StatefulWidget {
 class _DiscussionsSectionState extends State<DiscussionsSection> {
   String? _replyingToAuthorName;
   String? _replyingToParentId;
+  String? _highlightedDiscussionId;
+  Timer? _highlightTimer;
+  bool _hasHandledTarget = false;
+  final Map<String, GlobalKey> _itemKeys = {};
 
   @override
   void initState() {
     super.initState();
+    widget.notifier.addListener(_checkAndHighlightTarget);
     if (widget.notifier.state is DiscussionInitial) {
       widget.notifier.loadDiscussions(widget.reviewId);
+    } else if (widget.notifier.state is DiscussionLoaded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkAndHighlightTarget());
     }
+  }
+
+  @override
+  void didUpdateWidget(DiscussionsSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.notifier != widget.notifier) {
+      oldWidget.notifier.removeListener(_checkAndHighlightTarget);
+      widget.notifier.addListener(_checkAndHighlightTarget);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.notifier.removeListener(_checkAndHighlightTarget);
+    _highlightTimer?.cancel();
+    super.dispose();
+  }
+
+  void _checkAndHighlightTarget() {
+    if (_hasHandledTarget || widget.targetDiscussionId == null) return;
+    final state = widget.notifier.state;
+    if (state is! DiscussionLoaded) return;
+
+    final targetId = widget.targetDiscussionId!;
+    final bool found;
+    if (widget.isReplyTarget) {
+      found = state.threads.any((t) => t.replies.any((r) => r.id == targetId)) ||
+          state.threads.any((t) => t.id == targetId);
+    } else {
+      found = state.threads.any((t) => t.id == targetId);
+    }
+
+    _hasHandledTarget = true;
+    if (found) {
+      if (mounted) {
+        setState(() {
+          _highlightedDiscussionId = targetId;
+        });
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final key = _itemKeys[targetId];
+        if (key?.currentContext != null) {
+          Scrollable.ensureVisible(
+            key!.currentContext!,
+            duration: const Duration(milliseconds: 300),
+            alignment: 0.1,
+          );
+        }
+        _highlightTimer?.cancel();
+        _highlightTimer = Timer(const Duration(seconds: 2), () {
+          if (mounted) {
+            setState(() {
+              _highlightedDiscussionId = null;
+            });
+          }
+        });
+      });
+    }
+  }
+
+  GlobalKey _getKeyFor(String id) {
+    return _itemKeys.putIfAbsent(id, () => GlobalKey());
   }
 
   void _startReply(DiscussionThread thread) {
@@ -224,6 +299,8 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
                       widget.notifier.loadMoreReplies(thread.id);
                     },
                     onAuthorTap: widget.onAuthorTap,
+                    highlightedDiscussionId: _highlightedDiscussionId,
+                    keyProvider: _getKeyFor,
                   );
                 },
               ),

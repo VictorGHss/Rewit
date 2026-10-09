@@ -70,24 +70,49 @@ void main() {
         'id': 'notif-3',
         'type': 'NEW_DISCUSSION',
         'actorId': 'user-20',
-        'referenceId': 'review-99',
+        'referenceId': 'disc-root-1',
+        'reviewId': 'review-99',
+        'discussionId': 'disc-root-1',
         'readAt': null,
         'createdAt': '2026-10-08T10:10:00Z',
       };
       final entityDiscussion = NotificationDto.fromJson(jsonDiscussion).toEntity();
       expect(entityDiscussion.type, NotificationType.newDiscussion);
+      expect(entityDiscussion.reviewId, 'review-99');
+      expect(entityDiscussion.discussionId, 'disc-root-1');
 
       final jsonReply = {
         'id': 'notif-4',
         'type': 'DISCUSSION_REPLY',
         'actorId': 'user-30',
         'referenceId': 'reply-55',
+        'reviewId': 'review-99',
+        'discussionId': 'reply-55',
         'readAt': null,
         'createdAt': '2026-10-08T10:15:00Z',
       };
       final entityReply = NotificationDto.fromJson(jsonReply).toEntity();
       expect(entityReply.type, NotificationType.discussionReply);
       expect(entityReply.referenceId, 'reply-55');
+      expect(entityReply.reviewId, 'review-99');
+      expect(entityReply.discussionId, 'reply-55');
+    });
+
+    test('NotificationDto preserva compatibilidade retroativa com payloads legados sem reviewId e discussionId', () {
+      final legacyJson = {
+        'id': 'notif-legacy',
+        'type': 'DISCUSSION_REPLY',
+        'actorId': 'user-30',
+        'referenceId': 'reply-55',
+        'readAt': null,
+        'createdAt': '2026-10-08T10:15:00Z',
+      };
+      final dto = NotificationDto.fromJson(legacyJson);
+      final entity = dto.toEntity();
+      expect(entity.id, 'notif-legacy');
+      expect(entity.reviewId, isNull);
+      expect(entity.discussionId, isNull);
+      expect(entity.referenceId, 'reply-55');
     });
 
     test('NotificationsPageDto deserializa paginação completa', () {

@@ -5,6 +5,7 @@ import 'package:rewit_mobile/features/discussions/domain/entities/discussion_ent
 class DiscussionItemWidget extends StatelessWidget {
   final DiscussionItem item;
   final bool isRoot;
+  final bool isHighlighted;
   final VoidCallback? onReply;
   final VoidCallback? onDelete;
   final VoidCallback? onReport;
@@ -14,6 +15,7 @@ class DiscussionItemWidget extends StatelessWidget {
     super.key,
     required this.item,
     this.isRoot = false,
+    this.isHighlighted = false,
     this.onReply,
     this.onDelete,
     this.onReport,
@@ -73,18 +75,25 @@ class DiscussionItemWidget extends StatelessWidget {
           ? 'Comentário de $displayName em análise pela moderação.'
           : 'Comentário de $displayName: ${item.content ?? ""}',
       container: true,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: item.isPendingReview
               ? Colors.amber.shade50.withAlpha(120)
-              : theme.colorScheme.surface,
+              : isHighlighted
+                  ? theme.colorScheme.primaryContainer.withAlpha(90)
+                  : theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: item.isPendingReview
                 ? Colors.amber.shade300
-                : theme.colorScheme.outlineVariant.withAlpha(60),
+                : isHighlighted
+                    ? theme.colorScheme.primary.withAlpha(160)
+                    : theme.colorScheme.outlineVariant.withAlpha(60),
+            width: isHighlighted ? 1.5 : 1.0,
           ),
         ),
         child: Column(

@@ -153,7 +153,22 @@ class AppRouter {
         final currentUserId = (authNotifier.state is Authenticated)
             ? (authNotifier.state as Authenticated).user.id
             : null;
-        if (args is FeedReview) {
+        if (args is ReviewDetailArgs) {
+          return MaterialPageRoute(
+            builder: (context) => ReviewDetailScreen(
+              reviewId: args.reviewId,
+              initialReview: args.initialReview,
+              targetDiscussionId: args.targetDiscussionId,
+              isReplyTarget: args.isReplyTarget,
+              feedRepository: feedRepository,
+              mediaRepository: reviewMediaRepository,
+              discussionRepository: discussionRepository,
+              feedNotifier: feedNotifier,
+              currentUserId: currentUserId,
+            ),
+            settings: settings,
+          );
+        } else if (args is FeedReview) {
           return MaterialPageRoute(
             builder: (context) => ReviewDetailScreen(
               reviewId: args.id,

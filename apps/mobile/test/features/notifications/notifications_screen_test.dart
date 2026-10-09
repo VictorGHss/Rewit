@@ -7,6 +7,7 @@ import 'package:rewit_mobile/features/notifications/domain/entities/notification
 import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
 import 'package:rewit_mobile/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:rewit_mobile/features/notifications/presentation/state/notifications_notifier.dart';
+import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 
 class _FakeNotificationRepository implements NotificationRepository {
   List<InAppNotification> notificationsToReturn = [];
@@ -71,6 +72,7 @@ void main() {
       id: 'notif-2',
       type: NotificationType.reviewHelpful,
       referenceId: 'review-100',
+      reviewId: 'review-100',
       readAt: null,
       createdAt: DateTime.now().subtract(const Duration(hours: 1)),
     );
@@ -80,6 +82,8 @@ void main() {
       type: NotificationType.newDiscussion,
       actorId: 'user-99',
       referenceId: 'review-100',
+      reviewId: 'review-100',
+      discussionId: 'disc-1',
       readAt: DateTime.now().subtract(const Duration(days: 1)),
       createdAt: DateTime.now().subtract(const Duration(days: 1)),
     );
@@ -89,6 +93,17 @@ void main() {
       type: NotificationType.discussionReply,
       actorId: 'user-101',
       referenceId: 'reply-50',
+      readAt: null,
+      createdAt: DateTime.now().subtract(const Duration(minutes: 2)),
+    );
+
+    final notifReplyWithContext = InAppNotification(
+      id: 'notif-5',
+      type: NotificationType.discussionReply,
+      actorId: 'user-101',
+      referenceId: 'reply-50',
+      reviewId: 'review-100',
+      discussionId: 'reply-50',
       readAt: null,
       createdAt: DateTime.now().subtract(const Duration(minutes: 2)),
     );
@@ -110,9 +125,11 @@ void main() {
                 );
               }
               if (settings.name == AppRouter.reviewDetail) {
+                final args = settings.arguments;
+                final text = args is ReviewDetailArgs ? args.reviewId : args;
                 return MaterialPageRoute(
                   builder: (context) => Scaffold(
-                    body: Text('Review: ${settings.arguments}'),
+                    body: Text('Review: $text'),
                   ),
                 );
               }
@@ -237,20 +254,64 @@ void main() {
       expect(fakeRepo.markedReadIds, contains('notif-2'));
     });
 
-    testWidgets('clicar em notificação de discussão navega para Review Detail', (tester) async {
+    testWidgets('clicar em notificação de discussão navega para Review Detail com ReviewDetailArgs contextual', (tester) async {
+      ReviewDetailArgs? capturedArgs;
       fakeRepo.notificationsToReturn = [notifDiscussion];
       fakeRepo.unreadCountToReturn = 0;
 
-      await tester.pumpWidget(createTestWidget());
+      await tester.pumpWidget(createTestWidget(
+        onGenerateRoute: (settings) {
+          if (settings.name == AppRouter.reviewDetail) {
+            capturedArgs = settings.arguments as ReviewDetailArgs?;
+            return MaterialPageRoute(
+              builder: (context) => Scaffold(body: Text('Review: ${capturedArgs?.reviewId}')),
+            );
+          }
+          return null;
+        },
+      ));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Nova discussão'));
       await tester.pumpAndSettle();
 
       expect(find.text('Review: review-100'), findsOneWidget);
+      expect(capturedArgs, isNotNull);
+      expect(capturedArgs!.reviewId, 'review-100');
+      expect(capturedArgs!.targetDiscussionId, 'disc-1');
+      expect(capturedArgs!.isReplyTarget, isFalse);
     });
 
-    testWidgets('clicar em notificação de resposta marca como lida e exibe aviso informativo sem quebrar', (tester) async {
+    testWidgets('clicar em notificação de resposta com reviewId navega para Review Detail com ReviewDetailArgs de resposta', (tester) async {
+      ReviewDetailArgs? capturedArgs;
+      fakeRepo.notificationsToReturn = [notifReplyWithContext];
+      fakeRepo.unreadCountToReturn = 1;
+
+      await tester.pumpWidget(createTestWidget(
+        onGenerateRoute: (settings) {
+          if (settings.name == AppRouter.reviewDetail) {
+            capturedArgs = settings.arguments as ReviewDetailArgs?;
+            return MaterialPageRoute(
+              builder: (context) => Scaffold(body: Text('Review: ${capturedArgs?.reviewId}')),
+            );
+          }
+          return null;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Resposta em discussão'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Review: review-100'), findsOneWidget);
+      expect(capturedArgs, isNotNull);
+      expect(capturedArgs!.reviewId, 'review-100');
+      expect(capturedArgs!.targetDiscussionId, 'reply-50');
+      expect(capturedArgs!.isReplyTarget, isTrue);
+      expect(fakeRepo.markedReadIds, contains('notif-5'));
+    });
+
+    testWidgets('clicar em notificação de resposta legada (sem reviewId) exibe aviso amigável', (tester) async {
       fakeRepo.notificationsToReturn = [notifReply];
       fakeRepo.unreadCountToReturn = 1;
 

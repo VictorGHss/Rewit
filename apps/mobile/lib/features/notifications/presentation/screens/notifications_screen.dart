@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 import '../../domain/entities/in_app_notification.dart';
@@ -95,27 +96,50 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         break;
 
       case NotificationType.reviewHelpful:
-      case NotificationType.newDiscussion:
-        final reviewId = item.referenceId;
+        final reviewId = item.reviewId ?? item.referenceId;
         if (reviewId != null && reviewId.isNotEmpty) {
           Navigator.of(context).pushNamed(
             AppRouter.reviewDetail,
-            arguments: reviewId,
+            arguments: ReviewDetailArgs(reviewId: reviewId),
+          );
+        }
+        break;
+
+      case NotificationType.newDiscussion:
+        final reviewId = item.reviewId ?? item.referenceId;
+        if (reviewId != null && reviewId.isNotEmpty) {
+          Navigator.of(context).pushNamed(
+            AppRouter.reviewDetail,
+            arguments: ReviewDetailArgs(
+              reviewId: reviewId,
+              targetDiscussionId: item.discussionId,
+              isReplyTarget: false,
+            ),
           );
         }
         break;
 
       case NotificationType.discussionReply:
-        // O contrato backend fornece referenceId como o ID da resposta/tópico,
-        // não como o ID da review raiz. Para não quebrar o contrato REST
-        // nem inventar parâmetros inexistentes, a notificação é marcada como lida
-        // e um aviso informativo amigável é exibido ao usuário.
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Notificação de resposta em discussão marcada como lida.'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        final reviewId = item.reviewId;
+        final targetDiscussionId = item.discussionId ?? item.referenceId;
+        if (reviewId != null && reviewId.isNotEmpty) {
+          Navigator.of(context).pushNamed(
+            AppRouter.reviewDetail,
+            arguments: ReviewDetailArgs(
+              reviewId: reviewId,
+              targetDiscussionId: targetDiscussionId,
+              isReplyTarget: true,
+            ),
+          );
+        } else {
+          // Fallback seguro para notificações legadas sem reviewId associado
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Notificação de resposta em discussão marcada como lida.'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
         break;
     }
   }

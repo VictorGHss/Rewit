@@ -40,6 +40,8 @@ class InAppNotification {
   final NotificationType type;
   final String? actorId;
   final String? referenceId;
+  final String? reviewId;
+  final String? discussionId;
   final DateTime? readAt;
   final DateTime createdAt;
 
@@ -48,6 +50,8 @@ class InAppNotification {
     required this.type,
     this.actorId,
     this.referenceId,
+    this.reviewId,
+    this.discussionId,
     this.readAt,
     required this.createdAt,
   });
@@ -59,6 +63,8 @@ class InAppNotification {
     NotificationType? type,
     String? actorId,
     String? referenceId,
+    String? reviewId,
+    String? discussionId,
     DateTime? readAt,
     DateTime? createdAt,
     bool clearReadAt = false,
@@ -68,6 +74,8 @@ class InAppNotification {
       type: type ?? this.type,
       actorId: actorId ?? this.actorId,
       referenceId: referenceId ?? this.referenceId,
+      reviewId: reviewId ?? this.reviewId,
+      discussionId: discussionId ?? this.discussionId,
       readAt: clearReadAt ? null : (readAt ?? this.readAt),
       createdAt: createdAt ?? this.createdAt,
     );
@@ -82,6 +90,8 @@ class InAppNotification {
           type == other.type &&
           actorId == other.actorId &&
           referenceId == other.referenceId &&
+          reviewId == other.reviewId &&
+          discussionId == other.discussionId &&
           readAt == other.readAt &&
           createdAt == other.createdAt;
 
@@ -91,6 +101,8 @@ class InAppNotification {
       type.hashCode ^
       actorId.hashCode ^
       referenceId.hashCode ^
+      reviewId.hashCode ^
+      discussionId.hashCode ^
       readAt.hashCode ^
       createdAt.hashCode;
 }

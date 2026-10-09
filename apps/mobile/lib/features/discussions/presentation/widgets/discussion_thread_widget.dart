@@ -11,6 +11,8 @@ class DiscussionThreadWidget extends StatelessWidget {
   final VoidCallback? onLoadMoreReplies;
   final bool isLoadingReplies;
   final void Function(String authorId)? onAuthorTap;
+  final String? highlightedDiscussionId;
+  final GlobalKey? Function(String id)? keyProvider;
 
   const DiscussionThreadWidget({
     super.key,
@@ -21,6 +23,8 @@ class DiscussionThreadWidget extends StatelessWidget {
     this.onLoadMoreReplies,
     this.isLoadingReplies = false,
     this.onAuthorTap,
+    this.highlightedDiscussionId,
+    this.keyProvider,
   });
 
   DiscussionItem _rootAsItem() {
@@ -52,8 +56,10 @@ class DiscussionThreadWidget extends StatelessWidget {
       children: [
         // Comentário raiz
         DiscussionItemWidget(
+          key: keyProvider?.call(rootItem.id),
           item: rootItem,
           isRoot: true,
+          isHighlighted: highlightedDiscussionId == rootItem.id,
           onReply: thread.canReply && onReply != null ? () => onReply!(thread) : null,
           onDelete: thread.canDelete && onDelete != null ? () => onDelete!(rootItem) : null,
           onReport: thread.isVisible && onReport != null ? () => onReport!(rootItem) : null,
@@ -80,8 +86,10 @@ class DiscussionThreadWidget extends StatelessWidget {
                   // Respostas carregadas
                   ...thread.replies.map((reply) {
                     return DiscussionItemWidget(
+                      key: keyProvider?.call(reply.id),
                       item: reply,
                       isRoot: false,
+                      isHighlighted: highlightedDiscussionId == reply.id,
                       // 1 nível de nesting estrito: não há resposta para respostas
                       onReply: null,
                       onDelete: reply.canDelete && onDelete != null ? () => onDelete!(reply) : null,
