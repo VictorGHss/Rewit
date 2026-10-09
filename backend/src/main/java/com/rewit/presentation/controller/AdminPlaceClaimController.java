@@ -67,8 +67,8 @@ public class AdminPlaceClaimController {
             @RequestParam(name = "size", defaultValue = "20") int size,
             Authentication authentication
     ) {
-        extractAuthenticatedUserId(authentication);
-        PageResult<PlaceClaimView> pageResult = queryAdminPlaceClaimsUseCase.execute(page, size, status);
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
+        PageResult<PlaceClaimView> pageResult = queryAdminPlaceClaimsUseCase.execute(actorUserId, page, size, status);
 
         List<PlaceClaimResponse> content = pageResult.content().stream()
                 .map(PlaceClaimResponse::fromView)

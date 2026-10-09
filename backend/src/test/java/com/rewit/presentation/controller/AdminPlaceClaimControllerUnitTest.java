@@ -80,7 +80,7 @@ class AdminPlaceClaimControllerUnitTest {
         );
 
         PageResult<PlaceClaimView> pageResult = new PageResult<>(List.of(view), 0, 20, 1, 1, true);
-        when(queryAdminPlaceClaimsUseCase.execute(0, 20, PlaceClaimStatus.PENDING)).thenReturn(pageResult);
+        when(queryAdminPlaceClaimsUseCase.execute(moderatorId, 0, 20, PlaceClaimStatus.PENDING)).thenReturn(pageResult);
 
         mockMvc.perform(get("/api/v1/admin/place-claims")
                         .principal(authentication)
@@ -98,7 +98,7 @@ class AdminPlaceClaimControllerUnitTest {
                 .andExpect(jsonPath("$.pageNumber").value(0))
                 .andExpect(jsonPath("$.pageSize").value(20));
 
-        verify(queryAdminPlaceClaimsUseCase).execute(0, 20, PlaceClaimStatus.PENDING);
+        verify(queryAdminPlaceClaimsUseCase).execute(moderatorId, 0, 20, PlaceClaimStatus.PENDING);
     }
 
     @Test

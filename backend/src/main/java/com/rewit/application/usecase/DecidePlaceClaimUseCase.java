@@ -4,11 +4,9 @@ import com.rewit.application.dto.business.BusinessDtos.PlaceClaimView;
 import com.rewit.application.port.BusinessAccountRepository;
 import com.rewit.application.port.PlaceClaimRequestRepository;
 import com.rewit.application.port.PlaceRepository;
-import com.rewit.application.port.UserRepository;
-import com.rewit.application.service.AccountStatusPolicy;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.PlaceClaimDecision;
-import com.rewit.domain.enums.Role;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceClaimRequest;
@@ -40,21 +38,18 @@ public class DecidePlaceClaimUseCase {
     private final PlaceClaimRequestRepository placeClaimRequestRepository;
     private final PlaceRepository placeRepository;
     private final BusinessAccountRepository businessAccountRepository;
-    private final UserRepository userRepository;
-    private final AccountStatusPolicy accountStatusPolicy;
+    private final ModeratorRolePolicy moderatorRolePolicy;
 
     public DecidePlaceClaimUseCase(PlaceClaimRequestRepository placeClaimRequestRepository,
                                    PlaceRepository placeRepository,
                                    BusinessAccountRepository businessAccountRepository,
-                                   UserRepository userRepository,
-                                   AccountStatusPolicy accountStatusPolicy) {
+                                   ModeratorRolePolicy moderatorRolePolicy) {
         this.placeClaimRequestRepository = Objects.requireNonNull(placeClaimRequestRepository,
                 "PlaceClaimRequestRepository must not be null");
         this.placeRepository = Objects.requireNonNull(placeRepository, "PlaceRepository must not be null");
         this.businessAccountRepository = Objects.requireNonNull(businessAccountRepository,
                 "BusinessAccountRepository must not be null");
-        this.userRepository = Objects.requireNonNull(userRepository, "UserRepository must not be null");
-        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
     }
 
     @Transactional
@@ -73,14 +68,7 @@ public class DecidePlaceClaimUseCase {
         Instant decidedAt = now != null ? now : Instant.now();
 
         // Estado e role atuais: o JWT pode ser anterior a uma desativação ou mudança de role
-        accountStatusPolicy.requireOperational(actorUserId);
-        boolean moderator = userRepository.findById(actorUserId)
-                .map(user -> user.getRole() == Role.MODERATOR || user.getRole() == Role.ADMIN)
-                .orElse(false);
-        if (!moderator) {
-            throw new BusinessException("Apenas moderadores e administradores decidem reivindicações", HttpStatus.FORBIDDEN,
-                    "FORBIDDEN");
-        }
+        moderatorRolePolicy.requireCurrentModerator(actorUserId);
 
         PlaceClaimRequest unlocked = placeClaimRequestRepository.findById(claimId)
                 .orElseThrow(DecidePlaceClaimUseCase::claimNotFound);

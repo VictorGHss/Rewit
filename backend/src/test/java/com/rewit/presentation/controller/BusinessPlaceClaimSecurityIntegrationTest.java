@@ -219,6 +219,35 @@ class BusinessPlaceClaimSecurityIntegrationTest {
     }
 
     @Test
+    @DisplayName("MODERATOR rebaixado a USER: o token antigo passa pelo @PreAuthorize, mas fila e decisão recusam com 403")
+    void demotedModeratorWithOldTokenIsRejected() throws Exception {
+        TestUser owner = registerUser("sec_demote_owner");
+        UUID claimId = requestClaim(owner, createAccount(owner), place());
+        TestUser moderator = withRole(registerUser("sec_demoted"), "MODERATOR");
+
+        // Token válido e role atual MODERATOR: a fila responde
+        assertTrue(pendingQueueIds(moderator).contains(claimId.toString()));
+
+        // Rebaixado no banco; o token continua dizendo MODERATOR
+        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.id());
+
+        // A autoridade do token ainda satisfaz o @PreAuthorize; a recusa vem da revalidação da role atual no caso de
+        // uso: 403 com o ProblemDetail das regras de negócio (o @PreAuthorize responderia 403 sem corpo)
+        mockMvc.perform(withToken(get("/api/v1/admin/place-claims").param("status", "PENDING"), moderator))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.content").doesNotExist());
+        mockMvc.perform(withToken(decision(claimId), moderator))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        assertEquals("PENDING", claimStatus(claimId), "a decisão não foi aplicada");
+
+        // Restabelecida a role no banco, o mesmo token volta a consultar: a recusa acima era só a revalidação
+        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.id());
+        assertTrue(pendingQueueIds(moderator).contains(claimId.toString()));
+    }
+
+    @Test
     @DisplayName("MODERATOR também usa as rotas comuns de conta comercial com a própria identidade")
     void moderatorReachesBusinessRoutes() throws Exception {
         TestUser moderator = withRole(registerUser("sec_mod_business"), "MODERATOR");

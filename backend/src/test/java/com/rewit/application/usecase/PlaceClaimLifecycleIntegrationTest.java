@@ -392,14 +392,17 @@ class PlaceClaimLifecycleIntegrationTest {
         assertCode("BUSINESS_ACCOUNT_NOT_FOUND", 404,
                 () -> listBusinessPlaceClaims.execute(otherOwner, account.id(), null, 0, 10));
         assertCode("INVALID_PAGE_SIZE", 400, () -> listBusinessPlaceClaims.execute(owner, account.id(), null, 0, 51));
-        assertCode("INVALID_PAGE", 400, () -> queryAdminPlaceClaims.execute(-1, 10, null));
+        UUID queueModerator = moderator("list_queue_mod");
+        assertCode("INVALID_PAGE", 400, () -> queryAdminPlaceClaims.execute(queueModerator, -1, 10, null));
+        // A fila revalida a role atual: quem não é MODERATOR/ADMIN no banco não a consulta
+        assertCode("FORBIDDEN", 403, () -> queryAdminPlaceClaims.execute(owner, 0, 10, null));
 
         // Fila administrativa: pendentes, mais antigas primeiro, com conta e local
         List<UUID> queue = new ArrayList<>();
         int page = 0;
         PageResult<PlaceClaimView> slice;
         do {
-            slice = queryAdminPlaceClaims.execute(page++, 50, PlaceClaimStatus.PENDING);
+            slice = queryAdminPlaceClaims.execute(queueModerator, page++, 50, PlaceClaimStatus.PENDING);
             slice.content().forEach(view -> {
                 assertEquals(PlaceClaimStatus.PENDING, view.status());
                 queue.add(view.id());
