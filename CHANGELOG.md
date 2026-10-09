@@ -24,6 +24,11 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
   - Leitura óptica de códigos de barras (EAN/UPC) e QR Codes com validação restritiva de tipos permitidos e tratamento de ciclo de vida e permissões de câmera.
 - **Discussões e Notificações Contextuais**:
   - Exposição de `rootDiscussionId` nas respostas de notificação para navegação direta e precisa.
+- **Contas Comerciais e Reivindicação de Locais (`C9`)**:
+  - **APIs REST de Apresentação (`backend`)**: Endpoints de cadastro e consulta de contas comerciais (`/api/v1/business-accounts`), solicitação e histórico de reivindicações (`/api/v1/business-accounts/{id}/place-claims`) e fila de análise e decisão administrativa (`/api/v1/admin/place-claims`) para `MODERATOR`/`ADMIN`.
+  - **Painel Administrativo Web (`apps/admin`)**: Aba "Reivindicações" com tabela paginada de solicitações, filtros por status (`PENDING`, `APPROVED`, `REJECTED`), visualização dos dados da empresa solicitante e local, e modal de decisão auditado com justificativa obrigatória (15 a 1.000 caracteres) e diálogo de confirmação.
+  - **Aplicativo Mobile (`apps/mobile`)**: Área "Minhas empresas" com listagem de contas comerciais e suas reivindicações de local, bottom sheet para criação de conta com validação de razão social e documento fiscal, e fluxo de reivindicação integrado à tela de detalhes de locais (`PlaceDetailScreen`) com seleção de conta, validação de evidência (20 a 1.000 caracteres) e tratamento amigável de erros.
+  - **Privacidade e Segurança**: Minimização de dados estrita, garantindo que documentos fiscais e evidências nunca sejam expostos fora da própria conta e da moderação, e que nenhuma resposta HTTP vaze identificadores de proprietários ou moderadores.
 
 ### Removido
 - Abas e referências a funcionalidades não implementadas no painel administrativo ("Locais (Fase 2)", "Catálogo Global", "Empresas & Contas").

@@ -208,9 +208,16 @@ flutter run
   - Execução de ações formais de moderação auditadas (`REMOVE_REVIEW`, `RESTORE_REVIEW`, `REMOVE_DISCUSSION`, `RESTORE_DISCUSSION`) com justificativa obrigatória (15 a 1.000 caracteres) e diálogo de confirmação;
   - Proteção integral de privacidade, sem expor IDs de autores ou denunciantes.
 
+- **Contas Comerciais e Reivindicação de Locais (Fase 2 / C9)**:
+  - APIs REST para abertura de contas comerciais (`/api/v1/business-accounts`), listagem de contas do usuário logado e submissão de solicitações de reivindicação de locais físicos;
+  - Fila administrativa de reivindicações (`/api/v1/admin/place-claims`) para análise e decisão (`APPROVE` / `REJECT`) por moderadores e administradores;
+  - Experiência mobile para administradores em "Minhas empresas", com acompanhamento de status e solicitação direta na tela de detalhes de locais;
+  - Painel administrativo web com fila de triagem de solicitações, filtros por status e modal de decisão auditado com justificativa obrigatória;
+  - Preservação estrita de privacidade: dados fiscais e evidências restritos ao proprietário e à moderação, sem exposição de identificadores internos de usuários.
+
 ### 7.2 Funcionalidades Planejadas (Fases Futuras)
 
-- Reivindicação e gestão de estabelecimentos por proprietários (Fase 2);
+- Gestão avançada de estabelecimentos e respostas a avaliações por proprietários verificados (Fase 2);
 - Catálogo global e curadoria de marcas e produtos (Fase 2);
 - Perfis corporativos, métricas comerciais e anúncios patrocinados (Fase 3);
 - Microserviço autônomo de visão computacional em Python com embeddings visuais (`services/vision`).
