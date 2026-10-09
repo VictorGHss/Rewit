@@ -16,15 +16,17 @@ export type DiscussionStatus = 'ACTIVE' | 'UNDER_REVIEW' | 'REMOVED';
 
 export type ReviewStatus = 'ACTIVE' | 'UNDER_REVIEW' | 'REMOVED';
 
+export type TargetType = 'PLACE' | 'PRODUCT' | 'SERVICE';
+
 // ---------------------------------------------------------------------------
-// Denúncias de Avaliações (Review Reports)
+// Denúncias de Avaliações (Review Reports - Listagem)
 // ---------------------------------------------------------------------------
 
 export interface AdminReportResponse {
   id: string;
   reviewId: string;
   reviewAuthorUserId?: string; // Não exibir na interface
-  reviewStatus?: string;
+  reviewStatus?: ReviewStatus;
   reporterUserId?: string; // Não exibir na interface
   reason: ReportReason;
   detail?: string;
@@ -33,46 +35,52 @@ export interface AdminReportResponse {
   updatedAt?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Contexto de Moderação de Avaliação (GET /admin/reviews/{reviewId}/context)
+// ---------------------------------------------------------------------------
+
 export interface ReviewTarget {
-  id?: string;
   targetId: string;
+  type: TargetType | null;
+  displayName: string | null;
   rating: number;
   specificComment?: string | null;
-  comment?: string | null;
-  createdAt?: string;
 }
 
 export interface ReviewContextData {
   id: string;
   experienceText: string;
-  status: string;
+  status: ReviewStatus;
   visibility: string;
   isAnonymous: boolean;
   isVerifiedOnSite: boolean;
   createdAt: string;
   updatedAt?: string;
-  contextPlaceId?: string | null;
   targets: ReviewTarget[];
 }
 
-export interface ReviewAuditLogEntry {
+export interface ReviewContextReportEntry {
   id: string;
-  moderatorUserId?: string;
+  reason: ReportReason;
+  detail?: string;
+  status: ReportStatus;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface ReviewAuditLogEntry {
   action: ModerationAction;
   reasonCode: string;
   justification: string;
-  previousStatus?: string;
-  newStatus?: string;
-  resolvedReportsCount?: number;
-  reportsAffectedCount?: number;
-  createdAt?: string;
-  moderatedAt?: string;
+  previousStatus: ReviewStatus;
+  newStatus: ReviewStatus;
+  createdAt: string;
 }
 
 export interface AdminReviewContextResponse {
   review: ReviewContextData;
   pendingReportCount: number;
-  reports: AdminReportResponse[];
+  reports: ReviewContextReportEntry[];
   auditHistory: ReviewAuditLogEntry[];
 }
 
@@ -88,8 +96,8 @@ export interface ModerateReviewResponse {
   action: ModerationAction;
   reasonCode: string;
   justification: string;
-  previousStatus: string;
-  newStatus: string;
+  previousStatus: ReviewStatus;
+  newStatus: ReviewStatus;
   resolvedReportsCount: number;
   moderatedAt: string;
 }

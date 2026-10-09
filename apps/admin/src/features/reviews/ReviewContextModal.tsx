@@ -253,33 +253,56 @@ export const ReviewContextModal: React.FC<ReviewContextModalProps> = ({
                       Alvos Avaliados ({contextData.review.targets.length})
                     </h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {contextData.review.targets.map((t, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                          }}
-                        >
-                          <div>
-                            <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
-                              Alvo: {t.targetId}
+                      {contextData.review.targets.map((t, idx) => {
+                        const targetLabel = t.displayName
+                          ? t.displayName
+                          : t.type
+                          ? `Alvo (${t.type})`
+                          : 'Alvo sem especialização';
+                        const targetKey = `${t.targetId || 'target'}-${idx}`;
+
+                        return (
+                          <div
+                            key={targetKey}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: '8px',
+                              backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+                                  {targetLabel}
+                                </span>
+                                {t.type && (
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                                      color: 'var(--accent-primary)',
+                                      fontSize: '0.75rem',
+                                    }}
+                                  >
+                                    {t.type}
+                                  </span>
+                                )}
+                              </div>
+                              {t.specificComment ? (
+                                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                  {t.specificComment}
+                                </p>
+                              ) : null}
+                            </div>
+                            <span style={{ color: 'var(--accent-warning)', fontWeight: 700, fontSize: '1rem', whiteSpace: 'nowrap' }}>
+                              ★ {t.rating.toFixed(1)}
                             </span>
-                            {t.comment || t.specificComment ? (
-                              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                                {t.comment || t.specificComment}
-                              </p>
-                            ) : null}
                           </div>
-                          <span style={{ color: 'var(--accent-warning)', fontWeight: 700, fontSize: '1rem' }}>
-                            ★ {t.rating.toFixed(1)}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -329,23 +352,33 @@ export const ReviewContextModal: React.FC<ReviewContextModalProps> = ({
                 <div className="card" style={{ backgroundColor: 'var(--bg-card)' }}>
                   <h3 style={{ fontSize: '1rem', marginBottom: '12px' }}>Histórico de Decisões de Moderação</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {contextData.auditHistory.map((audit) => (
-                      <div
-                        key={audit.id}
-                        style={{
-                          padding: '8px 12px',
-                          borderRadius: '8px',
-                          backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                          fontSize: '0.85rem',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                          <strong>Ação: {audit.action} ({audit.reasonCode})</strong>
-                          <span style={{ color: 'var(--text-secondary)' }}>{formatDate(audit.createdAt || audit.moderatedAt)}</span>
+                    {contextData.auditHistory.map((audit, idx) => {
+                      const auditKey = `${audit.action}-${audit.reasonCode}-${audit.createdAt}-${idx}`;
+                      return (
+                        <div
+                          key={auditKey}
+                          style={{
+                            padding: '10px 14px',
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                            fontSize: '0.85rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                            <div>
+                              <strong>Ação: {audit.action} ({audit.reasonCode})</strong>
+                              <span style={{ marginLeft: '8px', color: 'var(--text-secondary)' }}>
+                                [{audit.previousStatus} → {audit.newStatus}]
+                              </span>
+                            </div>
+                            <span style={{ color: 'var(--text-secondary)' }}>{formatDate(audit.createdAt)}</span>
+                          </div>
+                          <p style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>
+                            Justificativa: {audit.justification}
+                          </p>
                         </div>
-                        <p style={{ color: 'var(--text-secondary)' }}>Justificativa: {audit.justification}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

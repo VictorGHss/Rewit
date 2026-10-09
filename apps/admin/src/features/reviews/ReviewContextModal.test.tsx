@@ -22,32 +22,58 @@ describe('ReviewContextModal', () => {
       isAnonymous: true,
       isVerifiedOnSite: true,
       createdAt: '2026-10-09T10:00:00Z',
+      updatedAt: '2026-10-09T10:05:00Z',
       targets: [
         {
-          targetId: 'comida',
+          targetId: 'target-uuid-place-1234',
+          type: 'PLACE',
+          displayName: 'Café das Flores',
+          rating: 4.8,
+          specificComment: 'Ambiente aconchegante e excelente música ambiente.',
+        },
+        {
+          targetId: 'target-uuid-product-5678',
+          type: 'PRODUCT',
+          displayName: 'Cappuccino Italiano',
           rating: 4.5,
-          comment: 'Sabor impecável',
+          specificComment: null,
+        },
+        {
+          targetId: 'target-uuid-unspecialized-9999',
+          type: null,
+          displayName: null,
+          rating: 3.5,
+          specificComment: 'Atendimento geral sem especialização.',
         },
       ],
     },
     pendingReportCount: 1,
     reports: [
       {
-        id: 'rep-1',
-        reviewId: 'review-100',
+        id: 'rep-uuid-1',
         reason: 'SPAM',
-        detail: 'Suspeita de conta automatizada.',
+        detail: 'Suspeita de conta automatizada com comentários repetitivos.',
         status: 'PENDING',
         createdAt: '2026-10-09T11:00:00Z',
+        updatedAt: '2026-10-09T11:00:00Z',
       },
     ],
     auditHistory: [
       {
-        id: 'aud-1',
         action: 'RESTORE_REVIEW',
         reasonCode: 'REPORT_DISMISSED',
-        justification: 'Avaliação legítima verificada por evidências.',
+        justification: 'Avaliação legítima verificada por evidências fotográficas.',
+        previousStatus: 'UNDER_REVIEW',
+        newStatus: 'ACTIVE',
         createdAt: '2026-10-08T09:00:00Z',
+      },
+      {
+        action: 'REMOVE_REVIEW',
+        reasonCode: 'TERMS_VIOLATION',
+        justification: 'Suspeita de violação temporariamente moderada.',
+        previousStatus: 'ACTIVE',
+        newStatus: 'UNDER_REVIEW',
+        createdAt: '2026-10-07T08:00:00Z',
       },
     ],
   };
@@ -56,7 +82,7 @@ describe('ReviewContextModal', () => {
     vi.clearAllMocks();
   });
 
-  it('carrega o contexto da avaliação com alvos, badges, denúncias e histórico', async () => {
+  it('exibe nome e tipo do alvo e trata alvos sem especialização sem utilizar UUID como rótulo principal', async () => {
     vi.mocked(moderationApi.getReviewContext).mockResolvedValueOnce(sampleContext);
 
     render(
@@ -71,13 +97,75 @@ describe('ReviewContextModal', () => {
     expect(screen.getByText(/carregando contexto e histórico da avaliação/i)).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText('Excelente atendimento e ambiente super agradável.')).toBeInTheDocument();
-      expect(screen.getByText(/autor anônimo/i)).toBeInTheDocument();
-      expect(screen.getByText(/presença confirmada/i)).toBeInTheDocument();
-      expect(screen.getByText(/Alvo: comida/i)).toBeInTheDocument();
-      expect(screen.getByText('Suspeita de conta automatizada.')).toBeInTheDocument();
-      expect(screen.getByText(/Avaliação legítima verificada por evidências./i)).toBeInTheDocument();
+      // Nome e tipo exibidos quando presentes
+      expect(screen.getByText('Café das Flores')).toBeInTheDocument();
+      expect(screen.getByText('PLACE')).toBeInTheDocument();
+      expect(screen.getByText('Cappuccino Italiano')).toBeInTheDocument();
+      expect(screen.getByText('PRODUCT')).toBeInTheDocument();
+
+      // Alvo sem especialização (displayName null, type null) exibe fallback legível
+      expect(screen.getByText('Alvo sem especialização')).toBeInTheDocument();
+      expect(screen.getByText('Atendimento geral sem especialização.')).toBeInTheDocument();
+
+      // Não exibe o UUID do alvo como rótulo principal quando há displayName
+      expect(screen.queryByText('Alvo: target-uuid-place-1234')).not.toBeInTheDocument();
+      expect(screen.queryByText('Alvo: target-uuid-product-5678')).not.toBeInTheDocument();
     });
+  });
+
+  it('renderiza o histórico de auditoria usando campos existentes sem dependência de auditHistory[].id', async () => {
+    vi.mocked(moderationApi.getReviewContext).mockResolvedValueOnce(sampleContext);
+
+    render(
+      <ReviewContextModal
+        reviewId="review-100"
+        isOpen={true}
+        onClose={vi.fn()}
+        onModerationComplete={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      // Entradas do histórico
+      expect(
+        screen.getByText(/Ação: RESTORE_REVIEW \(REPORT_DISMISSED\)/i)
+      ).toBeInTheDocument();
+      expect(screen.getByText(/\[UNDER_REVIEW → ACTIVE\]/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Justificativa: Avaliação legítima verificada por evidências fotográficas./i)
+      ).toBeInTheDocument();
+
+      expect(
+        screen.getByText(/Ação: REMOVE_REVIEW \(TERMS_VIOLATION\)/i)
+      ).toBeInTheDocument();
+      expect(screen.getByText(/\[ACTIVE → UNDER_REVIEW\]/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Justificativa: Suspeita de violação temporariamente moderada./i)
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('nunca exibe IDs de autores, denunciantes ou moderadores na tela', async () => {
+    vi.mocked(moderationApi.getReviewContext).mockResolvedValueOnce(sampleContext);
+
+    render(
+      <ReviewContextModal
+        reviewId="review-100"
+        isOpen={true}
+        onClose={vi.fn()}
+        onModerationComplete={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Excelente atendimento e ambiente super agradável.')).toBeInTheDocument();
+    });
+
+    // Garante que termos ou IDs sensíveis não vazam
+    expect(screen.queryByText(/userId/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/moderatorUserId/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/reporterUserId/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/authorUserId/i)).not.toBeInTheDocument();
   });
 
   it('valida o tamanho mínimo da justificativa (15 caracteres) e executa remoção com modal de confirmação', async () => {
@@ -111,7 +199,6 @@ describe('ReviewContextModal', () => {
     });
 
     const submitBtn = screen.getByRole('button', { name: /remover avaliação/i });
-    // Inicialmente a justificativa está vazia, o botão deve estar desabilitado
     expect(submitBtn).toBeDisabled();
 
     const justificationInput = screen.getByLabelText(/justificativa formal/i);
