@@ -437,7 +437,8 @@ void main() {
         expect(locNotifier.locationAccuracyMeters, isNull);
       });
 
-      test('submit envia coordenadas no payload quando check-in é realizado', () async {
+      test('submit envia coordenadas no payload quando check-in é realizado com local de contexto', () async {
+        locNotifier.setContextPlaceId(validTargetId1);
         locNotifier.updateTarget(0, targetId: validTargetId1);
         await locNotifier.captureLocation();
 
@@ -447,6 +448,85 @@ void main() {
         expect(locRepo.capturedInput?.userLatitude, -23.5505);
         expect(locRepo.capturedInput?.userLongitude, -46.6333);
         expect(locRepo.capturedInput?.locationAccuracyMeters, 15.0);
+      });
+
+      test('submit não envia coordenadas se contextPlaceId estiver ausente mesmo com localização capturada', () async {
+        locNotifier.updateTarget(0, targetId: validTargetId1);
+        await locNotifier.captureLocation();
+        expect(locNotifier.hasLocation, isTrue);
+        expect(locNotifier.hasValidCheckin, isFalse);
+
+        final submitted = await locNotifier.submit();
+
+        expect(submitted, isTrue);
+        expect(locRepo.capturedInput?.userLatitude, isNull);
+        expect(locRepo.capturedInput?.userLongitude, isNull);
+        expect(locRepo.capturedInput?.locationAccuracyMeters, isNull);
+      });
+
+      test('elimina coordenadas antigas após falha em nova tentativa de captura', () async {
+        locNotifier.setContextPlaceId(validTargetId1);
+        locNotifier.updateTarget(0, targetId: validTargetId1);
+
+        // 1. Primeira captura bem-sucedida
+        final success1 = await locNotifier.captureLocation();
+        expect(success1, isTrue);
+        expect(locNotifier.userLatitude, -23.5505);
+        expect(locNotifier.hasLocation, isTrue);
+
+        // 2. Segunda captura falha
+        locService.resultToReturn = const LocationFailure(
+          reason: LocationFailureReason.serviceDisabled,
+          message: 'GPS desativado.',
+        );
+        final success2 = await locNotifier.captureLocation();
+        expect(success2, isFalse);
+        expect(locNotifier.locationStatus, LocationCaptureStatus.error);
+        expect(locNotifier.userLatitude, isNull);
+        expect(locNotifier.userLongitude, isNull);
+        expect(locNotifier.hasLocation, isFalse);
+
+        // 3. Submissão subsequente não deve enviar coordenadas residuais
+        final submitted = await locNotifier.submit();
+        expect(submitted, isTrue);
+        expect(locRepo.capturedInput?.userLatitude, isNull);
+        expect(locRepo.capturedInput?.userLongitude, isNull);
+      });
+
+      test('bloqueia submit durante captura ativa de localização', () async {
+        locNotifier.setContextPlaceId(validTargetId1);
+        locNotifier.updateTarget(0, targetId: validTargetId1);
+        locService.simulatedDelay = const Duration(milliseconds: 100);
+
+        final captureFuture = locNotifier.captureLocation();
+        expect(locNotifier.isRequestingLocation, isTrue);
+
+        final submitBlocked = await locNotifier.submit();
+        expect(submitBlocked, isFalse);
+        expect(locNotifier.isSubmitting, isFalse);
+
+        final captureResult = await captureFuture;
+        expect(captureResult, isTrue);
+        expect(locNotifier.hasLocation, isTrue);
+      });
+
+      test('dispose do notifier durante captura não dispara exceção nem notifica ouvintes', () async {
+        locService.simulatedDelay = const Duration(milliseconds: 100);
+
+        bool listenerCalledAfterDispose = false;
+        locNotifier.addListener(() {
+          if (locNotifier.isDisposed) {
+            listenerCalledAfterDispose = true;
+          }
+        });
+
+        final captureFuture = locNotifier.captureLocation();
+        locNotifier.dispose();
+        expect(locNotifier.isDisposed, isTrue);
+
+        final result = await captureFuture;
+        expect(result, isFalse);
+        expect(listenerCalledAfterDispose, isFalse);
       });
 
       test('submit envia coordenadas nulas quando nenhum check-in foi realizado', () async {

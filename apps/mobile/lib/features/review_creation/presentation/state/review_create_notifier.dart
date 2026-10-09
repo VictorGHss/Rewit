@@ -5,7 +5,6 @@ import 'package:rewit_mobile/features/review_creation/domain/services/location_s
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
-import '../../data/services/geolocator_location_service.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/repositories/review_creation_repository.dart';
 import 'review_create_state.dart';
@@ -31,6 +30,21 @@ class ReviewCreateNotifier extends ChangeNotifier {
 
   ReviewCreateState _state = const ReviewCreateInitial();
   ReviewCreateState get state => _state;
+
+  bool _isDisposed = false;
+  int _locationCaptureSequence = 0;
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    super.dispose();
+  }
+
+  void _safeNotifyListeners() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
 
   // Campos do formulário
   final List<CreateReviewTargetInput> _targets = [
@@ -92,7 +106,14 @@ class ReviewCreateNotifier extends ChangeNotifier {
   LocationCaptureStatus get locationStatus => _locationStatus;
   String? get locationErrorMessage => _locationErrorMessage;
   LocationFailureReason? get locationFailureReason => _locationFailureReason;
-  bool get hasLocation => _userLatitude != null && _userLongitude != null;
+  bool get isDisposed => _isDisposed;
+  bool get hasContextPlace =>
+      _contextPlaceId != null && _contextPlaceId!.trim().isNotEmpty;
+  bool get hasLocation =>
+      _locationStatus == LocationCaptureStatus.captured &&
+      _userLatitude != null &&
+      _userLongitude != null;
+  bool get hasValidCheckin => hasContextPlace && hasLocation;
   bool get isRequestingLocation => _locationStatus == LocationCaptureStatus.requesting;
   bool get isApproximateLocation =>
       _locationAccuracyMeters != null && _locationAccuracyMeters! > 100.0;
@@ -106,7 +127,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
     String? targetType,
     String? category,
   }) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     _targets.add(
       CreateReviewTargetInput(
         rateableTargetId: targetId,
@@ -117,21 +138,21 @@ class ReviewCreateNotifier extends ChangeNotifier {
         category: category,
       ),
     );
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Remove um alvo pelo índice (mantendo pelo menos 1 alvo).
   void removeTarget(int index) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     if (_targets.length > 1 && index >= 0 && index < _targets.length) {
       _targets.removeAt(index);
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
   /// Seleciona um item retornado pela busca no alvo do índice especificado.
   void selectTarget(int index, SearchResultItem item) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     if (index >= 0 && index < _targets.length) {
       final current = _targets[index];
       _targets[index] = current.copyWith(
@@ -144,13 +165,13 @@ class ReviewCreateNotifier extends ChangeNotifier {
       if ((_contextPlaceId == null || _contextPlaceId!.isEmpty) && item.isPlace) {
         _contextPlaceId = item.id;
       }
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
   /// Limpa a seleção do alvo no índice especificado, reabrindo a busca.
   void clearTargetSelection(int index) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     if (index >= 0 && index < _targets.length) {
       final current = _targets[index];
       _targets[index] = CreateReviewTargetInput(
@@ -158,7 +179,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
         rating: current.rating,
         specificComment: current.specificComment,
       );
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
@@ -185,7 +206,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
     String? targetType,
     String? category,
   }) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     if (index >= 0 && index < _targets.length) {
       final current = _targets[index];
       _targets[index] = current.copyWith(
@@ -196,52 +217,68 @@ class ReviewCreateNotifier extends ChangeNotifier {
         targetType: targetType ?? current.targetType,
         category: category ?? current.category,
       );
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
   /// Atualiza o local de contexto (estabelecimento principal).
   void setContextPlaceId(String? placeId) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     _contextPlaceId = placeId?.trim().isEmpty ?? true ? null : placeId!.trim();
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Atualiza o texto geral de relato da experiência.
   void setExperienceText(String? text) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     _experienceText = text;
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Alterna o modo de publicação anônima.
   void setAnonymous(bool value) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     _isAnonymous = value;
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Define o nível de visibilidade da publicação.
   void setVisibility(String value) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     _visibility = value;
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
-  /// Captura a localização atual sob demanda (chamada única) com proteção contra concorrência (C5.10).
+  /// Captura a localização atual sob demanda (chamada única) com proteção contra concorrência e descarte de dados após falha ou submissão (C5.10).
   Future<bool> captureLocation({Duration timeout = const Duration(seconds: 10)}) async {
-    if (isSubmitting || _locationStatus == LocationCaptureStatus.requesting) {
+    if (_isDisposed || isSubmitting || _locationStatus == LocationCaptureStatus.requesting) {
       return false;
     }
 
+    final seq = ++_locationCaptureSequence;
     _locationStatus = LocationCaptureStatus.requesting;
     _locationErrorMessage = null;
     _locationFailureReason = null;
-    notifyListeners();
+    // Limpa imediatamente coordenadas existentes para não manter dados obsoletos
+    _userLatitude = null;
+    _userLongitude = null;
+    _locationAccuracyMeters = null;
+    _safeNotifyListeners();
+
+    if (locationService == null) {
+      _locationStatus = LocationCaptureStatus.error;
+      _locationFailureReason = LocationFailureReason.serviceDisabled;
+      _locationErrorMessage = 'Serviço de localização não configurado.';
+      _safeNotifyListeners();
+      return false;
+    }
 
     try {
-      final service = locationService ?? const GeolocatorLocationService();
-      final result = await service.getCurrentLocation(timeout: timeout);
+      final result = await locationService!.getCurrentLocation(timeout: timeout);
+
+      if (_isDisposed || seq != _locationCaptureSequence || isSubmitting || _state is ReviewCreateSuccess) {
+        return false;
+      }
 
       switch (result) {
         case LocationSuccess(:final location):
@@ -251,32 +288,42 @@ class ReviewCreateNotifier extends ChangeNotifier {
           _locationStatus = LocationCaptureStatus.captured;
           _locationErrorMessage = null;
           _locationFailureReason = null;
-          notifyListeners();
+          _safeNotifyListeners();
           return true;
 
         case LocationFailure(:final reason, :final message):
+          _userLatitude = null;
+          _userLongitude = null;
+          _locationAccuracyMeters = null;
           _locationStatus = LocationCaptureStatus.error;
           _locationFailureReason = reason;
           _locationErrorMessage = message;
-          notifyListeners();
+          _safeNotifyListeners();
           return false;
       }
     } catch (_) {
+      if (_isDisposed || seq != _locationCaptureSequence) {
+        return false;
+      }
+      _userLatitude = null;
+      _userLongitude = null;
+      _locationAccuracyMeters = null;
       _locationStatus = LocationCaptureStatus.error;
       _locationFailureReason = LocationFailureReason.error;
       _locationErrorMessage = 'Não foi possível obter sua localização agora.';
-      notifyListeners();
+      _safeNotifyListeners();
       return false;
     }
   }
 
   /// Define coordenadas de presença para check-in no local (compatibilidade e testes).
+  @visibleForTesting
   void setCoordinates({
     double? latitude,
     double? longitude,
     double? accuracyMeters,
   }) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     _userLatitude = latitude;
     _userLongitude = longitude;
     _locationAccuracyMeters = accuracyMeters;
@@ -285,69 +332,70 @@ class ReviewCreateNotifier extends ChangeNotifier {
         : LocationCaptureStatus.idle;
     _locationErrorMessage = null;
     _locationFailureReason = null;
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Remove coordenadas de presença e descarta os dados da memória da criação.
   void clearCoordinates() {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     _userLatitude = null;
     _userLongitude = null;
     _locationAccuracyMeters = null;
     _locationStatus = LocationCaptureStatus.idle;
     _locationErrorMessage = null;
     _locationFailureReason = null;
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Abre as configurações do sistema para ajuste manual de permissões se necessário.
   Future<bool> openAppSettings() async {
-    final service = locationService ?? const GeolocatorLocationService();
-    return service.openAppSettings();
+    if (_isDisposed || locationService == null) return false;
+    return locationService!.openAppSettings();
   }
 
   /// Seleciona mídias da galeria até o limite restante de 5 anexos.
   Future<void> pickMedia() async {
-    if (isSubmitting || mediaPickerService == null) return;
+    if (_isDisposed || isSubmitting || mediaPickerService == null) return;
     final remainingSlots = SelectedMediaItem.maxItemsPerReview - _selectedMedia.length;
     if (remainingSlots <= 0) return;
 
     final picked = await mediaPickerService!.pickImages(maxImages: remainingSlots);
+    if (_isDisposed) return;
     if (picked.isNotEmpty) {
       final toAdd = picked.take(remainingSlots);
       _selectedMedia.addAll(toAdd);
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
   /// Adiciona diretamente um item de mídia selecionado (útil para testes ou integrações diretas).
   void addSelectedMediaItem(SelectedMediaItem item) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     if (_selectedMedia.length < SelectedMediaItem.maxItemsPerReview) {
       _selectedMedia.add(item);
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
   /// Remove uma mídia selecionada pelo índice.
   void removeSelectedMediaItem(int index) {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     if (index >= 0 && index < _selectedMedia.length) {
       _selectedMedia.removeAt(index);
-      notifyListeners();
+      _safeNotifyListeners();
     }
   }
 
   /// Limpa todas as mídias selecionadas.
   void clearSelectedMedia() {
-    if (isSubmitting) return;
+    if (_isDisposed || isSubmitting) return;
     _selectedMedia.clear();
-    notifyListeners();
+    _safeNotifyListeners();
   }
 
   /// Reenvia uma mídia que falhou durante o envio pós-publicação.
   Future<bool> retryMediaUpload(int index, String reviewId) async {
-    if (mediaRepository == null || index < 0 || index >= _selectedMedia.length) {
+    if (_isDisposed || mediaRepository == null || index < 0 || index >= _selectedMedia.length) {
       return false;
     }
     final item = _selectedMedia[index];
@@ -356,7 +404,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
     }
 
     _selectedMedia[index] = item.copyWith(status: MediaUploadStatus.uploading);
-    notifyListeners();
+    _safeNotifyListeners();
 
     try {
       final uploaded = await mediaRepository!.uploadMedia(
@@ -365,15 +413,17 @@ class ReviewCreateNotifier extends ChangeNotifier {
         filename: item.name,
         mimeType: item.mimeType,
       );
+      if (_isDisposed) return false;
       _selectedMedia[index] = item.copyWith(
         status: MediaUploadStatus.uploaded,
         uploadedMedia: uploaded,
         errorMessage: null,
         errorCode: null,
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return true;
     } on ApiException catch (e) {
+      if (_isDisposed) return false;
       final isTerminal = e.statusCode == 413 ||
           e.statusCode == 415 ||
           e.statusCode == 403 ||
@@ -388,15 +438,16 @@ class ReviewCreateNotifier extends ChangeNotifier {
         isTerminalError: isTerminal,
         retryAfterSeconds: e.retryAfterSeconds,
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return false;
     } catch (_) {
+      if (_isDisposed) return false;
       _selectedMedia[index] = item.copyWith(
         status: MediaUploadStatus.failed,
         errorMessage: 'Falha ao reenviar anexo de imagem.',
         isTerminalError: false,
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return false;
     }
   }
@@ -472,7 +523,10 @@ class ReviewCreateNotifier extends ChangeNotifier {
   /// Submete a criação da avaliação ao backend com proteção contra cliques múltiplos
   /// e realiza o upload sequencial controlado das mídias anexadas.
   Future<bool> submit() async {
-    if (isSubmitting) return false;
+    if (_isDisposed || isSubmitting || isRequestingLocation) return false;
+
+    // Descarta qualquer captura de localização em andamento
+    _locationCaptureSequence++;
 
     final validationError = validate();
     if (validationError != null) {
@@ -481,22 +535,24 @@ class ReviewCreateNotifier extends ChangeNotifier {
         statusCode: 422,
         errorCode: 'VALIDATION_ERROR',
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return false;
     }
 
     _state = const ReviewCreateSubmitting();
-    notifyListeners();
+    _safeNotifyListeners();
 
     try {
+      final validCheckin = hasValidCheckin;
+
       final input = CreateReviewInput(
         contextPlaceId: _contextPlaceId,
         experienceText: _experienceText,
         isAnonymous: _isAnonymous,
         visibility: _visibility,
-        userLatitude: _userLatitude,
-        userLongitude: _userLongitude,
-        locationAccuracyMeters: _locationAccuracyMeters,
+        userLatitude: validCheckin ? _userLatitude : null,
+        userLongitude: validCheckin ? _userLongitude : null,
+        locationAccuracyMeters: validCheckin ? _locationAccuracyMeters : null,
         targets: _targets
             .map((t) => t.copyWith(rateableTargetId: t.rateableTargetId.trim()))
             .toList(),
@@ -504,9 +560,17 @@ class ReviewCreateNotifier extends ChangeNotifier {
 
       final created = await repository.createReview(input);
 
+      if (_isDisposed) return false;
+
+      // Limpa imediatamente coordenadas da memória da criação após submissão bem-sucedida
+      _userLatitude = null;
+      _userLongitude = null;
+      _locationAccuracyMeters = null;
+      _locationStatus = LocationCaptureStatus.idle;
+
       if (_selectedMedia.isEmpty || mediaRepository == null) {
         _state = ReviewCreateSuccess(created);
-        notifyListeners();
+        _safeNotifyListeners();
         return true;
       }
 
@@ -515,6 +579,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
       int failedCount = 0;
 
       for (int i = 0; i < _selectedMedia.length; i++) {
+        if (_isDisposed) return false;
         final item = _selectedMedia[i];
 
         // Validação preventiva de tamanho no cliente
@@ -526,7 +591,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
             isTerminalError: true,
           );
           failedCount++;
-          notifyListeners();
+          _safeNotifyListeners();
           continue;
         }
 
@@ -539,12 +604,12 @@ class ReviewCreateNotifier extends ChangeNotifier {
             isTerminalError: true,
           );
           failedCount++;
-          notifyListeners();
+          _safeNotifyListeners();
           continue;
         }
 
         _selectedMedia[i] = item.copyWith(status: MediaUploadStatus.uploading);
-        notifyListeners();
+        _safeNotifyListeners();
 
         try {
           final uploadedItem = await mediaRepository!.uploadMedia(
@@ -553,6 +618,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
             filename: item.name,
             mimeType: item.mimeType,
           );
+          if (_isDisposed) return false;
           _selectedMedia[i] = item.copyWith(
             status: MediaUploadStatus.uploaded,
             uploadedMedia: uploadedItem,
@@ -560,8 +626,9 @@ class ReviewCreateNotifier extends ChangeNotifier {
             errorCode: null,
           );
           uploadedCount++;
-          notifyListeners();
+          _safeNotifyListeners();
         } on ApiException catch (e) {
+          if (_isDisposed) return false;
           failedCount++;
           final isTerminal = e.statusCode == 413 ||
               e.statusCode == 415 ||
@@ -577,17 +644,20 @@ class ReviewCreateNotifier extends ChangeNotifier {
             isTerminalError: isTerminal,
             retryAfterSeconds: e.retryAfterSeconds,
           );
-          notifyListeners();
+          _safeNotifyListeners();
         } catch (_) {
+          if (_isDisposed) return false;
           failedCount++;
           _selectedMedia[i] = item.copyWith(
             status: MediaUploadStatus.failed,
             errorMessage: 'Falha no envio da imagem.',
             isTerminalError: false,
           );
-          notifyListeners();
+          _safeNotifyListeners();
         }
       }
+
+      if (_isDisposed) return false;
 
       _state = ReviewCreateSuccess(
         created,
@@ -597,9 +667,10 @@ class ReviewCreateNotifier extends ChangeNotifier {
             ? '$failedCount anexo(s) falharam no upload.'
             : null,
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return true;
     } on ApiException catch (e) {
+      if (_isDisposed) return false;
       _state = ReviewCreateError(
         message: e.detail,
         statusCode: e.statusCode,
@@ -607,31 +678,35 @@ class ReviewCreateNotifier extends ChangeNotifier {
         retryAfterSeconds: e.retryAfterSeconds,
         problemDetail: e.problemDetail,
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return false;
     } on NetworkException catch (e) {
+      if (_isDisposed) return false;
       _state = ReviewCreateError(
         message: e.message,
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return false;
     } on FormatException catch (e) {
+      if (_isDisposed) return false;
       _state = ReviewCreateError(
         message: e.message,
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return false;
     } catch (_) {
+      if (_isDisposed) return false;
       _state = const ReviewCreateError(
         message: 'Ocorreu um erro inesperado ao publicar sua avaliação.',
       );
-      notifyListeners();
+      _safeNotifyListeners();
       return false;
     }
   }
 
   /// Limpa o estado e redefine os campos do formulário para o padrão.
   void reset() {
+    if (_isDisposed) return;
     _state = const ReviewCreateInitial();
     _targets.clear();
     _targets.add(
@@ -649,6 +724,9 @@ class ReviewCreateNotifier extends ChangeNotifier {
     _userLatitude = null;
     _userLongitude = null;
     _locationAccuracyMeters = null;
-    notifyListeners();
+    _locationStatus = LocationCaptureStatus.idle;
+    _locationErrorMessage = null;
+    _locationFailureReason = null;
+    _safeNotifyListeners();
   }
 }

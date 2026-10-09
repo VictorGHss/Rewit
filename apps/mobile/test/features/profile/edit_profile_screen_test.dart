@@ -432,5 +432,38 @@ void main() {
       expect(updatedAuth.tokens.accessToken, initialAuth.tokens.accessToken);
       expect(updatedAuth.tokens.refreshToken, initialAuth.tokens.refreshToken);
     });
+
+    testWidgets('preserva preferência de anonimato do usuário autenticado ao editar somente a bio com perfil público de entrada', (tester) async {
+      // Usuário autenticado possui isAnonymousDefault: true
+      authRepo.user = authRepo.user.copyWith(isAnonymousDefault: true);
+      await authNotifier.checkAuthStatus();
+
+      // Perfil público de entrada vem com isAnonymousDefault: false (omitido no backend público)
+      const publicProfile = UserProfile(
+        id: 'usr-123',
+        handle: 'meu_handle',
+        displayName: 'Meu Nome Original',
+        bio: 'Bio anterior',
+        isAnonymousDefault: null,
+        stats: UserStats(followersCount: 5),
+      );
+
+      await pumpScreen(tester, initialProfile: publicProfile);
+
+      // O switch deve refletir a fonte autoritativa (authUser), ou seja, true
+      final switchWidget = tester.widget<SwitchListTile>(
+        find.byKey(const Key('edit_profile_anonymous_switch')),
+      );
+      expect(switchWidget.value, isTrue);
+
+      // Edita apenas a bio
+      await tester.enterText(find.byKey(const Key('edit_profile_bio_field')), 'Nova bio atualizada');
+      await tester.tap(find.byKey(const Key('edit_profile_submit_button')));
+      await tester.pumpAndSettle();
+
+      expect(profileRepo.updateCallCount, 1);
+      expect(profileRepo.capturedInput?.bio, 'Nova bio atualizada');
+      expect(profileRepo.capturedInput?.isAnonymousDefault, isTrue);
+    });
   });
 }

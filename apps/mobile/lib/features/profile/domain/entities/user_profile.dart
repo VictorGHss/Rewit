@@ -40,7 +40,7 @@ class UserProfile {
   final String? avatarUrl;
   final UserStats stats;
   final bool isFollowing;
-  final bool isAnonymousDefault;
+  final bool? isAnonymousDefault;
 
   const UserProfile({
     required this.id,
@@ -50,7 +50,7 @@ class UserProfile {
     this.avatarUrl,
     required this.stats,
     this.isFollowing = false,
-    this.isAnonymousDefault = false,
+    this.isAnonymousDefault,
   });
 
   UserProfile copyWith({

@@ -16,16 +16,18 @@ class MockReviewCreationRepository implements ReviewCreationRepository {
   CreateReviewInput? capturedInput;
   FeedReview? mockResult;
   Exception? exceptionToThrow;
+  int callCount = 0;
 
   @override
   Future<FeedReview> createReview(CreateReviewInput input) async {
+    callCount++;
     capturedInput = input;
     if (exceptionToThrow != null) {
       throw exceptionToThrow!;
     }
     return mockResult ??
         FeedReview(
-          id: 'created-review-uuid-1',
+          id: 'created-review-uuid-$callCount',
           author: const FeedAuthor(displayName: 'Autor Teste'),
           visibility: input.visibility,
           status: 'VISIBLE',
@@ -72,10 +74,14 @@ class MockLocationService implements LocationService {
   );
   int callCount = 0;
   bool openSettingsCalled = false;
+  Duration? simulatedDelay;
 
   @override
   Future<LocationResult> getCurrentLocation({Duration timeout = const Duration(seconds: 10)}) async {
     callCount++;
+    if (simulatedDelay != null) {
+      await Future.delayed(simulatedDelay!);
+    }
     return resultToReturn;
   }
 
@@ -481,6 +487,8 @@ void main() {
       await tester.pumpWidget(buildSubject(
         repository: repository,
         locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
       ));
 
       await tester.tap(find.byKey(const Key('validate_presence_button')));
@@ -502,6 +510,28 @@ void main() {
       expect(find.byKey(const Key('remove_checkin_button')), findsOneWidget);
     });
 
+    testWidgets('captura de localização sem local de contexto não exibe Presença capturada e exibe aviso de local necessário', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      expect(locService.callCount, 1);
+      // Não deve exibir "Presença capturada" sem local de contexto
+      expect(find.text('Presença capturada'), findsNothing);
+      expect(find.text('Local de contexto necessário para check-in'), findsOneWidget);
+    });
+
     testWidgets('exibe aviso de localização aproximada quando precisão > 100m', (tester) async {
       tester.view.physicalSize = const Size(800, 2400);
       tester.view.devicePixelRatio = 1.0;
@@ -519,6 +549,8 @@ void main() {
       await tester.pumpWidget(buildSubject(
         repository: repository,
         locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
       ));
 
       await tester.tap(find.byKey(const Key('validate_presence_button')));
@@ -544,6 +576,8 @@ void main() {
       await tester.pumpWidget(buildSubject(
         repository: repository,
         locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
       ));
 
       // Primeira captura via consentimento
@@ -568,6 +602,8 @@ void main() {
       await tester.pumpWidget(buildSubject(
         repository: repository,
         locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
       ));
 
       await tester.tap(find.byKey(const Key('validate_presence_button')));
@@ -598,6 +634,8 @@ void main() {
       await tester.pumpWidget(buildSubject(
         repository: repository,
         locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
       ));
 
       await tester.tap(find.byKey(const Key('validate_presence_button')));
@@ -658,6 +696,8 @@ void main() {
       await tester.pumpWidget(buildSubject(
         repository: repository,
         locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
       ));
 
       // Captura localização
@@ -677,6 +717,89 @@ void main() {
       expect(repository.capturedInput?.userLatitude, -23.5505);
       expect(repository.capturedInput?.userLongitude, -46.6333);
       expect(repository.capturedInput?.locationAccuracyMeters, 12.0);
+    });
+
+    testWidgets('publicação bem-sucedida limpa estado e não reutiliza coordenadas na publicação seguinte', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      int callbackCount = 0;
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
+        onReviewCreated: (_) => callbackCount++,
+      ));
+
+      // 1. Captura localização para o Local A
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      // Publica no Local A
+      await tester.tap(find.text('Publicar Avaliação'));
+      await tester.pumpAndSettle();
+
+      expect(callbackCount, 1);
+      expect(repository.capturedInput?.userLatitude, -23.5505);
+
+      // 2. Após sucesso, o formulário foi resetado. Configura novo alvo (Local B) sem check-in
+      const placeB = '22222222-2222-2222-2222-222222222222';
+      final targetField = find.widgetWithText(TextFormField, 'Identificador do Alvo (UUID) *');
+      await tester.enterText(targetField, placeB);
+
+      final contextPlaceField = find.widgetWithText(TextFormField, 'Identificador do Local (UUID)');
+      await tester.enterText(contextPlaceField, placeB);
+
+      // Publica no Local B sem solicitar nova presença
+      await tester.tap(find.text('Publicar Avaliação'));
+      await tester.pumpAndSettle();
+
+      expect(callbackCount, 2);
+      expect(repository.capturedInput?.contextPlaceId, placeB);
+      // Coordenadas do Local A NÃO devem ser reutilizadas
+      expect(repository.capturedInput?.userLatitude, isNull);
+      expect(repository.capturedInput?.userLongitude, isNull);
+    });
+
+    testWidgets('botão Publicar Avaliação fica desabilitado durante captura ativa de localização', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final locService = MockLocationService();
+      locService.simulatedDelay = const Duration(milliseconds: 500);
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
+      ));
+
+      // Inicia captura de localização
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pump(); // Não settle, para pegar o estado intermediário
+
+      // Botão Publicar Avaliação deve estar desabilitado
+      final buttonFinder = find.widgetWithText(ElevatedButton, 'Publicar Avaliação');
+      expect(buttonFinder, findsOneWidget);
+      final elevatedButton = tester.widget<ElevatedButton>(buttonFinder);
+      expect(elevatedButton.onPressed, isNull);
+
+      // Aguarda concluir a captura
+      await tester.pumpAndSettle();
+
+      // Botão é reabilitado
+      final reenabledButton = tester.widget<ElevatedButton>(buttonFinder);
+      expect(reenabledButton.onPressed, isNotNull);
     });
   });
 }

@@ -434,7 +434,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
           ],
 
-          if (_isMyProfile && profile.isAnonymousDefault) ...[
+          if (_isMyProfile && (profile.isAnonymousDefault ?? false)) ...[
             const SizedBox(height: 12),
             Row(
               children: [

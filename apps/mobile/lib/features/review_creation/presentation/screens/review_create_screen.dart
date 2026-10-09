@@ -77,6 +77,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
     _notifier.addListener(_handleStateChange);
   }
 
+  String? _lastHandledSuccessReviewId;
+
   void _handleStateChange() {
     if (!mounted) return;
     if (_contextPlaceIdController.text != (_notifier.contextPlaceId ?? '')) {
@@ -84,6 +86,12 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
     }
     final state = _notifier.state;
     if (state is ReviewCreateSuccess) {
+      if (_lastHandledSuccessReviewId == state.createdReview.id) {
+        return;
+      }
+      _lastHandledSuccessReviewId = state.createdReview.id;
+      final createdReview = state.createdReview;
+
       if (state.hasMediaFailures) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -106,7 +114,13 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
           ),
         );
       }
-      widget.onReviewCreated?.call(state.createdReview);
+
+      // Limpa os controladores e reinicia o estado do formulário para evitar reutilização no IndexedStack
+      _contextPlaceIdController.clear();
+      _experienceTextController.clear();
+      _notifier.reset();
+
+      widget.onReviewCreated?.call(createdReview);
     }
   }
 
@@ -477,11 +491,11 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // Botão de Submissão com proteção anti-duplo clique
+                // Botão de Submissão com proteção anti-duplo clique e bloqueio durante captura
                 SizedBox(
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: isSubmitting ? null : _submit,
+                    onPressed: (!isSubmitting && !_notifier.isRequestingLocation) ? _submit : null,
                     style: ElevatedButton.styleFrom(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -586,68 +600,106 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 ),
               ),
             ] else if (status == LocationCaptureStatus.captured && hasLocation) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green.withAlpha(20),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.withAlpha(80)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.check_circle, color: Colors.green, size: 20),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Presença capturada',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: Colors.green,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (_notifier.locationAccuracyMeters != null)
-                          Text(
-                            'Precisão aproximada: ${_notifier.locationAccuracyMeters!.round()} m',
+              if (_notifier.hasContextPlace)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withAlpha(20),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.withAlpha(80)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Presença capturada',
                             style: TextStyle(
-                              fontSize: 12,
-                              color: theme.colorScheme.onSurface.withAlpha(160),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: Colors.green,
                             ),
                           ),
-                      ],
-                    ),
-                    if (_notifier.isApproximateLocation) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.withAlpha(30),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.amber.withAlpha(100)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.info_outline, size: 16, color: Colors.orange),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Localização aproximada concedida. A precisão pode não ser suficiente para validar presença no local.',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.amber.shade900,
-                                ),
+                          const Spacer(),
+                          if (_notifier.locationAccuracyMeters != null)
+                            Text(
+                              'Precisão aproximada: ${_notifier.locationAccuracyMeters!.round()} m',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.onSurface.withAlpha(160),
                               ),
                             ),
-                          ],
+                        ],
+                      ),
+                      if (_notifier.isApproximateLocation) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withAlpha(30),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.amber.withAlpha(100)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info_outline, size: 16, color: Colors.orange),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Localização aproximada concedida. A precisão pode não ser suficiente para validar presença no local.',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.amber.shade900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.info_outline, color: theme.colorScheme.primary, size: 20),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Local de contexto necessário para check-in',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Sua localização foi obtida sob demanda, mas a validação de presença no local exige informar o estabelecimento de contexto da avaliação.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurface.withAlpha(180),
                         ),
                       ),
                     ],
-                  ],
+                  ),
                 ),
-              ),
               const SizedBox(height: 10),
               Row(
                 children: [

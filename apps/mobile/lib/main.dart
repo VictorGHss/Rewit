@@ -14,6 +14,7 @@ import 'package:rewit_mobile/features/product/data/repositories/product_reposito
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/notifications/data/repositories/notification_repository_impl.dart';
 import 'package:rewit_mobile/features/review_creation/data/repositories/review_creation_repository_impl.dart';
+import 'package:rewit_mobile/features/review_creation/data/services/geolocator_location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/data/repositories/review_media_repository_impl.dart';
 import 'package:rewit_mobile/features/search/data/repositories/search_repository_impl.dart';
@@ -53,6 +54,7 @@ void main() async {
   final productRepository = ProductRepositoryImpl(httpClient: httpClient);
   final mediaRepository = ReviewMediaRepositoryImpl(client: httpClient);
   final mediaPickerService = ImagePickerMediaService();
+  const locationService = GeolocatorLocationService();
   final notificationRepository = NotificationRepositoryImpl(httpClient: httpClient);
 
   authNotifier = AuthNotifier(authRepository: authRepository);
@@ -68,6 +70,7 @@ void main() async {
     feedRepository: feedRepository,
     reviewMediaRepository: mediaRepository,
     mediaPickerService: mediaPickerService,
+    locationService: locationService,
     discussionRepository: discussionRepository,
     reviewCreationRepository: reviewCreationRepository,
     searchRepository: searchRepository,

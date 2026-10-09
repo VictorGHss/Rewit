@@ -24,6 +24,7 @@ import 'package:rewit_mobile/features/profile/presentation/screens/follow_list_s
 import 'package:rewit_mobile/features/profile/presentation/screens/my_reviews_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
@@ -59,6 +60,7 @@ class AppRouter {
   final FeedRepository? feedRepository;
   final ReviewMediaRepository? reviewMediaRepository;
   final MediaPickerService? mediaPickerService;
+  final LocationService? locationService;
   final DiscussionRepository? discussionRepository;
   final ReviewCreationRepository? reviewCreationRepository;
   final SearchRepository? searchRepository;
@@ -74,6 +76,7 @@ class AppRouter {
     this.feedRepository,
     this.reviewMediaRepository,
     this.mediaPickerService,
+    this.locationService,
     this.discussionRepository,
     this.reviewCreationRepository,
     this.searchRepository,
@@ -104,6 +107,7 @@ class AppRouter {
                   reviewCreationRepository: reviewCreationRepository,
                   mediaRepository: reviewMediaRepository,
                   mediaPickerService: mediaPickerService,
+                  locationService: locationService,
                   searchRepository: searchRepository,
                   userProfileRepository: userProfileRepository,
                   notificationRepository: notificationRepository,
@@ -296,6 +300,7 @@ class AppRouter {
             repository: reviewCreationRepository,
             mediaRepository: reviewMediaRepository,
             mediaPickerService: mediaPickerService,
+            locationService: locationService,
             searchRepository: searchRepository,
             initialTargetId: initialTargetId,
             initialTargetName: initialTargetName,

@@ -10,6 +10,7 @@ import 'package:rewit_mobile/features/notifications/presentation/state/notificat
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
@@ -23,6 +24,7 @@ class HomeScreen extends StatefulWidget {
   final ReviewCreationRepository? reviewCreationRepository;
   final ReviewMediaRepository? mediaRepository;
   final MediaPickerService? mediaPickerService;
+  final LocationService? locationService;
   final SearchRepository? searchRepository;
   final UserProfileRepository? userProfileRepository;
   final NotificationRepository? notificationRepository;
@@ -35,6 +37,7 @@ class HomeScreen extends StatefulWidget {
     this.reviewCreationRepository,
     this.mediaRepository,
     this.mediaPickerService,
+    this.locationService,
     this.searchRepository,
     this.userProfileRepository,
     this.notificationRepository,
@@ -306,6 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
             repository: widget.reviewCreationRepository,
             mediaRepository: widget.mediaRepository,
             mediaPickerService: widget.mediaPickerService,
+            locationService: widget.locationService,
             searchRepository: widget.searchRepository,
             onReviewCreated: (createdReview) async {
               widget.feedNotifier?.refresh();
