@@ -20,6 +20,7 @@ import com.rewit.domain.enums.ModerationDecision;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewStatus;
+import com.rewit.domain.enums.Role;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.Review;
@@ -83,7 +84,7 @@ class ModerateDiscussionIntegrationTest {
     @BeforeEach
     void setUp() {
         commenter = createUser("comentarista");
-        moderator = createUser("moderador");
+        moderator = createModerator("moderador");
         review = createReview(createUser("autor").getId());
         reporters = List.of(createUser("d1"), createUser("d2"), createUser("d3"));
     }
@@ -133,7 +134,7 @@ class ModerateDiscussionIntegrationTest {
 
         ReviewDiscussion removed = quarantinedComment();
         moderate(removed, moderator, DiscussionModerationAction.REMOVE_DISCUSSION);
-        assertConflict(() -> moderate(removed, createUser("outro_mod"), DiscussionModerationAction.RESTORE_DISCUSSION));
+        assertConflict(() -> moderate(removed, createModerator("outro_mod"), DiscussionModerationAction.RESTORE_DISCUSSION));
         assertEquals(1, count("SELECT count(*) FROM discussion_moderation_audit_logs WHERE discussion_id = ?", removed.getId()));
     }
 
@@ -141,6 +142,9 @@ class ModerateDiscussionIntegrationTest {
     @DisplayName("Conflito de interesse: autor do comentário e quem o denunciou não moderam (403)")
     void conflictsOfInterestAreForbidden() {
         ReviewDiscussion comment = quarantinedComment();
+        // Autor e denunciante também são moderadores atuais: passam pela política e são barrados pelo conflito
+        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id IN (?, ?)", commenter.getId(),
+                reporters.get(0).getId());
 
         BusinessException self = assertThrows(BusinessException.class,
                 () -> moderate(comment, commenter, DiscussionModerationAction.RESTORE_DISCUSSION));
@@ -169,7 +173,7 @@ class ModerateDiscussionIntegrationTest {
     @DisplayName("Concorrência: duas moderações simultâneas do mesmo comentário, exatamente uma vence; a outra recebe 409")
     void concurrentModerationsAreSerialized() throws Exception {
         ReviewDiscussion comment = quarantinedComment();
-        User secondModerator = createUser("mod2");
+        User secondModerator = createModerator("mod2");
         ExecutorService executor = Executors.newFixedThreadPool(2);
         CountDownLatch start = new CountDownLatch(1);
         try {
@@ -336,8 +340,19 @@ class ModerateDiscussionIntegrationTest {
     }
 
     private User createUser(String prefix) {
+        return createUser(prefix, Role.USER);
+    }
+
+    /** O caso de uso revalida o cargo atual no banco: o moderador precisa ter a role MODERATOR. */
+    private User createModerator(String prefix) {
+        return createUser(prefix, Role.MODERATOR);
+    }
+
+    private User createUser(String prefix, Role role) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
-        User user = userRepository.save(new User(null, prefix + "." + suffix + "@rewit.test", "hash", AuthProvider.LOCAL, null));
+        User candidate = new User(null, prefix + "." + suffix + "@rewit.test", "hash", AuthProvider.LOCAL, null);
+        candidate.changeRole(role);
+        User user = userRepository.save(candidate);
         profileRepository.save(new Profile(null, user.getId(), "md_" + suffix, "Conta " + prefix, null, null));
         return user;
     }

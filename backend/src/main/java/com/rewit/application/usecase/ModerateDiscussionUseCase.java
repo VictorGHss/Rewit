@@ -5,7 +5,7 @@ import com.rewit.application.dto.discussion.AdminDiscussionModerationDtos.Modera
 import com.rewit.application.port.DiscussionModerationAuditLogRepository;
 import com.rewit.application.port.DiscussionReportRepository;
 import com.rewit.application.port.DiscussionRepository;
-import com.rewit.application.service.AccountStatusPolicy;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.DiscussionModerationAction;
 import com.rewit.domain.enums.DiscussionStatus;
@@ -39,16 +39,16 @@ public class ModerateDiscussionUseCase {
     private final DiscussionRepository discussionRepository;
     private final DiscussionReportRepository discussionReportRepository;
     private final DiscussionModerationAuditLogRepository auditLogRepository;
-    private final AccountStatusPolicy accountStatusPolicy;
+    private final ModeratorRolePolicy moderatorRolePolicy;
 
     public ModerateDiscussionUseCase(DiscussionRepository discussionRepository,
                                      DiscussionReportRepository discussionReportRepository,
                                      DiscussionModerationAuditLogRepository auditLogRepository,
-                                     AccountStatusPolicy accountStatusPolicy) {
+                                     ModeratorRolePolicy moderatorRolePolicy) {
         this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
         this.discussionReportRepository = Objects.requireNonNull(discussionReportRepository, "DiscussionReportRepository must not be null");
         this.auditLogRepository = Objects.requireNonNull(auditLogRepository, "DiscussionModerationAuditLogRepository must not be null");
-        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
     }
 
     @Transactional
@@ -58,8 +58,9 @@ public class ModerateDiscussionUseCase {
         String justification = command.justification().trim();
         Instant now = command.now() != null ? command.now() : Instant.now();
 
-        // Estado atual da conta do moderador antes do lock: o JWT, e a role nele, pode ser anterior à desativação
-        accountStatusPolicy.requireOperational(command.moderatorUserId());
+        // Estado e role atuais do moderador antes do lock: o JWT, e a role nele, pode ser anterior a uma desativação
+        // ou a um rebaixamento (conta inoperante 401 ACCOUNT_DISABLED; sem MODERATOR/ADMIN 403 FORBIDDEN)
+        moderatorRolePolicy.requireCurrentModerator(command.moderatorUserId());
 
         // 1. Lock pessimista da discussão
         ReviewDiscussion discussion = discussionRepository.findByIdForUpdate(command.discussionId())

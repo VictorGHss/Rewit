@@ -501,4 +501,63 @@ class AdminModerationControllerIntegrationTest {
                         .param("size", "0"))
                 .andExpect(status().isBadRequest());
     }
+
+    // =========================================================================
+    // CARGO ATUAL — token emitido antes do rebaixamento
+    // =========================================================================
+
+    @Test
+    @DisplayName("16. MODERATOR rebaixado a USER: o token antigo passa pelo @PreAuthorize, mas a moderação recusa com 403 e nada muda")
+    void moderateReview_demotedModeratorWithOldToken_returns403WithoutSideEffects() throws Exception {
+        TestUser author = registerUser("mod_demoted_author");
+        UUID reviewId = createReview(author.userId(), createRateableTarget());
+        createReport(registerUser("mod_demoted_reporter").userId(), reviewId);
+        TestUser moderator = promoteToModerator(registerUser("mod_demoted"));
+
+        // Token legítimo, emitido com MODERATOR: a rota administrativa responde
+        mockMvc.perform(get("/api/v1/admin/reviews/" + reviewId + "/context")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + moderator.accessToken()))
+                .andExpect(status().isOk());
+
+        // Rebaixado no banco; o token continua dizendo MODERATOR
+        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+
+        // O @PreAuthorize aceita a autoridade do token; a recusa vem do caso de uso (ProblemDetail com code). Sem a
+        // role no token, o @PreAuthorize responderia 403 sem corpo
+        moderate(reviewId, moderator)
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        assertReviewUntouched(reviewId);
+
+        // Conta desativada com o token de MODERATOR: 401 ACCOUNT_DISABLED, também sem efeito
+        TestUser disabled = promoteToModerator(registerUser("mod_disabled"));
+        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", disabled.userId());
+        moderate(reviewId, disabled)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+        assertReviewUntouched(reviewId);
+
+        // Cargo restabelecido no banco: o mesmo token antigo volta a moderar (a recusa era só a revalidação)
+        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.userId());
+        moderate(reviewId, moderator)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.newStatus").value("REMOVED"))
+                .andExpect(jsonPath("$.resolvedReportsCount").value(1));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions moderate(UUID reviewId, TestUser actor) throws Exception {
+        return mockMvc.perform(post("/api/v1/admin/reviews/" + reviewId + "/moderate")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + actor.accessToken())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(removeRequest())));
+    }
+
+    /** Avaliação ainda ACTIVE, sem auditoria de moderação e com a denúncia pendente. */
+    private void assertReviewUntouched(UUID reviewId) {
+        assertEquals("ACTIVE", jdbcTemplate.queryForObject("SELECT status FROM reviews WHERE id = ?", String.class, reviewId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM moderation_audit_logs WHERE review_id = ?", Integer.class, reviewId));
+        assertEquals(List.of("PENDING"), jdbcTemplate.queryForList(
+                "SELECT status FROM review_reports WHERE review_id = ?", String.class, reviewId));
+    }
 }

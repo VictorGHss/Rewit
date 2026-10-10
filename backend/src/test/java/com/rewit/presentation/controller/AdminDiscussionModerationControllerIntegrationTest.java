@@ -26,8 +26,11 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -116,6 +119,56 @@ class AdminDiscussionModerationControllerIntegrationTest {
         moderate(comment.getId(), admin, REMOVE_BODY)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("DISCUSSION_NOT_UNDER_REVIEW"));
+    }
+
+    @Test
+    @DisplayName("MODERATOR rebaixado a USER: o token antigo passa pelo @PreAuthorize, mas a moderação recusa com 403 e nada muda")
+    void demotedModeratorWithOldTokenCannotModerate() throws Exception {
+        ReviewDiscussion comment = quarantinedComment();
+        Account moderator = promote(register("rebaixado"), "MODERATOR");
+
+        // Token legítimo, emitido com MODERATOR: a rota administrativa responde
+        perform(get("/api/v1/admin/discussions/{id}", comment.getId()), moderator).andExpect(status().isOk());
+
+        // Rebaixado no banco; o token continua dizendo MODERATOR
+        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+
+        // O @PreAuthorize aceita a autoridade do token; a recusa vem do caso de uso (ProblemDetail com code). Sem a
+        // role no token, o @PreAuthorize responderia 403 sem corpo
+        moderate(comment.getId(), moderator, REMOVE_BODY)
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        assertUntouched(comment.getId());
+
+        // Usuário sem a role no token: 403 do filtro de segurança, sem corpo
+        String body = moderate(comment.getId(), register("sem_role"), REMOVE_BODY)
+                .andExpect(status().isForbidden()).andReturn().getResponse().getContentAsString();
+        assertTrue(body.isEmpty(), body);
+
+        // Conta desativada com o token de MODERATOR: 401 ACCOUNT_DISABLED, também sem efeito
+        Account disabled = promote(register("desativado"), "MODERATOR");
+        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", disabled.userId());
+        moderate(comment.getId(), disabled, REMOVE_BODY)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+        assertUntouched(comment.getId());
+
+        // Cargo restabelecido no banco: o mesmo token antigo volta a moderar (a recusa era só a revalidação)
+        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.userId());
+        moderate(comment.getId(), moderator, REMOVE_BODY)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.newStatus").value("REMOVED"))
+                .andExpect(jsonPath("$.resolvedReportsCount").value(3));
+    }
+
+    /** Comentário ainda em análise, sem auditoria e com as 3 denúncias pendentes. */
+    private void assertUntouched(UUID discussionId) {
+        assertEquals("UNDER_REVIEW", jdbcTemplate.queryForObject(
+                "SELECT status FROM review_discussions WHERE id = ?", String.class, discussionId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM discussion_moderation_audit_logs WHERE discussion_id = ?", Integer.class, discussionId));
+        assertEquals(List.of("PENDING", "PENDING", "PENDING"), jdbcTemplate.queryForList(
+                "SELECT status FROM discussion_reports WHERE discussion_id = ?", String.class, discussionId));
     }
 
     private ResultActions moderate(UUID discussionId, Account account, String body) throws Exception {

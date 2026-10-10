@@ -7,19 +7,25 @@ import com.rewit.application.port.RateableTargetStatsRepository;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.AccountStatusPolicy;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.application.service.ReputationService;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.AccountStatus;
+import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.ModerationAction;
 import com.rewit.domain.enums.ModerationDecision;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.ReviewStatus;
+import com.rewit.domain.enums.Role;
 import com.rewit.domain.model.Report;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewMedia;
 import com.rewit.domain.model.ReviewTarget;
+import com.rewit.domain.model.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,6 +51,10 @@ class ModerateReviewUseCaseUnitTest {
 
     @Mock
     private AccountStatusPolicy accountStatusPolicy;
+
+    /** A ModeratorRolePolicy é a real: só a conta (AccountStatusPolicy) e o usuário (role atual) são simulados. */
+    @Mock
+    private UserRepository userRepository;
 
     @Mock
     private ReviewRepository reviewRepository;
@@ -77,7 +87,7 @@ class ModerateReviewUseCaseUnitTest {
     void setUp() {
         moderateReviewUseCase = new ModerateReviewUseCase(
                 reviewRepository,
-                accountStatusPolicy,
+                new ModeratorRolePolicy(accountStatusPolicy, userRepository),
                 reportRepository,
                 moderationAuditLogRepository,
                 rateableTargetStatsRepository,
@@ -91,6 +101,19 @@ class ModerateReviewUseCaseUnitTest {
         targetAId = UUID.randomUUID();
         targetBId = UUID.randomUUID();
         now = Instant.parse("2026-10-01T12:00:00Z");
+
+        // Por padrão o ator é MODERATOR atual; os testes de autorização trocam a role
+        lenient().when(userRepository.findById(moderatorUserId)).thenReturn(Optional.of(userWithRole(moderatorUserId, Role.MODERATOR)));
+    }
+
+    private User userWithRole(UUID id, Role role) {
+        return User.rehydrate(id, "moderador@rewit.test", "hash", AuthProvider.LOCAL, null, AccountStatus.ACTIVE, true,
+                role, null, now.minusSeconds(7200), now.minusSeconds(7200));
+    }
+
+    private ModerateReviewCommand removeCommand() {
+        return new ModerateReviewCommand(reviewId, moderatorUserId, ModerationAction.REMOVE_REVIEW, "VIOLATION_TOS",
+                "Justificativa válida com mais de quinze caracteres.", now);
     }
 
     private Review createReview(ReviewStatus status) {
@@ -261,7 +284,7 @@ class ModerateReviewUseCaseUnitTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         assertEquals("INVALID_REASON_CODE_LENGTH", ex.getErrorCode());
-        verifyNoInteractions(reviewRepository, moderationAuditLogRepository, accountStatusPolicy);
+        verifyNoInteractions(reviewRepository, moderationAuditLogRepository, accountStatusPolicy, userRepository);
     }
 
     @Test
@@ -321,6 +344,8 @@ class ModerateReviewUseCaseUnitTest {
     void shouldRejectSelfModeration() {
         Review review = createReview(ReviewStatus.ACTIVE);
         when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
+        // O autor também é moderador atual: passa pela política e é barrado pelo conflito de interesse
+        when(userRepository.findById(authorUserId)).thenReturn(Optional.of(userWithRole(authorUserId, Role.MODERATOR)));
 
         // moderador é o mesmo autor da avaliação
         ModerateReviewCommand command = new ModerateReviewCommand(
@@ -595,5 +620,49 @@ class ModerateReviewUseCaseUnitTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> moderateReviewUseCase.execute(command));
         assertEquals("REVIEW_ALREADY_REMOVED", ex.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    }
+
+    // -----------------------------------------------------------------------------------------------------------
+    // Cargo atual (ModeratorRolePolicy): o JWT pode carregar uma role revogada
+    // -----------------------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Cargo atual ADMIN também modera")
+    void currentAdminCanModerate() {
+        when(userRepository.findById(moderatorUserId)).thenReturn(Optional.of(userWithRole(moderatorUserId, Role.ADMIN)));
+        Review review = createReview(ReviewStatus.ACTIVE);
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
+        when(reportRepository.findPendingByReviewId(reviewId)).thenReturn(List.of());
+
+        ModerateReviewResult result = moderateReviewUseCase.execute(removeCommand());
+
+        assertEquals(ReviewStatus.REMOVED, result.review().getStatus());
+        verify(reviewRepository).save(review);
+    }
+
+    @Test
+    @DisplayName("Rebaixado a USER no banco: 403 FORBIDDEN antes de qualquer lock, leitura ou escrita")
+    void demotedModeratorIsRejectedBeforeAnySideEffect() {
+        when(userRepository.findById(moderatorUserId)).thenReturn(Optional.of(userWithRole(moderatorUserId, Role.USER)));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> moderateReviewUseCase.execute(removeCommand()));
+
+        assertEquals("FORBIDDEN", ex.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+        verifyNoInteractions(reviewRepository, reportRepository, moderationAuditLogRepository, rateableTargetStatsRepository,
+                reputationService, reviewMediaRepository);
+    }
+
+    @Test
+    @DisplayName("Conta inoperante: 401 ACCOUNT_DISABLED antes da role e de qualquer efeito")
+    void disabledAccountIsRejectedBeforeRoleCheck() {
+        doThrow(AccountStatusPolicy.accountDisabled()).when(accountStatusPolicy).requireOperational(moderatorUserId);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> moderateReviewUseCase.execute(removeCommand()));
+
+        assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
+        assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatus());
+        verifyNoInteractions(userRepository, reviewRepository, reportRepository, moderationAuditLogRepository,
+                rateableTargetStatsRepository, reputationService, reviewMediaRepository);
     }
 }
