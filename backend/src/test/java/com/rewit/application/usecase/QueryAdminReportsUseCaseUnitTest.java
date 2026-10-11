@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static com.rewit.application.usecase.CurrentRoleStubs.currentRole;
+import static com.rewit.application.usecase.CurrentRoleStubs.defaultRole;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -59,6 +60,8 @@ class QueryAdminReportsUseCaseUnitTest {
         queryAdminReportsUseCase = new QueryAdminReportsUseCase(reportRepository, reviewRepository,
                 new ModeratorRolePolicy(accountStatusPolicy, userRepository));
         now = Instant.parse("2026-10-01T12:00:00Z");
+        // Ator padrão: MODERATOR atual. Os testes de autorização trocam o cargo
+        defaultRole(userRepository, actor, Role.MODERATOR);
     }
 
     private Review createStubReview(UUID reviewId, UUID authorId, boolean anonymous) {
@@ -85,7 +88,7 @@ class QueryAdminReportsUseCaseUnitTest {
         when(reportRepository.findAllPaged(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20), eq("asc")))
                 .thenReturn(PageResult.of(List.of(), 0, 20, 0));
 
-        PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(QueryAdminReportsFilter.ofDefault());
+        PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(actor, QueryAdminReportsFilter.ofDefault());
 
         assertNotNull(result);
         assertEquals(0, result.pageNumber());
@@ -100,23 +103,23 @@ class QueryAdminReportsUseCaseUnitTest {
                 .thenReturn(PageResult.of(List.of(), 0, 100, 0));
 
         QueryAdminReportsFilter filter = new QueryAdminReportsFilter(0, 100, null, null, null, null, "asc");
-        assertDoesNotThrow(() -> queryAdminReportsUseCase.execute(filter));
+        assertDoesNotThrow(() -> queryAdminReportsUseCase.execute(actor, filter));
     }
 
     @Test
     @DisplayName("3. Rejeição de size > 100 e size <= 0 com BAD_REQUEST")
     void shouldRejectInvalidPageSize() {
         QueryAdminReportsFilter tooLarge = new QueryAdminReportsFilter(0, 101, null, null, null, null, "asc");
-        BusinessException ex1 = assertThrows(BusinessException.class, () -> queryAdminReportsUseCase.execute(tooLarge));
+        BusinessException ex1 = assertThrows(BusinessException.class, () -> queryAdminReportsUseCase.execute(actor, tooLarge));
         assertEquals("INVALID_PAGE_SIZE", ex1.getErrorCode());
         assertEquals(HttpStatus.BAD_REQUEST, ex1.getStatus());
 
         QueryAdminReportsFilter zeroSize = new QueryAdminReportsFilter(0, 0, null, null, null, null, "asc");
-        BusinessException ex2 = assertThrows(BusinessException.class, () -> queryAdminReportsUseCase.execute(zeroSize));
+        BusinessException ex2 = assertThrows(BusinessException.class, () -> queryAdminReportsUseCase.execute(actor, zeroSize));
         assertEquals("INVALID_PAGE_SIZE", ex2.getErrorCode());
 
         QueryAdminReportsFilter negativePage = new QueryAdminReportsFilter(-1, 20, null, null, null, null, "asc");
-        BusinessException ex3 = assertThrows(BusinessException.class, () -> queryAdminReportsUseCase.execute(negativePage));
+        BusinessException ex3 = assertThrows(BusinessException.class, () -> queryAdminReportsUseCase.execute(actor, negativePage));
         assertEquals("INVALID_PAGE", ex3.getErrorCode());
     }
 
@@ -127,7 +130,7 @@ class QueryAdminReportsUseCaseUnitTest {
                 .thenReturn(PageResult.of(List.of(), 0, 20, 0));
 
         QueryAdminReportsFilter filter = new QueryAdminReportsFilter(0, 20, ReportStatus.PENDING, null, null, null, "asc");
-        queryAdminReportsUseCase.execute(filter);
+        queryAdminReportsUseCase.execute(actor, filter);
 
         verify(reportRepository).findAllPaged(eq(ReportStatus.PENDING), isNull(), isNull(), isNull(), eq(0), eq(20), eq("asc"));
     }
@@ -139,7 +142,7 @@ class QueryAdminReportsUseCaseUnitTest {
                 .thenReturn(PageResult.of(List.of(), 0, 20, 0));
 
         QueryAdminReportsFilter filter = new QueryAdminReportsFilter(0, 20, null, ReportReason.SPAM, null, null, "asc");
-        queryAdminReportsUseCase.execute(filter);
+        queryAdminReportsUseCase.execute(actor, filter);
 
         verify(reportRepository).findAllPaged(isNull(), eq(ReportReason.SPAM), isNull(), isNull(), eq(0), eq(20), eq("asc"));
     }
@@ -152,7 +155,7 @@ class QueryAdminReportsUseCaseUnitTest {
                 .thenReturn(PageResult.of(List.of(), 0, 20, 0));
 
         QueryAdminReportsFilter filter = new QueryAdminReportsFilter(0, 20, null, null, reviewId, null, "asc");
-        queryAdminReportsUseCase.execute(filter);
+        queryAdminReportsUseCase.execute(actor, filter);
 
         verify(reportRepository).findAllPaged(isNull(), isNull(), eq(reviewId), isNull(), eq(0), eq(20), eq("asc"));
     }
@@ -165,7 +168,7 @@ class QueryAdminReportsUseCaseUnitTest {
                 .thenReturn(PageResult.of(List.of(), 0, 20, 0));
 
         QueryAdminReportsFilter filter = new QueryAdminReportsFilter(0, 20, null, null, null, reporterUserId, "asc");
-        queryAdminReportsUseCase.execute(filter);
+        queryAdminReportsUseCase.execute(actor, filter);
 
         verify(reportRepository).findAllPaged(isNull(), isNull(), isNull(), eq(reporterUserId), eq(0), eq(20), eq("asc"));
     }
@@ -179,7 +182,7 @@ class QueryAdminReportsUseCaseUnitTest {
                 .thenReturn(PageResult.of(List.of(), 1, 50, 0));
 
         QueryAdminReportsFilter filter = new QueryAdminReportsFilter(1, 50, ReportStatus.PENDING, ReportReason.INAPPROPRIATE_CONTENT, reviewId, reporterUserId, "desc");
-        queryAdminReportsUseCase.execute(filter);
+        queryAdminReportsUseCase.execute(actor, filter);
 
         verify(reportRepository).findAllPaged(eq(ReportStatus.PENDING), eq(ReportReason.INAPPROPRIATE_CONTENT), eq(reviewId), eq(reporterUserId), eq(1), eq(50), eq("desc"));
     }
@@ -192,8 +195,8 @@ class QueryAdminReportsUseCaseUnitTest {
         when(reportRepository.findAllPaged(any(), any(), any(), any(), anyInt(), anyInt(), eq("desc")))
                 .thenReturn(PageResult.of(List.of(), 0, 20, 0));
 
-        queryAdminReportsUseCase.execute(new QueryAdminReportsFilter(0, 20, null, null, null, null, "asc"));
-        queryAdminReportsUseCase.execute(new QueryAdminReportsFilter(0, 20, null, null, null, null, "desc"));
+        queryAdminReportsUseCase.execute(actor, new QueryAdminReportsFilter(0, 20, null, null, null, null, "asc"));
+        queryAdminReportsUseCase.execute(actor, new QueryAdminReportsFilter(0, 20, null, null, null, null, "desc"));
 
         verify(reportRepository).findAllPaged(any(), any(), any(), any(), anyInt(), anyInt(), eq("asc"));
         verify(reportRepository).findAllPaged(any(), any(), any(), any(), anyInt(), anyInt(), eq("desc"));
@@ -217,7 +220,7 @@ class QueryAdminReportsUseCaseUnitTest {
         Review review2 = createStubReview(reviewId2, author2, false);
         when(reviewRepository.findByIdIn(any())).thenReturn(List.of(review1, review2));
 
-        PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(QueryAdminReportsFilter.ofDefault());
+        PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(actor, QueryAdminReportsFilter.ofDefault());
 
         assertEquals(2, result.content().size());
         assertEquals(author1, result.content().get(0).reviewAuthorUserId());
@@ -298,16 +301,5 @@ class QueryAdminReportsUseCaseUnitTest {
         assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatus());
         verifyNoInteractions(userRepository, reportRepository, reviewRepository);
-    }
-
-    @Test
-    @DisplayName("Variantes transitórias sem ator não consultam a política")
-    void legacyVariantsDoNotUsePolicy() {
-        when(reportRepository.findAllPaged(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20), eq("asc")))
-                .thenReturn(PageResult.of(List.of(), 0, 20, 0));
-
-        queryAdminReportsUseCase.execute(QueryAdminReportsFilter.ofDefault());
-
-        verifyNoInteractions(accountStatusPolicy, userRepository);
     }
 }

@@ -117,13 +117,4 @@ class GetAdminDiscussionContextUseCaseTest {
         assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
         verifyNoInteractions(userRepository, discussionRepository, discussionReportRepository, auditLogRepository);
     }
-
-    @Test
-    @DisplayName("Variante transitória sem ator: comportamento existente, sem revalidação")
-    void legacyVariantUnchanged() {
-        stubContext();
-
-        assertEquals(parentId, useCase.execute(replyId).parent().id());
-        verifyNoInteractions(accountStatusPolicy, userRepository);
-    }
 }

@@ -200,7 +200,7 @@ class ModerateDiscussionIntegrationTest {
         ReviewDiscussion comment = quarantinedComment();
 
         PageResult<AdminDiscussionReportView> pending = queryAdminDiscussionReportsUseCase.execute(
-                0, 50, ReportStatus.PENDING, null, comment.getId(), "asc");
+                moderator.getId(), 0, 50, ReportStatus.PENDING, null, comment.getId(), "asc");
         assertEquals(3, pending.totalElements());
         AdminDiscussionReportView first = pending.content().get(0);
         assertEquals(review.getId(), first.reviewId());
@@ -208,14 +208,14 @@ class ModerateDiscussionIntegrationTest {
         assertEquals(DiscussionStatus.UNDER_REVIEW, first.discussionStatus());
 
         moderate(comment, moderator, DiscussionModerationAction.REMOVE_DISCUSSION);
-        AdminDiscussionContextView context = getAdminDiscussionContextUseCase.execute(comment.getId());
+        AdminDiscussionContextView context = getAdminDiscussionContextUseCase.execute(moderator.getId(), comment.getId());
         assertEquals(DiscussionStatus.REMOVED, context.discussion().status());
         assertEquals("Comentário moderável", context.discussion().content(), "moderação vê o conteúdo mesmo removido");
         assertNull(context.parent());
         assertEquals(0, context.pendingReportCount());
         assertEquals(3, context.reports().size());
         assertEquals(1, context.auditHistory().size());
-        assertTrue(queryAdminDiscussionReportsUseCase.execute(0, 50, ReportStatus.PENDING, null, comment.getId(), "asc")
+        assertTrue(queryAdminDiscussionReportsUseCase.execute(moderator.getId(), 0, 50, ReportStatus.PENDING, null, comment.getId(), "asc")
                 .content().isEmpty());
     }
 
@@ -230,7 +230,7 @@ class ModerateDiscussionIntegrationTest {
         assertEquals("DISCUSSION_UNDER_REVIEW_MUTATION_DENIED", ex.getErrorCode());
         assertEquals(DiscussionStatus.UNDER_REVIEW, statusOf(comment));
         assertEquals(3, count("SELECT count(*) FROM discussion_reports WHERE discussion_id = ? AND status = 'PENDING'", comment.getId()));
-        assertEquals(3, queryAdminDiscussionReportsUseCase.execute(0, 50, ReportStatus.PENDING, null, comment.getId(), "asc")
+        assertEquals(3, queryAdminDiscussionReportsUseCase.execute(moderator.getId(), 0, 50, ReportStatus.PENDING, null, comment.getId(), "asc")
                 .totalElements());
 
         moderate(comment, moderator, DiscussionModerationAction.RESTORE_DISCUSSION);

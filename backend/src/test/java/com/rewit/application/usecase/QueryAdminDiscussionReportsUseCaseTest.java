@@ -120,14 +120,4 @@ class QueryAdminDiscussionReportsUseCaseTest {
         assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
         verifyNoInteractions(userRepository, discussionReportRepository, discussionRepository);
     }
-
-    @Test
-    @DisplayName("Variante transitória sem ator: comportamento existente, sem revalidação")
-    void legacyVariantUnchanged() {
-        stubPage();
-
-        assertEquals(1, useCase.execute(1, 5, ReportStatus.PENDING, ReportReason.HARASSMENT, discussionId, "desc")
-                .content().size());
-        verifyNoInteractions(accountStatusPolicy, userRepository);
-    }
 }

@@ -46,15 +46,11 @@ public class GetAdminDiscussionContextUseCase {
     @Transactional(readOnly = true)
     public AdminDiscussionContextView execute(UUID actorUserId, UUID discussionId) {
         moderatorRolePolicy.requireCurrentModerator(actorUserId);
-        return execute(discussionId);
+        return load(discussionId);
     }
 
-    /**
-     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
-     * todas as rotas usarem a variante com {@code actorUserId}.
-     */
-    @Transactional(readOnly = true)
-    public AdminDiscussionContextView execute(UUID discussionId) {
+    /** Carga do contexto propriamente dita; só alcançável depois da revalidação do cargo do ator. */
+    private AdminDiscussionContextView load(UUID discussionId) {
         if (discussionId == null) {
             throw new BusinessException("Identificador do comentário é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_DISCUSSION_ID");
         }

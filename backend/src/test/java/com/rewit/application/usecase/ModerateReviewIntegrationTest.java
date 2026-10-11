@@ -261,7 +261,8 @@ class ModerateReviewIntegrationTest {
                 "asc"
         );
 
-        PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(filter);
+        User moderator = createActiveUser(Role.MODERATOR);
+        PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(moderator.getId(), filter);
 
         assertFalse(result.content().isEmpty());
         AdminReportView item = result.content().get(0);

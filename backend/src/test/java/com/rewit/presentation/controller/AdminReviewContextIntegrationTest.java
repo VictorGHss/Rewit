@@ -226,6 +226,47 @@ class AdminReviewContextIntegrationTest {
 
     // -----------------------------------------------------------------------------------------------------------
 
+    @Test
+    @DisplayName("Revalidação do cargo: MODERATOR atual 200; rebaixado com token antigo 403 FORBIDDEN; desativado 401; sem dados")
+    void contextRevalidatesCurrentRoleWithOldToken() throws Exception {
+        TestUser author = registerUser("ctx_demote_author");
+        UUID reviewId = createReview(author, place("Rebaixamento"), null, false);
+        report(reviewId, "ctx_demote_rep", ReportReason.SPAM);
+        TestUser moderator = withRole(registerUser("ctx_demote_mod"), "MODERATOR");
+
+        // Cargo atual MODERATOR: o contexto responde
+        mockMvc.perform(get("/api/v1/admin/reviews/{id}/context", reviewId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + moderator.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.review.experienceText").value("Texto da avaliação denunciada"));
+
+        // Rebaixado no banco, mesmo token: o @PreAuthorize aceita a role do token e o caso de uso recusa
+        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+        assertNoContextData(mockMvc.perform(get("/api/v1/admin/reviews/{id}/context", reviewId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + moderator.accessToken()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andReturn());
+
+        // Conta desativada com token de MODERATOR válido
+        TestUser disabled = withRole(registerUser("ctx_disabled_mod"), "MODERATOR");
+        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", disabled.userId());
+        assertNoContextData(mockMvc.perform(get("/api/v1/admin/reviews/{id}/context", reviewId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + disabled.accessToken()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"))
+                .andReturn());
+    }
+
+    /** A recusa não traz nada do contexto: nem a avaliação, nem denúncias ou histórico. */
+    private static void assertNoContextData(MvcResult result) throws Exception {
+        String body = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        for (String value : List.of("Texto da avaliação denunciada", "\"review\"", "\"reports\"", "\"auditHistory\"",
+                "Detalhe da denúncia")) {
+            assertFalse(body.contains(value), body);
+        }
+    }
+
     private UUID createReview(TestUser author, Place place, Product product, boolean anonymous) {
         List<CreateReviewTargetCommand> targets = new ArrayList<>();
         targets.add(new CreateReviewTargetCommand(place.getId(), new BigDecimal("4.5"), "Comentário do local"));

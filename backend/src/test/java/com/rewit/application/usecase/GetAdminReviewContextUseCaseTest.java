@@ -36,6 +36,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static com.rewit.application.usecase.CurrentRoleStubs.currentRole;
+import static com.rewit.application.usecase.CurrentRoleStubs.defaultRole;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -62,18 +63,21 @@ class GetAdminReviewContextUseCaseTest {
 
     private final UUID reviewId = UUID.randomUUID();
     private final UUID authorId = UUID.randomUUID();
+    private final UUID actor = UUID.randomUUID();
     private final Instant created = Instant.parse("2026-10-01T10:00:00Z");
 
     @BeforeEach
     void setUp() {
         useCase = new GetAdminReviewContextUseCase(reviewRepository, reportRepository, auditLogRepository,
                 rateableTargetRepository, new ModeratorRolePolicy(accountStatusPolicy, userRepository));
+        // Ator padrão: MODERATOR atual. Os testes de autorização trocam o cargo
+        defaultRole(userRepository, actor, Role.MODERATOR);
     }
 
     @Test
     @DisplayName("Identificador nulo: 400 MISSING_REVIEW_ID sem consultar nada")
     void nullId() {
-        BusinessException ex = assertThrows(BusinessException.class, () -> useCase.execute(null));
+        BusinessException ex = assertThrows(BusinessException.class, () -> useCase.execute(actor, null));
         assertEquals("MISSING_REVIEW_ID", ex.getErrorCode());
         assertEquals(400, ex.getStatus().value());
         verifyNoInteractions(reviewRepository, reportRepository, auditLogRepository, rateableTargetRepository);
@@ -84,7 +88,7 @@ class GetAdminReviewContextUseCaseTest {
     void missingReview() {
         when(reviewRepository.findById(reviewId)).thenReturn(Optional.empty());
 
-        BusinessException ex = assertThrows(BusinessException.class, () -> useCase.execute(reviewId));
+        BusinessException ex = assertThrows(BusinessException.class, () -> useCase.execute(actor, reviewId));
         assertEquals("REVIEW_NOT_FOUND", ex.getErrorCode());
         assertEquals(404, ex.getStatus().value());
         verifyNoInteractions(reportRepository, auditLogRepository, rateableTargetRepository);
@@ -114,7 +118,7 @@ class GetAdminReviewContextUseCaseTest {
                         ModerationDecision.REJECTED, "NO_VIOLATION", "Justificativa da restauração", ReviewStatus.UNDER_REVIEW,
                         ReviewStatus.ACTIVE, 1, created)));
 
-        AdminReviewContextView view = useCase.execute(reviewId);
+        AdminReviewContextView view = useCase.execute(actor, reviewId);
 
         assertEquals(reviewId, view.review().id());
         assertEquals("Texto", view.review().experienceText());
@@ -163,7 +167,7 @@ class GetAdminReviewContextUseCaseTest {
         when(reportRepository.findByReviewId(reviewId)).thenReturn(List.of());
         when(auditLogRepository.findByReviewId(reviewId)).thenReturn(List.of());
 
-        AdminReviewContextView view = useCase.execute(reviewId);
+        AdminReviewContextView view = useCase.execute(actor, reviewId);
 
         assertTrue(view.review().targets().isEmpty());
         assertEquals(0, view.pendingReportCount());
@@ -173,8 +177,6 @@ class GetAdminReviewContextUseCaseTest {
     // -----------------------------------------------------------------------------------------------------------
     // Variante com ator: revalidação do cargo atual (ModeratorRolePolicy real) antes de qualquer consulta
     // -----------------------------------------------------------------------------------------------------------
-
-    private final UUID actor = UUID.randomUUID();
 
     private Review stubReviewWithoutTargets() {
         Review review = new Review(reviewId, authorId, null, "Texto", false, false, ReviewStatus.UNDER_REVIEW, "PUBLIC",

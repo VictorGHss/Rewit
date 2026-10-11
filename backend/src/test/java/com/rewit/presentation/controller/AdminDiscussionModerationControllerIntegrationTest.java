@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -159,6 +160,63 @@ class AdminDiscussionModerationControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.newStatus").value("REMOVED"))
                 .andExpect(jsonPath("$.resolvedReportsCount").value(3));
+    }
+
+    @Test
+    @DisplayName("Leituras (fila e contexto): MODERATOR e ADMIN atuais 200; rebaixado com token antigo 403 FORBIDDEN; desativado 401")
+    void readsRevalidateCurrentRoleWithOldToken() throws Exception {
+        ReviewDiscussion comment = quarantinedComment();
+        Account moderator = promote(register("leitura_mod"), "MODERATOR");
+        Account admin = promote(register("leitura_adm"), "ADMIN");
+
+        // A e D. Cargo atual MODERATOR e ADMIN: fila e contexto respondem
+        for (Account staff : List.of(moderator, admin)) {
+            queue(comment.getId(), staff)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(3));
+            context(comment.getId(), staff)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.discussion.content").value("Comentário denunciado"));
+        }
+
+        // B. Rebaixado no banco, mesmo token: o @PreAuthorize aceita a role do token e o caso de uso recusa
+        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+        assertNoDiscussionData(queue(comment.getId(), moderator)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("FORBIDDEN")), comment);
+        assertNoDiscussionData(context(comment.getId(), moderator)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("FORBIDDEN")), comment);
+
+        // C. Conta desativada com token de MODERATOR válido
+        Account disabled = promote(register("leitura_desativado"), "MODERATOR");
+        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", disabled.userId());
+        assertNoDiscussionData(queue(comment.getId(), disabled)
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED")), comment);
+        assertNoDiscussionData(context(comment.getId(), disabled)
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED")), comment);
+
+        // E. Sem a role no token: 403 do filtro de segurança, sem corpo (distinto do 403 do caso de uso)
+        Account plain = register("leitura_sem_role");
+        assertTrue(queue(comment.getId(), plain).andExpect(status().isForbidden())
+                .andReturn().getResponse().getContentAsString().isEmpty());
+        assertTrue(context(comment.getId(), plain).andExpect(status().isForbidden())
+                .andReturn().getResponse().getContentAsString().isEmpty());
+    }
+
+    private ResultActions queue(UUID discussionId, Account account) throws Exception {
+        return perform(get("/api/v1/admin/discussion-reports").param("discussionId", discussionId.toString()), account);
+    }
+
+    private ResultActions context(UUID discussionId, Account account) throws Exception {
+        return perform(get("/api/v1/admin/discussions/{id}", discussionId), account);
+    }
+
+    /** A recusa não traz nada da fila nem do contexto: nem conteúdo, nem o autor do comentário, nem denúncias. */
+    private static void assertNoDiscussionData(ResultActions refused, ReviewDiscussion comment) throws Exception {
+        String body = refused.andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        for (String value : List.of("Comentário denunciado", comment.getUserId().toString(), "\"content\"",
+                "\"discussion\"", "\"reports\"")) {
+            assertFalse(body.contains(value), body);
+        }
     }
 
     /** Comentário ainda em análise, sem auditoria e com as 3 denúncias pendentes. */

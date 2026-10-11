@@ -51,15 +51,11 @@ public class QueryAdminDiscussionReportsUseCase {
     public PageResult<AdminDiscussionReportView> execute(UUID actorUserId, int page, int size, ReportStatus status,
                                                          ReportReason reason, UUID discussionId, String sortDirection) {
         moderatorRolePolicy.requireCurrentModerator(actorUserId);
-        return execute(page, size, status, reason, discussionId, sortDirection);
+        return query(page, size, status, reason, discussionId, sortDirection);
     }
 
-    /**
-     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
-     * todas as rotas usarem a variante com {@code actorUserId}.
-     */
-    @Transactional(readOnly = true)
-    public PageResult<AdminDiscussionReportView> execute(int page, int size, ReportStatus status, ReportReason reason,
+    /** Consulta propriamente dita; só alcançável depois da revalidação do cargo do ator. */
+    private PageResult<AdminDiscussionReportView> query(int page, int size, ReportStatus status, ReportReason reason,
                                                          UUID discussionId, String sortDirection) {
         if (page < 0) {
             throw new BusinessException("O número da página não pode ser negativo", HttpStatus.BAD_REQUEST, "INVALID_PAGE");

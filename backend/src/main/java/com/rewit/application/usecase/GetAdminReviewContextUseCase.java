@@ -64,15 +64,11 @@ public class GetAdminReviewContextUseCase {
     @Transactional(readOnly = true)
     public AdminReviewContextView execute(UUID actorUserId, UUID reviewId) {
         moderatorRolePolicy.requireCurrentModerator(actorUserId);
-        return execute(reviewId);
+        return load(reviewId);
     }
 
-    /**
-     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
-     * todas as rotas usarem a variante com {@code actorUserId}.
-     */
-    @Transactional(readOnly = true)
-    public AdminReviewContextView execute(UUID reviewId) {
+    /** Carga do contexto propriamente dita; só alcançável depois da revalidação do cargo do ator. */
+    private AdminReviewContextView load(UUID reviewId) {
         if (reviewId == null) {
             throw new BusinessException("Identificador da avaliação é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_REVIEW_ID");
         }

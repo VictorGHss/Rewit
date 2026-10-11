@@ -545,6 +545,57 @@ class AdminModerationControllerIntegrationTest {
                 .andExpect(jsonPath("$.resolvedReportsCount").value(1));
     }
 
+    @Test
+    @DisplayName("17. GET /admin/reports: MODERATOR atual 200; rebaixado com token antigo 403 FORBIDDEN; desativado 401; sem dados")
+    void listReports_revalidatesCurrentRoleWithOldToken() throws Exception {
+        TestUser author = registerUser("rep_dem_aut");
+        UUID reviewId = createReview(author.userId(), createRateableTarget());
+        TestUser reporter = registerUser("rep_dem_den");
+        createReport(reporter.userId(), reviewId);
+        TestUser moderator = promoteToModerator(registerUser("rep_dem_mod"));
+
+        // A. Cargo atual MODERATOR: a fila responde com a denúncia
+        reports(reviewId, moderator)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].reviewId").value(reviewId.toString()));
+
+        // B. Rebaixado no banco, mesmo token: o @PreAuthorize aceita a role do token e o caso de uso recusa
+        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+        assertNoReportData(reports(reviewId, moderator)
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andReturn(), reviewId, author, reporter);
+
+        // C. Conta desativada com token de MODERATOR válido
+        TestUser disabled = promoteToModerator(registerUser("rep_dis_mod"));
+        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", disabled.userId());
+        assertNoReportData(reports(reviewId, disabled)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"))
+                .andReturn(), reviewId, author, reporter);
+
+        // E. Sem a role no token: 403 do filtro de segurança, sem corpo (distinto do 403 do caso de uso)
+        MvcResult plain = reports(reviewId, registerUser("rep_plain")).andExpect(status().isForbidden()).andReturn();
+        assertTrue(plain.getResponse().getContentAsString().isEmpty());
+    }
+
+    private org.springframework.test.web.servlet.ResultActions reports(UUID reviewId, TestUser actor) throws Exception {
+        return mockMvc.perform(get("/api/v1/admin/reports")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + actor.accessToken())
+                .param("reviewId", reviewId.toString()));
+    }
+
+    /** A recusa não traz nenhum dado da fila: nem página, nem a avaliação, o autor ou o denunciante. */
+    private static void assertNoReportData(MvcResult result, UUID reviewId, TestUser author, TestUser reporter)
+            throws Exception {
+        String body = result.getResponse().getContentAsString();
+        assertFalse(body.contains("\"content\""), body);
+        for (String value : List.of(reviewId.toString(), author.userId().toString(), reporter.userId().toString())) {
+            assertFalse(body.contains(value), body);
+        }
+    }
+
     private org.springframework.test.web.servlet.ResultActions moderate(UUID reviewId, TestUser actor) throws Exception {
         return mockMvc.perform(post("/api/v1/admin/reviews/" + reviewId + "/moderate")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + actor.accessToken())

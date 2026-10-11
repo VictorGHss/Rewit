@@ -74,32 +74,11 @@ public class QueryAdminReportsUseCase {
     @Transactional(readOnly = true)
     public PageResult<AdminReportView> execute(UUID actorUserId, QueryAdminReportsFilter filter) {
         moderatorRolePolicy.requireCurrentModerator(actorUserId);
-        return execute(filter);
+        return query(filter);
     }
 
-    /**
-     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
-     * todas as rotas usarem a variante com {@code actorUserId}.
-     */
-    @Transactional(readOnly = true)
-    public PageResult<AdminReportView> execute(
-            Integer page,
-            Integer size,
-            ReportStatus status,
-            ReportReason reason,
-            UUID reviewId,
-            UUID reporterUserId,
-            String sortDirection
-    ) {
-        return execute(new QueryAdminReportsFilter(page, size, status, reason, reviewId, reporterUserId, sortDirection));
-    }
-
-    /**
-     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
-     * todas as rotas usarem a variante com {@code actorUserId}.
-     */
-    @Transactional(readOnly = true)
-    public PageResult<AdminReportView> execute(QueryAdminReportsFilter filter) {
+    /** Consulta propriamente dita; só alcançável depois da revalidação do cargo do ator. */
+    private PageResult<AdminReportView> query(QueryAdminReportsFilter filter) {
         QueryAdminReportsFilter effectiveFilter = filter != null ? filter : QueryAdminReportsFilter.ofDefault();
 
         int page = effectiveFilter.page() != null ? effectiveFilter.page() : DEFAULT_PAGE;
