@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.adapter;
 
+import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseView;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.BusinessResponseRepository;
 import com.rewit.domain.enums.BusinessResponseStatus;
@@ -14,6 +15,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
@@ -98,6 +102,47 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
                 .map(entity -> entity.toDomain())
                 .toList();
         return PageResult.of(content, page, size, result.getTotalElements());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<BusinessResponseView> findActiveReviewResponseViews(UUID reviewId, int page, int size) {
+        if (reviewId == null) {
+            return PageResult.of(List.of(), page, size, 0);
+        }
+        // Atendida por idx_business_responses_review (review_id, created_at, id)
+        String where = " FROM business_responses r"
+                + " JOIN business_accounts b ON b.id = r.business_account_id"
+                + " JOIN places p ON p.id = r.place_id"
+                + " WHERE r.review_id = :reviewId AND r.discussion_id IS NULL AND r.status = 'ACTIVE'";
+        List<?> rows = entityManager.createNativeQuery("SELECT r.id, r.review_id, b.id AS business_account_id,"
+                        + " b.corporate_name, p.id AS place_id, p.name, r.content, r.created_at" + where
+                        + " ORDER BY r.created_at ASC, r.id ASC")
+                .setParameter("reviewId", reviewId)
+                .setFirstResult(Math.multiplyExact(page, size))
+                .setMaxResults(size)
+                .getResultList();
+        Number total = (Number) entityManager.createNativeQuery("SELECT count(*)" + where)
+                .setParameter("reviewId", reviewId)
+                .getSingleResult();
+        List<BusinessResponseView> content = rows.stream()
+                .map(row -> toView((Object[]) row))
+                .toList();
+        return PageResult.of(content, page, size, total.longValue());
+    }
+
+    private static BusinessResponseView toView(Object[] row) {
+        return new BusinessResponseView((UUID) row[0], (UUID) row[1], (UUID) row[2], (String) row[3], (UUID) row[4],
+                (String) row[5], (String) row[6], toInstant(row[7]));
+    }
+
+    private static Instant toInstant(Object value) {
+        return switch (value) {
+            case Instant instant -> instant;
+            case OffsetDateTime offsetDateTime -> offsetDateTime.toInstant();
+            case Timestamp timestamp -> timestamp.toInstant();
+            default -> throw new IllegalStateException("Tipo de data inesperado: " + value.getClass());
+        };
     }
 
     @Override

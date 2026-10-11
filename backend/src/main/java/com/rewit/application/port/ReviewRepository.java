@@ -6,6 +6,7 @@ import com.rewit.domain.model.ReviewTarget;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -39,6 +40,12 @@ public interface ReviewRepository {
     );
 
     boolean existsById(UUID id);
+
+    /**
+     * Locais associados à avaliação (C11): alvos que são o próprio local, locais dos serviços e eventos avaliados e o
+     * {@code context_place_id}. Sem filtro de status; quem decide o que cada local permite é o chamador.
+     */
+    Set<UUID> findAssociatedPlaceIds(UUID reviewId);
 
     PageResult<Review> findFeedByFollowing(UUID requesterUserId, int page, int size);
 

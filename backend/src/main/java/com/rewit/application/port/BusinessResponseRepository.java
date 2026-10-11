@@ -1,5 +1,6 @@
 package com.rewit.application.port;
 
+import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseView;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.domain.model.BusinessResponse;
 
@@ -34,6 +35,12 @@ public interface BusinessResponseRepository {
 
     /** Respostas ativas diretas à avaliação (sem comentário), em ordem cronológica. */
     PageResult<BusinessResponse> findActiveReviewResponses(UUID reviewId, int page, int size);
+
+    /**
+     * Página pública das respostas ativas diretas à avaliação, com empresa e local numa única consulta, em ordem
+     * cronológica estável (created_at, id).
+     */
+    PageResult<BusinessResponseView> findActiveReviewResponseViews(UUID reviewId, int page, int size);
 
     /** Respostas ativas aos comentários informados, em ordem cronológica; para compor uma página de comentários. */
     List<BusinessResponse> findActiveDiscussionResponses(Collection<UUID> discussionIds);

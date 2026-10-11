@@ -1,8 +1,14 @@
 package com.rewit.infrastructure.persistence;
 
+import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseView;
+import com.rewit.application.dto.business.BusinessResponseDtos.PublishReviewBusinessResponseCommand;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.BusinessResponseModerationAuditLogRepository;
 import com.rewit.application.port.BusinessResponseRepository;
+import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.usecase.PublishReviewBusinessResponseUseCase;
+import com.rewit.application.usecase.RemoveBusinessResponseUseCase;
+import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
 import com.rewit.domain.enums.BusinessResponseStatus;
@@ -29,7 +35,9 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -37,6 +45,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,6 +67,15 @@ class BusinessResponsePersistenceIntegrationTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private ReviewRepository reviewRepository;
+
+    @Autowired
+    private PublishReviewBusinessResponseUseCase publishUseCase;
+
+    @Autowired
+    private RemoveBusinessResponseUseCase removeUseCase;
 
     /** Precisão do TIMESTAMPTZ: comparar instantes depois de ida e volta ao banco. */
     private final Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -361,7 +379,220 @@ class BusinessResponsePersistenceIntegrationTest {
         }
     }
 
+    // ------------------------------------------------------------------------------- caminhos de aplicação (C11)
+
+    @Test
+    @Transactional
+    @DisplayName("Locais da avaliação: alvo PLACE, local de SERVICE e de EVENT avaliados e local de contexto, sem outros")
+    void associatedPlacesFromEachPath() {
+        UUID reviewer = insertUser();
+        UUID targetPlace = insertPlace();
+        UUID servicePlace = insertPlace();
+        UUID eventPlace = insertPlace();
+        UUID contextPlace = insertPlace();
+        UUID unrelated = insertPlace();
+        UUID service = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO rateable_targets (id, target_type) VALUES (?, 'SERVICE')", service);
+        jdbcTemplate.update("INSERT INTO services (id, place_id, name, category) VALUES (?, ?, 'Delivery', 'DELIVERY')",
+                service, servicePlace);
+        UUID event = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO rateable_targets (id, target_type) VALUES (?, 'EVENT')", event);
+        jdbcTemplate.update("INSERT INTO events (id, place_id, title, category, start_at, end_at) "
+                + "VALUES (?, ?, 'Show', 'MUSICA', NOW(), NOW() + INTERVAL '2 hours')", event, eventPlace);
+        UUID review = insertReview(reviewer);
+        jdbcTemplate.update("UPDATE reviews SET context_place_id = ? WHERE id = ?", contextPlace, review);
+        for (UUID target : List.of(targetPlace, service, event)) {
+            jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 4)", review, target);
+        }
+
+        assertEquals(Set.of(targetPlace, servicePlace, eventPlace, contextPlace),
+                reviewRepository.findAssociatedPlaceIds(review));
+        assertFalse(reviewRepository.findAssociatedPlaceIds(review).contains(unrelated));
+        // Contexto que coincide com um alvo não duplica; avaliação sem locais devolve vazio
+        jdbcTemplate.update("UPDATE reviews SET context_place_id = ? WHERE id = ?", targetPlace, review);
+        assertEquals(Set.of(targetPlace, servicePlace, eventPlace), reviewRepository.findAssociatedPlaceIds(review));
+        assertTrue(reviewRepository.findAssociatedPlaceIds(insertReview(reviewer)).isEmpty());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Visão pública: só respostas ativas diretas, com empresa e local, em ordem estável e paginada")
+    void publicViewPage() {
+        Fixture f = fixture();
+        UUID otherBusiness = insertBusiness(insertUser());
+        BusinessResponse first = responseRepository.save(publish(f, null, "Primeira"));
+        BusinessResponse second = responseRepository.save(BusinessResponse.publish(f.review(), null, otherBusiness,
+                f.place(), f.businessAdmin(), "Segunda", now.plusSeconds(1)));
+        responseRepository.save(publish(f, f.rootDiscussion(), "No comentário"));
+        BusinessResponse removed = BusinessResponse.publish(f.review(), null, insertBusiness(insertUser()), f.place(),
+                f.businessAdmin(), "Removida", now.plusSeconds(2));
+        removed.removeByBusiness(now.plusSeconds(3));
+        responseRepository.save(removed);
+
+        PageResult<BusinessResponseView> page = responseRepository.findActiveReviewResponseViews(f.review(), 0, 10);
+        assertEquals(2, page.totalElements());
+        assertEquals(List.of(first.getId(), second.getId()), page.content().stream().map(v -> v.id()).toList());
+        BusinessResponseView view = page.content().get(0);
+        assertEquals(f.review(), view.reviewId());
+        assertEquals(f.business(), view.businessAccountId());
+        assertEquals("Empresa C11", view.corporateName());
+        assertEquals(f.place(), view.placeId());
+        assertEquals("Local C11", view.placeName());
+        assertEquals("Primeira", view.content());
+        assertEquals(now, view.createdAt());
+
+        PageResult<BusinessResponseView> secondPage = responseRepository.findActiveReviewResponseViews(f.review(), 1, 1);
+        assertEquals(2, secondPage.totalElements());
+        assertEquals(List.of(second.getId()), secondPage.content().stream().map(v -> v.id()).toList());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Ponta a ponta: publica, recusa a segunda ativa, remove e publica outra")
+    void publishRemoveRepublish() {
+        Fixture f = fixture();
+        BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Obrigado pela visita!"), now);
+        assertEquals("Empresa C11", published.corporateName());
+        assertEquals("Local C11", published.placeName());
+        assertEquals(f.businessAdmin(), responseRepository.findById(published.id()).orElseThrow().getAuthorUserId());
+
+        BusinessException duplicate = assertThrows(BusinessException.class,
+                () -> publishUseCase.execute(command(f, f.place(), "De novo"), now));
+        assertEquals("BUSINESS_RESPONSE_ALREADY_EXISTS", duplicate.getErrorCode());
+
+        removeUseCase.execute(f.businessAdmin(), published.id(), now.plusSeconds(5));
+        BusinessResponse history = responseRepository.findById(published.id()).orElseThrow();
+        assertEquals(BusinessResponseStatus.REMOVED, history.getStatus());
+        assertEquals(BusinessResponseRemovalSource.BUSINESS, history.getRemovedBy());
+
+        BusinessResponseView again = publishUseCase.execute(command(f, f.place(), "Nova resposta"), now.plusSeconds(6));
+        assertEquals(List.of(again.id()), responseRepository.findActiveReviewResponseViews(f.review(), 0, 10).content()
+                .stream().map(v -> v.id()).toList());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Vínculo perdido: nova resposta bloqueada (403); a já publicada fica e a conta ainda pode removê-la")
+    void lostLinkBlocksNewButAllowsRemoval() {
+        Fixture f = fixture();
+        BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Resposta"), now);
+
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", insertBusiness(insertUser()),
+                f.place());
+
+        assertEquals("BUSINESS_NOT_RESPONSIBLE", assertThrows(BusinessException.class,
+                () -> publishUseCase.execute(command(f, f.place(), "Outra"), now)).getErrorCode());
+        assertTrue(responseRepository.findById(published.id()).orElseThrow().isActive());
+
+        removeUseCase.execute(f.businessAdmin(), published.id(), now.plusSeconds(1));
+        assertEquals(BusinessResponseStatus.REMOVED, responseRepository.findById(published.id()).orElseThrow().getStatus());
+    }
+
+    @Test
+    @DisplayName("Corrida real: a mesma empresa por dois locais da avaliação ao mesmo tempo publica uma única resposta")
+    void concurrentPublicationsThroughDifferentPlaces() throws Exception {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        Fixture f = tx.execute(_ -> fixture());
+        UUID secondPlace = tx.execute(_ -> {
+            UUID place = insertPlace();
+            jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
+            jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 5)",
+                    f.review(), place);
+            return place;
+        });
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<String>> attempts = new ArrayList<>();
+            for (UUID place : List.of(f.place(), secondPlace)) {
+                attempts.add(executor.submit(() -> {
+                    start.await(10, TimeUnit.SECONDS);
+                    try {
+                        publishUseCase.execute(command(f, place, "Pelo local " + place), now);
+                        return "OK";
+                    } catch (BusinessException conflict) {
+                        return conflict.getErrorCode();
+                    }
+                }));
+            }
+            start.countDown();
+            List<String> outcomes = new ArrayList<>();
+            for (Future<String> attempt : attempts) {
+                outcomes.add(attempt.get(30, TimeUnit.SECONDS));
+            }
+            assertEquals(1, outcomes.stream().filter(o -> o.equals("OK")).count(), () -> outcomes.toString());
+            assertEquals(1, outcomes.stream().filter(o -> o.equals("BUSINESS_RESPONSE_ALREADY_EXISTS")).count(),
+                    () -> outcomes.toString());
+            assertEquals(1, count("SELECT count(*) FROM business_responses WHERE review_id = ? AND status = 'ACTIVE'",
+                    f.review()));
+        } finally {
+            executor.shutdownNow();
+            cleanup(f);
+            jdbcTemplate.update("DELETE FROM places WHERE id = ?", secondPlace);
+            jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", secondPlace);
+        }
+    }
+
+    @Test
+    @DisplayName("Corrida real: troca de vínculo com o local travado; a publicação espera o lock e lê o vínculo novo")
+    void publicationWaitsForPlaceLockAndSeesNewLink() throws Exception {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        Fixture f = tx.execute(_ -> fixture());
+        UUID otherAdmin = tx.execute(_ -> insertUser());
+        UUID otherBusiness = tx.execute(_ -> insertBusiness(otherAdmin));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // Simula a decisão de reivindicação: trava o local (como o C9) e troca o vínculo antes do commit
+            Future<?> relink = executor.submit(() -> tx.executeWithoutResult(_ -> {
+                jdbcTemplate.queryForObject("SELECT id FROM places WHERE id = ? FOR UPDATE", UUID.class, f.place());
+                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, f.place());
+                locked.countDown();
+                await(release);
+            }));
+            assertTrue(locked.await(10, TimeUnit.SECONDS));
+            Future<String> publication = executor.submit(() -> {
+                try {
+                    publishUseCase.execute(command(f, f.place(), "Resposta"), now);
+                    return "OK";
+                } catch (BusinessException refused) {
+                    return refused.getErrorCode();
+                }
+            });
+            waitForLockWaiter();
+            release.countDown();
+            relink.get(30, TimeUnit.SECONDS);
+
+            assertEquals("BUSINESS_NOT_RESPONSIBLE", publication.get(30, TimeUnit.SECONDS));
+            assertEquals(0, count("SELECT count(*) FROM business_responses WHERE review_id = ?", f.review()));
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            cleanup(f);
+            jdbcTemplate.update("DELETE FROM business_accounts WHERE id = ?", otherBusiness);
+            jdbcTemplate.update("DELETE FROM users WHERE id = ?", otherAdmin);
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
+
+    private PublishReviewBusinessResponseCommand command(Fixture f, UUID placeId, String content) {
+        return new PublishReviewBusinessResponseCommand(f.businessAdmin(), f.business(), f.review(), placeId, content);
+    }
+
+    /** Espera alguma sessão bloqueada em lock de linha (a publicação parada no FOR UPDATE do local). */
+    private void waitForLockWaiter() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (count("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                    + "AND wait_event_type = 'Lock'") > 0) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        fail("A publicação deveria esperar o lock do local");
+    }
 
     private BusinessResponse publish(Fixture f, UUID discussionId, String content) {
         return BusinessResponse.publish(f.review(), discussionId, f.business(), f.place(), f.businessAdmin(), content, now);
@@ -455,8 +686,20 @@ class BusinessResponsePersistenceIntegrationTest {
         }
     }
 
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Tempo esgotado esperando a liberação do lock");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(interrupted);
+        }
+    }
+
     private void cleanup(Fixture f) {
         jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", f.review());
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place());
         jdbcTemplate.update("DELETE FROM places WHERE id = ?", f.place());
         jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", f.place());
         jdbcTemplate.update("DELETE FROM business_accounts WHERE id = ?", f.business());

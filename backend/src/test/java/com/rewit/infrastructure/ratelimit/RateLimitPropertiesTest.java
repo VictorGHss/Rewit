@@ -23,6 +23,7 @@ class RateLimitPropertiesTest {
         assertPolicy(properties, RateLimitedAction.REPORT_CREATION, 10, Duration.ofSeconds(60));
         assertPolicy(properties, RateLimitedAction.DISCUSSION_CREATION, 15, Duration.ofSeconds(60));
         assertPolicy(properties, RateLimitedAction.MEDIA_UPLOAD, 10, Duration.ofSeconds(60));
+        assertPolicy(properties, RateLimitedAction.BUSINESS_RESPONSE_CREATION, 10, Duration.ofSeconds(60));
     }
 
     @Test

@@ -132,6 +132,10 @@ rewit:
       media-upload:
         limit: 10
         window: PT60S
+      # Respostas oficiais de empresas por administrador da conta comercial (C11)
+      business-response-creation:
+        limit: 10
+        window: PT60S
     query:
       # Buscas por usuário (GET /api/v1/search); o app consulta com debounce de 350 ms
       search:

@@ -335,4 +335,16 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             @Param("requesterId") UUID requesterId,
             Pageable pageable
     );
+
+    /** Alvos PLACE, locais de SERVICE/EVENT avaliados e o local de contexto; atendida pelos índices de review_targets. */
+    @Query(value = """
+            SELECT rt.target_id FROM review_targets rt JOIN places p ON p.id = rt.target_id WHERE rt.review_id = :reviewId
+            UNION
+            SELECT s.place_id FROM review_targets rt JOIN services s ON s.id = rt.target_id WHERE rt.review_id = :reviewId
+            UNION
+            SELECT e.place_id FROM review_targets rt JOIN events e ON e.id = rt.target_id WHERE rt.review_id = :reviewId
+            UNION
+            SELECT r.context_place_id FROM reviews r WHERE r.id = :reviewId AND r.context_place_id IS NOT NULL
+            """, nativeQuery = true)
+    List<UUID> findAssociatedPlaceIds(@Param("reviewId") UUID reviewId);
 }

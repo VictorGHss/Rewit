@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -182,6 +183,15 @@ public class ReviewRepositoryAdapter implements ReviewRepository {
             return false;
         }
         return reviewJpaRepository.existsById(id);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findAssociatedPlaceIds(UUID reviewId) {
+        if (reviewId == null) {
+            return Set.of();
+        }
+        return Set.copyOf(reviewJpaRepository.findAssociatedPlaceIds(reviewId));
     }
 
     @Override

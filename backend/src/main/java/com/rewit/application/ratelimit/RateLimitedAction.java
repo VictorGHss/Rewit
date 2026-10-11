@@ -14,6 +14,7 @@ public enum RateLimitedAction {
     REPORT_CREATION("Limite de denúncias excedido. Tente novamente mais tarde."),
     DISCUSSION_CREATION("Limite de criação de comentários excedido. Tente novamente mais tarde."),
     MEDIA_UPLOAD("Limite de upload de mídia excedido. Tente novamente mais tarde."),
+    BUSINESS_RESPONSE_CREATION("Limite de respostas oficiais excedido. Tente novamente mais tarde."),
     SEARCH("Muitas buscas em pouco tempo. Tente novamente mais tarde.");
 
     private final String exceededMessage;
