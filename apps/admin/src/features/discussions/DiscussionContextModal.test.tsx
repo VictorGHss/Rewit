@@ -27,7 +27,7 @@ describe('DiscussionContextModal', () => {
       id: 'disc-100',
       reviewId: 'review-1',
       parentId: null,
-      content: 'Mensagem original postada pelo proprietário.',
+      content: 'Mensagem original postada pelo autor da avaliação.',
       status: 'ACTIVE',
       isFromOwner: true,
       createdAt: '2026-10-09T13:00:00Z',
@@ -79,12 +79,44 @@ describe('DiscussionContextModal', () => {
       expect(screen.getByText('Resposta com conteúdo inadequado e ofensivo.')).toBeInTheDocument();
       // Contexto da discussão pai
       expect(screen.getByText(/mensagem original \/ contexto pai/i)).toBeInTheDocument();
-      expect(screen.getByText('Mensagem original postada pelo proprietário.')).toBeInTheDocument();
+      expect(screen.getByText('Mensagem original postada pelo autor da avaliação.')).toBeInTheDocument();
+      // Badge de autor da avaliação na discussão pai e membro da comunidade na resposta
+      expect(screen.getByText('Autor da avaliação')).toBeInTheDocument();
+      expect(screen.getByText('Membro da Comunidade')).toBeInTheDocument();
       // Denúncia
       expect(screen.getByText('Linguagem vulgar e ameaça velada.')).toBeInTheDocument();
       // Histórico
       expect(screen.getByText(/Mensagem avaliada previamente como regular./i)).toBeInTheDocument();
     });
+
+    // Garante que nenhum rótulo atribui indevidamente propriedade comercial
+    expect(screen.queryByText(/proprietário/i)).not.toBeInTheDocument();
+  });
+
+  it('exibe badge de autor da avaliação quando a discussão alvo é do próprio autor', async () => {
+    const contextWithOwnerDiscussion: AdminDiscussionContextResponse = {
+      ...sampleContextWithParent,
+      discussion: {
+        ...sampleContextWithParent.discussion,
+        isFromOwner: true,
+      },
+    };
+    vi.mocked(moderationApi.getDiscussionContext).mockResolvedValueOnce(contextWithOwnerDiscussion);
+
+    render(
+      <DiscussionContextModal
+        discussionId="disc-200"
+        isOpen={true}
+        onClose={vi.fn()}
+        onModerationComplete={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Autor da avaliação')).toHaveLength(2);
+    });
+
+    expect(screen.queryByText(/proprietário/i)).not.toBeInTheDocument();
   });
 
   it('valida justificativa e executa remoção de discussão com diálogo de confirmação', async () => {

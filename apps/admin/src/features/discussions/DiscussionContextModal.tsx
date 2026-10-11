@@ -226,7 +226,7 @@ export const DiscussionContextModal: React.FC<DiscussionContextModalProps> = ({
                       </span>
                       <StatusBadge status={contextData.parent.status} />
                       {contextData.parent.isFromOwner && (
-                        <span className="badge badge-warning">🏢 Proprietário</span>
+                        <span className="badge badge-warning">Autor da avaliação</span>
                       )}
                     </div>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
@@ -245,7 +245,7 @@ export const DiscussionContextModal: React.FC<DiscussionContextModalProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <StatusBadge status={contextData.discussion.status} />
                     {contextData.discussion.isFromOwner ? (
-                      <span className="badge badge-warning">🏢 Proprietário do Local</span>
+                      <span className="badge badge-warning">Autor da avaliação</span>
                     ) : (
                       <span className="badge" style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }}>
                         Membro da Comunidade
