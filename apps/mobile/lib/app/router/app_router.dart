@@ -3,6 +3,7 @@ import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
+import 'package:rewit_mobile/features/business/domain/repositories/business_response_repository.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/my_business_accounts_screen.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
@@ -68,6 +69,7 @@ class AppRouter {
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
   final BusinessRepository? businessRepository;
+  final BusinessResponseRepository? businessResponseRepository;
 
   const AppRouter({
     required this.authNotifier,
@@ -85,6 +87,7 @@ class AppRouter {
     this.notificationRepository,
     this.notificationsNotifier,
     this.businessRepository,
+    this.businessResponseRepository,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -169,6 +172,8 @@ class AppRouter {
               mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
               feedNotifier: feedNotifier,
+              businessResponseRepository: businessResponseRepository,
+              businessRepository: businessRepository,
               currentUserId: currentUserId,
             ),
             settings: settings,
@@ -182,6 +187,8 @@ class AppRouter {
               mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
               feedNotifier: feedNotifier,
+              businessResponseRepository: businessResponseRepository,
+              businessRepository: businessRepository,
               currentUserId: currentUserId,
             ),
             settings: settings,
@@ -194,6 +201,8 @@ class AppRouter {
               mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
               feedNotifier: feedNotifier,
+              businessResponseRepository: businessResponseRepository,
+              businessRepository: businessRepository,
               currentUserId: currentUserId,
             ),
             settings: settings,

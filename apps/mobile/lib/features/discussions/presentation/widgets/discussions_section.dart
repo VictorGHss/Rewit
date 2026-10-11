@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/business/domain/entities/business_response_entities.dart';
+import 'package:rewit_mobile/features/business/domain/repositories/business_response_repository.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
 import 'package:rewit_mobile/features/discussions/presentation/state/discussion_notifier.dart';
 import 'package:rewit_mobile/features/discussions/presentation/widgets/create_discussion_form.dart';
@@ -17,6 +19,9 @@ class DiscussionsSection extends StatefulWidget {
   final String? targetDiscussionId;
   final String? rootDiscussionId;
   final bool isReplyTarget;
+  final BusinessResponseRepository? businessResponseRepository;
+  final BusinessResponseEligibility? eligibility;
+  final Set<String> myBusinessAccountIds;
 
   const DiscussionsSection({
     super.key,
@@ -26,6 +31,9 @@ class DiscussionsSection extends StatefulWidget {
     this.targetDiscussionId,
     this.rootDiscussionId,
     this.isReplyTarget = false,
+    this.businessResponseRepository,
+    this.eligibility,
+    this.myBusinessAccountIds = const {},
   });
 
   @override
@@ -383,6 +391,9 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
                     onAuthorTap: widget.onAuthorTap,
                     highlightedDiscussionId: _highlightedDiscussionId,
                     keyProvider: _getKeyFor,
+                    businessResponseRepository: widget.businessResponseRepository,
+                    eligibility: widget.eligibility,
+                    myBusinessAccountIds: widget.myBusinessAccountIds,
                   );
                 },
               ),

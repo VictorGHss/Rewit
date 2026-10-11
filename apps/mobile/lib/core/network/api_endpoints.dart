@@ -90,4 +90,18 @@ class ApiEndpoints {
     final statusQuery = status != null && status.isNotEmpty ? '&status=$status' : '';
     return '/api/v1/business-accounts/$businessAccountId/place-claims?page=$page&size=$size$statusQuery';
   }
+
+  // Respostas Oficiais de Empresas (C11)
+  static String reviewBusinessResponses(String reviewId, {int page = 0, int size = 20}) =>
+      '/api/v1/reviews/$reviewId/business-responses?page=$page&size=$size';
+  static String createReviewBusinessResponse(String reviewId) =>
+      '/api/v1/reviews/$reviewId/business-responses';
+  static String reviewBusinessResponsesEligibility(String reviewId) =>
+      '/api/v1/reviews/$reviewId/business-responses/eligibility';
+  static String discussionBusinessResponses(String discussionId, {int page = 0, int size = 20}) =>
+      '/api/v1/discussions/$discussionId/business-responses?page=$page&size=$size';
+  static String createDiscussionBusinessResponse(String discussionId) =>
+      '/api/v1/discussions/$discussionId/business-responses';
+  static String businessResponse(String responseId) =>
+      '/api/v1/business-responses/$responseId';
 }
