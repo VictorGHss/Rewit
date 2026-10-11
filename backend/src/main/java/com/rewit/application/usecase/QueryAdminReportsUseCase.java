@@ -5,6 +5,7 @@ import com.rewit.application.dto.report.ReportDtos.AdminReportView;
 import com.rewit.application.dto.report.ReportDtos.QueryAdminReportsFilter;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
@@ -41,12 +42,45 @@ public class QueryAdminReportsUseCase {
 
     private final ReportRepository reportRepository;
     private final ReviewRepository reviewRepository;
+    private final ModeratorRolePolicy moderatorRolePolicy;
 
-    public QueryAdminReportsUseCase(ReportRepository reportRepository, ReviewRepository reviewRepository) {
+    public QueryAdminReportsUseCase(ReportRepository reportRepository, ReviewRepository reviewRepository,
+                                    ModeratorRolePolicy moderatorRolePolicy) {
         this.reportRepository = Objects.requireNonNull(reportRepository, "reportRepository must not be null");
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "moderatorRolePolicy must not be null");
     }
 
+    /**
+     * Fila de denúncias com revalidação do cargo atual do ator (ModeratorRolePolicy) antes de qualquer consulta: a
+     * visão expõe autores e denunciantes, e o JWT pode carregar uma role revogada.
+     */
+    @Transactional(readOnly = true)
+    public PageResult<AdminReportView> execute(
+            UUID actorUserId,
+            Integer page,
+            Integer size,
+            ReportStatus status,
+            ReportReason reason,
+            UUID reviewId,
+            UUID reporterUserId,
+            String sortDirection
+    ) {
+        return execute(actorUserId, new QueryAdminReportsFilter(page, size, status, reason, reviewId, reporterUserId,
+                sortDirection));
+    }
+
+    /** Variante com filtro; mesma revalidação do cargo atual antes de qualquer consulta. */
+    @Transactional(readOnly = true)
+    public PageResult<AdminReportView> execute(UUID actorUserId, QueryAdminReportsFilter filter) {
+        moderatorRolePolicy.requireCurrentModerator(actorUserId);
+        return execute(filter);
+    }
+
+    /**
+     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
+     * todas as rotas usarem a variante com {@code actorUserId}.
+     */
     @Transactional(readOnly = true)
     public PageResult<AdminReportView> execute(
             Integer page,
@@ -60,6 +94,10 @@ public class QueryAdminReportsUseCase {
         return execute(new QueryAdminReportsFilter(page, size, status, reason, reviewId, reporterUserId, sortDirection));
     }
 
+    /**
+     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
+     * todas as rotas usarem a variante com {@code actorUserId}.
+     */
     @Transactional(readOnly = true)
     public PageResult<AdminReportView> execute(QueryAdminReportsFilter filter) {
         QueryAdminReportsFilter effectiveFilter = filter != null ? filter : QueryAdminReportsFilter.ofDefault();

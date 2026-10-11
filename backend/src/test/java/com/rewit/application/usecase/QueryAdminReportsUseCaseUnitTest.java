@@ -5,10 +5,14 @@ import com.rewit.application.dto.report.ReportDtos.AdminReportView;
 import com.rewit.application.dto.report.ReportDtos.QueryAdminReportsFilter;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.port.UserRepository;
+import com.rewit.application.service.AccountStatusPolicy;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewStatus;
+import com.rewit.domain.enums.Role;
 import com.rewit.domain.model.Report;
 import com.rewit.domain.model.Review;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +27,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static com.rewit.application.usecase.CurrentRoleStubs.currentRole;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -37,13 +42,22 @@ class QueryAdminReportsUseCaseUnitTest {
     @Mock
     private ReviewRepository reviewRepository;
 
+    @Mock
+    private AccountStatusPolicy accountStatusPolicy;
+
+    @Mock
+    private UserRepository userRepository;
+
     private QueryAdminReportsUseCase queryAdminReportsUseCase;
+
+    private final UUID actor = UUID.randomUUID();
 
     private Instant now;
 
     @BeforeEach
     void setUp() {
-        queryAdminReportsUseCase = new QueryAdminReportsUseCase(reportRepository, reviewRepository);
+        queryAdminReportsUseCase = new QueryAdminReportsUseCase(reportRepository, reviewRepository,
+                new ModeratorRolePolicy(accountStatusPolicy, userRepository));
         now = Instant.parse("2026-10-01T12:00:00Z");
     }
 
@@ -212,5 +226,88 @@ class QueryAdminReportsUseCaseUnitTest {
 
         // Confirma que a hidratação de reviews foi feita em lote (findByIdIn chamado exatamente 1 vez)
         verify(reviewRepository, times(1)).findByIdIn(any());
+    }
+
+    // -----------------------------------------------------------------------------------------------------------
+    // Variantes com ator: revalidação do cargo atual (ModeratorRolePolicy real) antes de qualquer consulta
+    // -----------------------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Com ator MODERATOR (parâmetros): filtros e paginação repassados, autor e status da avaliação projetados")
+    void actorVariantWithParametersKeepsFiltersAndProjection() {
+        currentRole(userRepository, actor, Role.MODERATOR);
+        UUID reviewId = UUID.randomUUID();
+        UUID reporterId = UUID.randomUUID();
+        UUID authorId = UUID.randomUUID();
+        Report report = new Report(UUID.randomUUID(), reviewId, reporterId, ReportReason.SPAM, "detalhe",
+                ReportStatus.PENDING, now, now);
+        when(reportRepository.findAllPaged(ReportStatus.PENDING, ReportReason.SPAM, reviewId, reporterId, 2, 10, "desc"))
+                .thenReturn(PageResult.of(List.of(report), 2, 10, 21));
+        when(reviewRepository.findByIdIn(List.of(reviewId))).thenReturn(List.of(createStubReview(reviewId, authorId, false)));
+
+        PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(actor, 2, 10, ReportStatus.PENDING,
+                ReportReason.SPAM, reviewId, reporterId, " desc ");
+
+        assertEquals(21, result.totalElements());
+        assertEquals(2, result.pageNumber());
+        AdminReportView view = result.content().get(0);
+        assertEquals(report.getId(), view.id());
+        assertEquals(authorId, view.reviewAuthorUserId());
+        assertEquals(ReviewStatus.ACTIVE, view.reviewStatus());
+        assertEquals(reporterId, view.reporterUserId());
+    }
+
+    @Test
+    @DisplayName("Com ator ADMIN (filtro): consulta como a variante existente")
+    void actorVariantWithFilterForAdmin() {
+        currentRole(userRepository, actor, Role.ADMIN);
+        when(reportRepository.findAllPaged(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20), eq("asc")))
+                .thenReturn(PageResult.of(List.of(), 0, 20, 0));
+
+        PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(actor, QueryAdminReportsFilter.ofDefault());
+
+        assertEquals(0, result.totalElements());
+        verify(reportRepository).findAllPaged(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20), eq("asc"));
+    }
+
+    @Test
+    @DisplayName("Rebaixado a USER: 403 FORBIDDEN nas duas variantes, sem consultar denúncias nem avaliações")
+    void demotedIsForbiddenInBothVariants() {
+        currentRole(userRepository, actor, Role.USER);
+
+        BusinessException byParameters = assertThrows(BusinessException.class,
+                () -> queryAdminReportsUseCase.execute(actor, 0, 20, null, null, null, null, "asc"));
+        BusinessException byFilter = assertThrows(BusinessException.class,
+                () -> queryAdminReportsUseCase.execute(actor, QueryAdminReportsFilter.ofDefault()));
+
+        for (BusinessException ex : List.of(byParameters, byFilter)) {
+            assertEquals("FORBIDDEN", ex.getErrorCode());
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+        }
+        verifyNoInteractions(reportRepository, reviewRepository);
+    }
+
+    @Test
+    @DisplayName("Conta inoperante: 401 ACCOUNT_DISABLED sem consultar cargo, denúncias nem avaliações")
+    void disabledIsRejected() {
+        doThrow(AccountStatusPolicy.accountDisabled()).when(accountStatusPolicy).requireOperational(actor);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> queryAdminReportsUseCase.execute(actor, QueryAdminReportsFilter.ofDefault()));
+
+        assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
+        assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatus());
+        verifyNoInteractions(userRepository, reportRepository, reviewRepository);
+    }
+
+    @Test
+    @DisplayName("Variantes transitórias sem ator não consultam a política")
+    void legacyVariantsDoNotUsePolicy() {
+        when(reportRepository.findAllPaged(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20), eq("asc")))
+                .thenReturn(PageResult.of(List.of(), 0, 20, 0));
+
+        queryAdminReportsUseCase.execute(QueryAdminReportsFilter.ofDefault());
+
+        verifyNoInteractions(accountStatusPolicy, userRepository);
     }
 }

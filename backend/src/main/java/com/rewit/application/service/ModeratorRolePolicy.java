@@ -16,8 +16,8 @@ import java.util.UUID;
  * moderador rebaixado continua com a autoridade antiga até o token expirar. Os casos de uso administrativos que
  * expõem ou alteram dados sensíveis revalidam aqui a role atual no banco.
  *
- * <p>Conta inoperante responde {@code 401 ACCOUNT_DISABLED} (AccountStatusPolicy); role insuficiente,
- * {@code 403 FORBIDDEN}.
+ * <p>Ator ausente responde {@code 401 UNAUTHORIZED}; conta inoperante, {@code 401 ACCOUNT_DISABLED}
+ * (AccountStatusPolicy); role insuficiente, {@code 403 FORBIDDEN}.
  */
 @Component
 public class ModeratorRolePolicy {
@@ -31,6 +31,9 @@ public class ModeratorRolePolicy {
     }
 
     public void requireCurrentModerator(UUID actorUserId) {
+        if (actorUserId == null) {
+            throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+        }
         accountStatusPolicy.requireOperational(actorUserId);
         boolean moderator = userRepository.findById(actorUserId)
                 .map(user -> user.getRole() == Role.MODERATOR || user.getRole() == Role.ADMIN)

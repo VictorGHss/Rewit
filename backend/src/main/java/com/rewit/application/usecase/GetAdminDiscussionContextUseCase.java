@@ -5,6 +5,7 @@ import com.rewit.application.dto.discussion.AdminDiscussionModerationDtos.AdminD
 import com.rewit.application.port.DiscussionModerationAuditLogRepository;
 import com.rewit.application.port.DiscussionReportRepository;
 import com.rewit.application.port.DiscussionRepository;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.DiscussionReport;
 import com.rewit.domain.model.ReviewDiscussion;
@@ -26,15 +27,32 @@ public class GetAdminDiscussionContextUseCase {
     private final DiscussionRepository discussionRepository;
     private final DiscussionReportRepository discussionReportRepository;
     private final DiscussionModerationAuditLogRepository auditLogRepository;
+    private final ModeratorRolePolicy moderatorRolePolicy;
 
     public GetAdminDiscussionContextUseCase(DiscussionRepository discussionRepository,
                                             DiscussionReportRepository discussionReportRepository,
-                                            DiscussionModerationAuditLogRepository auditLogRepository) {
+                                            DiscussionModerationAuditLogRepository auditLogRepository,
+                                            ModeratorRolePolicy moderatorRolePolicy) {
         this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
         this.discussionReportRepository = Objects.requireNonNull(discussionReportRepository, "DiscussionReportRepository must not be null");
         this.auditLogRepository = Objects.requireNonNull(auditLogRepository, "DiscussionModerationAuditLogRepository must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
     }
 
+    /**
+     * Contexto do comentário com revalidação do cargo atual do ator (ModeratorRolePolicy) antes de qualquer consulta:
+     * expõe conteúdo, autores, denunciantes e moderadores, e o JWT pode carregar uma role revogada.
+     */
+    @Transactional(readOnly = true)
+    public AdminDiscussionContextView execute(UUID actorUserId, UUID discussionId) {
+        moderatorRolePolicy.requireCurrentModerator(actorUserId);
+        return execute(discussionId);
+    }
+
+    /**
+     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
+     * todas as rotas usarem a variante com {@code actorUserId}.
+     */
     @Transactional(readOnly = true)
     public AdminDiscussionContextView execute(UUID discussionId) {
         if (discussionId == null) {

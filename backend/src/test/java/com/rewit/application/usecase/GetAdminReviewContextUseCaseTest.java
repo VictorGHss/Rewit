@@ -7,12 +7,16 @@ import com.rewit.application.port.RateableTargetRepository;
 import com.rewit.application.port.RateableTargetRepository.TargetDisplay;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.port.UserRepository;
+import com.rewit.application.service.AccountStatusPolicy;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ModerationAction;
 import com.rewit.domain.enums.ModerationDecision;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewStatus;
+import com.rewit.domain.enums.Role;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.ModerationAuditLog;
 import com.rewit.domain.model.Report;
@@ -31,11 +35,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static com.rewit.application.usecase.CurrentRoleStubs.currentRole;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -49,6 +55,8 @@ class GetAdminReviewContextUseCaseTest {
     @Mock private ReportRepository reportRepository;
     @Mock private ModerationAuditLogRepository auditLogRepository;
     @Mock private RateableTargetRepository rateableTargetRepository;
+    @Mock private AccountStatusPolicy accountStatusPolicy;
+    @Mock private UserRepository userRepository;
 
     private GetAdminReviewContextUseCase useCase;
 
@@ -59,7 +67,7 @@ class GetAdminReviewContextUseCaseTest {
     @BeforeEach
     void setUp() {
         useCase = new GetAdminReviewContextUseCase(reviewRepository, reportRepository, auditLogRepository,
-                rateableTargetRepository);
+                rateableTargetRepository, new ModeratorRolePolicy(accountStatusPolicy, userRepository));
     }
 
     @Test
@@ -160,5 +168,68 @@ class GetAdminReviewContextUseCaseTest {
         assertTrue(view.review().targets().isEmpty());
         assertEquals(0, view.pendingReportCount());
         verifyNoInteractions(rateableTargetRepository);
+    }
+
+    // -----------------------------------------------------------------------------------------------------------
+    // Variante com ator: revalidação do cargo atual (ModeratorRolePolicy real) antes de qualquer consulta
+    // -----------------------------------------------------------------------------------------------------------
+
+    private final UUID actor = UUID.randomUUID();
+
+    private Review stubReviewWithoutTargets() {
+        Review review = new Review(reviewId, authorId, null, "Texto", false, false, ReviewStatus.UNDER_REVIEW, "PUBLIC",
+                null, null, null, created, created);
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(review));
+        when(reportRepository.findByReviewId(reviewId)).thenReturn(List.of(
+                new Report(UUID.randomUUID(), reviewId, UUID.randomUUID(), ReportReason.SPAM, "a", ReportStatus.PENDING,
+                        created, created)));
+        when(auditLogRepository.findByReviewId(reviewId)).thenReturn(List.of());
+        return review;
+    }
+
+    @Test
+    @DisplayName("Com ator MODERATOR: contexto igual ao da consulta existente")
+    void currentModeratorReadsContext() {
+        currentRole(userRepository, actor, Role.MODERATOR);
+        stubReviewWithoutTargets();
+
+        AdminReviewContextView view = useCase.execute(actor, reviewId);
+
+        assertEquals(reviewId, view.review().id());
+        assertEquals(ReviewStatus.UNDER_REVIEW, view.review().status());
+        assertEquals(1, view.pendingReportCount());
+        assertEquals(1, view.reports().size());
+    }
+
+    @Test
+    @DisplayName("Com ator ADMIN: também lê o contexto")
+    void currentAdminReadsContext() {
+        currentRole(userRepository, actor, Role.ADMIN);
+        stubReviewWithoutTargets();
+
+        assertEquals(reviewId, useCase.execute(actor, reviewId).review().id());
+    }
+
+    @Test
+    @DisplayName("Rebaixado a USER: 403 FORBIDDEN sem consultar avaliação, denúncias, auditoria nem alvos")
+    void demotedIsForbidden() {
+        currentRole(userRepository, actor, Role.USER);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> useCase.execute(actor, reviewId));
+
+        assertEquals("FORBIDDEN", ex.getErrorCode());
+        assertEquals(403, ex.getStatus().value());
+        verifyNoInteractions(reviewRepository, reportRepository, auditLogRepository, rateableTargetRepository);
+    }
+
+    @Test
+    @DisplayName("Conta inoperante: 401 ACCOUNT_DISABLED sem consultar cargo nem dados")
+    void disabledIsRejected() {
+        doThrow(AccountStatusPolicy.accountDisabled()).when(accountStatusPolicy).requireOperational(actor);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> useCase.execute(actor, reviewId));
+
+        assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
+        verifyNoInteractions(userRepository, reviewRepository, reportRepository, auditLogRepository, rateableTargetRepository);
     }
 }

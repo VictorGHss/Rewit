@@ -10,6 +10,7 @@ import com.rewit.application.port.RateableTargetRepository;
 import com.rewit.application.port.RateableTargetRepository.TargetDisplay;
 import com.rewit.application.port.ReportRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.model.Report;
@@ -41,18 +42,35 @@ public class GetAdminReviewContextUseCase {
     private final ReportRepository reportRepository;
     private final ModerationAuditLogRepository auditLogRepository;
     private final RateableTargetRepository rateableTargetRepository;
+    private final ModeratorRolePolicy moderatorRolePolicy;
 
     public GetAdminReviewContextUseCase(ReviewRepository reviewRepository,
                                         ReportRepository reportRepository,
                                         ModerationAuditLogRepository auditLogRepository,
-                                        RateableTargetRepository rateableTargetRepository) {
+                                        RateableTargetRepository rateableTargetRepository,
+                                        ModeratorRolePolicy moderatorRolePolicy) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "ReviewRepository must not be null");
         this.reportRepository = Objects.requireNonNull(reportRepository, "ReportRepository must not be null");
         this.auditLogRepository = Objects.requireNonNull(auditLogRepository, "ModerationAuditLogRepository must not be null");
         this.rateableTargetRepository = Objects.requireNonNull(rateableTargetRepository,
                 "RateableTargetRepository must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
     }
 
+    /**
+     * Contexto da avaliação com revalidação do cargo atual do ator (ModeratorRolePolicy) antes de qualquer consulta:
+     * expõe conteúdo privado e anônimo e as denúncias, e o JWT pode carregar uma role revogada.
+     */
+    @Transactional(readOnly = true)
+    public AdminReviewContextView execute(UUID actorUserId, UUID reviewId) {
+        moderatorRolePolicy.requireCurrentModerator(actorUserId);
+        return execute(reviewId);
+    }
+
+    /**
+     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
+     * todas as rotas usarem a variante com {@code actorUserId}.
+     */
     @Transactional(readOnly = true)
     public AdminReviewContextView execute(UUID reviewId) {
         if (reviewId == null) {

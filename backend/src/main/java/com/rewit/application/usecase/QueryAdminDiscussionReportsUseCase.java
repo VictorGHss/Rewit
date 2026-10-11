@@ -4,6 +4,7 @@ import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.discussion.AdminDiscussionModerationDtos.AdminDiscussionReportView;
 import com.rewit.application.port.DiscussionReportRepository;
 import com.rewit.application.port.DiscussionRepository;
+import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
@@ -32,13 +33,31 @@ public class QueryAdminDiscussionReportsUseCase {
 
     private final DiscussionReportRepository discussionReportRepository;
     private final DiscussionRepository discussionRepository;
+    private final ModeratorRolePolicy moderatorRolePolicy;
 
     public QueryAdminDiscussionReportsUseCase(DiscussionReportRepository discussionReportRepository,
-                                              DiscussionRepository discussionRepository) {
+                                              DiscussionRepository discussionRepository,
+                                              ModeratorRolePolicy moderatorRolePolicy) {
         this.discussionReportRepository = Objects.requireNonNull(discussionReportRepository, "DiscussionReportRepository must not be null");
         this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
     }
 
+    /**
+     * Fila de denúncias de comentários com revalidação do cargo atual do ator (ModeratorRolePolicy) antes de qualquer
+     * consulta: a visão expõe autores e denunciantes, e o JWT pode carregar uma role revogada.
+     */
+    @Transactional(readOnly = true)
+    public PageResult<AdminDiscussionReportView> execute(UUID actorUserId, int page, int size, ReportStatus status,
+                                                         ReportReason reason, UUID discussionId, String sortDirection) {
+        moderatorRolePolicy.requireCurrentModerator(actorUserId);
+        return execute(page, size, status, reason, discussionId, sortDirection);
+    }
+
+    /**
+     * Variante sem ator, transitória: não revalida o cargo atual (só a role do JWT, na rota). Será removida quando
+     * todas as rotas usarem a variante com {@code actorUserId}.
+     */
     @Transactional(readOnly = true)
     public PageResult<AdminDiscussionReportView> execute(int page, int size, ReportStatus status, ReportReason reason,
                                                          UUID discussionId, String sortDirection) {
