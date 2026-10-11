@@ -42,6 +42,9 @@ public interface BusinessResponseRepository {
      */
     PageResult<BusinessResponseView> findActiveReviewResponseViews(UUID reviewId, int page, int size);
 
+    /** Página pública das respostas ativas a um comentário, na mesma forma e ordem (created_at, id). */
+    PageResult<BusinessResponseView> findActiveDiscussionResponseViews(UUID discussionId, int page, int size);
+
     /** Respostas ativas aos comentários informados, em ordem cronológica; para compor uma página de comentários. */
     List<BusinessResponse> findActiveDiscussionResponses(Collection<UUID> discussionIds);
 }

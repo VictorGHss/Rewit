@@ -32,10 +32,28 @@ public final class BusinessResponseDtos {
     ) {
     }
 
-    /** Resposta oficial publicada, na forma pública. */
+    /**
+     * @param placeId local que a resposta representa, escolhido explicitamente (ver
+     *                {@link PublishReviewBusinessResponseCommand})
+     */
+    public record PublishDiscussionBusinessResponseCommand(
+            UUID actorUserId,
+            UUID businessAccountId,
+            UUID discussionId,
+            UUID placeId,
+            String content
+    ) {
+    }
+
+    /**
+     * Resposta oficial publicada, na forma pública.
+     *
+     * @param discussionId comentário raiz respondido; {@code null} quando a resposta é direta à avaliação
+     */
     public record BusinessResponseView(
             UUID id,
             UUID reviewId,
+            UUID discussionId,
             UUID businessAccountId,
             String corporateName,
             UUID placeId,
@@ -44,8 +62,8 @@ public final class BusinessResponseDtos {
             Instant createdAt
     ) {
         public static BusinessResponseView of(BusinessResponse response, BusinessAccount account, Place place) {
-            return new BusinessResponseView(response.getId(), response.getReviewId(), account.getId(),
-                    account.getCorporateName(), place.getId(), place.getName(), response.getContent(),
+            return new BusinessResponseView(response.getId(), response.getReviewId(), response.getDiscussionId(),
+                    account.getId(), account.getCorporateName(), place.getId(), place.getName(), response.getContent(),
                     response.getCreatedAt());
         }
     }

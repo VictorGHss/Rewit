@@ -1,11 +1,15 @@
 package com.rewit.infrastructure.persistence;
 
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseView;
+import com.rewit.application.dto.business.BusinessResponseDtos.PublishDiscussionBusinessResponseCommand;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishReviewBusinessResponseCommand;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.BusinessResponseModerationAuditLogRepository;
 import com.rewit.application.port.BusinessResponseRepository;
+import com.rewit.application.port.DiscussionRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.usecase.ListDiscussionBusinessResponsesUseCase;
+import com.rewit.application.usecase.PublishDiscussionBusinessResponseUseCase;
 import com.rewit.application.usecase.PublishReviewBusinessResponseUseCase;
 import com.rewit.application.usecase.RemoveBusinessResponseUseCase;
 import com.rewit.common.exception.BusinessException;
@@ -14,6 +18,7 @@ import com.rewit.domain.enums.BusinessResponseRemovalSource;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.domain.model.BusinessResponseModerationAuditLog;
+import com.rewit.domain.model.ReviewDiscussion;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -72,10 +77,19 @@ class BusinessResponsePersistenceIntegrationTest {
     private ReviewRepository reviewRepository;
 
     @Autowired
+    private DiscussionRepository discussionRepository;
+
+    @Autowired
     private PublishReviewBusinessResponseUseCase publishUseCase;
 
     @Autowired
     private RemoveBusinessResponseUseCase removeUseCase;
+
+    @Autowired
+    private PublishDiscussionBusinessResponseUseCase publishDiscussionUseCase;
+
+    @Autowired
+    private ListDiscussionBusinessResponsesUseCase listDiscussionUseCase;
 
     /** Precisão do TIMESTAMPTZ: comparar instantes depois de ida e volta ao banco. */
     private final Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -575,7 +589,139 @@ class BusinessResponsePersistenceIntegrationTest {
         }
     }
 
+    @Test
+    @Transactional
+    @DisplayName("Comentário ponta a ponta: avaliação correta, uma ativa por empresa, outra empresa e alvos independentes")
+    void discussionResponsesEndToEnd() {
+        Fixture f = fixture();
+        UUID otherAdmin = insertUser();
+        UUID otherBusiness = insertBusiness(otherAdmin);
+        UUID otherPlace = insertPlace();
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, otherPlace);
+        jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 3)", f.review(), otherPlace);
+        UUID secondRoot = insertDiscussion(f.review(), f.reviewer());
+
+        BusinessResponseView first = publishDiscussionUseCase.execute(
+                discussionCommand(f.businessAdmin(), f.business(), f.rootDiscussion(), f.place(), "Vamos verificar"), now);
+        BusinessResponse stored = responseRepository.findById(first.id()).orElseThrow();
+        assertEquals(f.review(), stored.getReviewId());
+        assertEquals(f.rootDiscussion(), stored.getDiscussionId());
+        assertEquals(f.businessAdmin(), stored.getAuthorUserId());
+
+        assertEquals("BUSINESS_RESPONSE_ALREADY_EXISTS", assertThrows(BusinessException.class,
+                () -> publishDiscussionUseCase.execute(discussionCommand(f.businessAdmin(), f.business(),
+                        f.rootDiscussion(), f.place(), "De novo"), now)).getErrorCode());
+
+        BusinessResponseView fromOther = publishDiscussionUseCase.execute(
+                discussionCommand(otherAdmin, otherBusiness, f.rootDiscussion(), otherPlace, "Também respondemos"),
+                now.plusSeconds(1));
+        // A mesma empresa responde à avaliação e a outro comentário sem conflito com a resposta acima
+        publishUseCase.execute(command(f, f.place(), "Resposta à avaliação"), now.plusSeconds(2));
+        publishDiscussionUseCase.execute(
+                discussionCommand(f.businessAdmin(), f.business(), secondRoot, f.place(), "Outro comentário"), now);
+
+        PageResult<BusinessResponseView> page = listDiscussionUseCase.execute(f.reviewer(), f.rootDiscussion(), 0, 10);
+        assertEquals(List.of(first.id(), fromOther.id()), page.content().stream().map(v -> v.id()).toList());
+        BusinessResponseView view = page.content().get(1);
+        assertEquals(f.review(), view.reviewId());
+        assertEquals(f.rootDiscussion(), view.discussionId());
+        assertEquals(otherBusiness, view.businessAccountId());
+        assertEquals(otherPlace, view.placeId());
+        assertEquals(1, listDiscussionUseCase.execute(f.reviewer(), f.rootDiscussion(), 1, 1).content().size());
+        // A resposta à avaliação não aparece entre as do comentário, e vice-versa
+        assertEquals(1, responseRepository.findActiveReviewResponseViews(f.review(), 0, 10).totalElements());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Comentário: remover libera o índice parcial, a nova publicação preserva o histórico e só a ativa é listada")
+    void discussionRemoveAndRepublish() {
+        Fixture f = fixture();
+        BusinessResponseView first = publishDiscussionUseCase.execute(
+                discussionCommand(f.businessAdmin(), f.business(), f.rootDiscussion(), f.place(), "Primeira"), now);
+
+        removeUseCase.execute(f.businessAdmin(), first.id(), now.plusSeconds(1));
+        BusinessResponseView second = publishDiscussionUseCase.execute(
+                discussionCommand(f.businessAdmin(), f.business(), f.rootDiscussion(), f.place(), "Segunda"),
+                now.plusSeconds(2));
+
+        assertEquals(BusinessResponseStatus.REMOVED, responseRepository.findById(first.id()).orElseThrow().getStatus());
+        assertEquals(2, count("SELECT count(*) FROM business_responses WHERE discussion_id = ?", f.rootDiscussion()));
+        assertEquals(List.of(second.id()), listDiscussionUseCase.execute(f.reviewer(), f.rootDiscussion(), 0, 10)
+                .content().stream().map(v -> v.id()).toList());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Comentário em quarentena: publicação e listagem respondem 404; respostas existentes ficam ocultas")
+    void quarantinedDiscussionHidesResponses() {
+        Fixture f = fixture();
+        publishDiscussionUseCase.execute(
+                discussionCommand(f.businessAdmin(), f.business(), f.rootDiscussion(), f.place(), "Resposta"), now);
+        // Pelo domínio, como a denúncia faz: um UPDATE direto deixaria a entidade antiga no cache desta transação
+        ReviewDiscussion root = discussionRepository.findById(f.rootDiscussion()).orElseThrow();
+        root.markUnderReview();
+        discussionRepository.save(root);
+
+        assertEquals("DISCUSSION_NOT_FOUND", assertThrows(BusinessException.class,
+                () -> listDiscussionUseCase.execute(f.reviewer(), f.rootDiscussion(), 0, 10)).getErrorCode());
+        assertEquals("DISCUSSION_NOT_FOUND", assertThrows(BusinessException.class,
+                () -> publishDiscussionUseCase.execute(discussionCommand(f.businessAdmin(), f.business(),
+                        f.rootDiscussion(), f.place(), "Outra"), now)).getErrorCode());
+    }
+
+    @Test
+    @DisplayName("Corrida real no comentário: a mesma empresa por dois locais ao mesmo tempo publica uma única resposta")
+    void concurrentDiscussionPublications() throws Exception {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        Fixture f = tx.execute(_ -> fixture());
+        UUID secondPlace = tx.execute(_ -> {
+            UUID place = insertPlace();
+            jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
+            jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 5)",
+                    f.review(), place);
+            return place;
+        });
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<String>> attempts = new ArrayList<>();
+            for (UUID place : List.of(f.place(), secondPlace)) {
+                attempts.add(executor.submit(() -> {
+                    start.await(10, TimeUnit.SECONDS);
+                    try {
+                        publishDiscussionUseCase.execute(discussionCommand(f.businessAdmin(), f.business(),
+                                f.rootDiscussion(), place, "Pelo local " + place), now);
+                        return "OK";
+                    } catch (BusinessException conflict) {
+                        return conflict.getErrorCode();
+                    }
+                }));
+            }
+            start.countDown();
+            List<String> outcomes = new ArrayList<>();
+            for (Future<String> attempt : attempts) {
+                outcomes.add(attempt.get(30, TimeUnit.SECONDS));
+            }
+            assertEquals(1, outcomes.stream().filter(o -> o.equals("OK")).count(), () -> outcomes.toString());
+            assertEquals(1, outcomes.stream().filter(o -> o.equals("BUSINESS_RESPONSE_ALREADY_EXISTS")).count(),
+                    () -> outcomes.toString());
+            assertEquals(1, count("SELECT count(*) FROM business_responses WHERE discussion_id = ? AND status = 'ACTIVE'",
+                    f.rootDiscussion()));
+        } finally {
+            executor.shutdownNow();
+            cleanup(f);
+            jdbcTemplate.update("DELETE FROM places WHERE id = ?", secondPlace);
+            jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", secondPlace);
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
+
+    private static PublishDiscussionBusinessResponseCommand discussionCommand(UUID actor, UUID business, UUID discussion,
+                                                                             UUID place, String content) {
+        return new PublishDiscussionBusinessResponseCommand(actor, business, discussion, place, content);
+    }
 
     private PublishReviewBusinessResponseCommand command(Fixture f, UUID placeId, String content) {
         return new PublishReviewBusinessResponseCommand(f.businessAdmin(), f.business(), f.review(), placeId, content);

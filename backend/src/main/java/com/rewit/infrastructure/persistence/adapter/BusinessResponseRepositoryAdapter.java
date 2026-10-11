@@ -107,23 +107,37 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
     @Override
     @Transactional(readOnly = true)
     public PageResult<BusinessResponseView> findActiveReviewResponseViews(UUID reviewId, int page, int size) {
-        if (reviewId == null) {
+        // Atendida por idx_business_responses_review (review_id, created_at, id)
+        return findActiveViews("r.review_id = :targetId AND r.discussion_id IS NULL", reviewId, page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<BusinessResponseView> findActiveDiscussionResponseViews(UUID discussionId, int page, int size) {
+        // Filtro atendido por uq_business_responses_discussion_active (discussion_id, ...) WHERE status = 'ACTIVE'; no
+        // máximo uma resposta ativa por empresa no comentário, então a ordenação é sobre poucas linhas
+        return findActiveViews("r.discussion_id = :targetId", discussionId, page, size);
+    }
+
+    /** Página pública das respostas ativas do alvo, com empresa e local numa única consulta. */
+    private PageResult<BusinessResponseView> findActiveViews(String targetFilter, UUID targetId, int page, int size) {
+        if (targetId == null) {
             return PageResult.of(List.of(), page, size, 0);
         }
-        // Atendida por idx_business_responses_review (review_id, created_at, id)
         String where = " FROM business_responses r"
                 + " JOIN business_accounts b ON b.id = r.business_account_id"
                 + " JOIN places p ON p.id = r.place_id"
-                + " WHERE r.review_id = :reviewId AND r.discussion_id IS NULL AND r.status = 'ACTIVE'";
-        List<?> rows = entityManager.createNativeQuery("SELECT r.id, r.review_id, b.id AS business_account_id,"
-                        + " b.corporate_name, p.id AS place_id, p.name, r.content, r.created_at" + where
+                + " WHERE " + targetFilter + " AND r.status = 'ACTIVE'";
+        List<?> rows = entityManager.createNativeQuery("SELECT r.id, r.review_id, r.discussion_id,"
+                        + " b.id AS business_account_id, b.corporate_name, p.id AS place_id, p.name, r.content,"
+                        + " r.created_at" + where
                         + " ORDER BY r.created_at ASC, r.id ASC")
-                .setParameter("reviewId", reviewId)
+                .setParameter("targetId", targetId)
                 .setFirstResult(Math.multiplyExact(page, size))
                 .setMaxResults(size)
                 .getResultList();
         Number total = (Number) entityManager.createNativeQuery("SELECT count(*)" + where)
-                .setParameter("reviewId", reviewId)
+                .setParameter("targetId", targetId)
                 .getSingleResult();
         List<BusinessResponseView> content = rows.stream()
                 .map(row -> toView((Object[]) row))
@@ -132,8 +146,8 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
     }
 
     private static BusinessResponseView toView(Object[] row) {
-        return new BusinessResponseView((UUID) row[0], (UUID) row[1], (UUID) row[2], (String) row[3], (UUID) row[4],
-                (String) row[5], (String) row[6], toInstant(row[7]));
+        return new BusinessResponseView((UUID) row[0], (UUID) row[1], (UUID) row[2], (UUID) row[3], (String) row[4],
+                (UUID) row[5], (String) row[6], (String) row[7], toInstant(row[8]));
     }
 
     private static Instant toInstant(Object value) {

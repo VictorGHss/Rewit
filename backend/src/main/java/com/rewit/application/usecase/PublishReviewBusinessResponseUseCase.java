@@ -131,7 +131,10 @@ public class PublishReviewBusinessResponseUseCase {
     }
 
     private static BusinessException alreadyExists() {
-        return new BusinessException("A empresa já tem uma resposta ativa a esta avaliação", HttpStatus.CONFLICT,
-                "BUSINESS_RESPONSE_ALREADY_EXISTS");
+        return alreadyExists("A empresa já tem uma resposta ativa a esta avaliação");
+    }
+
+    static BusinessException alreadyExists(String message) {
+        return new BusinessException(message, HttpStatus.CONFLICT, "BUSINESS_RESPONSE_ALREADY_EXISTS");
     }
 }

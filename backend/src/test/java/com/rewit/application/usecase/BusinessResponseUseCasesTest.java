@@ -306,7 +306,7 @@ class BusinessResponseUseCasesTest {
     @DisplayName("Listagem: respeita a leitura da avaliação e não expõe autor pessoal, documento nem remoção")
     void listRespectsVisibility() {
         PageResult<BusinessResponseView> page = PageResult.of(List.of(new BusinessResponseView(UUID.randomUUID(), reviewId,
-                accountId, "Padaria Central LTDA", placeId, "Centro", "Obrigado", NOW)), 0, 20, 1);
+                null, accountId, "Padaria Central LTDA", placeId, "Centro", "Obrigado", NOW)), 0, 20, 1);
         when(businessResponseRepository.findActiveReviewResponseViews(reviewId, 0, 20)).thenReturn(page);
 
         assertSame(page, list.execute(reviewer, reviewId, 0, 20));
@@ -314,7 +314,7 @@ class BusinessResponseUseCasesTest {
         List<String> components = Arrays.stream(BusinessResponseView.class.getRecordComponents())
                 .map(component -> component.getName())
                 .toList();
-        assertEquals(List.of("id", "reviewId", "businessAccountId", "corporateName", "placeId", "placeName", "content",
+        assertEquals(List.of("id", "reviewId", "discussionId", "businessAccountId", "corporateName", "placeId", "placeName", "content",
                 "createdAt"), components);
     }
 
