@@ -84,10 +84,10 @@ public class AdminModerationController {
             @RequestParam(name = "sort", defaultValue = "asc") String sort,
             Authentication authentication
     ) {
-        extractAuthenticatedUserId(authentication);
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
 
         PageResult<AdminReportView> result = queryAdminReportsUseCase.execute(
-                page, size, status, reason, reviewId, reporterUserId, sort
+                actorUserId, page, size, status, reason, reviewId, reporterUserId, sort
         );
 
         List<AdminReportResponse> responses = result.content().stream()
@@ -119,8 +119,8 @@ public class AdminModerationController {
             @PathVariable("reviewId") UUID reviewId,
             Authentication authentication
     ) {
-        extractAuthenticatedUserId(authentication);
-        return ResponseEntity.ok(AdminReviewContextResponse.fromView(getAdminReviewContextUseCase.execute(reviewId)));
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
+        return ResponseEntity.ok(AdminReviewContextResponse.fromView(getAdminReviewContextUseCase.execute(actorUserId, reviewId)));
     }
 
     /**

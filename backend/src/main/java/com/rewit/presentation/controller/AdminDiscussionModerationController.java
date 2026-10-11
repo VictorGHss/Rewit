@@ -71,9 +71,9 @@ public class AdminDiscussionModerationController {
             @RequestParam(name = "sort", defaultValue = "asc") String sort,
             Authentication authentication
     ) {
-        requireAuthenticatedUser(authentication);
+        UUID actorUserId = requireAuthenticatedUser(authentication);
         PageResult<AdminDiscussionReportView> result =
-                queryAdminDiscussionReportsUseCase.execute(page, size, status, reason, discussionId, sort);
+                queryAdminDiscussionReportsUseCase.execute(actorUserId, page, size, status, reason, discussionId, sort);
         return ResponseEntity.ok(PagedResponse.of(
                 result.content().stream().map(AdminDiscussionReportResponse::fromView).toList(),
                 result.pageNumber(),
@@ -88,8 +88,8 @@ public class AdminDiscussionModerationController {
             @PathVariable("discussionId") UUID discussionId,
             Authentication authentication
     ) {
-        requireAuthenticatedUser(authentication);
-        return ResponseEntity.ok(AdminDiscussionContextResponse.fromView(getAdminDiscussionContextUseCase.execute(discussionId)));
+        UUID actorUserId = requireAuthenticatedUser(authentication);
+        return ResponseEntity.ok(AdminDiscussionContextResponse.fromView(getAdminDiscussionContextUseCase.execute(actorUserId, discussionId)));
     }
 
     @PostMapping("/discussions/{discussionId}/moderate")
