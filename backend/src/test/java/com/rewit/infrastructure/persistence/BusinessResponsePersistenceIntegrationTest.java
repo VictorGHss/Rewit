@@ -1,6 +1,8 @@
 package com.rewit.infrastructure.persistence;
 
+import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseModerationResult;
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseView;
+import com.rewit.application.dto.business.BusinessResponseDtos.ModerateBusinessResponseCommand;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishDiscussionBusinessResponseCommand;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishReviewBusinessResponseCommand;
 import com.rewit.application.dto.common.PageResult;
@@ -9,6 +11,7 @@ import com.rewit.application.port.BusinessResponseRepository;
 import com.rewit.application.port.DiscussionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.usecase.ListDiscussionBusinessResponsesUseCase;
+import com.rewit.application.usecase.ModerateBusinessResponseUseCase;
 import com.rewit.application.usecase.PublishDiscussionBusinessResponseUseCase;
 import com.rewit.application.usecase.PublishReviewBusinessResponseUseCase;
 import com.rewit.application.usecase.RemoveBusinessResponseUseCase;
@@ -24,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -90,6 +94,9 @@ class BusinessResponsePersistenceIntegrationTest {
 
     @Autowired
     private ListDiscussionBusinessResponsesUseCase listDiscussionUseCase;
+
+    @Autowired
+    private ModerateBusinessResponseUseCase moderateUseCase;
 
     /** Precisão do TIMESTAMPTZ: comparar instantes depois de ida e volta ao banco. */
     private final Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -714,6 +721,146 @@ class BusinessResponsePersistenceIntegrationTest {
             jdbcTemplate.update("DELETE FROM places WHERE id = ?", secondPlace);
             jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", secondPlace);
         }
+    }
+
+    // ------------------------------------------------------------------------------------ moderação (C11)
+
+    @Test
+    @Transactional
+    @DisplayName("Moderação: remoção e restauração gravam resposta e auditoria juntas, em ordem e append-only")
+    void moderationRemoveAndRestoreWithAudit() {
+        Fixture f = fixture();
+        UUID moderator = insertModerator();
+        BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Resposta"), now);
+
+        BusinessResponseModerationResult removed = moderateUseCase.execute(moderation(published.id(), moderator,
+                BusinessResponseModerationAction.REMOVE_RESPONSE, now.plusSeconds(10)));
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT status, removed_by, removed_at FROM business_responses WHERE id = ?", published.id());
+        assertEquals("REMOVED", row.get("status"));
+        assertEquals("MODERATION", row.get("removed_by"));
+        assertEquals(BusinessResponseStatus.REMOVED, removed.newStatus());
+
+        BusinessResponseModerationResult restored = moderateUseCase.execute(moderation(published.id(), moderator,
+                BusinessResponseModerationAction.RESTORE_RESPONSE, now.plusSeconds(20)));
+        assertEquals(BusinessResponseStatus.ACTIVE, restored.newStatus());
+        assertTrue(responseRepository.findById(published.id()).orElseThrow().isActive());
+
+        List<BusinessResponseModerationAuditLog> logs = auditLogRepository.findByResponseId(published.id());
+        assertEquals(List.of(removed.auditLogId(), restored.auditLogId()), logs.stream().map(l -> l.getId()).toList());
+        assertEquals(moderator, logs.get(0).getModeratorUserId());
+        assertEquals(BusinessResponseModerationAction.REMOVE_RESPONSE, logs.get(0).getAction());
+        assertEquals(BusinessResponseStatus.ACTIVE, logs.get(0).getPreviousStatus());
+        assertEquals(BusinessResponseStatus.REMOVED, logs.get(0).getNewStatus());
+        assertEquals(BusinessResponseModerationAction.RESTORE_RESPONSE, logs.get(1).getAction());
+        assertEquals(BusinessResponseStatus.REMOVED, logs.get(1).getPreviousStatus());
+        assertEquals(BusinessResponseStatus.ACTIVE, logs.get(1).getNewStatus());
+        assertRejected("append-only", "UPDATE business_response_moderation_audit_logs SET reason_code = 'X' WHERE id = ?",
+                removed.auditLogId());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Restaurar com resposta nova ativa (avaliação e comentário): 409, nova intacta, antiga removida, sem auditoria")
+    void restoreConflictsWithNewerResponse() {
+        Fixture f = fixture();
+        UUID moderator = insertModerator();
+        BusinessResponseView onReview = publishUseCase.execute(command(f, f.place(), "Antiga"), now);
+        BusinessResponseView onDiscussion = publishDiscussionUseCase.execute(
+                discussionCommand(f.businessAdmin(), f.business(), f.rootDiscussion(), f.place(), "Antiga"), now);
+        for (UUID old : List.of(onReview.id(), onDiscussion.id())) {
+            moderateUseCase.execute(moderation(old, moderator, BusinessResponseModerationAction.REMOVE_RESPONSE,
+                    now.plusSeconds(10)));
+        }
+        BusinessResponseView newOnReview = publishUseCase.execute(command(f, f.place(), "Nova"), now.plusSeconds(20));
+        BusinessResponseView newOnDiscussion = publishDiscussionUseCase.execute(
+                discussionCommand(f.businessAdmin(), f.business(), f.rootDiscussion(), f.place(), "Nova"),
+                now.plusSeconds(20));
+
+        for (UUID old : List.of(onReview.id(), onDiscussion.id())) {
+            BusinessException conflict = assertThrows(BusinessException.class, () -> moderateUseCase.execute(
+                    moderation(old, moderator, BusinessResponseModerationAction.RESTORE_RESPONSE, now.plusSeconds(30))));
+            assertEquals(HttpStatus.CONFLICT, conflict.getStatus());
+            assertEquals("BUSINESS_RESPONSE_ALREADY_EXISTS", conflict.getErrorCode());
+
+            assertEquals(BusinessResponseStatus.REMOVED, responseRepository.findById(old).orElseThrow().getStatus());
+            assertEquals(List.of(BusinessResponseModerationAction.REMOVE_RESPONSE),
+                    auditLogRepository.findByResponseId(old).stream().map(l -> l.getAction()).toList());
+        }
+        for (UUID current : List.of(newOnReview.id(), newOnDiscussion.id())) {
+            BusinessResponse response = responseRepository.findById(current).orElseThrow();
+            assertTrue(response.isActive());
+            assertEquals("Nova", response.getContent());
+        }
+    }
+
+    @Test
+    @DisplayName("Corrida real: a restauração passa pela checagem, espera no índice e falha quando a nova é confirmada")
+    void restoreRaceDetectedByUniqueIndex() throws Exception {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        Fixture f = tx.execute(_ -> fixture());
+        UUID moderator = tx.execute(_ -> insertModerator());
+        UUID old = publishUseCase.execute(command(f, f.place(), "Antiga"), now).id();
+        BusinessResponseModerationResult removal = moderateUseCase.execute(moderation(old, moderator,
+                BusinessResponseModerationAction.REMOVE_RESPONSE, now.plusSeconds(10)));
+        Map<String, Object> removalRow = jdbcTemplate.queryForMap(
+                "SELECT * FROM business_response_moderation_audit_logs WHERE id = ?", removal.auditLogId());
+        UUID newer = UUID.randomUUID();
+        CountDownLatch inserted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            // Publicação concorrente ainda sem commit: invisível para a checagem prévia da restauração
+            Future<?> publication = executor.submit(() -> tx.executeWithoutResult(_ -> {
+                jdbcTemplate.update("INSERT INTO business_responses (id, review_id, business_account_id, place_id, "
+                        + "author_user_id, content) VALUES (?, ?, ?, ?, ?, 'Nova')",
+                        newer, f.review(), f.business(), f.place(), f.businessAdmin());
+                inserted.countDown();
+                await(release);
+            }));
+            assertTrue(inserted.await(10, TimeUnit.SECONDS));
+            Future<String> restore = executor.submit(() -> {
+                try {
+                    moderateUseCase.execute(moderation(old, moderator, BusinessResponseModerationAction.RESTORE_RESPONSE,
+                            now.plusSeconds(20)));
+                    return "OK";
+                } catch (BusinessException conflict) {
+                    return conflict.getErrorCode();
+                }
+            });
+            waitForLockWaiter();
+            release.countDown();
+            publication.get(30, TimeUnit.SECONDS);
+
+            assertEquals("BUSINESS_RESPONSE_ALREADY_EXISTS", restore.get(30, TimeUnit.SECONDS));
+            assertEquals("REMOVED", jdbcTemplate.queryForObject(
+                    "SELECT status FROM business_responses WHERE id = ?", String.class, old));
+            assertEquals("ACTIVE", jdbcTemplate.queryForObject(
+                    "SELECT status FROM business_responses WHERE id = ?", String.class, newer));
+            assertEquals(1, count("SELECT count(*) FROM business_responses WHERE review_id = ? AND status = 'ACTIVE'",
+                    f.review()));
+            // Nenhuma auditoria da restauração falha; a da remoção continua idêntica
+            assertEquals(1, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ?", old));
+            assertEquals(removalRow, jdbcTemplate.queryForMap(
+                    "SELECT * FROM business_response_moderation_audit_logs WHERE id = ?", removal.auditLogId()));
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            cleanup(f);
+            jdbcTemplate.update("DELETE FROM users WHERE id = ?", moderator);
+        }
+    }
+
+    private UUID insertModerator() {
+        UUID moderator = insertUser();
+        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator);
+        return moderator;
+    }
+
+    private static ModerateBusinessResponseCommand moderation(UUID responseId, UUID moderator,
+                                                              BusinessResponseModerationAction action, Instant at) {
+        return new ModerateBusinessResponseCommand(responseId, moderator, action, "SPAM",
+                "Conteúdo promocional fora das regras", at);
     }
 
     // ---------------------------------------------------------------------------------------------------------------

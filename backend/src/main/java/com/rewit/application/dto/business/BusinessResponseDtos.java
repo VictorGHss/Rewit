@@ -1,7 +1,11 @@
 package com.rewit.application.dto.business;
 
+import com.rewit.domain.enums.BusinessResponseModerationAction;
+import com.rewit.domain.enums.BusinessResponseRemovalSource;
+import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.BusinessResponse;
+import com.rewit.domain.model.BusinessResponseModerationAuditLog;
 import com.rewit.domain.model.Place;
 
 import java.time.Instant;
@@ -97,5 +101,50 @@ public final class BusinessResponseDtos {
     }
 
     public record EligiblePlace(UUID placeId, String placeName) {
+    }
+
+    /**
+     * Decisão administrativa sobre uma resposta oficial.
+     *
+     * @param moderatorUserId identidade autenticada do moderador, nunca um valor escolhido pelo cliente
+     * @param now             instante da decisão; {@code null} usa o relógio atual
+     */
+    public record ModerateBusinessResponseCommand(
+            UUID responseId,
+            UUID moderatorUserId,
+            BusinessResponseModerationAction action,
+            String reasonCode,
+            String justification,
+            Instant now
+    ) {
+    }
+
+    /**
+     * Resultado administrativo da moderação: a decisão auditada e o estado resultante da resposta. Sem o autor
+     * pessoal da resposta nem o documento da empresa.
+     */
+    public record BusinessResponseModerationResult(
+            UUID auditLogId,
+            UUID responseId,
+            UUID reviewId,
+            UUID discussionId,
+            UUID businessAccountId,
+            UUID placeId,
+            BusinessResponseModerationAction action,
+            String reasonCode,
+            String justification,
+            BusinessResponseStatus previousStatus,
+            BusinessResponseStatus newStatus,
+            BusinessResponseRemovalSource removedBy,
+            Instant moderatedAt
+    ) {
+        public static BusinessResponseModerationResult of(BusinessResponseModerationAuditLog auditLog,
+                                                          BusinessResponse response) {
+            return new BusinessResponseModerationResult(auditLog.getId(), response.getId(), response.getReviewId(),
+                    response.getDiscussionId(), response.getBusinessAccountId(), response.getPlaceId(),
+                    auditLog.getAction(), auditLog.getReasonCode(), auditLog.getJustification(),
+                    auditLog.getPreviousStatus(), auditLog.getNewStatus(), response.getRemovedBy(),
+                    auditLog.getCreatedAt());
+        }
     }
 }
