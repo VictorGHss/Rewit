@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/features/business/domain/entities/business_response_entities.dart';
+import 'package:rewit_mobile/features/business/domain/repositories/business_response_repository.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
+import 'package:rewit_mobile/features/discussions/presentation/widgets/discussion_business_responses_list.dart';
 import 'package:rewit_mobile/features/discussions/presentation/widgets/discussion_item_widget.dart';
 
 /// Widget para renderização de uma thread completa de discussão: comentário raiz e respostas embutidas.
@@ -13,6 +16,9 @@ class DiscussionThreadWidget extends StatelessWidget {
   final void Function(String authorId)? onAuthorTap;
   final String? highlightedDiscussionId;
   final GlobalKey? Function(String id)? keyProvider;
+  final BusinessResponseRepository? businessResponseRepository;
+  final BusinessResponseEligibility? eligibility;
+  final Set<String> myBusinessAccountIds;
 
   const DiscussionThreadWidget({
     super.key,
@@ -25,6 +31,9 @@ class DiscussionThreadWidget extends StatelessWidget {
     this.onAuthorTap,
     this.highlightedDiscussionId,
     this.keyProvider,
+    this.businessResponseRepository,
+    this.eligibility,
+    this.myBusinessAccountIds = const {},
   });
 
   DiscussionItem _rootAsItem() {
@@ -65,6 +74,16 @@ class DiscussionThreadWidget extends StatelessWidget {
           onReport: thread.isVisible && onReport != null ? () => onReport!(rootItem) : null,
           onAuthorTap: onAuthorTap,
         ),
+
+        // Respostas oficiais da empresa ao comentário raiz (C11)
+        if (businessResponseRepository != null) ...[
+          DiscussionBusinessResponsesWidget(
+            discussionId: thread.id,
+            repository: businessResponseRepository!,
+            eligibility: eligibility,
+            myBusinessAccountIds: myBusinessAccountIds,
+          ),
+        ],
 
         // Bloco de respostas aninhadas (1 nível de profundidade)
         if (hasReplies || canLoadMoreReplies) ...[

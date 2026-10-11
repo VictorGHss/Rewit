@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/business/domain/entities/business_response_entities.dart';
+import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
+import 'package:rewit_mobile/features/business/domain/repositories/business_response_repository.dart';
+import 'package:rewit_mobile/features/business/presentation/widgets/review_business_responses_section.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/discussions/presentation/state/discussion_notifier.dart';
 import 'package:rewit_mobile/features/discussions/presentation/widgets/discussions_section.dart';
@@ -43,6 +47,8 @@ class ReviewDetailScreen extends StatefulWidget {
   final DiscussionRepository? discussionRepository;
   final DiscussionNotifier? discussionNotifier;
   final FeedNotifier? feedNotifier;
+  final BusinessResponseRepository? businessResponseRepository;
+  final BusinessRepository? businessRepository;
   final String? currentUserId;
   final bool? isAuthor;
   final DateTime Function()? nowProvider;
@@ -59,6 +65,8 @@ class ReviewDetailScreen extends StatefulWidget {
     this.discussionRepository,
     this.discussionNotifier,
     this.feedNotifier,
+    this.businessResponseRepository,
+    this.businessRepository,
     this.currentUserId,
     this.isAuthor,
     this.nowProvider,
@@ -91,6 +99,34 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   // Notifier de Discussões
   DiscussionNotifier? _discussionNotifier;
   bool _ownsNotifier = false;
+
+  // Respostas Oficiais e Contexto Empresarial (C11)
+  BusinessResponseEligibility? _eligibility;
+  Set<String> _myBusinessAccountIds = {};
+
+  Future<void> _loadBusinessContext() async {
+    if (widget.businessRepository != null) {
+      try {
+        final accounts = await widget.businessRepository!.getMyBusinessAccounts();
+        if (mounted) {
+          setState(() {
+            _myBusinessAccountIds = accounts.map((a) => a.id).toSet();
+          });
+        }
+      } catch (_) {}
+    }
+
+    if (widget.businessResponseRepository != null) {
+      try {
+        final el = await widget.businessResponseRepository!.getReviewEligibility(widget.reviewId);
+        if (mounted) {
+          setState(() {
+            _eligibility = el;
+          });
+        }
+      } catch (_) {}
+    }
+  }
 
   bool get _isAuthor {
     if (widget.isAuthor != null) return widget.isAuthor!;
@@ -143,6 +179,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
         _loadReview();
       }
     }
+
+    _loadBusinessContext();
   }
 
   @override
@@ -1028,7 +1066,17 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
             ),
             const SizedBox(height: 24),
 
-            // 7. Seção de Discussões Comunitárias
+            // 7. Respostas Oficiais de Empresas (C11)
+            if (widget.businessResponseRepository != null) ...[
+              ReviewBusinessResponsesSection(
+                reviewId: widget.reviewId,
+                repository: widget.businessResponseRepository!,
+                businessRepository: widget.businessRepository,
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // 8. Seção de Discussões Comunitárias
             if (_discussionNotifier != null) ...[
               DiscussionsSection(
                 reviewId: widget.reviewId,
@@ -1036,6 +1084,9 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
                 targetDiscussionId: widget.targetDiscussionId,
                 rootDiscussionId: widget.rootDiscussionId,
                 isReplyTarget: widget.isReplyTarget,
+                businessResponseRepository: widget.businessResponseRepository,
+                eligibility: _eligibility,
+                myBusinessAccountIds: _myBusinessAccountIds,
                 onAuthorTap: (authorId) {
                   Navigator.of(context).pushNamed(
                     AppRouter.profile,

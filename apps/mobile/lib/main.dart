@@ -7,6 +7,7 @@ import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/business/data/repositories/business_repository_impl.dart';
+import 'package:rewit_mobile/features/business/data/repositories/business_response_repository_impl.dart';
 import 'package:rewit_mobile/features/discussions/data/repositories/discussion_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/data/repositories/feed_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
@@ -58,6 +59,7 @@ void main() async {
   const locationService = GeolocatorLocationService();
   final notificationRepository = NotificationRepositoryImpl(httpClient: httpClient);
   final businessRepository = BusinessRepositoryImpl(httpClient: httpClient);
+  final businessResponseRepository = BusinessResponseRepositoryImpl(httpClient: httpClient);
 
   authNotifier = AuthNotifier(authRepository: authRepository);
   final feedNotifier = FeedNotifier(feedRepository: feedRepository);
@@ -81,6 +83,7 @@ void main() async {
     productRepository: productRepository,
     notificationRepository: notificationRepository,
     businessRepository: businessRepository,
+    businessResponseRepository: businessResponseRepository,
   );
 
 
