@@ -501,14 +501,29 @@ Eventos relevantes originados no ciclo de vida de avaliações geram notificaç�
 
 ---
 
+### 3.12 Respostas Oficiais de Empresas a Avaliações (C11)
+Empresas administradas por usuários autenticados podem publicar e gerenciar respostas oficiais a avaliações públicas ativas:
+* **Endpoints**:
+  * `POST /api/v1/reviews/{reviewId}/business-responses`: Publica resposta oficial à avaliação. Payload: `businessAccountId`, `placeId`, `content` (até 2000 caracteres).
+  * `GET /api/v1/reviews/{reviewId}/business-responses`: Lista paginada das respostas oficiais ativas da avaliação (`page`, `size` até 50).
+  * `GET /api/v1/reviews/{reviewId}/business-responses/eligibility`: Consulta contas aprovadas administradas pelo usuário autenticado e respectivos locais elegíveis associados à avaliação.
+  * `DELETE /api/v1/business-responses/{responseId}`: Remove a própria resposta oficial pela empresa (retorna `204 No Content`).
+  * `POST /api/v1/admin/business-responses/{responseId}/moderate`: Ação administrativa de moderação (`REMOVE_RESPONSE` ou `RESTORE_RESPONSE`) com motivo e justificativa (15 a 1000 caracteres). Exige perfil `MODERATOR` ou `ADMIN`.
+* **Segurança e Minimização de Dados**: A representação pública da resposta identifica a empresa (`businessAccountId`, `corporateName`) e o local representado (`placeId`, `placeName`), sem expor o autor pessoal (`authorUserId`), o documento da empresa (`taxId`), dados internos de auditoria ou metadados privados de remoção.
+* **Rate Limiting (`BUSINESS_RESPONSE_CREATION`)**: Protegido por janela deslizante no Redis com limite de 10 requisições por usuário a cada 60 segundos. Quando excedido, responde `429 Too Many Requests` com código `RATE_LIMIT_EXCEEDED` e cabeçalho `Retry-After`.
+
+---
+
 ## 4. Tratamento de Erros e Códigos HTTP
 
 Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
 
 | Código HTTP | Cenário | Código da Aplicação |
 |---|---|---|
-| `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas, página negativa (`page < 0`), tamanho inválido (`size <= 0` ou `size > 50`), ordenação não suportada ou tentativa de autor marcar a própria review como útil | `validation-error` / `INVALID_PAGE` / `INVALID_SIZE` / `PAGE_SIZE_EXCEEDED` / `INVALID_SORT` / `SELF_HELPFUL_FORBIDDEN` |
-| `401 Unauthorized` | Requisição sem token JWT válido no header `Authorization` | N/A (Spring Security filter) |
-| `403 Forbidden` | Tentativa de consultar ou interagir com Review `PRIVATE` de terceiro, ou Review `FOLLOWERS` por usuário que não seja seguidor ativo do autor | `FORBIDDEN` |
-| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente, alvo inexistente ou indisponível (place/product fora de `ACTIVE`) na consulta de stats/reviews ou Review inativa (`UNDER_REVIEW` / `REMOVED`) | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` |
+| `400 Bad Request` | Payload sintaticamente malformado, coordenadas inválidas, página negativa (`page < 0`), tamanho inválido (`size <= 0` ou `size > 50`), ordenação não suportada, justificativa fora dos limites (15-1000) ou tentativa de autor marcar a própria review como útil | `validation-error` / `INVALID_PAGE` / `INVALID_SIZE` / `PAGE_SIZE_EXCEEDED` / `INVALID_SORT` / `SELF_HELPFUL_FORBIDDEN` / `INVALID_JUSTIFICATION_LENGTH` |
+| `401 Unauthorized` | Requisição sem token JWT válido no header `Authorization` ou conta desativada | `AUTHENTICATION_REQUIRED` / `UNAUTHORIZED` / `ACCOUNT_DISABLED` |
+| `403 Forbidden` | Tentativa de consultar ou interagir com Review `PRIVATE` de terceiro, Review `FOLLOWERS` por usuário que não seja seguidor ativo do autor, moderador tentando moderar resposta da própria empresa ou usuário sem vínculo comercial com o local | `FORBIDDEN` / `SELF_MODERATION_FORBIDDEN` / `BUSINESS_NOT_RESPONSIBLE` |
+| `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente, alvo inexistente ou indisponível (place/product fora de `ACTIVE`), conta comercial inexistente ou resposta oficial inexistente | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` / `BUSINESS_ACCOUNT_NOT_FOUND` / `BUSINESS_RESPONSE_NOT_FOUND` |
+| `409 Conflict` | Avaliação não aceita respostas oficiais, conta comercial não aprovada, resposta ativa duplicada para a mesma empresa e avaliação, ou resposta não restaurável | `REVIEW_NOT_RESPONDABLE` / `BUSINESS_ACCOUNT_NOT_APPROVED` / `BUSINESS_RESPONSE_ALREADY_EXISTS` / `BUSINESS_RESPONSE_ALREADY_REMOVED` / `BUSINESS_RESPONSE_NOT_RESTORABLE` |
 | `422 Unprocessable Entity` | Violação de regra de negócio do domínio: alvo duplicado no mesmo Review ou nota com mais de 1 casa decimal | `DUPLICATE_REVIEW_TARGET` / `INVALID_RATING_PRECISION` |
+| `429 Too Many Requests` | Limite de criação de respostas oficiais excedido (10 em 60 s) | `RATE_LIMIT_EXCEEDED` |

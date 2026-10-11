@@ -285,6 +285,20 @@ Regras da moderação (`ModerateDiscussionUseCase`, lock pessimista da discussã
 * Cada decisão grava um registro em `discussion_moderation_audit_logs` (V20), append-only: o banco rejeita `UPDATE` (`trg_prevent_discussion_moderation_audit_update`).
 * Não altera reputação nem estatísticas e não gera notificação. Moderações concorrentes do mesmo comentário são serializadas: a segunda recebe `409`.
 
+## 4.1 Respostas Oficiais de Empresas a Comentários (C11)
+
+Empresas com contas comerciais aprovadas podem responder oficialmente a comentários raiz (`parentId == null`) de avaliações públicas:
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/api/v1/discussions/{discussionId}/business-responses` | Publica resposta oficial ao comentário raiz. Payload: `businessAccountId`, `placeId`, `content` (até 2000 caracteres) |
+| `GET` | `/api/v1/discussions/{discussionId}/business-responses` | Lista paginada das respostas oficiais ativas do comentário (`page`, `size` até 50) |
+
+Regras:
+* Apenas comentários raiz (`parentId == null`) e ativos aceitam respostas oficiais. Resposta a respostas ou comentário inativo responde `409 DISCUSSION_NOT_RESPONDABLE`.
+* Uma única resposta ativa por empresa e comentário (`409 BUSINESS_RESPONSE_ALREADY_EXISTS`).
+* Sujeito ao rate limit `BUSINESS_RESPONSE_CREATION` (10 requisições por usuário a cada 60 s).
+
 ---
 
 ## 5. Tabela de Códigos de Erro (RFC 7807)
@@ -300,6 +314,8 @@ Regras da moderação (`ModerateDiscussionUseCase`, lock pessimista da discussã
 | `401 Unauthorized` | `UNAUTHORIZED` | Ausência ou token JWT inválido/expirado |
 | `403 Forbidden` | `FORBIDDEN` | Tentativa de comentar em Review `PRIVATE` de terceiro, Review `FOLLOWERS` sem ser seguidor, ou excluir comentário de outro usuário |
 | `404 Not Found` | `REVIEW_NOT_FOUND` | Avaliação inexistente ou em status `UNDER_REVIEW` / `REMOVED` |
-| `409 Conflict` | `DISCUSSION_UNDER_REVIEW_MUTATION_DENIED` | Autor tentando excluir o próprio comentário em análise |
 | `404 Not Found` | `DISCUSSION_NOT_FOUND` | Comentário pai (`parentId`) ou comentário a deletar não encontrado ou já indisponível |
-| `429 Too Many Requests` | `RATE_LIMIT_EXCEEDED` | Mais de 15 comentários criados em menos de 60 segundos pelo mesmo usuário |
+| `409 Conflict` | `DISCUSSION_UNDER_REVIEW_MUTATION_DENIED` | Autor tentando excluir o próprio comentário em análise |
+| `409 Conflict` | `DISCUSSION_NOT_RESPONDABLE` | Comentário não é raiz ou não está ativo para receber respostas oficiais |
+| `409 Conflict` | `BUSINESS_RESPONSE_ALREADY_EXISTS` | Empresa já possui resposta ativa para este comentário |
+| `429 Too Many Requests` | `RATE_LIMIT_EXCEEDED` | Limite de criação de comentários (15 em 60 s) ou de respostas oficiais (10 em 60 s) excedido |
