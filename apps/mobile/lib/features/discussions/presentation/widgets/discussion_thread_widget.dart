@@ -75,8 +75,8 @@ class DiscussionThreadWidget extends StatelessWidget {
           onAuthorTap: onAuthorTap,
         ),
 
-        // Respostas oficiais da empresa ao comentário raiz (C11)
-        if (businessResponseRepository != null) ...[
+        // Respostas oficiais da empresa somente ao comentário raiz ativo/visível (C11)
+        if (businessResponseRepository != null && thread.parentId == null && thread.isVisible) ...[
           DiscussionBusinessResponsesWidget(
             discussionId: thread.id,
             repository: businessResponseRepository!,

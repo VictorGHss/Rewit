@@ -8,6 +8,7 @@ import 'package:rewit_mobile/features/business/presentation/widgets/review_busin
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/discussions/presentation/state/discussion_notifier.dart';
+import 'package:rewit_mobile/features/discussions/presentation/widgets/discussion_business_responses_list.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
@@ -68,15 +69,32 @@ class MockBusinessResponseRepository implements BusinessResponseRepository {
     return created;
   }
 
+  bool paginateDiscussionResponses = false;
+  int discussionResponsesPageSize = 1;
+
   @override
   Future<BusinessResponsePage> getDiscussionBusinessResponses(String discussionId, {int page = 0, int size = 20}) async {
+    if (!paginateDiscussionResponses) {
+      return BusinessResponsePage(
+        content: List.of(discussionResponses),
+        pageNumber: page,
+        pageSize: size,
+        totalElements: discussionResponses.length,
+        totalPages: 1,
+        isLast: true,
+      );
+    }
+    final effectiveSize = discussionResponsesPageSize;
+    final start = page * effectiveSize;
+    final end = (start + effectiveSize).clamp(0, discussionResponses.length);
+    final items = start < discussionResponses.length ? discussionResponses.sublist(start, end) : <BusinessResponse>[];
     return BusinessResponsePage(
-      content: List.of(discussionResponses),
+      content: items,
       pageNumber: page,
-      pageSize: size,
+      pageSize: effectiveSize,
       totalElements: discussionResponses.length,
-      totalPages: 1,
-      isLast: true,
+      totalPages: (discussionResponses.length / effectiveSize).ceil(),
+      isLast: end >= discussionResponses.length,
     );
   }
 
@@ -472,6 +490,198 @@ void main() {
 
       // 4. Resposta oficial da empresa ao comentário do João
       expect(find.text('Sim, João! Temos pães e bolos sem glúten diariamente.'), findsOneWidget);
+    });
+
+    testWidgets('suporta paginação de respostas oficiais em discussões com botão Carregar mais', (tester) async {
+      responseRepo.paginateDiscussionResponses = true;
+      responseRepo.discussionResponsesPageSize = 1;
+      responseRepo.discussionResponses = [
+        BusinessResponse(
+          id: 'resp-disc-p1',
+          reviewId: 'rev-1',
+          discussionId: 'disc-1',
+          businessAccountId: 'acc-1',
+          corporateName: 'Padaria Modelo Ltda',
+          placeId: 'plc-1',
+          placeName: 'Modelo Centro',
+          content: 'Primeira resposta na discussão.',
+          createdAt: DateTime(2026, 10, 11, 16, 35),
+        ),
+        BusinessResponse(
+          id: 'resp-disc-p2',
+          reviewId: 'rev-1',
+          discussionId: 'disc-1',
+          businessAccountId: 'acc-2',
+          corporateName: 'Outra Empresa Ltda',
+          placeId: 'plc-2',
+          placeName: 'Filial Centro',
+          content: 'Segunda resposta vinda da paginação.',
+          createdAt: DateTime(2026, 10, 11, 16, 40),
+        ),
+      ];
+
+      discussionRepo.threads = [
+        DiscussionThread(
+          id: 'disc-1',
+          reviewId: 'rev-1',
+          parentId: null,
+          state: DiscussionViewState.visible,
+          content: 'Pergunta sobre produtos.',
+          author: const DiscussionAuthor(id: 'usr-2', displayName: 'Carlos'),
+          isFromOwner: false,
+          createdAt: DateTime(2026, 10, 11, 16, 30),
+          canReply: true,
+          canDelete: false,
+          replies: const [],
+          replyCount: 0,
+          hasMoreReplies: false,
+        ),
+      ];
+
+      final notifier = DiscussionNotifier(repository: discussionRepo);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReviewDetailScreen(
+            reviewId: 'rev-1',
+            initialReview: dummyReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            discussionNotifier: notifier,
+            businessResponseRepository: responseRepo,
+            businessRepository: businessRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Primeira resposta visível
+      expect(find.text('Primeira resposta na discussão.'), findsOneWidget);
+      // Segunda resposta ainda não carregada
+      expect(find.text('Segunda resposta vinda da paginação.'), findsNothing);
+
+      // Botão de carregar mais respostas visível
+      final loadMoreBtn = find.byKey(const ValueKey('load_more_discussion_responses_disc-1'));
+      expect(loadMoreBtn, findsOneWidget);
+
+      await tester.ensureVisible(loadMoreBtn);
+      await tester.tap(loadMoreBtn);
+      await tester.pumpAndSettle();
+
+      // Agora ambas estão presentes
+      expect(find.text('Primeira resposta na discussão.'), findsOneWidget);
+      expect(find.text('Segunda resposta vinda da paginação.'), findsOneWidget);
+    });
+
+    testWidgets('impede publicação duplicada na mesma discussão por conta que já respondeu', (tester) async {
+      responseRepo.eligibility = const BusinessResponseEligibility(
+        reviewId: 'rev-1',
+        respondable: true,
+        accounts: [
+          EligibleBusinessAccount(
+            businessAccountId: 'acc-1',
+            corporateName: 'Padaria Modelo Ltda',
+            places: [
+              EligiblePlace(placeId: 'plc-1', placeName: 'Modelo Centro'),
+            ],
+            activeResponseId: null,
+            canPublish: true,
+          ),
+        ],
+      );
+
+      // A conta acc-1 já possui resposta nesta discussão
+      responseRepo.discussionResponses = [
+        BusinessResponse(
+          id: 'resp-disc-1',
+          reviewId: 'rev-1',
+          discussionId: 'disc-1',
+          businessAccountId: 'acc-1',
+          corporateName: 'Padaria Modelo Ltda',
+          placeId: 'plc-1',
+          placeName: 'Modelo Centro',
+          content: 'Já respondemos anteriormente.',
+          createdAt: DateTime(2026, 10, 11, 16, 35),
+        ),
+      ];
+
+      discussionRepo.threads = [
+        DiscussionThread(
+          id: 'disc-1',
+          reviewId: 'rev-1',
+          parentId: null,
+          state: DiscussionViewState.visible,
+          content: 'Dúvida do cliente.',
+          author: const DiscussionAuthor(id: 'usr-3', displayName: 'Paula'),
+          isFromOwner: false,
+          createdAt: DateTime(2026, 10, 11, 16, 30),
+          canReply: true,
+          canDelete: false,
+          replies: const [],
+          replyCount: 0,
+          hasMoreReplies: false,
+        ),
+      ];
+
+      final notifier = DiscussionNotifier(repository: discussionRepo);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReviewDetailScreen(
+            reviewId: 'rev-1',
+            initialReview: dummyReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            discussionNotifier: notifier,
+            businessResponseRepository: responseRepo,
+            businessRepository: businessRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Botão de responder como empresa NÃO deve aparecer para disc-1 porque a única conta elegível já respondeu
+      expect(find.byKey(const ValueKey('reply_as_business_button_disc-1')), findsNothing);
+    });
+
+    testWidgets('não exibe respostas oficiais em comentários aninhados ou não visíveis', (tester) async {
+      discussionRepo.threads = [
+        DiscussionThread(
+          id: 'disc-reply-1',
+          reviewId: 'rev-1',
+          parentId: 'disc-root-parent',
+          state: DiscussionViewState.visible,
+          content: 'Este é um comentário aninhado (não raiz).',
+          author: const DiscussionAuthor(id: 'usr-4', displayName: 'Lucas'),
+          isFromOwner: false,
+          createdAt: DateTime(2026, 10, 11, 16, 30),
+          canReply: false,
+          canDelete: false,
+          replies: const [],
+          replyCount: 0,
+          hasMoreReplies: false,
+        ),
+      ];
+
+      final notifier = DiscussionNotifier(repository: discussionRepo);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReviewDetailScreen(
+            reviewId: 'rev-1',
+            initialReview: dummyReview,
+            feedRepository: feedRepo,
+            discussionRepository: discussionRepo,
+            discussionNotifier: notifier,
+            businessResponseRepository: responseRepo,
+            businessRepository: businessRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Não deve renderizar DiscussionBusinessResponsesWidget para comentários com parentId != null
+      expect(find.byType(DiscussionBusinessResponsesWidget), findsNothing);
     });
   });
 }

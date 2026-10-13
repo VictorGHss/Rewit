@@ -27,8 +27,11 @@ class DiscussionBusinessResponsesWidget extends StatefulWidget {
 
 class _DiscussionBusinessResponsesWidgetState
     extends State<DiscussionBusinessResponsesWidget> {
-  bool _isLoading = false;
+  bool _isLoading = true;
   List<BusinessResponse> _responses = [];
+  int _page = 0;
+  bool _hasMore = false;
+  bool _isLoadingMore = false;
   String? _errorMessage;
   String? _deletingResponseId;
   bool _showPublishForm = false;
@@ -47,6 +50,21 @@ class _DiscussionBusinessResponsesWidgetState
     }
   }
 
+  BusinessResponseEligibility? get _effectiveEligibility {
+    if (widget.eligibility == null) return null;
+    final availableAccounts = widget.eligibility!.accounts.where((account) {
+      final alreadyResponded =
+          _responses.any((r) => r.businessAccountId == account.businessAccountId);
+      return account.canPublish && account.places.isNotEmpty && !alreadyResponded;
+    }).toList();
+
+    return BusinessResponseEligibility(
+      reviewId: widget.eligibility!.reviewId,
+      respondable: widget.eligibility!.respondable && availableAccounts.isNotEmpty,
+      accounts: availableAccounts,
+    );
+  }
+
   Future<void> _loadResponses() async {
     setState(() {
       _isLoading = true;
@@ -63,6 +81,8 @@ class _DiscussionBusinessResponsesWidgetState
       if (mounted) {
         setState(() {
           _responses = List.of(pageResult.content);
+          _page = pageResult.pageNumber;
+          _hasMore = !pageResult.isLast;
           _isLoading = false;
         });
       }
@@ -79,6 +99,56 @@ class _DiscussionBusinessResponsesWidgetState
           _isLoading = false;
           _errorMessage = 'Falha ao carregar respostas oficiais do comentário.';
         });
+      }
+    }
+  }
+
+  Future<void> _loadMoreResponses() async {
+    if (_isLoadingMore || !_hasMore) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final nextPage = _page + 1;
+      final pageResult = await widget.repository.getDiscussionBusinessResponses(
+        widget.discussionId,
+        page: nextPage,
+        size: 20,
+      );
+
+      if (mounted) {
+        setState(() {
+          _responses.addAll(pageResult.content);
+          _page = pageResult.pageNumber;
+          _hasMore = !pageResult.isLast;
+          _isLoadingMore = false;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingMore = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Falha ao carregar mais respostas: ${e.detail}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingMore = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Falha ao carregar mais respostas.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
       }
     }
   }
@@ -108,6 +178,9 @@ class _DiscussionBusinessResponsesWidgetState
       if (mounted) {
         setState(() {
           _deletingResponseId = null;
+          if (e.isNotFound || e.isConflict) {
+            _responses.removeWhere((r) => r.id == response.id);
+          }
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -163,7 +236,8 @@ class _DiscussionBusinessResponsesWidgetState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final canPublish = widget.eligibility?.hasEligibleAccounts ?? false;
+    final effectiveEligibility = _effectiveEligibility;
+    final canPublish = effectiveEligibility?.hasEligibleAccounts ?? false;
 
     if (_isLoading) {
       return const Padding(
@@ -222,6 +296,24 @@ class _DiscussionBusinessResponsesWidgetState
             );
           }),
 
+          // Botão para carregar mais respostas paginadas da discussão
+          if (_hasMore) ...[
+            const SizedBox(height: 6),
+            Center(
+              child: _isLoadingMore
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : TextButton(
+                      key: ValueKey('load_more_discussion_responses_${widget.discussionId}'),
+                      onPressed: _loadMoreResponses,
+                      child: const Text('Carregar mais respostas oficiais', style: TextStyle(fontSize: 12)),
+                    ),
+            ),
+          ],
+
           // Botão para abrir formulário de resposta comercial à discussão
           if (canPublish && !_showPublishForm) ...[
             Padding(
@@ -261,11 +353,11 @@ class _DiscussionBusinessResponsesWidgetState
           ],
 
           // Formulário aberto
-          if (canPublish && _showPublishForm && widget.eligibility != null) ...[
+          if (canPublish && _showPublishForm && effectiveEligibility != null) ...[
             Padding(
               padding: const EdgeInsets.only(top: 6.0),
               child: PublishBusinessResponseForm(
-                eligibility: widget.eligibility!,
+                eligibility: effectiveEligibility,
                 onSubmit: _handlePublish,
                 onCancel: () {
                   setState(() {

@@ -92,6 +92,7 @@ class _PublishBusinessResponseFormState
   }
 
   Future<void> _handleSubmit() async {
+    if (_isSubmitting) return;
     FocusScope.of(context).unfocus();
 
     final content = _controller.text.trim();
@@ -139,8 +140,18 @@ class _PublishBusinessResponseFormState
         setState(() {
           _isSubmitting = false;
           if (e.isRateLimited) {
-            _errorMessage =
-                'Limite de publicações atingido temporariamente (10 requisições/min). Tente novamente em breve.';
+            if (e.retryAfterSeconds != null && e.retryAfterSeconds! > 0) {
+              _errorMessage =
+                  'Limite de publicações atingido temporariamente (10 requisições/min). Tente novamente em ${e.retryAfterSeconds} segundos.';
+            } else {
+              _errorMessage =
+                  'Limite de publicações atingido temporariamente (10 requisições/min). Tente novamente em breve.';
+            }
+          } else if (e.hasFieldErrors) {
+            _errorMessage = e.getFieldError('content') ??
+                e.getFieldError('businessAccountId') ??
+                e.getFieldError('placeId') ??
+                e.allFieldErrors.values.first;
           } else {
             _errorMessage = e.detail;
           }

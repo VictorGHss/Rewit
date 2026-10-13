@@ -243,5 +243,139 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets('exibe tempo restante quando erro 429 inclui retryAfterSeconds', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PublishBusinessResponseForm(
+              eligibility: eligibilityMultiple,
+              onSubmit: ({required businessAccountId, required placeId, required content}) async {
+                throw const ApiException(
+                  ProblemDetail(
+                    type: 'about:blank',
+                    title: 'Limite excedido',
+                    status: 429,
+                    detail: 'Rate limit excedido.',
+                    code: 'RATE_LIMIT_EXCEEDED',
+                  ),
+                  retryAfterSeconds: 45,
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('business_response_content_field')),
+        'Testando taxa com Retry-After.',
+      );
+
+      await tester.tap(find.byKey(const Key('submit_business_response_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Limite de publicações atingido temporariamente (10 requisições/min). Tente novamente em 45 segundos.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('exibe mensagem de erro de campo específico retornado na ProblemDetail RFC 7807', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PublishBusinessResponseForm(
+              eligibility: eligibilityMultiple,
+              onSubmit: ({required businessAccountId, required placeId, required content}) async {
+                throw const ApiException(
+                  ProblemDetail(
+                    type: 'https://api.rewit.app/errors/validation-error',
+                    title: 'Erro de Validação de Dados',
+                    status: 400,
+                    detail: 'Parâmetros da requisição inválidos',
+                    code: 'VALIDATION_ERROR',
+                    fieldErrors: {
+                      'content': 'O conteúdo não pode conter linguagem ofensiva.',
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('business_response_content_field')),
+        'Texto com erro de validação.',
+      );
+
+      await tester.tap(find.byKey(const Key('submit_business_response_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('O conteúdo não pode conter linguagem ofensiva.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('evita múltiplos envios concorrentes quando submissão já está em andamento', (tester) async {
+      int submitCount = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PublishBusinessResponseForm(
+              eligibility: eligibilityMultiple,
+              onSubmit: ({required businessAccountId, required placeId, required content}) async {
+                submitCount++;
+                await Future.delayed(const Duration(milliseconds: 100));
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('business_response_content_field')),
+        'Mensagem enviada com proteção de concorrência.',
+      );
+
+      await tester.tap(find.byKey(const Key('submit_business_response_button')));
+      await tester.pump();
+
+      expect(find.text('Publicando...'), findsOneWidget);
+
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pumpAndSettle();
+
+      expect(submitCount, 1);
+    });
+
+    testWidgets('suporta caracteres UTF-8 e emojis no conteúdo da resposta', (tester) async {
+      String? submittedContent;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PublishBusinessResponseForm(
+              eligibility: eligibilityMultiple,
+              onSubmit: ({required businessAccountId, required placeId, required content}) async {
+                submittedContent = content;
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('business_response_content_field')),
+        'Olá! Agradecemos o carinho ❤️🥐☕. Até breve! ✨',
+      );
+
+      await tester.tap(find.byKey(const Key('submit_business_response_button')));
+      await tester.pumpAndSettle();
+
+      expect(submittedContent, 'Olá! Agradecemos o carinho ❤️🥐☕. Até breve! ✨');
+    });
   });
 }
