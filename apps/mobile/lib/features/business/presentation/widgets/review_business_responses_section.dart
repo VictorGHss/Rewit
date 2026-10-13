@@ -85,6 +85,10 @@ class _ReviewBusinessResponsesSectionState
         _eligibility = null;
       }
 
+      if (_myBusinessAccountIds.isEmpty && _eligibility != null) {
+        _myBusinessAccountIds = _eligibility!.accounts.map((a) => a.businessAccountId).toSet();
+      }
+
       if (mounted) {
         setState(() {
           _responses = List.of(pageResult.content);
@@ -110,6 +114,21 @@ class _ReviewBusinessResponsesSectionState
     }
   }
 
+  BusinessResponseEligibility? get _effectiveEligibility {
+    if (_eligibility == null) return null;
+    final availableAccounts = _eligibility!.accounts.where((account) {
+      final alreadyResponded =
+          _responses.any((r) => r.businessAccountId == account.businessAccountId);
+      return account.canPublish && account.places.isNotEmpty && !alreadyResponded;
+    }).toList();
+
+    return BusinessResponseEligibility(
+      reviewId: _eligibility!.reviewId,
+      respondable: _eligibility!.respondable && availableAccounts.isNotEmpty,
+      accounts: availableAccounts,
+    );
+  }
+
   Future<void> _loadMoreResponses() async {
     if (_isLoadingMore || !_hasMore) return;
 
@@ -132,6 +151,18 @@ class _ReviewBusinessResponsesSectionState
           _hasMore = !pageResult.isLast;
           _isLoadingMore = false;
         });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingMore = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Falha ao carregar mais respostas: ${e.detail}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
       }
     } catch (_) {
       if (mounted) {
@@ -173,7 +204,13 @@ class _ReviewBusinessResponsesSectionState
       if (mounted) {
         setState(() {
           _deletingResponseId = null;
+          if (e.isNotFound || e.isConflict) {
+            _responses.removeWhere((r) => r.id == response.id);
+          }
         });
+        if (e.isNotFound || e.isConflict) {
+          _reloadEligibility();
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Falha ao remover resposta: ${e.detail}'),
@@ -242,7 +279,8 @@ class _ReviewBusinessResponsesSectionState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final canPublish = _eligibility?.hasEligibleAccounts ?? false;
+    final effectiveEligibility = _effectiveEligibility;
+    final canPublish = effectiveEligibility?.hasEligibleAccounts ?? false;
 
     // Se estiver carregando inicialmente
     if (_isLoading) {
@@ -312,9 +350,9 @@ class _ReviewBusinessResponsesSectionState
         const SizedBox(height: 8),
 
         // Formulário de Publicação (quando aberto)
-        if (canPublish && _showPublishForm && _eligibility != null) ...[
+        if (canPublish && _showPublishForm && effectiveEligibility != null) ...[
           PublishBusinessResponseForm(
-            eligibility: _eligibility!,
+            eligibility: effectiveEligibility,
             onSubmit: _handlePublish,
             onCancel: () {
               setState(() {

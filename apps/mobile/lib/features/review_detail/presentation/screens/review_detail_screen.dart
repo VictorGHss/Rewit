@@ -122,6 +122,9 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
         if (mounted) {
           setState(() {
             _eligibility = el;
+            if (_myBusinessAccountIds.isEmpty) {
+              _myBusinessAccountIds = el.accounts.map((a) => a.businessAccountId).toSet();
+            }
           });
         }
       } catch (_) {}
