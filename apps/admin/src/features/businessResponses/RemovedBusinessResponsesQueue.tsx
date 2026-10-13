@@ -68,6 +68,19 @@ export const RemovedBusinessResponsesQueue: React.FC = () => {
         placeId: appliedFilters.placeId.trim() || undefined,
       });
 
+      // Se a consulta retornar a lista vazia e o número da página solicitada estiver fora do novo intervalo
+      // (ex.: após uma operação reduzir o total de páginas), volta para a última página válida ou para zero.
+      if (response.content.length === 0 && page > 0) {
+        const isOutOfRange = response.totalPages === 0 || page >= response.totalPages;
+        if (isOutOfRange) {
+          const targetPage = response.totalPages > 0 ? response.totalPages - 1 : 0;
+          if (targetPage !== page) {
+            setPage(targetPage);
+            return;
+          }
+        }
+      }
+
       setResponses(response.content);
       setPage(response.pageNumber);
       setTotalPages(response.totalPages);
@@ -462,6 +475,11 @@ export const RemovedBusinessResponsesQueue: React.FC = () => {
                         <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
                           Removida: {formatDate(item.removedAt)}
                         </div>
+                        {item.moderatedAt && (
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                            Moderada: {formatDate(item.moderatedAt)}
+                          </div>
+                        )}
                         {item.moderationJustification && (
                           <div
                             style={{
@@ -553,6 +571,7 @@ export const RemovedBusinessResponsesQueue: React.FC = () => {
           isOpen={!!selectedResponseForRestore}
           onClose={() => setSelectedResponseForRestore(null)}
           onRestoreSuccess={handleRestoreSuccess}
+          onRefreshRequired={fetchResponses}
         />
       )}
     </div>

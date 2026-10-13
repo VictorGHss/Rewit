@@ -4,7 +4,7 @@ export interface ProblemDetail {
   status?: number;
   detail?: string;
   code?: string;
-  fieldErrors?: Array<{ field: string; message: string }>;
+  fieldErrors?: Array<{ field: string; message: string }> | Record<string, string>;
   [key: string]: unknown;
 }
 

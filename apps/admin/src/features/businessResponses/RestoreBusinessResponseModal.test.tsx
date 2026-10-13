@@ -148,13 +148,15 @@ describe('RestoreBusinessResponseModal', () => {
     });
   });
 
-  it('exibe erro de negócio (ex.: 409 conflito) sem fechar o modal e sem perder os dados', async () => {
+  it('trata 409 BUSINESS_RESPONSE_ALREADY_EXISTS atualizando a fila e preservando o detail no modal', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     const onRestoreSuccess = vi.fn();
+    const onRefreshRequired = vi.fn();
 
     const conflictError = new ApiError(409, {
       title: 'Conflito de Regra de Negócio',
+      code: 'BUSINESS_RESPONSE_ALREADY_EXISTS',
       detail: 'A empresa já tem outra resposta ativa neste alvo; a resposta removida não pode ser restaurada',
       status: 409,
     });
@@ -167,6 +169,7 @@ describe('RestoreBusinessResponseModal', () => {
         isOpen={true}
         onClose={onClose}
         onRestoreSuccess={onRestoreSuccess}
+        onRefreshRequired={onRefreshRequired}
       />
     );
 
@@ -181,10 +184,155 @@ describe('RestoreBusinessResponseModal', () => {
       expect(screen.getByText(/a empresa já tem outra resposta ativa neste alvo/i)).toBeInTheDocument();
     });
 
-    // O modal continua aberto e os callbacks de sucesso não foram chamados
+    // Callback de atualização da fila foi acionado
+    expect(onRefreshRequired).toHaveBeenCalledTimes(1);
+    // Não fecha o modal nem declara sucesso falso
     expect(onRestoreSuccess).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue('Justificativa de teste válida com mais de 15 caracteres.')).toBeInTheDocument();
+  });
+
+  it('trata 409 BUSINESS_RESPONSE_NOT_RESTORABLE atualizando a fila', async () => {
+    const user = userEvent.setup();
+    const onRefreshRequired = vi.fn();
+
+    const notRestorableError = new ApiError(409, {
+      title: 'Não Restaurável',
+      code: 'BUSINESS_RESPONSE_NOT_RESTORABLE',
+      detail: 'Somente respostas removidas pela moderação podem ser restauradas.',
+      status: 409,
+    });
+
+    vi.mocked(businessResponsesApi.moderateBusinessResponse).mockRejectedValueOnce(notRestorableError);
+
+    render(
+      <RestoreBusinessResponseModal
+        response={sampleResponse}
+        isOpen={true}
+        onClose={vi.fn()}
+        onRestoreSuccess={vi.fn()}
+        onRefreshRequired={onRefreshRequired}
+      />
+    );
+
+    const justificationInput = screen.getByLabelText(/justificativa da restauração/i);
+    await user.type(justificationInput, 'Justificativa com tamanho suficiente de caracteres.');
+
+    await user.click(screen.getByRole('button', { name: /restaurar resposta/i }));
+    await user.click(screen.getByRole('button', { name: /sim, restaurar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Somente respostas removidas pela moderação podem ser restauradas.')).toBeInTheDocument();
+    });
+
+    expect(onRefreshRequired).toHaveBeenCalledTimes(1);
+  });
+
+  it('trata 403 SELF_MODERATION_FORBIDDEN atualizando a fila', async () => {
+    const user = userEvent.setup();
+    const onRefreshRequired = vi.fn();
+
+    const selfModError = new ApiError(403, {
+      title: 'Acesso Proibido',
+      code: 'SELF_MODERATION_FORBIDDEN',
+      detail: 'O moderador não pode moderar uma resposta da própria empresa',
+      status: 403,
+    });
+
+    vi.mocked(businessResponsesApi.moderateBusinessResponse).mockRejectedValueOnce(selfModError);
+
+    render(
+      <RestoreBusinessResponseModal
+        response={sampleResponse}
+        isOpen={true}
+        onClose={vi.fn()}
+        onRestoreSuccess={vi.fn()}
+        onRefreshRequired={onRefreshRequired}
+      />
+    );
+
+    const justificationInput = screen.getByLabelText(/justificativa da restauração/i);
+    await user.type(justificationInput, 'Justificativa para teste de conflito de interesse.');
+
+    await user.click(screen.getByRole('button', { name: /restaurar resposta/i }));
+    await user.click(screen.getByRole('button', { name: /sim, restaurar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('O moderador não pode moderar uma resposta da própria empresa')).toBeInTheDocument();
+    });
+
+    expect(onRefreshRequired).toHaveBeenCalledTimes(1);
+  });
+
+  it('trata 403 sem corpo de erro apresentando mensagem compreensível em vez de "Erro na API (403)"', async () => {
+    const user = userEvent.setup();
+    const onRefreshRequired = vi.fn();
+
+    // 403 puro sem problem detail
+    const forbiddenWithoutBody = new ApiError(403);
+
+    vi.mocked(businessResponsesApi.moderateBusinessResponse).mockRejectedValueOnce(forbiddenWithoutBody);
+
+    render(
+      <RestoreBusinessResponseModal
+        response={sampleResponse}
+        isOpen={true}
+        onClose={vi.fn()}
+        onRestoreSuccess={vi.fn()}
+        onRefreshRequired={onRefreshRequired}
+      />
+    );
+
+    const justificationInput = screen.getByLabelText(/justificativa da restauração/i);
+    await user.type(justificationInput, 'Justificativa de teste válida com mais de 15 caracteres.');
+
+    await user.click(screen.getByRole('button', { name: /restaurar resposta/i }));
+    await user.click(screen.getByRole('button', { name: /sim, restaurar/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Você não possui permissão para executar esta ação de moderação.')
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Erro na API (403)')).not.toBeInTheDocument();
+    });
+
+    expect(onRefreshRequired).toHaveBeenCalledTimes(1);
+  });
+
+  it('trata 404 BUSINESS_RESPONSE_NOT_FOUND atualizando a fila', async () => {
+    const user = userEvent.setup();
+    const onRefreshRequired = vi.fn();
+
+    const notFoundError = new ApiError(404, {
+      title: 'Não Encontrado',
+      code: 'BUSINESS_RESPONSE_NOT_FOUND',
+      detail: 'Resposta oficial não encontrada',
+      status: 404,
+    });
+
+    vi.mocked(businessResponsesApi.moderateBusinessResponse).mockRejectedValueOnce(notFoundError);
+
+    render(
+      <RestoreBusinessResponseModal
+        response={sampleResponse}
+        isOpen={true}
+        onClose={vi.fn()}
+        onRestoreSuccess={vi.fn()}
+        onRefreshRequired={onRefreshRequired}
+      />
+    );
+
+    const justificationInput = screen.getByLabelText(/justificativa da restauração/i);
+    await user.type(justificationInput, 'Justificativa de teste válida com mais de 15 caracteres.');
+
+    await user.click(screen.getByRole('button', { name: /restaurar resposta/i }));
+    await user.click(screen.getByRole('button', { name: /sim, restaurar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Resposta oficial não encontrada')).toBeInTheDocument();
+    });
+
+    expect(onRefreshRequired).toHaveBeenCalledTimes(1);
   });
 
   it('previne múltiplos envios concorrentes durante o processamento', async () => {

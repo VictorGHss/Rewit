@@ -299,4 +299,165 @@ describe('RemovedBusinessResponsesQueue', () => {
     // A lista foi recarregada
     expect(businessResponsesApi.listRemovedBusinessResponses).toHaveBeenCalledTimes(2);
   });
+
+  it('exibe data de moderação quando presente e não exibe quando for nula', async () => {
+    vi.mocked(businessResponsesApi.listRemovedBusinessResponses).mockResolvedValueOnce(sampleResponses);
+
+    render(<RemovedBusinessResponsesQueue />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Padaria Alfa Ltda')).toBeInTheDocument();
+    });
+
+    // resp-1 e resp-3 têm moderatedAt presente
+    const moderatedDates = screen.getAllByText(/moderada:/i);
+    expect(moderatedDates.length).toBe(2);
+
+    // O container de resp-2 (removida pela empresa, moderatedAt null) não deve conter texto "Moderada:"
+    const betaRow = screen.getByText('Hamburgueria Beta S.A.').closest('tr');
+    expect(betaRow).not.toBeNull();
+    expect(within(betaRow!).queryByText(/moderada:/i)).not.toBeInTheDocument();
+  });
+
+  it('recupera para a última página válida quando a página atual deixa de existir após operação', async () => {
+    const user = userEvent.setup();
+
+    // Chamada inicial: página 0 com 2 páginas no total
+    vi.mocked(businessResponsesApi.listRemovedBusinessResponses)
+      .mockResolvedValueOnce({
+        content: [sampleResponses.content[0]],
+        pageNumber: 0,
+        pageSize: 1,
+        totalElements: 2,
+        totalPages: 2,
+        isLast: false,
+      })
+      // Usuário navega para a página 1: a API retorna vazia porque o item foi restaurado/removido
+      .mockResolvedValueOnce({
+        content: [],
+        pageNumber: 1,
+        pageSize: 1,
+        totalElements: 1,
+        totalPages: 1,
+        isLast: true,
+      })
+      // Componente se recupera voltando para a página 0
+      .mockResolvedValueOnce({
+        content: [sampleResponses.content[0]],
+        pageNumber: 0,
+        pageSize: 1,
+        totalElements: 1,
+        totalPages: 1,
+        isLast: true,
+      });
+
+    render(<RemovedBusinessResponsesQueue />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Padaria Alfa Ltda')).toBeInTheDocument();
+    });
+
+    // Avança para a página 1
+    const nextBtn = screen.getByRole('button', { name: /próxima página/i });
+    await user.click(nextBtn);
+
+    // Aguarda recuperação e re-renderização na página 0
+    await waitFor(() => {
+      expect(businessResponsesApi.listRemovedBusinessResponses).toHaveBeenCalledTimes(3);
+      expect(businessResponsesApi.listRemovedBusinessResponses).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 0 })
+      );
+      expect(screen.getByText('Padaria Alfa Ltda')).toBeInTheDocument();
+    });
+  });
+
+  it('recupera para a página zero quando a lista fica totalmente vazia após operação sem loop infinito', async () => {
+    const user = userEvent.setup();
+
+    // Chamada inicial: página 0 com 2 páginas
+    vi.mocked(businessResponsesApi.listRemovedBusinessResponses)
+      .mockResolvedValueOnce({
+        content: [sampleResponses.content[0]],
+        pageNumber: 0,
+        pageSize: 1,
+        totalElements: 2,
+        totalPages: 2,
+        isLast: false,
+      })
+      // Usuário navega para página 1: a API retorna lista totalmente vazia (totalElements: 0, totalPages: 0)
+      .mockResolvedValueOnce({
+        content: [],
+        pageNumber: 1,
+        pageSize: 1,
+        totalElements: 0,
+        totalPages: 0,
+        isLast: true,
+      })
+      // Componente se recupera voltando para a página 0, onde a consulta também retorna vazia
+      .mockResolvedValueOnce({
+        content: [],
+        pageNumber: 0,
+        pageSize: 1,
+        totalElements: 0,
+        totalPages: 0,
+        isLast: true,
+      });
+
+    render(<RemovedBusinessResponsesQueue />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Padaria Alfa Ltda')).toBeInTheDocument();
+    });
+
+    const nextBtn = screen.getByRole('button', { name: /próxima página/i });
+    await user.click(nextBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/nenhuma resposta oficial removida encontrada/i)).toBeInTheDocument();
+    });
+
+    // Fez exatamente 3 requisições (página 0 inicial, página 1 que retornou vazia, página 0 de recuperação)
+    expect(businessResponsesApi.listRemovedBusinessResponses).toHaveBeenCalledTimes(3);
+    expect(businessResponsesApi.listRemovedBusinessResponses).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 0 })
+    );
+  });
+
+  it('mantém a página atual válida sem efetuar requisições adicionais desnecessárias', async () => {
+    const user = userEvent.setup();
+
+    vi.mocked(businessResponsesApi.listRemovedBusinessResponses)
+      .mockResolvedValueOnce({
+        content: [sampleResponses.content[0]],
+        pageNumber: 0,
+        pageSize: 1,
+        totalElements: 2,
+        totalPages: 2,
+        isLast: false,
+      })
+      .mockResolvedValueOnce({
+        content: [sampleResponses.content[1]],
+        pageNumber: 1,
+        pageSize: 1,
+        totalElements: 2,
+        totalPages: 2,
+        isLast: true,
+      });
+
+    render(<RemovedBusinessResponsesQueue />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Padaria Alfa Ltda')).toBeInTheDocument();
+    });
+
+    const nextBtn = screen.getByRole('button', { name: /próxima página/i });
+    await user.click(nextBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Hamburgueria Beta S.A.')).toBeInTheDocument();
+    });
+
+    // Exatamente 2 chamadas: página 0 e página 1, nenhuma chamada extra
+    expect(businessResponsesApi.listRemovedBusinessResponses).toHaveBeenCalledTimes(2);
+  });
 });

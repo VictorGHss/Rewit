@@ -14,6 +14,7 @@ interface RestoreBusinessResponseModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRestoreSuccess: () => void;
+  onRefreshRequired?: () => void;
 }
 
 export const RestoreBusinessResponseModal: React.FC<RestoreBusinessResponseModalProps> = ({
@@ -21,6 +22,7 @@ export const RestoreBusinessResponseModal: React.FC<RestoreBusinessResponseModal
   isOpen,
   onClose,
   onRestoreSuccess,
+  onRefreshRequired,
 }) => {
   const [reasonCode, setReasonCode] = useState('REPORT_DISMISSED');
   const [justification, setJustification] = useState('');
@@ -91,8 +93,28 @@ export const RestoreBusinessResponseModal: React.FC<RestoreBusinessResponseModal
     } catch (err) {
       setShowConfirmation(false);
       if (err instanceof ApiError) {
-        setErrorMessage(err.message);
+        let displayMessage = err.message;
+
+        if (err.problem?.detail) {
+          displayMessage = err.problem.detail;
+        } else if (err.status === 403) {
+          if (err.problem?.code === 'SELF_MODERATION_FORBIDDEN') {
+            displayMessage = 'O moderador não possui permissão para moderar uma resposta da própria empresa.';
+          } else {
+            displayMessage = 'Você não possui permissão para executar esta ação de moderação.';
+          }
+        } else if (err.status === 404) {
+          displayMessage = 'A resposta oficial não foi encontrada ou não está mais disponível.';
+        } else if (err.status === 409) {
+          displayMessage = 'A resposta oficial não pode ser restaurada devido a um conflito de estado.';
+        }
+
+        setErrorMessage(displayMessage);
         setProblemDetail(err.problem);
+
+        if (err.status === 409 || err.status === 403 || err.status === 404) {
+          onRefreshRequired?.();
+        }
       } else {
         setErrorMessage('Não foi possível restaurar a resposta oficial.');
       }
