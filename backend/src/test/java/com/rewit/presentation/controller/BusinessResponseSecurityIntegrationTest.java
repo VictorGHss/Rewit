@@ -87,7 +87,7 @@ class BusinessResponseSecurityIntegrationTest {
     // ---------------------------------------------------------------------------------------------------------
 
     @Test
-    @DisplayName("Sem token: todas as 7 rotas rejeitam com 401 AUTHENTICATION_REQUIRED")
+    @DisplayName("Sem token: todas as 8 rotas rejeitam com 401 AUTHENTICATION_REQUIRED")
     void unauthenticatedRequestsAreRejected() throws Exception {
         UUID dummyId = UUID.randomUUID();
 
@@ -104,7 +104,8 @@ class BusinessResponseSecurityIntegrationTest {
                 delete("/api/v1/business-responses/{responseId}", dummyId),
                 post("/api/v1/admin/business-responses/{responseId}/moderate", dummyId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(moderateBody(BusinessResponseModerationAction.REMOVE_RESPONSE, "SPAM", JUSTIFICATION))
+                        .content(moderateBody(BusinessResponseModerationAction.REMOVE_RESPONSE, "SPAM", JUSTIFICATION)),
+                get("/api/v1/admin/business-responses/removed")
         );
 
         for (MockHttpServletRequestBuilder request : requests) {
@@ -286,6 +287,54 @@ class BusinessResponseSecurityIntegrationTest {
                         .content(moderateBody(BusinessResponseModerationAction.REMOVE_RESPONSE, "SPAM", JUSTIFICATION)),
                 regularUser))
                 .andExpect(status().isForbidden());
+
+        mockMvc.perform(withToken(
+                get("/api/v1/admin/business-responses/removed"),
+                regularUser))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("MODERATOR consulta respostas oficiais removidas com sucesso (200 OK)")
+    void moderatorCanQueryRemovedBusinessResponses() throws Exception {
+        TestUser businessAdmin = registerUser("q_biz_admin");
+        TestUser reviewer = registerUser("q_reviewer");
+        TestUser moderator = withRole(registerUser("q_moderator"), "MODERATOR");
+
+        UUID placeId = createPlace();
+        UUID reviewId = createReview(reviewer.id(), placeId, "PUBLIC", ReviewStatus.ACTIVE);
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        MvcResult publishResult = mockMvc.perform(withToken(
+                post("/api/v1/reviews/{reviewId}/business-responses", reviewId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(publishBody(accountId, placeId, "Resposta para consulta de removidas")), businessAdmin))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID responseId = UUID.fromString(read(publishResult).get("id").asText());
+
+        // 1. Moderação remove a resposta
+        mockMvc.perform(withToken(
+                post("/api/v1/admin/business-responses/{responseId}/moderate", responseId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(moderateBody(BusinessResponseModerationAction.REMOVE_RESPONSE, "INAPPROPRIATE_CONTENT", JUSTIFICATION)),
+                moderator))
+                .andExpect(status().isOk());
+
+        // 2. Moderação consulta respostas removidas
+        mockMvc.perform(withToken(
+                get("/api/v1/admin/business-responses/removed")
+                        .param("reviewId", reviewId.toString()),
+                moderator))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(responseId.toString()))
+                .andExpect(jsonPath("$.content[0].reviewId").value(reviewId.toString()))
+                .andExpect(jsonPath("$.content[0].removedBy").value("MODERATION"))
+                .andExpect(jsonPath("$.content[0].restorable").value(true))
+                .andExpect(jsonPath("$.content[0].authorUserId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].taxId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].moderatorUserId").doesNotExist());
     }
 
     @Test
