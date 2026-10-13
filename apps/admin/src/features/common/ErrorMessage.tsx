@@ -7,6 +7,32 @@ interface ErrorMessageProps {
   onRetry?: () => void;
 }
 
+export function normalizeFieldErrors(
+  fieldErrors?: Array<{ field: string; message: string }> | Record<string, string> | null
+): Array<{ field: string; message: string }> {
+  if (!fieldErrors) {
+    return [];
+  }
+
+  if (Array.isArray(fieldErrors)) {
+    return fieldErrors.filter(
+      (item): item is { field: string; message: string } =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof item.field === 'string' &&
+        typeof item.message === 'string'
+    );
+  }
+
+  if (typeof fieldErrors === 'object') {
+    return Object.entries(fieldErrors)
+      .filter(([field, message]) => typeof field === 'string' && typeof message === 'string')
+      .map(([field, message]) => ({ field, message }));
+  }
+
+  return [];
+}
+
 export const ErrorMessage: React.FC<ErrorMessageProps> = ({
   message,
   problem,
@@ -15,6 +41,7 @@ export const ErrorMessage: React.FC<ErrorMessageProps> = ({
   const displayTitle = problem?.title || 'Erro na operação';
   const displayDetail =
     message || problem?.detail || 'Ocorreu um erro ao processar a requisição.';
+  const fieldErrorsList = normalizeFieldErrors(problem?.fieldErrors);
 
   return (
     <div
@@ -36,10 +63,10 @@ export const ErrorMessage: React.FC<ErrorMessageProps> = ({
             {displayDetail}
           </p>
 
-          {problem?.fieldErrors && problem.fieldErrors.length > 0 && (
+          {fieldErrorsList.length > 0 && (
             <ul style={{ marginTop: '8px', paddingLeft: '20px', color: 'var(--accent-danger)', fontSize: '0.85rem' }}>
-              {problem.fieldErrors.map((fe, idx) => (
-                <li key={idx}>
+              {fieldErrorsList.map((fe, idx) => (
+                <li key={`${fe.field}-${idx}`}>
                   <strong>{fe.field}:</strong> {fe.message}
                 </li>
               ))}
