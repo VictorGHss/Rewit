@@ -1,4 +1,5 @@
 import { fetchFromApi } from './client';
+import { businessResponsesApi } from './businessResponses';
 import type {
   PagedResponse,
   AdminReportResponse,
@@ -97,4 +98,13 @@ export const moderationApi = {
       body: JSON.stringify(request),
     });
   },
+
+  // -------------------------------------------------------------------------
+  // Moderação de Respostas Oficiais de Empresas
+  // -------------------------------------------------------------------------
+
+  listRemovedBusinessResponses: businessResponsesApi.listRemovedBusinessResponses,
+  moderateBusinessResponse: businessResponsesApi.moderateBusinessResponse,
 };
+
+export { businessResponsesApi } from './businessResponses';

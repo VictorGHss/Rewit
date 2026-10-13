@@ -6,6 +6,7 @@ import { authApi } from './core/api/auth';
 import { tokenStorage } from './core/storage/tokenStorage';
 import { moderationApi } from './core/api/moderation';
 import { claimsApi } from './core/api/claims';
+import { businessResponsesApi } from './core/api/businessResponses';
 
 vi.mock('./core/api/auth', () => ({
   authApi: {
@@ -20,6 +21,13 @@ vi.mock('./core/api/claims', () => ({
   claimsApi: {
     listPlaceClaims: vi.fn(),
     decidePlaceClaim: vi.fn(),
+  },
+}));
+
+vi.mock('./core/api/businessResponses', () => ({
+  businessResponsesApi: {
+    listRemovedBusinessResponses: vi.fn(),
+    moderateBusinessResponse: vi.fn(),
   },
 }));
 
@@ -97,6 +105,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /denúncias de avaliações/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /denúncias de discussões/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /reivindicações de locais/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /respostas oficiais removidas/i })).toBeInTheDocument();
 
     // Abas de funcionalidades não implementadas DEVEM TER SIDO REMOVIDAS
     expect(screen.queryByText(/locais \(fase 2\)/i)).not.toBeInTheDocument();
@@ -171,6 +180,46 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/fila de reivindicações de locais/i)).toBeInTheDocument();
+    });
+  });
+
+  it('alterna para a fila de respostas oficiais removidas ao clicar no menu', async () => {
+    const user = userEvent.setup();
+    vi.mocked(authApi.isAuthenticated).mockReturnValue(true);
+    vi.mocked(moderationApi.listReviewReports).mockResolvedValue({
+      content: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    });
+    vi.mocked(moderationApi.listDiscussionReports).mockResolvedValue({
+      content: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    });
+    vi.mocked(businessResponsesApi.listRemovedBusinessResponses).mockResolvedValue({
+      content: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: /respostas oficiais removidas/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /respostas oficiais removidas/i })).toBeInTheDocument();
+      expect(
+        screen.getByText(/consulta administrativa e restauração de respostas oficiais de empresas à comunidade/i)
+      ).toBeInTheDocument();
     });
   });
 

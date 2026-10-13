@@ -7,9 +7,10 @@ import { Dashboard } from './features/dashboard/Dashboard';
 import { ReviewReportsQueue } from './features/reviews/ReviewReportsQueue';
 import { DiscussionReportsQueue } from './features/discussions/DiscussionReportsQueue';
 import { PlaceClaimsQueue } from './features/claims/PlaceClaimsQueue';
+import { RemovedBusinessResponsesQueue } from './features/businessResponses/RemovedBusinessResponsesQueue';
 import type { AuthUser } from './core/types';
 
-export type NavigationTab = 'dashboard' | 'reviews' | 'discussions' | 'claims';
+export type NavigationTab = 'dashboard' | 'reviews' | 'discussions' | 'claims' | 'business-responses';
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => authApi.isAuthenticated());
@@ -97,6 +98,16 @@ export const App: React.FC = () => {
                   <span>Reivindicações de Locais</span>
                 </button>
               </li>
+              <li>
+                <button
+                  type="button"
+                  className={`nav-item ${activeTab === 'business-responses' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('business-responses')}
+                >
+                  <span>↩️</span>
+                  <span>Respostas Oficiais Removidas</span>
+                </button>
+              </li>
             </ul>
           </nav>
         </div>
@@ -133,6 +144,7 @@ export const App: React.FC = () => {
         {activeTab === 'reviews' && <ReviewReportsQueue />}
         {activeTab === 'discussions' && <DiscussionReportsQueue />}
         {activeTab === 'claims' && <PlaceClaimsQueue />}
+        {activeTab === 'business-responses' && <RemovedBusinessResponsesQueue />}
       </main>
     </div>
   );
