@@ -1,8 +1,11 @@
 package com.rewit.infrastructure.persistence.adapter;
 
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseView;
+import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseFilter;
+import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseRecord;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.BusinessResponseRepository;
+import com.rewit.domain.enums.BusinessResponseRemovalSource;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.infrastructure.persistence.entity.BusinessResponseJpaEntity;
@@ -10,6 +13,7 @@ import com.rewit.infrastructure.persistence.repository.BusinessResponseJpaReposi
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
+import jakarta.persistence.Query;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
@@ -143,6 +147,93 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
                 .map(row -> toView((Object[]) row))
                 .toList();
         return PageResult.of(content, page, size, total.longValue());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<RemovedBusinessResponseRecord> findRemovedForModeration(RemovedBusinessResponseFilter filter,
+                                                                              int page, int size) {
+        RemovedBusinessResponseFilter criteria = filter != null ? filter : RemovedBusinessResponseFilter.none();
+        StringBuilder where = new StringBuilder(" WHERE r.status = 'REMOVED'");
+        if (criteria.reviewId() != null) {
+            where.append(" AND r.review_id = :reviewId");
+        }
+        if (criteria.discussionId() != null) {
+            where.append(" AND r.discussion_id = :discussionId");
+        }
+        if (criteria.businessAccountId() != null) {
+            where.append(" AND r.business_account_id = :businessAccountId");
+        }
+        if (criteria.placeId() != null) {
+            where.append(" AND r.place_id = :placeId");
+        }
+        if (criteria.removedBy() != null) {
+            where.append(" AND r.removed_by = :removedBy");
+        }
+        // Sem filtro, idx_business_responses_removed (V25) entrega as linhas já na ordem da página. A outra resposta
+        // ativa sai dos índices únicos parciais da V24, um por tipo de alvo: cada EXISTS repete o predicado do seu
+        // índice (IS NOT DISTINCT FROM impediria o uso de ambos); a última remoção da moderação, de
+        // idx_business_response_audit_response (response_id, created_at), uma linha por resposta da página
+        Query query = entityManager.createNativeQuery("""
+                SELECT r.id, r.review_id, r.discussion_id, b.id AS business_account_id, b.corporate_name,
+                       p.id AS place_id, p.name, r.content, r.created_at, r.removed_by, r.removed_at,
+                       CASE WHEN r.discussion_id IS NULL
+                            THEN EXISTS (SELECT 1 FROM business_responses o
+                                         WHERE o.review_id = r.review_id
+                                           AND o.business_account_id = r.business_account_id
+                                           AND o.discussion_id IS NULL
+                                           AND o.status = 'ACTIVE')
+                            ELSE EXISTS (SELECT 1 FROM business_responses o
+                                         WHERE o.discussion_id = r.discussion_id
+                                           AND o.business_account_id = r.business_account_id
+                                           AND o.status = 'ACTIVE')
+                       END AS other_active,
+                       m.reason_code, m.justification, m.created_at AS moderated_at
+                FROM business_responses r
+                JOIN business_accounts b ON b.id = r.business_account_id
+                JOIN places p ON p.id = r.place_id
+                LEFT JOIN LATERAL (
+                    SELECT a.reason_code, a.justification, a.created_at
+                    FROM business_response_moderation_audit_logs a
+                    WHERE a.response_id = r.id AND a.action = 'REMOVE_RESPONSE'
+                    ORDER BY a.created_at DESC, a.id DESC
+                    LIMIT 1
+                ) m ON r.removed_by = 'MODERATION'"""
+                + where + " ORDER BY r.removed_at DESC, r.id DESC LIMIT :limit OFFSET :offset");
+        Query count = entityManager.createNativeQuery("SELECT count(*) FROM business_responses r" + where);
+        for (Query q : List.of(query, count)) {
+            if (criteria.reviewId() != null) {
+                q.setParameter("reviewId", criteria.reviewId());
+            }
+            if (criteria.discussionId() != null) {
+                q.setParameter("discussionId", criteria.discussionId());
+            }
+            if (criteria.businessAccountId() != null) {
+                q.setParameter("businessAccountId", criteria.businessAccountId());
+            }
+            if (criteria.placeId() != null) {
+                q.setParameter("placeId", criteria.placeId());
+            }
+            if (criteria.removedBy() != null) {
+                q.setParameter("removedBy", criteria.removedBy().name());
+            }
+        }
+        query.setParameter("limit", size);
+        query.setParameter("offset", (long) page * size);
+
+        List<?> rows = query.getResultList();
+        List<RemovedBusinessResponseRecord> content = rows.stream()
+                .map(row -> toRemovedRecord((Object[]) row))
+                .toList();
+        long total = ((Number) count.getSingleResult()).longValue();
+        return PageResult.of(content, page, size, total);
+    }
+
+    private static RemovedBusinessResponseRecord toRemovedRecord(Object[] row) {
+        return new RemovedBusinessResponseRecord((UUID) row[0], (UUID) row[1], (UUID) row[2], (UUID) row[3],
+                (String) row[4], (UUID) row[5], (String) row[6], (String) row[7], toInstant(row[8]),
+                BusinessResponseRemovalSource.valueOf((String) row[9]), toInstant(row[10]), (Boolean) row[11],
+                (String) row[12], (String) row[13], row[14] == null ? null : toInstant(row[14]));
     }
 
     private static BusinessResponseView toView(Object[] row) {

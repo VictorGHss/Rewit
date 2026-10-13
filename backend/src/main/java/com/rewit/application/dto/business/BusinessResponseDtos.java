@@ -147,4 +147,81 @@ public final class BusinessResponseDtos {
                     auditLog.getCreatedAt());
         }
     }
+
+    /**
+     * Filtros opcionais da consulta administrativa de respostas removidas; {@code null} não filtra.
+     *
+     * @param discussionId comentário respondido; não distingue respostas diretas à avaliação (use {@code reviewId})
+     */
+    public record RemovedBusinessResponseFilter(
+            UUID reviewId,
+            UUID discussionId,
+            UUID businessAccountId,
+            UUID placeId,
+            BusinessResponseRemovalSource removedBy
+    ) {
+        public static RemovedBusinessResponseFilter none() {
+            return new RemovedBusinessResponseFilter(null, null, null, null, null);
+        }
+    }
+
+    /**
+     * Resposta removida como a persistência a lê, com o contexto da última decisão de remoção da moderação (nulo
+     * quando a remoção foi da empresa) e se a empresa tem hoje outra resposta ativa no mesmo alvo.
+     */
+    public record RemovedBusinessResponseRecord(
+            UUID id,
+            UUID reviewId,
+            UUID discussionId,
+            UUID businessAccountId,
+            String corporateName,
+            UUID placeId,
+            String placeName,
+            String content,
+            Instant createdAt,
+            BusinessResponseRemovalSource removedBy,
+            Instant removedAt,
+            boolean otherActiveResponse,
+            String moderationReasonCode,
+            String moderationJustification,
+            Instant moderatedAt
+    ) {
+    }
+
+    /**
+     * Resposta removida na consulta administrativa. Sem o autor pessoal nem o documento da empresa.
+     *
+     * @param restorable          a restauração passaria agora: removida pela moderação
+     *                            ({@link BusinessResponse#isRestorableByModeration}) e sem outra resposta ativa da
+     *                            empresa no alvo. É uma indicação; a moderação revalida tudo com a resposta travada
+     * @param otherActiveResponse a empresa publicou outra resposta ativa no mesmo alvo depois desta
+     */
+    public record AdminRemovedBusinessResponseView(
+            UUID id,
+            UUID reviewId,
+            UUID discussionId,
+            UUID businessAccountId,
+            String corporateName,
+            UUID placeId,
+            String placeName,
+            String content,
+            Instant createdAt,
+            BusinessResponseRemovalSource removedBy,
+            Instant removedAt,
+            boolean restorable,
+            boolean otherActiveResponse,
+            String moderationReasonCode,
+            String moderationJustification,
+            Instant moderatedAt
+    ) {
+        public static AdminRemovedBusinessResponseView of(RemovedBusinessResponseRecord record) {
+            boolean restorable = BusinessResponse.isRestorableByModeration(BusinessResponseStatus.REMOVED, record.removedBy())
+                    && !record.otherActiveResponse();
+            return new AdminRemovedBusinessResponseView(record.id(), record.reviewId(), record.discussionId(),
+                    record.businessAccountId(), record.corporateName(), record.placeId(), record.placeName(),
+                    record.content(), record.createdAt(), record.removedBy(), record.removedAt(), restorable,
+                    record.otherActiveResponse(), record.moderationReasonCode(), record.moderationJustification(),
+                    record.moderatedAt());
+        }
+    }
 }

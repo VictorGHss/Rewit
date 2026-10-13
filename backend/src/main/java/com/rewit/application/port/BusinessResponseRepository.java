@@ -1,6 +1,8 @@
 package com.rewit.application.port;
 
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseView;
+import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseFilter;
+import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseRecord;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.domain.model.BusinessResponse;
 
@@ -44,6 +46,14 @@ public interface BusinessResponseRepository {
 
     /** Página pública das respostas ativas a um comentário, na mesma forma e ordem (created_at, id). */
     PageResult<BusinessResponseView> findActiveDiscussionResponseViews(UUID discussionId, int page, int size);
+
+    /**
+     * Respostas REMOVED para a moderação, das removidas mais recentemente para as mais antigas (removed_at DESC,
+     * id DESC), numa única consulta com empresa, local, última decisão de remoção da moderação e existência de outra
+     * resposta ativa da empresa no mesmo alvo.
+     */
+    PageResult<RemovedBusinessResponseRecord> findRemovedForModeration(RemovedBusinessResponseFilter filter, int page,
+                                                                        int size);
 
     /** Respostas ativas aos comentários informados, em ordem cronológica; para compor uma página de comentários. */
     List<BusinessResponse> findActiveDiscussionResponses(Collection<UUID> discussionIds);

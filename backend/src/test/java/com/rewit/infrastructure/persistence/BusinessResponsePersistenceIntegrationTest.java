@@ -2,7 +2,9 @@ package com.rewit.infrastructure.persistence;
 
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseModerationResult;
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseView;
+import com.rewit.application.dto.business.BusinessResponseDtos.AdminRemovedBusinessResponseView;
 import com.rewit.application.dto.business.BusinessResponseDtos.ModerateBusinessResponseCommand;
+import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseFilter;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishDiscussionBusinessResponseCommand;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishReviewBusinessResponseCommand;
 import com.rewit.application.dto.common.PageResult;
@@ -14,6 +16,7 @@ import com.rewit.application.usecase.ListDiscussionBusinessResponsesUseCase;
 import com.rewit.application.usecase.ModerateBusinessResponseUseCase;
 import com.rewit.application.usecase.PublishDiscussionBusinessResponseUseCase;
 import com.rewit.application.usecase.PublishReviewBusinessResponseUseCase;
+import com.rewit.application.usecase.QueryAdminRemovedBusinessResponsesUseCase;
 import com.rewit.application.usecase.RemoveBusinessResponseUseCase;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
@@ -42,6 +45,8 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -97,6 +102,9 @@ class BusinessResponsePersistenceIntegrationTest {
 
     @Autowired
     private ModerateBusinessResponseUseCase moderateUseCase;
+
+    @Autowired
+    private QueryAdminRemovedBusinessResponsesUseCase removedQueryUseCase;
 
     /** Precisão do TIMESTAMPTZ: comparar instantes depois de ida e volta ao banco. */
     private final Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -849,6 +857,143 @@ class BusinessResponsePersistenceIntegrationTest {
             cleanup(f);
             jdbcTemplate.update("DELETE FROM users WHERE id = ?", moderator);
         }
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Removidas para a moderação: só REMOVED, filtros por alvo, conta, local e origem, restorabilidade e última decisão")
+    void removedResponsesForModeration() {
+        Fixture f = fixture();
+        UUID moderator = insertModerator();
+        UUID otherAdmin = insertUser();
+        UUID otherBusiness = insertBusiness(otherAdmin);
+        UUID otherPlace = insertPlace();
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, otherPlace);
+        jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 3)", f.review(), otherPlace);
+
+        // Avaliação: retirada pela empresa, depois outra removida pela moderação (nada ativo no alvo)
+        UUID withdrawn = publishUseCase.execute(command(f, f.place(), "Retirada"), now).id();
+        removeUseCase.execute(f.businessAdmin(), withdrawn, now.plusSeconds(1));
+        UUID moderated = publishUseCase.execute(command(f, f.place(), "Moderada"), now.plusSeconds(2)).id();
+        moderateUseCase.execute(moderation(moderated, moderator, BusinessResponseModerationAction.REMOVE_RESPONSE,
+                now.plusSeconds(3)));
+        // Comentário: removida pela moderação e substituída por uma nova ativa
+        UUID replaced = publishDiscussionUseCase.execute(discussionCommand(f.businessAdmin(), f.business(),
+                f.rootDiscussion(), f.place(), "Substituída"), now).id();
+        moderateUseCase.execute(moderation(replaced, moderator, BusinessResponseModerationAction.REMOVE_RESPONSE,
+                now.plusSeconds(4)));
+        UUID replacement = publishDiscussionUseCase.execute(discussionCommand(f.businessAdmin(), f.business(),
+                f.rootDiscussion(), f.place(), "Nova"), now.plusSeconds(5)).id();
+        // Outra empresa: removida, restaurada e removida de novo; vale a última decisão
+        UUID twice = publishUseCase.execute(new PublishReviewBusinessResponseCommand(otherAdmin, otherBusiness,
+                f.review(), otherPlace, "Outra empresa"), now).id();
+        moderateUseCase.execute(moderation(twice, moderator, BusinessResponseModerationAction.REMOVE_RESPONSE,
+                now.plusSeconds(6)));
+        moderateUseCase.execute(moderation(twice, moderator, BusinessResponseModerationAction.RESTORE_RESPONSE,
+                now.plusSeconds(7)));
+        moderateUseCase.execute(new ModerateBusinessResponseCommand(twice, moderator,
+                BusinessResponseModerationAction.REMOVE_RESPONSE, "OFF_TOPIC", "Fora do assunto da avaliação",
+                now.plusSeconds(8)));
+        // Outra avaliação da mesma empresa, fora do filtro por avaliação
+        UUID otherReview = insertReview(f.reviewer());
+        jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 2)", otherReview, f.place());
+        UUID elsewhere = publishUseCase.execute(new PublishReviewBusinessResponseCommand(f.businessAdmin(), f.business(),
+                otherReview, f.place(), "Em outra avaliação"), now).id();
+        removeUseCase.execute(f.businessAdmin(), elsewhere, now.plusSeconds(9));
+
+        List<AdminRemovedBusinessResponseView> byReview = removed(filter(f.review(), null, null, null, null));
+        assertEquals(List.of(twice, replaced, moderated, withdrawn), byReview.stream().map(v -> v.id()).toList());
+        assertFalse(byReview.stream().anyMatch(v -> v.id().equals(replacement)), "ativa não aparece");
+
+        Map<UUID, AdminRemovedBusinessResponseView> views = new HashMap<>();
+        byReview.forEach(view -> views.put(view.id(), view));
+        AdminRemovedBusinessResponseView w = views.get(withdrawn);
+        assertEquals(BusinessResponseRemovalSource.BUSINESS, w.removedBy());
+        assertEquals(now.plusSeconds(1), w.removedAt());
+        assertFalse(w.restorable());
+        assertNull(w.moderationReasonCode());
+        assertNull(w.moderatedAt());
+        AdminRemovedBusinessResponseView m = views.get(moderated);
+        assertEquals(BusinessResponseRemovalSource.MODERATION, m.removedBy());
+        assertTrue(m.restorable());
+        assertFalse(m.otherActiveResponse());
+        assertEquals("SPAM", m.moderationReasonCode());
+        assertEquals("Conteúdo promocional fora das regras", m.moderationJustification());
+        assertEquals(now.plusSeconds(3), m.moderatedAt());
+        assertEquals("Empresa C11", m.corporateName());
+        assertEquals(f.place(), m.placeId());
+        assertEquals("Local C11", m.placeName());
+        assertEquals("Moderada", m.content());
+        assertEquals(now.plusSeconds(2), m.createdAt());
+        AdminRemovedBusinessResponseView r = views.get(replaced);
+        assertEquals(f.rootDiscussion(), r.discussionId());
+        assertTrue(r.otherActiveResponse());
+        assertFalse(r.restorable());
+        AdminRemovedBusinessResponseView t = views.get(twice);
+        assertEquals("OFF_TOPIC", t.moderationReasonCode());
+        assertEquals(now.plusSeconds(8), t.moderatedAt());
+        assertEquals(now.plusSeconds(8), t.removedAt());
+        assertTrue(t.restorable());
+
+        assertEquals(List.of(replaced), ids(filter(null, f.rootDiscussion(), null, null, null)));
+        assertEquals(List.of(twice), ids(filter(null, null, otherBusiness, null, null)));
+        assertEquals(List.of(twice), ids(filter(null, null, null, otherPlace, null)));
+        assertEquals(List.of(elsewhere, replaced, moderated, withdrawn), ids(filter(null, null, f.business(), null, null)));
+        assertEquals(List.of(withdrawn), ids(filter(f.review(), null, null, null, BusinessResponseRemovalSource.BUSINESS)));
+        assertEquals(List.of(twice, replaced, moderated),
+                ids(filter(f.review(), null, null, null, BusinessResponseRemovalSource.MODERATION)));
+        assertTrue(ids(filter(otherReview, f.rootDiscussion(), null, null, null)).isEmpty());
+
+        // A consulta não altera nada
+        assertEquals("REMOVED", jdbcTemplate.queryForObject("SELECT status FROM business_responses WHERE id = ?",
+                String.class, moderated));
+        assertEquals(3, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ?", twice));
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Removidas com o mesmo removed_at: páginas sem duplicar nem omitir, desempate por id decrescente")
+    void removedPaginationWithTies() {
+        Fixture f = fixture();
+        Timestamp sameInstant = Timestamp.from(now);
+        List<UUID> inserted = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            UUID id = UUID.randomUUID();
+            jdbcTemplate.update("""
+                    INSERT INTO business_responses (id, review_id, business_account_id, place_id, author_user_id, content,
+                                                    status, removed_by, removed_at)
+                    VALUES (?, ?, ?, ?, ?, 'Retirada', 'REMOVED', 'BUSINESS', ?)
+                    """, id, f.review(), f.business(), f.place(), f.businessAdmin(), sameInstant);
+            inserted.add(id);
+        }
+        RemovedBusinessResponseFilter byReview = filter(f.review(), null, null, null, null);
+
+        List<UUID> paged = new ArrayList<>();
+        for (int page = 0; page < 3; page++) {
+            PageResult<AdminRemovedBusinessResponseView> result = removedQueryUseCase.execute(insertModerator(), byReview,
+                    page, 2);
+            assertEquals(5, result.totalElements());
+            result.content().forEach(view -> paged.add(view.id()));
+        }
+        // Ordem do PostgreSQL para uuid (bytes sem sinal) = ordem do texto canônico; UUID.compareTo usa sinal
+        List<UUID> expected = inserted.stream()
+                .sorted(Comparator.comparing((UUID id) -> id.toString()).reversed())
+                .toList();
+        assertEquals(5, Set.copyOf(paged).size());
+        assertEquals(expected, paged);
+    }
+
+    private RemovedBusinessResponseFilter filter(UUID reviewId, UUID discussionId, UUID businessAccountId, UUID placeId,
+                                                 BusinessResponseRemovalSource removedBy) {
+        return new RemovedBusinessResponseFilter(reviewId, discussionId, businessAccountId, placeId, removedBy);
+    }
+
+    private List<AdminRemovedBusinessResponseView> removed(RemovedBusinessResponseFilter filter) {
+        return removedQueryUseCase.execute(insertModerator(), filter, 0, 50).content();
+    }
+
+    private List<UUID> ids(RemovedBusinessResponseFilter filter) {
+        return removed(filter).stream().map(view -> view.id()).toList();
     }
 
     private UUID insertModerator() {

@@ -92,7 +92,7 @@ public class BusinessResponse {
      */
     public void restoreByModeration(Instant now) {
         Objects.requireNonNull(now, "now must not be null");
-        if (status != BusinessResponseStatus.REMOVED || removedBy != BusinessResponseRemovalSource.MODERATION) {
+        if (!isRestorableByModeration(status, removedBy)) {
             throw new BusinessException("Só uma resposta removida pela moderação pode ser restaurada", HttpStatus.CONFLICT,
                     "BUSINESS_RESPONSE_NOT_RESTORABLE");
         }
@@ -100,6 +100,14 @@ public class BusinessResponse {
         this.removedBy = null;
         this.removedAt = null;
         this.updatedAt = now;
+    }
+
+    /**
+     * Regra de {@link #restoreByModeration}: só a remoção feita pela moderação é desfeita por ela. Não considera a
+     * unicidade da resposta ativa, que depende das outras respostas da empresa no alvo.
+     */
+    public static boolean isRestorableByModeration(BusinessResponseStatus status, BusinessResponseRemovalSource removedBy) {
+        return status == BusinessResponseStatus.REMOVED && removedBy == BusinessResponseRemovalSource.MODERATION;
     }
 
     private void remove(BusinessResponseRemovalSource source, Instant now) {

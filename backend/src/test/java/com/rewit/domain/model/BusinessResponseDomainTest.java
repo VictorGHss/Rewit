@@ -169,6 +169,18 @@ class BusinessResponseDomainTest {
     }
 
     @Test
+    @DisplayName("isRestorableByModeration: só REMOVED pela moderação, a mesma regra de restoreByModeration")
+    void restorablePredicate() {
+        assertTrue(BusinessResponse.isRestorableByModeration(BusinessResponseStatus.REMOVED,
+                BusinessResponseRemovalSource.MODERATION));
+        assertFalse(BusinessResponse.isRestorableByModeration(BusinessResponseStatus.REMOVED,
+                BusinessResponseRemovalSource.BUSINESS));
+        assertFalse(BusinessResponse.isRestorableByModeration(BusinessResponseStatus.ACTIVE, null));
+        assertFalse(BusinessResponse.isRestorableByModeration(BusinessResponseStatus.ACTIVE,
+                BusinessResponseRemovalSource.MODERATION));
+    }
+
+    @Test
     @DisplayName("Reconstituição recusa metadados de remoção incoerentes com o status")
     void reconstitutionInvariants() {
         UUID id = UUID.randomUUID();
