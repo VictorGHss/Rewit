@@ -1,5 +1,6 @@
 package com.rewit.presentation.dto.admin;
 
+import com.rewit.application.dto.business.BusinessResponseDtos.AdminRemovedBusinessResponseView;
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseModerationResult;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
@@ -75,6 +76,53 @@ public final class AdminBusinessResponseModerationDtos {
                     result.newStatus(),
                     result.removedBy(),
                     result.moderatedAt()
+            );
+        }
+    }
+
+    /**
+     * Projeção administrativa de resposta oficial removida (C11).
+     * Preserva todo o contexto da moderação e auditoria, sem expor authorUserId, taxId ou moderatorUserId.
+     */
+    public record AdminRemovedBusinessResponseResponse(
+            UUID id,
+            UUID reviewId,
+            UUID discussionId,
+            UUID businessAccountId,
+            String corporateName,
+            UUID placeId,
+            String placeName,
+            String content,
+            Instant createdAt,
+            BusinessResponseRemovalSource removedBy,
+            Instant removedAt,
+            boolean restorable,
+            boolean otherActiveResponse,
+            String moderationReasonCode,
+            String moderationJustification,
+            Instant moderatedAt
+    ) {
+        public static AdminRemovedBusinessResponseResponse fromView(AdminRemovedBusinessResponseView view) {
+            if (view == null) {
+                return null;
+            }
+            return new AdminRemovedBusinessResponseResponse(
+                    view.id(),
+                    view.reviewId(),
+                    view.discussionId(),
+                    view.businessAccountId(),
+                    view.corporateName(),
+                    view.placeId(),
+                    view.placeName(),
+                    view.content(),
+                    view.createdAt(),
+                    view.removedBy(),
+                    view.removedAt(),
+                    view.restorable(),
+                    view.otherActiveResponse(),
+                    view.moderationReasonCode(),
+                    view.moderationJustification(),
+                    view.moderatedAt()
             );
         }
     }

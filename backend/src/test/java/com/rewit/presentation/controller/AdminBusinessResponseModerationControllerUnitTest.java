@@ -1,9 +1,13 @@
 package com.rewit.presentation.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rewit.application.dto.business.BusinessResponseDtos.AdminRemovedBusinessResponseView;
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseModerationResult;
 import com.rewit.application.dto.business.BusinessResponseDtos.ModerateBusinessResponseCommand;
+import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseFilter;
+import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.usecase.ModerateBusinessResponseUseCase;
+import com.rewit.application.usecase.QueryAdminRemovedBusinessResponsesUseCase;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.common.exception.GlobalExceptionHandler;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
@@ -26,12 +30,18 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -42,6 +52,9 @@ class AdminBusinessResponseModerationControllerUnitTest {
 
     @Mock
     private ModerateBusinessResponseUseCase moderateBusinessResponseUseCase;
+
+    @Mock
+    private QueryAdminRemovedBusinessResponsesUseCase queryAdminRemovedBusinessResponsesUseCase;
 
     @InjectMocks
     private AdminBusinessResponseModerationController controller;
@@ -230,5 +243,283 @@ class AdminBusinessResponseModerationControllerUnitTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("SELF_MODERATION_FORBIDDEN"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Retorna 200 com paginação e itens mapeados")
+    void shouldListRemovedBusinessResponsesSuccessfully() throws Exception {
+        UUID responseId = UUID.randomUUID();
+        UUID reviewId = UUID.randomUUID();
+        UUID discussionId = UUID.randomUUID();
+        UUID businessAccountId = UUID.randomUUID();
+        UUID placeId = UUID.randomUUID();
+        Instant createdAt = Instant.parse("2026-10-10T12:00:00Z");
+        Instant removedAt = Instant.parse("2026-10-11T14:00:00Z");
+        Instant moderatedAt = Instant.parse("2026-10-11T14:00:00Z");
+
+        AdminRemovedBusinessResponseView view = new AdminRemovedBusinessResponseView(
+                responseId,
+                reviewId,
+                discussionId,
+                businessAccountId,
+                "Restaurante Sabor & Arte",
+                placeId,
+                "Unidade Centro",
+                "Resposta oficial removida para análise.",
+                createdAt,
+                BusinessResponseRemovalSource.MODERATION,
+                removedAt,
+                true,
+                false,
+                "INAPPROPRIATE_CONTENT",
+                "Linguagem incompatível com diretrizes.",
+                moderatedAt
+        );
+
+        PageResult<AdminRemovedBusinessResponseView> pageResult = PageResult.of(
+                List.of(view), 1, 10, 25
+        );
+
+        when(queryAdminRemovedBusinessResponsesUseCase.execute(
+                eq(moderatorUserId),
+                any(RemovedBusinessResponseFilter.class),
+                eq(1),
+                eq(10)
+        )).thenReturn(pageResult);
+
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .param("reviewId", reviewId.toString())
+                        .param("discussionId", discussionId.toString())
+                        .param("businessAccountId", businessAccountId.toString())
+                        .param("placeId", placeId.toString())
+                        .param("removedBy", "MODERATION")
+                        .param("page", "1")
+                        .param("size", "10")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(responseId.toString()))
+                .andExpect(jsonPath("$.content[0].reviewId").value(reviewId.toString()))
+                .andExpect(jsonPath("$.content[0].discussionId").value(discussionId.toString()))
+                .andExpect(jsonPath("$.content[0].businessAccountId").value(businessAccountId.toString()))
+                .andExpect(jsonPath("$.content[0].corporateName").value("Restaurante Sabor & Arte"))
+                .andExpect(jsonPath("$.content[0].placeId").value(placeId.toString()))
+                .andExpect(jsonPath("$.content[0].placeName").value("Unidade Centro"))
+                .andExpect(jsonPath("$.content[0].content").value("Resposta oficial removida para análise."))
+                .andExpect(jsonPath("$.content[0].createdAt").value("2026-10-10T12:00:00Z"))
+                .andExpect(jsonPath("$.content[0].removedBy").value("MODERATION"))
+                .andExpect(jsonPath("$.content[0].removedAt").value("2026-10-11T14:00:00Z"))
+                .andExpect(jsonPath("$.content[0].restorable").value(true))
+                .andExpect(jsonPath("$.content[0].otherActiveResponse").value(false))
+                .andExpect(jsonPath("$.content[0].moderationReasonCode").value("INAPPROPRIATE_CONTENT"))
+                .andExpect(jsonPath("$.content[0].moderationJustification").value("Linguagem incompatível com diretrizes."))
+                .andExpect(jsonPath("$.content[0].moderatedAt").value("2026-10-11T14:00:00Z"))
+                .andExpect(jsonPath("$.pageNumber").value(1))
+                .andExpect(jsonPath("$.pageSize").value(10))
+                .andExpect(jsonPath("$.totalElements").value(25))
+                .andExpect(jsonPath("$.totalPages").value(3))
+                .andExpect(jsonPath("$.isLast").value(false))
+                // Verificação de segurança: não expõe authorUserId, taxId ou moderatorUserId
+                .andExpect(jsonPath("$.content[0].authorUserId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].taxId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].moderatorUserId").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Propaga ator autenticado e todos os filtros ao caso de uso")
+    void shouldForwardActorUserIdAndFiltersToUseCase() throws Exception {
+        UUID reviewId = UUID.randomUUID();
+        UUID discussionId = UUID.randomUUID();
+        UUID businessAccountId = UUID.randomUUID();
+        UUID placeId = UUID.randomUUID();
+
+        when(queryAdminRemovedBusinessResponsesUseCase.execute(
+                any(UUID.class),
+                any(RemovedBusinessResponseFilter.class),
+                any(int.class),
+                any(int.class)
+        )).thenReturn(PageResult.of(List.of(), 2, 15, 0));
+
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .param("reviewId", reviewId.toString())
+                        .param("discussionId", discussionId.toString())
+                        .param("businessAccountId", businessAccountId.toString())
+                        .param("placeId", placeId.toString())
+                        .param("removedBy", "BUSINESS")
+                        .param("page", "2")
+                        .param("size", "15")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<UUID> actorCaptor = ArgumentCaptor.forClass(UUID.class);
+        ArgumentCaptor<RemovedBusinessResponseFilter> filterCaptor =
+                ArgumentCaptor.forClass(RemovedBusinessResponseFilter.class);
+        ArgumentCaptor<Integer> pageCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> sizeCaptor = ArgumentCaptor.forClass(Integer.class);
+
+        verify(queryAdminRemovedBusinessResponsesUseCase).execute(
+                actorCaptor.capture(),
+                filterCaptor.capture(),
+                pageCaptor.capture(),
+                sizeCaptor.capture()
+        );
+
+        assertEquals(moderatorUserId, actorCaptor.getValue());
+        assertEquals(reviewId, filterCaptor.getValue().reviewId());
+        assertEquals(discussionId, filterCaptor.getValue().discussionId());
+        assertEquals(businessAccountId, filterCaptor.getValue().businessAccountId());
+        assertEquals(placeId, filterCaptor.getValue().placeId());
+        assertEquals(BusinessResponseRemovalSource.BUSINESS, filterCaptor.getValue().removedBy());
+        assertEquals(2, pageCaptor.getValue());
+        assertEquals(15, sizeCaptor.getValue());
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Aplica valores padrão para page (0) e size (20)")
+    void shouldApplyDefaultPageAndSizeWhenOmitted() throws Exception {
+        when(queryAdminRemovedBusinessResponsesUseCase.execute(
+                any(UUID.class),
+                any(RemovedBusinessResponseFilter.class),
+                any(int.class),
+                any(int.class)
+        )).thenReturn(PageResult.of(List.of(), 0, 20, 0));
+
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pageNumber").value(0))
+                .andExpect(jsonPath("$.pageSize").value(20));
+
+        ArgumentCaptor<RemovedBusinessResponseFilter> filterCaptor =
+                ArgumentCaptor.forClass(RemovedBusinessResponseFilter.class);
+        ArgumentCaptor<Integer> pageCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> sizeCaptor = ArgumentCaptor.forClass(Integer.class);
+
+        verify(queryAdminRemovedBusinessResponsesUseCase).execute(
+                eq(moderatorUserId),
+                filterCaptor.capture(),
+                pageCaptor.capture(),
+                sizeCaptor.capture()
+        );
+
+        assertEquals(0, pageCaptor.getValue());
+        assertEquals(20, sizeCaptor.getValue());
+        assertNull(filterCaptor.getValue().reviewId());
+        assertNull(filterCaptor.getValue().discussionId());
+        assertNull(filterCaptor.getValue().businessAccountId());
+        assertNull(filterCaptor.getValue().placeId());
+        assertNull(filterCaptor.getValue().removedBy());
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Rejeita UUID inválido com erro 400 TYPE_MISMATCH")
+    void shouldRejectInvalidUuid() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .param("reviewId", "nao-e-um-uuid-valido")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TYPE_MISMATCH"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Rejeita enum inválido com erro 400 TYPE_MISMATCH")
+    void shouldRejectInvalidEnum() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .param("removedBy", "ORIGEM_INEXISTENTE")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TYPE_MISMATCH"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Rejeita page negativa com 400 INVALID_PAGE")
+    void shouldRejectNegativePage() throws Exception {
+        when(queryAdminRemovedBusinessResponsesUseCase.execute(
+                eq(moderatorUserId),
+                any(RemovedBusinessResponseFilter.class),
+                eq(-1),
+                eq(20)
+        )).thenThrow(new BusinessException("O número da página não pode ser negativo", HttpStatus.BAD_REQUEST, "INVALID_PAGE"));
+
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .param("page", "-1")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_PAGE"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Rejeita size fora dos limites com 400 INVALID_PAGE_SIZE")
+    void shouldRejectInvalidPageSize() throws Exception {
+        when(queryAdminRemovedBusinessResponsesUseCase.execute(
+                eq(moderatorUserId),
+                any(RemovedBusinessResponseFilter.class),
+                eq(0),
+                eq(51)
+        )).thenThrow(new BusinessException("O tamanho da página deve ser entre 1 e 50", HttpStatus.BAD_REQUEST, "INVALID_PAGE_SIZE"));
+
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .param("size", "51")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_PAGE_SIZE"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Preserva contexto de auditoria e indicador restorable")
+    void shouldPreserveAuditContextAndRestorableIndicator() throws Exception {
+        Instant moderatedAt = Instant.parse("2026-10-12T09:30:00Z");
+        AdminRemovedBusinessResponseView view = new AdminRemovedBusinessResponseView(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null,
+                UUID.randomUUID(),
+                "Empresa Teste",
+                UUID.randomUUID(),
+                "Local Teste",
+                "Conteúdo",
+                Instant.parse("2026-10-10T10:00:00Z"),
+                BusinessResponseRemovalSource.MODERATION,
+                moderatedAt,
+                true,
+                false,
+                "TERMS_OF_SERVICE",
+                "Justificativa completa da moderação de remoção.",
+                moderatedAt
+        );
+
+        when(queryAdminRemovedBusinessResponsesUseCase.execute(
+                eq(moderatorUserId),
+                any(RemovedBusinessResponseFilter.class),
+                eq(0),
+                eq(20)
+        )).thenReturn(PageResult.of(List.of(view), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].restorable").value(true))
+                .andExpect(jsonPath("$.content[0].otherActiveResponse").value(false))
+                .andExpect(jsonPath("$.content[0].removedBy").value("MODERATION"))
+                .andExpect(jsonPath("$.content[0].moderationReasonCode").value("TERMS_OF_SERVICE"))
+                .andExpect(jsonPath("$.content[0].moderationJustification").value("Justificativa completa da moderação de remoção."))
+                .andExpect(jsonPath("$.content[0].moderatedAt").value("2026-10-12T09:30:00Z"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - Rejeita requisição sem autenticação com 401")
+    void shouldRejectUnauthenticatedQuery() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 }

@@ -509,6 +509,7 @@ Empresas administradas por usuários autenticados podem publicar e gerenciar res
   * `GET /api/v1/reviews/{reviewId}/business-responses/eligibility`: Consulta contas aprovadas administradas pelo usuário autenticado e respectivos locais elegíveis associados à avaliação.
   * `DELETE /api/v1/business-responses/{responseId}`: Remove a própria resposta oficial pela empresa (retorna `204 No Content`).
   * `POST /api/v1/admin/business-responses/{responseId}/moderate`: Ação administrativa de moderação (`REMOVE_RESPONSE` ou `RESTORE_RESPONSE`) com motivo e justificativa (15 a 1000 caracteres). Exige perfil `MODERATOR` ou `ADMIN`.
+  * `GET /api/v1/admin/business-responses/removed`: Consulta administrativa paginada de respostas oficiais removidas (`page`, `size` padrão 20 máx 50; filtros opcionais por `reviewId`, `discussionId`, `businessAccountId`, `placeId`, `removedBy`). Exige perfil `MODERATOR` ou `ADMIN`.
 * **Segurança e Minimização de Dados**: A representação pública da resposta identifica a empresa (`businessAccountId`, `corporateName`) e o local representado (`placeId`, `placeName`), sem expor o autor pessoal (`authorUserId`), o documento da empresa (`taxId`), dados internos de auditoria ou metadados privados de remoção.
 * **Rate Limiting (`BUSINESS_RESPONSE_CREATION`)**: Protegido por janela deslizante no Redis com limite de 10 requisições por usuário a cada 60 segundos. Quando excedido, responde `429 Too Many Requests` com código `RATE_LIMIT_EXCEEDED` e cabeçalho `Retry-After`.
 
