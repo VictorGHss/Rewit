@@ -46,4 +46,3 @@ CREATE INDEX idx_place_opening_hours_intervals_place_day
 
 CREATE INDEX idx_place_opening_hours_schedules_business
     ON place_opening_hours_schedules (business_account_id);
-

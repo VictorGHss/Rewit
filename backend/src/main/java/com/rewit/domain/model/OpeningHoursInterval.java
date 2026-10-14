@@ -74,4 +74,3 @@ public final class OpeningHoursInterval implements Comparable<OpeningHoursInterv
         return openTime + " - " + closeTime;
     }
 }
-

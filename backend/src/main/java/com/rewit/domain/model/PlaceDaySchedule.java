@@ -94,4 +94,3 @@ public final class PlaceDaySchedule {
         return Objects.hash(dayOfWeek, closed, intervals);
     }
 }
-

@@ -116,4 +116,3 @@ public class PlaceOpeningHoursIntervalJpaEntity {
         return Objects.hash(id);
     }
 }
-

@@ -115,4 +115,3 @@ public class PlaceOpeningHoursRepositoryAdapter implements PlaceOpeningHoursRepo
         }
     }
 }
-

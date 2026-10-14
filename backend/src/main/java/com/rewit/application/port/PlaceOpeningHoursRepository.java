@@ -21,4 +21,3 @@ public interface PlaceOpeningHoursRepository {
      */
     void saveSchedule(PlaceOpeningHoursSchedule schedule);
 }
-

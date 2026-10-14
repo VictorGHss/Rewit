@@ -527,12 +527,18 @@ Produto sem códigos públicos: `{"identifiers": []}`.
   * A conta comercial precisa estar aprovada (`409 BUSINESS_ACCOUNT_NOT_APPROVED` se `PENDING`).
   * O estabelecimento precisa estar ativo e atualmente reivindicado pela conta comercial informada (`403 BUSINESS_NOT_RESPONSIBLE` se de outra empresa ou sem reivindicação; `404 PLACE_NOT_FOUND` se inativo ou inexistente).
   * Concorrência de atualização é serializada no banco de dados via `SELECT ... FOR UPDATE` no local.
-* **Validação dos Horários**:
+* **Validação dos Horários e Contrato Temporal**:
+  * Formato dos horários: os horários utilizam estritamente o formato `HH:mm` (ex.: `"08:00"`, `"18:30"`).
+  * Escopo intradiário: cada intervalo começa e termina estritamente no mesmo dia civil/comercial.
+  * Fechamento posterior: o horário de fechamento (`closeTime`) precisa ser estritamente posterior ao horário de abertura (`openTime`) (`400 INVALID_OPENING_HOURS_INTERVAL`).
+  * Restrição de 24:00: `"24:00"` não é um valor aceito pelo padrão temporal (`LocalTime` opera estritamente de `00:00` a `23:59`).
+  * Sem transposição de meia-noite: intervalos que atravessam a meia-noite (como `"22:00"` até `"02:00"`) e horários de fechamento exatamente às `"00:00"` não são suportados nesta versão (`00:00` é cronologicamente anterior a qualquer horário diurno, violando a regra `openTime < closeTime`). Estabelecimentos com funcionamento contínuo ou noturno devem ajustar os intervalos aos limites do mesmo dia ou aguardar a evolução futura da plataforma para suporte a intervalos interdiários.
+  * Formato de envio e divisões: o payload da requisição deve dividir os intervalos estritamente conforme as regras documentadas, sem inventar representações artificiais para atravessar a meia-noite.
+  * Validação de elementos: tanto a lista de dias (`days`) quanto a lista de intervalos (`intervals`) rejeitam elementos nulos (`days: [null]` ou `intervals: [null]`), respondendo `400 Bad Request` com código `VALIDATION_ERROR` no padrão RFC 7807, preservando integralmente o estado persistido no banco de dados.
   * `dayOfWeek`: inteiro entre 1 (Segunda-feira) e 7 (Domingo). Rejeita duplicatas no mesmo payload (`400 DUPLICATE_DAY_OF_WEEK`).
   * Dias omitidos na requisição são automaticamente interpretados como fechados (`closed = true`).
   * Dias fechados (`closed = true`): rejeita qualquer intervalo enviado (`400 INVALID_OPENING_HOURS`).
   * Dias abertos (`closed = false`): exige pelo menos um intervalo válido (`400 INVALID_OPENING_HOURS`).
-  * Intervalos: `openTime` deve ser estritamente anterior a `closeTime` (`400 INVALID_OPENING_HOURS_INTERVAL`).
   * Múltiplos intervalos no mesmo dia são permitidos, mas não podem se sobrepor nem colidir (`400 OPENING_HOURS_OVERLAPPING_INTERVALS`).
 * **Substituição Atômica**: Os horários anteriores do local são substituídos integralmente em transação única.
 

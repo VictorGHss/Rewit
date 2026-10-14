@@ -2,17 +2,21 @@
 
 > **Data de Atualização**: 14/10/2026\
 > **Status do Repositório**: Verde e Estabilizado\
-> **Base Integrada Atual (Política B)**: commit `033a1ab4f25223968ccc67fe12ceddc1684804a8` (merge do PR #2 sobre a base funcional histórica original `dfd84ae0d0b7e14558b03ee08abe359e2dcd5057`)\
-> **Branch Atual de Trabalho**: `agent/claude/business-response-eligibility-policy`\
-> **Referência da Validação Atual**: commit `b36732221e185a5c2de3b5b78018327ad43ceb76` (validado pelo Gemini em clone isolado; código implementado e testado no commit `8b5dd287f62c173ed5e4bacb4cccd046b35a856c`, com commits seguintes exclusivamente documentais `fd373c3` e `b367322`)\
+> **Base Integrada Atual (Política B em main)**: commit `5909410382b819a4d60d626154ff8ce8d4e53973` (merge do PR #3 sobre a base integrada anterior `033a1ab4f25223968ccc67fe12ceddc1684804a8`)\
+> **Branch Atual de Trabalho**: `agent/gemini/commercial-opening-hours`\
+> **Referência da Validação Atual**: branch `agent/gemini/commercial-opening-hours` (Fatia F2.1 concluída com 42 novos testes dedicados e correções pós-auditoria independente F1, F3, F4, F5 e F6)\
+> **Validação da Política B (Histórica Integrada)**: branch `agent/claude/business-response-eligibility-policy` (commits `f7bd9e1`, `4522a18`, `341ef22` e `8b5dd28`, integrada em `main` via PR #3 no commit `5909410`)\
 > **Validação Pós-C11 (Histórica)**: branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d` (base `dfd84ae` + documentação pós-C11 + testes de integração de segurança da consulta de respostas oficiais removidas)\
 > **Resultados Mais Recentes por Suíte de Testes (Execuções Individuais)**:\
-> - **Backend (Spring Boot / Maven)**: **1.860 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados, `BUILD SUCCESS`) via `./mvnw clean test` em containers reais, no commit `8b5dd28` da branch da política B. A validação pós-C11 anterior registrou 1.842 na branch integrada (commit `7b9473d`). Inventário estático do código em `8b5dd28` (não é resultado de execução): 202 arquivos `.java` em `backend/src/test/`, 199 deles com testes, e 1.838 métodos anotados (1.831 `@Test` e 7 `@ParameterizedTest`). Registros históricos: 1.271 testes no STEP 29.3 (`2d49b38`) e 1.462 no último total registrado neste roadmap antes da consolidação pós-C11 (`298d0bc`)\
-> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) em 48 arquivos via `flutter test`; análise estática `flutter analyze` com 0 pendências (*"No issues found!"*, código de término 0). Nova validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 no commit `b367322` em clone isolado (Flutter SDK 3.47.7, Dart 3.13.5), confirmando compatibilidade plena sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação a `033a1ab`. A execução anterior do Gemini (pré-política B, branch `agent/gemini/post-c11-validation-and-docs`) também registrou 618 testes verdes e análise estática limpa\
-> - **Admin (React / Vitest)**: **82 testes executados e aprovados** (0 falhas, 0 erros) em 16 arquivos via `vitest run`, com `eslint` sem pendências e build de produção `tsc && vite build` concluído, no ciclo da política B (conteúdo do commit `8b5dd28`). A execução anterior do Gemini (branch `agent/gemini/post-c11-validation-and-docs`) registrou 78 testes\
+> - **Backend (Spring Boot / Maven)**:\
+>   - **Execução F2.1 (Atual)**: **1.902 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados, `BUILD SUCCESS`) via `./mvnw clean test` em 3m18s na branch `agent/gemini/commercial-opening-hours`, orquestrando containers reais de PostgreSQL 18 + PostGIS 3.6, Redis 7 e SeaweedFS. Inventário estático do código de teste atual: 205 arquivos `.java` em `backend/src/test/`, 202 com testes e 1.880 declarações anotadas (1.873 `@Test` e 7 `@ParameterizedTest` gerando 29 invocações). Inclui 42 novos testes dedicados ao F2.1 (13 de domínio, 9 de controller REST e 20 de segurança/integração).\
+>   - **Execução da Política B (Histórica Integrada)**: **1.860 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados, `BUILD SUCCESS`) via `./mvnw clean test` em containers reais no commit `8b5dd28` da branch da política B. Inventário estático em `8b5dd28`: 202 arquivos `.java` em `backend/src/test/`, 199 deles com testes, e 1.838 métodos anotados (1.831 `@Test` e 7 `@ParameterizedTest`).\
+>   - **Validação pós-C11 anterior**: 1.842 testes na branch integrada (commit `7b9473d`). Registros históricos: 1.271 testes no STEP 29.3 (`2d49b38`) e 1.462 no último total registrado neste roadmap antes da consolidação pós-C11 (`298d0bc`).\
+> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) em 48 arquivos via `flutter test`; análise estática `flutter analyze` com 0 pendências (*"No issues found!"*, código de término 0). Validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 no commit `b367322` em clone isolado (Flutter SDK 3.47.7, Dart 3.13.5), confirmando compatibilidade plena sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação a `033a1ab`. A execução anterior do Gemini (pré-política B, branch `agent/gemini/post-c11-validation-and-docs`) também registrou 618 testes verdes e análise estática limpa. O STEP F2.1 não introduz alterações contratuais no mobile.\
+> - **Admin (React / Vitest)**: **82 testes executados e aprovados** (0 falhas, 0 erros) em 16 arquivos via `vitest run`, com `eslint` sem pendências e build de produção `tsc && vite build` concluído, no ciclo da política B (conteúdo do commit `8b5dd28`). A execução anterior do Gemini (branch `agent/gemini/post-c11-validation-and-docs`) registrou 78 testes. O STEP F2.1 não introduz alterações no admin.\
 > *Nota Metodológica*: Cada módulo opera com runners e ambientes independentes (JVM/Maven, Dart/Flutter e Node/Vitest). Não há pipeline de execução unificado do monorepo, mantendo-se os resultados de execução individuais e sem somas agregadas heterogêneas.\
 > **Working Tree**: `Limpo`\
-> **Próximo Trabalho**: Consolidação documental pós-C11, preparação da proposta de Gestão de Estabelecimentos Reivindicados / Catálogo Local (Fase 2 Comercial) e resolução de decisões pendentes (ADR-011)
+> **Próximo Trabalho**: Avaliação do mantenedor sobre a leitura pública F2 (`GetPlaceOpeningHoursUseCase` quando a representação perde elegibilidade) e continuidade da Fase 2 Comercial (STEP F2.2 - Comodidades).
 
 ---
 
@@ -29,7 +33,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1860, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS` (última execução completa no commit `8b5dd28`, branch da política B; validação pós-C11 anterior: 1.842 em `7b9473d`; registros históricos: 1.271 testes no STEP 29.3 e 1.462 em `298d0bc`). A suíte usa PostgreSQL, SeaweedFS e Redis reais.
+*Resultado esperado*: `Tests run: 1902, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS` (execução completa na branch `agent/gemini/commercial-opening-hours` com a entrega F2.1 e correções pós-auditoria; baseline histórica da Política B: 1.860 testes no commit `8b5dd28`; validação pós-C11 anterior: 1.842 em `7b9473d`; registros históricos: 1.271 testes no STEP 29.3 e 1.462 em `298d0bc`). A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -1082,22 +1086,23 @@ Por possuírem granularidades e ambientes distintos (especialmente no backend, o
 ---
 
 ### 12.1 Backend (`backend` — Spring Boot / JUnit 5)
-* **Resultados da Execução Mais Recente Comprovada**:
-  * **Testes Executados**: **1.860 testes**
+* **Resultados da Execução Mais Recente Comprovada (STEP F2.1 pós-auditoria)**:
+  * **Testes Executados**: **1.902 testes**
   * **Falhas**: `0`
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
   * **Taxa de Aprovação**: 100%
-  * **Evidência / Origem**: Execução no commit `8b5dd28` da branch `agent/claude/business-response-eligibility-policy` (`Tests run: 1860, Failures: 0, Errors: 0, Skipped: 0`, `BUILD SUCCESS`); os commits seguintes da branch só alteram o roadmap. A validação pós-C11 anterior registrou 1.842 na branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d`.
+  * **Evidência / Origem**: Execução completa via `./mvnw clean test` em 3m18s na branch `agent/gemini/commercial-opening-hours`, cobrindo toda a base do sistema com a entrega do STEP F2.1 e os achados da auditoria independente (F1 e F6).
   * **Ambiente de Teste**: Maven (`./mvnw clean test`), Java 25 LTS, JUnit 5 e Spring Boot 4.1.1 sob perfil `local`, orquestrando containers reais de PostgreSQL 18 + PostGIS 3.6, Redis 7 e SeaweedFS (compatível S3).
 * **Inventário Estático de Código de Teste**:
-  * **Arquivos de Teste**: 202 arquivos `.java` em `backend/src/test/` no commit `8b5dd28`, dos quais 199 contêm métodos de teste (os demais são classes de apoio).
-  * **Métodos Anotados de Teste**: 1.838 declarações no código-fonte do commit `8b5dd28` (1.831 com anotação `@Test` e 7 com `@ParameterizedTest`); na validação pós-C11 (`7b9473d`), 1.820 (1.813 e 7), e na base `dfd84ae`, 1.815 (1.808 e 7). Na execução de `8b5dd28`, os 7 métodos parametrizados geram 29 invocações, que somadas aos 1.831 métodos `@Test` resultam nos 1.860 casos executados.
+  * **Arquivos de Teste**: 205 arquivos `.java` em `backend/src/test/` na branch atual, dos quais 202 contêm métodos de teste (3 arquivos dedicados adicionados no STEP F2.1: `PlaceOpeningHoursDomainTest`, `PlaceOpeningHoursControllerUnitTest` e `PlaceOpeningHoursSecurityIntegrationTest`).
+  * **Métodos Anotados de Teste**: 1.880 declarações no código-fonte atual (1.873 com anotação `@Test` e 7 com `@ParameterizedTest`). Os 7 métodos parametrizados geram 29 invocações em runtime, que somadas aos 1.873 métodos `@Test` resultam nos 1.902 casos executados.
 * **Histórico de Baselines do Backend**:
   * *STEP 29.3* (`2d49b38`): 1.271 testes verdes no checkpoint do Session Cleanup, que fechou os passos 24 a 29 (Cold Start, Content Lifecycle, Moderação Admin V1, Outbox, Storage GC e Session Cleanup).
   * *Último registro antes da consolidação pós-C11* (`298d0bc`, 06/10/2026): 1.462 testes verdes, depois da Observabilidade V1 (1.293 testes em `22b465e`), do rate limiting distribuído, do estado da conta nas mutações (`C2` Fase 1) e das denúncias e moderação de discussões (`C3`).
   * *Evolução de `298d0bc` até a validação pós-C11 (`7b9473d`)*: 380 testes de execução adicionais (1.842 − 1.462), cobrindo o ciclo de vida e o purge de contas (`C2`), normalização e unaccent de catálogo (`C5.1`), contas comerciais e reivindicação de locais (`C9`), revalidação de privilégios de moderação contra stale tokens (`C10`) e respostas oficiais comerciais (`C11`).
-  * *Política B de elegibilidade das respostas oficiais* (`8b5dd28`): 18 testes de execução adicionais (1.860 − 1.842), cobrindo a avaliação da representação, o filtro das leituras públicas, o bloqueio da restauração e a consulta administrativa (§13.1).
+  * *Política B de elegibilidade das respostas oficiais* (`8b5dd28`, integrada em `main` no commit `5909410`): 18 testes de execução adicionais (1.860 − 1.842), cobrindo a avaliação da representação, o filtro das leituras públicas, o bloqueio da restauração e a consulta administrativa (§13.1).
+  * *Fase 2 Comercial — STEP F2.1 (Gestão de Horários de Funcionamento)*: 42 testes de execução adicionais (1.902 − 1.860), sendo 13 de modelo rico de domínio, 9 de controller REST com Bean Validation e tratamento RFC 7807, e 20 de integração e segurança com PostgreSQL real, autorização estrita via `BusinessRepresentationPolicy`, serialização de concorrência e rejeição de elementos nulos sem mutação de banco (§13.2).
 
 ---
 
@@ -1155,15 +1160,16 @@ O ecossistema Rewit concluiu formalmente os ciclos C2, C3, C5.1, C9, C10 e C11. 
      - A **restauração administrativa deve ser bloqueada** enquanto os requisitos de elegibilidade não forem atendidos.
      - Não basta verificar a elegibilidade apenas no instante da restauração, pois respostas já ativas também precisam obedecer à regra de visibilidade pública.
      - Os critérios de elegibilidade a observar são os já consolidados em `BusinessRepresentationPolicy`: conta comercial aprovada (`verification_status = 'APPROVED'`), usuário administrador operacional (`account_status = 'ACTIVE'`) e estabelecimento ativo vinculado à conta (`places.claimed_by_business_id` e `places.status = 'ACTIVE'`).
-   - **Política implementada e integrada**:
+   - **Política implementada e integrada** (commits `f7bd9e1`, `4522a18`, `341ef22` e `8b5dd28`, sobre `033a1ab`; integrada em `main` no commit `5909410`):
      - *Regra única*: `BusinessRepresentationPolicy.evaluate` define os três critérios com motivos estruturados (`BusinessRepresentationIneligibility`); `currentIneligibility` avalia a representação sem ator e sem lock. A publicação mantém passos, códigos e ordem de locks.
      - *Leitura pública*: as listagens de respostas a avaliações e a comentários filtram em SQL a representação elegível, com o mesmo FROM/WHERE no conteúdo e na contagem; a resposta oculta não muda de estado nem de auditoria e volta a aparecer automaticamente quando a representação volta a ser elegível (por exemplo, reativação ou reintegração do administrador). Os métodos de listagem sem chamadores em produção usam o mesmo filtro.
      - *Restauração*: depois da autorização, do conflito de interesse e da transição do domínio, a representação inelegível responde `409 BUSINESS_RESPONSE_NOT_RESTORABLE` com os motivos no `detail`, sem gravar nem auditar. Não há lock no local: travá-lo depois da resposta inverteria a ordem da publicação.
      - *Consulta administrativa*: campo aditivo `restorationBlockers` (`REMOVED_BY_BUSINESS`, `OTHER_ACTIVE_RESPONSE`, `ACCOUNT_NOT_APPROVED`, `ADMINISTRATOR_NOT_OPERATIONAL`, `PLACE_NOT_REPRESENTED`), com `restorable` verdadeiro só sem bloqueios; o administrador aparece só como não operacional. O painel exibe uma explicação por motivo.
-   - **Validações executadas**:
-     - Backend: `./mvnw clean test` com 1.860 testes, 0 falhas, 0 erros e 0 ignorados (18 novos) na validação da branch, e integrado em `main` via PR #3.
+   - **Validações executadas** (no commit `8b5dd28` da Política B):
+     - Backend: `./mvnw clean test` com 1.860 testes, 0 falhas, 0 erros e 0 ignorados (18 novos), incluindo a matriz de estados nas listagens, paginação e contagem, paridade entre a regra Java e o SQL nas listagens e na consulta administrativa, restauração bloqueada por motivo e fluxo HTTP com suspensão e reintegração do administrador. Integrado em `main` via PR #3 (`5909410`).
      - Admin: `vitest run` com 82 testes aprovados (4 novos), `eslint` sem pendências e `tsc && vite build` concluído.
-     - Mobile: validado pelo Gemini no commit `b367322` em clone isolado (618 testes aprovados, `flutter analyze` limpo, sem alterações em `apps/mobile/` em relação a `033a1ab`; ver §12.2).
+     - Mobile: não reexecutado no commit de código `8b5dd28` (contrato público inalterado); validação posterior de compatibilidade executada pelo Gemini no commit `b367322` em clone isolado (618 testes aprovados, `flutter analyze` limpo, sem alterações em `apps/mobile/` em relação a `033a1ab`; ver §12.2).
+     - Desempenho: `EXPLAIN ANALYZE` no PostgreSQL local com massa sintética (100.100 respostas) dentro de transação desfeita: a listagem segue o índice único parcial e resolve conta, administrador e local por chave (cerca de 0,1 ms por página); a fila administrativa sem filtro levou 27 ms, a maior parte na subconsulta `other_active` que já existia. Não é medição de produção.
    - **Limitações e questões pendentes**:
      - Uma resposta ativa oculta continua ocupando a vaga da empresa no alvo; para publicar outra, a empresa precisa retirá-la. Mudar isso exige decisão adicional.
      - Administrador `DELETED` não volta a ser operacional, e não há fluxo de troca do administrador da conta: as respostas dessa conta ficam ocultas. Quando a troca existir, as respostas publicadas sob o administrador anterior reapareceriam sob o novo; isso precisa ser decidido junto com o fluxo.
@@ -1196,11 +1202,15 @@ A primeira fatia vertical da Fase 2 Comercial foi integralmente implementada, te
 * **API RESTful e RFC 7807 (`com.rewit.presentation`)**:
   * `PlaceOpeningHoursController` mapeado em `/api/v1/places/{placeId}/opening-hours`:
     * `GET`: consulta pública dos horários semanais;
-    * `PUT`: configuração/atualização dos horários com payload JSON estruturado e Bean Validation.
-* **Métricas Reais de Testes**:
-  * **34 novos testes** dedicados em `PlaceOpeningHoursDomainTest`, `PlaceOpeningHoursControllerUnitTest` e `PlaceOpeningHoursSecurityIntegrationTest`.
-  * Execução completa do backend via `./mvnw clean test`: **1.894 testes executados, 0 falhas, 0 erros e 0 ignorados** em 3m13s.
-  * `git diff --check` verificado sem pendências.
+    * `PUT`: configuração/atualização dos horários com payload JSON estruturado e Bean Validation com validação estrita de elementos não nulos nas listas de dias e intervalos (`400 Bad Request` RFC 7807 `VALIDATION_ERROR`, prevenindo `500 NPE` e preservando a integridade do banco).
+* **Contrato Temporal e Limitações Documentadas (F5)**:
+  * Registrado em `docs/api/catalog.md`: formato `HH:mm`, intervalos restritos ao mesmo dia (`openTime < closeTime`), rejeição de `24:00`, e ausência de suporte a transposição de meia-noite nesta versão (registrada como futura evolução).
+* **Métricas Reais de Testes Observadas**:
+  * **42 novos testes** dedicados em `PlaceOpeningHoursDomainTest` (13), `PlaceOpeningHoursControllerUnitTest` (9) e `PlaceOpeningHoursSecurityIntegrationTest` (20).
+  * Execução completa do backend via `./mvnw clean test`: **1.902 testes executados, 0 falhas, 0 erros e 0 ignorados** em 3m18s.
+  * `git diff --check 5909410382b819a4d60d626154ff8ce8d4e53973..HEAD` verificado e 100% limpo após saneamento de quebras de linha em 18 arquivos (F3).
+* **Decisão de Produto Pendente (F2)**:
+  * O comportamento funcional de `GetPlaceOpeningHoursUseCase` permaneceu estritamente inalterado no código. A política de ocultação de horários caso a representação comercial perca elegibilidade (ex.: conta suspensa ou desvinculada) e eventual exigência de reconfiguração após transferência de reivindicação foi mantida como decisão de produto aberta para deliberação soberana do mantenedor.
 
 ---
 

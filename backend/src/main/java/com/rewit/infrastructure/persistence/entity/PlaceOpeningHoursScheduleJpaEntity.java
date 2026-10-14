@@ -102,4 +102,3 @@ public class PlaceOpeningHoursScheduleJpaEntity {
         return Objects.hash(placeId);
     }
 }
-

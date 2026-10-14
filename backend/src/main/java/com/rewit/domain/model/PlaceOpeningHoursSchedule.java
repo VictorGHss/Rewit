@@ -105,4 +105,3 @@ public final class PlaceOpeningHoursSchedule {
         return schedule == null || schedule.isClosed();
     }
 }
-

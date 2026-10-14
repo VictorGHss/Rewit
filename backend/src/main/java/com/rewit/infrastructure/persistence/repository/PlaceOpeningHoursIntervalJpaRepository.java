@@ -20,4 +20,3 @@ public interface PlaceOpeningHoursIntervalJpaRepository
     @Query("DELETE FROM PlaceOpeningHoursIntervalJpaEntity i WHERE i.placeId = :placeId")
     void deleteByPlaceId(@Param("placeId") UUID placeId);
 }
-

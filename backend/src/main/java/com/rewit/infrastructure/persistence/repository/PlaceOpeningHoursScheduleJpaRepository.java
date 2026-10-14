@@ -10,4 +10,3 @@ import java.util.UUID;
 public interface PlaceOpeningHoursScheduleJpaRepository
         extends JpaRepository<PlaceOpeningHoursScheduleJpaEntity, UUID> {
 }
-

@@ -109,4 +109,3 @@ public class UpdatePlaceOpeningHoursUseCase {
         return new BusinessException("Local não encontrado", HttpStatus.NOT_FOUND, "PLACE_NOT_FOUND");
     }
 }
-
