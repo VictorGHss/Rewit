@@ -11,6 +11,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -40,6 +43,12 @@ import com.rewit.presentation.dto.auth.RegisterRequest;
 import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.DayScheduleRequest;
 import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.TimeIntervalRequest;
 import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.UpdatePlaceOpeningHoursRequest;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Testes de segurança e integração com PostgreSQL real para gestão de horários de funcionamento (F2.1).
@@ -57,6 +66,9 @@ class PlaceOpeningHoursSecurityIntegrationTest {
 
     @Autowired
     private PlaceRepository placeRepository;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper()
@@ -483,95 +495,96 @@ class PlaceOpeningHoursSecurityIntegrationTest {
     // ---------------------------------------------------------------------------------------------------------
 
     @Test
-    @DisplayName("Atualizações concorrentes no mesmo local se serializam via lock de banco e preservam consistência")
-    void concurrentUpdatesSerializeAndPreserveConsistency() throws Exception {
+    @DisplayName("Atualização concorrente bloqueia no SELECT FOR UPDATE do local e conclui com sucesso após liberação (A4)")
+    void concurrentUpdateBlocksOnPlaceLockAndCompletesAfterRelease() throws Exception {
         TestUser businessAdmin = registerUser("conc_admin");
         UUID placeId = createPlace();
         UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
 
-        UpdatePlaceOpeningHoursRequest requestA = new UpdatePlaceOpeningHoursRequest(
+        UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
                 accountId,
                 List.of(new DayScheduleRequest(1, false, List.of(
                         new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(12, 0))
                 )))
         );
 
-        UpdatePlaceOpeningHoursRequest requestB = new UpdatePlaceOpeningHoursRequest(
-                accountId,
-                List.of(new DayScheduleRequest(2, false, List.of(
-                        new TimeIntervalRequest(LocalTime.of(14, 0), LocalTime.of(18, 0)),
-                        new TimeIntervalRequest(LocalTime.of(19, 0), LocalTime.of(22, 0))
-                )))
-        );
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
 
-        int threads = 2;
-        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
-        java.util.concurrent.CountDownLatch startSignal = new java.util.concurrent.CountDownLatch(1);
-        java.util.concurrent.CountDownLatch doneSignal = new java.util.concurrent.CountDownLatch(threads);
-        java.util.concurrent.atomic.AtomicInteger statusA = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.atomic.AtomicInteger statusB = new java.util.concurrent.atomic.AtomicInteger();
+        try {
+            // 1. Conexão de teste mantém o lock FOR UPDATE sobre o estabelecimento
+            Future<?> lockHolder = executor.submit(() -> tx.executeWithoutResult(status -> {
+                jdbcTemplate.queryForObject("SELECT id FROM places WHERE id = ? FOR UPDATE", UUID.class, placeId);
+                lockAcquired.countDown();
+                try {
+                    if (!releaseLock.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timeout aguardando liberação do lock de teste");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+            }));
 
-        executor.submit(() -> {
-            try {
-                startSignal.await();
-                MvcResult res = mockMvc.perform(withToken(
-                        put("/api/v1/places/{placeId}/opening-hours", placeId)
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(objectMapper.writeValueAsString(requestA)), businessAdmin)).andReturn();
-                statusA.set(res.getResponse().getStatus());
-            } catch (Exception e) {
-                statusA.set(500);
-            } finally {
-                doneSignal.countDown();
-            }
-        });
+            assertTrue(lockAcquired.await(5, TimeUnit.SECONDS), "Transação inicial deve adquirir o lock do local");
 
-        executor.submit(() -> {
-            try {
-                startSignal.await();
-                MvcResult res = mockMvc.perform(withToken(
-                        put("/api/v1/places/{placeId}/opening-hours", placeId)
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(objectMapper.writeValueAsString(requestB)), businessAdmin)).andReturn();
-                statusB.set(res.getResponse().getStatus());
-            } catch (Exception e) {
-                statusB.set(500);
-            } finally {
-                doneSignal.countDown();
-            }
-        });
+            // 2. Operação de atualização de horários é iniciada por outra transação
+            Future<Integer> updateResult = executor.submit(() -> {
+                try {
+                    MvcResult res = mockMvc.perform(withToken(
+                            put("/api/v1/places/{placeId}/opening-hours", placeId)
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(objectMapper.writeValueAsString(request)), businessAdmin)).andReturn();
+                    return res.getResponse().getStatus();
+                } catch (Exception e) {
+                    return 500;
+                }
+            });
 
-        startSignal.countDown();
-        doneSignal.await();
-        executor.shutdown();
+            // 3. Comprova que a atualização ficou bloqueada no PostgreSQL antes de liberar a primeira transação
+            waitForLockWaiter();
 
-        assertEquals(200, statusA.get(), "Requisição A deve completar com 200 OK após serialização");
-        assertEquals(200, statusB.get(), "Requisição B deve completar com 200 OK após serialização");
+            // 4. Libera a primeira transação (commit que libera o lock)
+            releaseLock.countDown();
+            lockHolder.get(10, TimeUnit.SECONDS);
 
-        // Demonstra serialização determinística e consistência do estado final:
-        // Apenas 1 registro de schedule deve existir para o local
-        Integer scheduleCount = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId);
-        assertEquals(1, scheduleCount);
+            // 5. Atualização desbloqueia e termina com sucesso (200 OK)
+            Integer httpStatus = updateResult.get(10, TimeUnit.SECONDS);
+            assertEquals(200, httpStatus, "Atualização deve concluir com 200 OK após liberação do lock");
 
-        // A persistência final deve refletir exatamente um dos requests:
-        // - se A venceu por último: exatamente 1 intervalo no dia 1 (08:00 - 12:00)
-        // - se B venceu por último: exatamente 2 intervalos no dia 2 (14:00 - 18:00 e 19:00 - 22:00)
-        Integer finalIntervalCount = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?",
-                Integer.class, placeId);
-        assertTrue(finalIntervalCount == 1 || finalIntervalCount == 2,
-                "A quantidade de intervalos gravada deve ser estritamente consistente com uma das duas atualizações atômicas");
+            // 6. Estado final do banco consistente
+            Integer scheduleCount = jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId);
+            assertEquals(1, scheduleCount);
 
-        if (finalIntervalCount == 1) {
+            Integer intervalCount = jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
+            assertEquals(1, intervalCount);
+
             Integer dayOfWeek = jdbcTemplate.queryForObject(
                     "SELECT day_of_week FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
-            assertEquals(1, dayOfWeek, "Se A foi o último a comitar, os intervalos devem pertencer exclusivamente ao dia 1");
-        } else {
-            List<Integer> days = jdbcTemplate.queryForList(
-                    "SELECT day_of_week FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
-            assertTrue(days.stream().allMatch(d -> d == 2), "Se B foi o último a comitar, os intervalos devem pertencer exclusivamente ao dia 2");
+            assertEquals(1, dayOfWeek);
+        } finally {
+            releaseLock.countDown();
+            executor.shutdownNow();
         }
+    }
+
+    /** Espera alguma sessão bloqueada em lock de linha (a atualização parada no FOR UPDATE do local). */
+    private void waitForLockWaiter() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Integer waiters = jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+                    Integer.class);
+            if (waiters != null && waiters > 0) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        fail("A atualização de horários deveria estar bloqueada aguardando o lock do local no PostgreSQL");
     }
 
     @Test
