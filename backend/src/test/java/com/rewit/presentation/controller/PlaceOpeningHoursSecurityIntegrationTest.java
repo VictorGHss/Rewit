@@ -1,29 +1,5 @@
 package com.rewit.presentation.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rewit.application.port.PlaceRepository;
-import com.rewit.domain.model.Place;
-import com.rewit.presentation.dto.auth.LoginRequest;
-import com.rewit.presentation.dto.auth.RegisterRequest;
-import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.DayScheduleRequest;
-import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.TimeIntervalRequest;
-import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.UpdatePlaceOpeningHoursRequest;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
-
 import java.nio.charset.StandardCharsets;
 import java.time.LocalTime;
 import java.util.Collections;
@@ -32,13 +8,38 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rewit.application.port.PlaceRepository;
+import com.rewit.domain.model.Place;
+import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.DayScheduleRequest;
+import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.TimeIntervalRequest;
+import com.rewit.presentation.dto.catalog.PlaceOpeningHoursPresentationDtos.UpdatePlaceOpeningHoursRequest;
 
 /**
  * Testes de segurança e integração com PostgreSQL real para gestão de horários de funcionamento (F2.1).
@@ -859,6 +860,223 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId));
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // 5. Decisão F2: Elegibilidade da Representação e Visibilidade dos Horários
+    // ---------------------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Oculta horários quando administrador é suspenso e restaura visibilidade automaticamente ao reativar (F2)")
+    void shouldHideOpeningHoursWhenAdminIsSuspendedAndRestoreAutomaticallyWhenReintegrated() throws Exception {
+        TestUser businessAdmin = registerUser("f2_admin");
+        UUID placeId = createPlace();
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        // 1. Conta A configura horários e continua elegível: GET retorna horários de A
+        UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(18, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)), businessAdmin))
+                .andExpect(status().isOk());
+
+        // Snapshot dos timestamps originais no banco
+        Map<String, Object> originalSchedule = jdbcTemplate.queryForMap(
+                "SELECT created_at, updated_at FROM place_opening_hours_schedules WHERE place_id = ?", placeId);
+        Object origCreatedAt = originalSchedule.get("created_at");
+        Object origUpdatedAt = originalSchedule.get("updated_at");
+
+        // GET confirma visibilidade pública inicial
+        TestUser visitor = registerUser("visitor_f2");
+        mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), visitor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.days[0].closed").value(false))
+                .andExpect(jsonPath("$.days[0].intervals[0].openTime").value("08:00"));
+
+        // 2. Administrador da conta A é temporariamente suspenso
+        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", businessAdmin.id());
+
+        // GET passa a retornar configured = false e days = [] (oculto, sem expor dados)
+        mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), visitor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.placeId").value(placeId.toString()))
+                .andExpect(jsonPath("$.configured").value(false))
+                .andExpect(jsonPath("$.days").isEmpty());
+
+        // Comprova no banco que os dados continuam persistidos intactos
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
+
+        // 3. Administrador volta a ser operacional (reativado)
+        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", businessAdmin.id());
+
+        // GET volta a retornar a configuração anterior automaticamente sem nova gravação
+        mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), visitor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.days[0].closed").value(false))
+                .andExpect(jsonPath("$.days[0].intervals[0].openTime").value("08:00"));
+
+        // Comprova que timestamps no banco não foram alterados
+        Map<String, Object> restoredSchedule = jdbcTemplate.queryForMap(
+                "SELECT created_at, updated_at FROM place_opening_hours_schedules WHERE place_id = ?", placeId);
+        assertEquals(origCreatedAt, restoredSchedule.get("created_at"), "created_at não deve mudar");
+        assertEquals(origUpdatedAt, restoredSchedule.get("updated_at"), "updated_at não deve mudar");
+    }
+
+    @Test
+    @DisplayName("Transferência de local para conta B oculta horários de A até que B configure os seus (F2)")
+    void shouldHideOpeningHoursWhenPlaceIsTransferredToAccountBUntilBConfiguresOwnSchedule() throws Exception {
+        // 1. Conta A configura horários para o local
+        TestUser adminA = registerUser("trans_adm_a");
+        UUID placeId = createPlace();
+        UUID accountA = createAndApproveBusinessAccount(adminA, placeId);
+
+        UpdatePlaceOpeningHoursRequest requestA = new UpdatePlaceOpeningHoursRequest(
+                accountA,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(12, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(requestA)), adminA))
+                .andExpect(status().isOk());
+
+        // 2. Conta B aprovada é criada e passa a reivindicar o local (transferência)
+        TestUser adminB = registerUser("trans_adm_b");
+        UUID accountB = createAccount(adminB);
+        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountB);
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
+
+        // 3. Enquanto B não configura seus próprios horários:
+        // GET retorna configured = false e days = [] (não revela horários de A)
+        TestUser visitor = registerUser("trans_visitor");
+        mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), visitor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(false))
+                .andExpect(jsonPath("$.days").isEmpty());
+
+        // Conta A tenta atualizar após perder a titularidade -> 403 Forbidden
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(requestA)), adminA))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("BUSINESS_NOT_RESPONSIBLE"));
+
+        // 4. Conta B configura sua própria grade semanal
+        UpdatePlaceOpeningHoursRequest requestB = new UpdatePlaceOpeningHoursRequest(
+                accountB,
+                List.of(new DayScheduleRequest(2, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(10, 0), LocalTime.of(20, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(requestB)), adminB))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.days[0].closed").value(true)) // Segunda de A foi substituída
+                .andExpect(jsonPath("$.days[1].dayOfWeek").value(2))
+                .andExpect(jsonPath("$.days[1].closed").value(false))
+                .andExpect(jsonPath("$.days[1].intervals[0].openTime").value("10:00"));
+
+        // 5. Asserções diretas no banco para a nova configuração
+        Map<String, Object> currentSchedule = jdbcTemplate.queryForMap(
+                "SELECT business_account_id, updated_by_user_id FROM place_opening_hours_schedules WHERE place_id = ?",
+                placeId);
+        assertEquals(accountB, currentSchedule.get("business_account_id"));
+        assertEquals(adminB.id(), currentSchedule.get("updated_by_user_id"));
+
+        Integer intervalCount = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
+        assertEquals(1, intervalCount);
+
+        Integer dayOfWeek = jdbcTemplate.queryForObject(
+                "SELECT day_of_week FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
+        assertEquals(2, dayOfWeek, "Intervalo salvo deve ser o de Terça-feira configurado por B");
+    }
+
+    @Test
+    @DisplayName("Resposta de horários ocultos não revela intervalos, conta proprietária ou metadados de auditoria (F2)")
+    void shouldNotExposeAnyInternalDetailsWhenScheduleIsHidden() throws Exception {
+        TestUser businessAdmin = registerUser("priv_adm");
+        UUID placeId = createPlace();
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(18, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)), businessAdmin))
+                .andExpect(status().isOk());
+
+        // Inelegibilidade por desvinculação
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
+
+        TestUser visitor = registerUser("auditor_v");
+        mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), visitor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.placeId").value(placeId.toString()))
+                .andExpect(jsonPath("$.configured").value(false))
+                .andExpect(jsonPath("$.days").isEmpty())
+                .andExpect(jsonPath("$.businessAccountId").doesNotExist())
+                .andExpect(jsonPath("$.updatedByUserId").doesNotExist())
+                .andExpect(jsonPath("$.createdAt").doesNotExist())
+                .andExpect(jsonPath("$.updatedAt").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET responde 404 PLACE_NOT_FOUND para local inexistente ou inativo mesmo se houver schedule no banco (Regressão)")
+    void shouldReturn404WhenPlaceIsInactiveOrNonExistentEvenIfScheduleExistsInDatabase() throws Exception {
+        TestUser businessAdmin = registerUser("inact_reg_adm");
+        UUID placeId = createPlace();
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(18, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)), businessAdmin))
+                .andExpect(status().isOk());
+
+        // 1. Local inexistente -> 404
+        mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", UUID.randomUUID()), businessAdmin))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PLACE_NOT_FOUND"));
+
+        // 2. Local inativado no catálogo -> 404
+        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), businessAdmin))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PLACE_NOT_FOUND"));
     }
 
     // ---------------------------------------------------------------------------------------------------------
