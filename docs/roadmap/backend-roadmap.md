@@ -4,11 +4,11 @@
 > **Status do Repositório**: Verde e Estabilizado\
 > **Checkpoint Atual (HEAD)**: commit `dfd84ae` (*"feat: adicionar fila administrativa de respostas oficiais removidas"*)\
 > **Branch**: `origin/main` (commit `dfd84ae0d0b7e14558b03ee08abe359e2dcd5057`)\
-> **Inventário de Testes Catalogados no Monorepo**: `2.526` métodos/casos declarados\
-> - **Backend (Spring Boot)**: 200 arquivos de teste, 1.830 métodos de teste declarados (1.823 `@Test` e 7 `@ParameterizedTest`); baseline histórico executado: 1.462 testes verdes (STEP 29.3)\
-> - **Mobile (Flutter)**: 48 arquivos de teste, 618 testes executados e aprovados via `flutter test` (100%)\
-> - **Admin (React)**: 16 arquivos de teste, 78 testes executados e aprovados via `vitest run` (100%)\
-> **Validação Multiplataforma Recente (Mobile + Admin)**: 696 testes executados e aprovados (0 falhas, 0 erros)\
+> **Resultados Mais Recentes por Suíte de Testes (Execuções Individuais)**:\
+> - **Backend (Spring Boot / Maven)**: **1.842 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados) via `./mvnw clean test` em containers reais (comprovado na branch `agent/claude/c11-hardening-removed-responses`; baseline histórico fundacional: 1.462 testes no STEP 29.3; inventário de código: 200 arquivos de teste e 1.830 métodos anotados com `@Test`/`@ParameterizedTest`)\
+> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) via `flutter test` em 59s; análise estática `flutter analyze` com 0 pendências (48 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`)\
+> - **Admin (React / Vitest)**: **78 testes executados e aprovados** (0 falhas, 0 erros) via `vitest run` em 41.44s; build de produção `tsc && vite build` com sucesso em 442ms (16 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`)\
+> *Nota Metodológica*: Cada módulo opera com runners e ambientes independentes (JVM/Maven, Dart/Flutter e Node/Vitest). Não há pipeline de execução unificado do monorepo, mantendo-se os resultados de execução individuais e sem somas agregadas heterogêneas.\
 > **Working Tree**: `Limpo`\
 > **Próximo Trabalho**: Consolidação documental pós-C11, preparação da proposta de Gestão de Estabelecimentos Reivindicados / Catálogo Local (Fase 2 Comercial) e resolução de decisões pendentes (ADR-011)
 
@@ -27,7 +27,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1462, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS`. A suíte usa PostgreSQL, SeaweedFS e Redis reais.
+*Resultado esperado*: `Tests run: 1842, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS` (baseline atualizado pós-C11; baseline histórico fundacional do STEP 29.3: 1.462 testes). A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -1071,36 +1071,63 @@ Os gates dos passos fundacionais de Cold Start (24.5), Ciclo de Vida de Avaliaç
 
 ---
 
-## 12. Estado Atual da Suíte de Testes do Monorepo
+## 12. Estado Atual das Suítes de Testes por Módulo
 
-### 12.1 Validação Multiplataforma Recente (Mobile e Admin)
-* **Módulos Validados nesta Sessão**: `apps/mobile` e `apps/admin`
-* **Testes Executados e Aprovados**: **696 testes** (618 Mobile + 78 Admin)
-* **Falhas**: `0`
-* **Erros**: `0`
-* **Ignorados / Skipped**: `0`
-* **Taxa de Sucesso**: 100%
+O projeto Rewit é concebido como um monorepo modular composto por três frentes tecnológicas autônomas: API central Spring Boot (Java 25 LTS), aplicativo móvel Flutter (Dart) e painel web administrativo React (TypeScript/Vite). As suítes de testes utilizam executores e ferramentas distintas (`maven-surefire-plugin`, `flutter test` e `vitest`).
 
-### 12.2 Inventário Consolidado de Testes do Monorepo
+Por possuírem granularidades e ambientes distintos (especialmente no backend, onde métodos anotados com `@ParameterizedTest` expandem em múltiplos casos de teste em tempo de execução), **as métricas de execução de cada módulo são registradas e acompanhadas individualmente, sem consolidação em uma soma global heterogênea**.
 
-O monorepo possui **2.526 testes catalogados** distribuídos em seus três módulos:
+---
 
-1. **Backend (Spring Boot / JUnit 5)**:
-   - **Inventário de Código de Teste**: 200 arquivos de teste em `backend/src/test/`, com **1.830 métodos de teste declarados** (1.823 com anotação `@Test` e 7 com `@ParameterizedTest`), cobrindo domínio puro, segurança, use cases transacionais, persistência com PostgreSQL/PostGIS real, Redis real, SeaweedFS real, MockMvc e controllers REST.
-   - **Baseline Histórico Executado**: 1.462 testes executados e aprovados com sucesso no fechamento formal do STEP 29.3 (`Tests run: 1462, Failures: 0, Errors: 0, Skipped: 0`). Os 368 métodos de teste adicionados nos ciclos C2, C3, C5.1, C9, C10 e C11 encontram-se implementados no código e sua execução completa ocorre contra containers reais orquestrados via Docker Compose (`./mvnw clean test`).
-   - **Perfil de Execução**: `local` com containers dedicados.
+### 12.1 Backend (`backend` — Spring Boot / JUnit 5)
+* **Resultados da Execução Mais Recente Comprovada**:
+  * **Testes Executados**: **1.842 testes**
+  * **Falhas**: `0`
+  * **Erros**: `0`
+  * **Ignorados / Skipped**: `0`
+  * **Taxa de Aprovação**: 100%
+  * **Evidência / Origem**: Execução documentada na branch `agent/claude/c11-hardening-removed-responses` pós-C11 (`Tests run: 1842, Failures: 0, Errors: 0, Skipped: 0`).
+  * **Ambiente de Teste**: Maven (`./mvnw clean test`), Java 25 LTS, JUnit 5 e Spring Boot 4.1.1 sob perfil `local`, orquestrando containers reais de PostgreSQL 18 + PostGIS 3.6, Redis 7 e SeaweedFS (compatível S3).
+* **Inventário Estático de Código de Teste**:
+  * **Arquivos de Teste**: 200 arquivos em `backend/src/test/`.
+  * **Métodos Anotados de Teste**: 1.830 declarações no código-fonte (1.823 com anotação `@Test` e 7 com `@ParameterizedTest`). A expansão das invocações parametrizadas pelo runner Surefire gera os 1.842 casos executados.
+* **Histórico de Baselines do Backend**:
+  * *Baseline Fundacional (STEP 29.3)*: 1.462 testes verdes na consolidação dos passos 24 a 29 (Cold Start, Content Lifecycle, Moderação Admin V1, Outbox, Storage GC e Session Cleanup).
+  * *Evolução Pós-Fundação (Ciclos C2 a C11)*: Inclusão de 380 testes de execução adicionais cobrindo ciclo de vida de contas (`C2`), moderação e denúncias de discussões (`C3`), normalização e unaccent de catálogo (`C5.1`), contas comerciais e reivindicação de locais (`C9`), revalidação de privilégios de moderação contra stale tokens (`C10`) e respostas oficiais comerciais (`C11`).
 
-2. **Aplicativo Mobile (Flutter / Dart)**:
-   - **Arquivos de Teste**: 48 arquivos em `apps/mobile/test/`.
-   - **Testes Executados e Aprovados**: **618 testes** executados via `flutter test` (100% de sucesso em 59s).
-   - **Análise Estática**: `flutter analyze` sem nenhum erro ou aviso (`No issues found!`).
-   - **Cobertura Funcional**: Autenticação, ciclo de vida de contas, navegação, feeds, criação multi-alvo com geolocalização precisa, detalhes de locais e produtos, scanner de código de barras/QR Code, discussões, notificações e respostas oficiais de empresas.
+---
 
-3. **Painel Administrativo Web (React / TypeScript / Vitest)**:
-   - **Arquivos de Teste**: 16 arquivos em `apps/admin/src/`.
-   - **Testes Executados e Aprovados**: **78 testes** executados via `vitest run` (100% de sucesso em 41.44s).
-   - **Build de Produção**: `npx tsc && npx vite build` concluído com sucesso e zero erros de compilação em 442ms.
-   - **Cobertura Funcional**: Autenticação administrativa com sessionStorage, renovação de tokens com trava de concorrência, dashboard com contadores em tempo real, filas de denúncias de reviews e discussões, fila de reivindicações de locais e fila de respostas oficiais removidas com restauração auditada e compatibilidade a `fieldErrors` como Record e Array.
+### 12.2 Aplicativo Mobile (`apps/mobile` — Flutter / Dart)
+* **Resultados da Execução Mais Recente Comprovada**:
+  * **Testes Executados**: **618 testes**
+  * **Falhas**: `0`
+  * **Erros**: `0`
+  * **Ignorados / Skipped**: `0`
+  * **Taxa de Aprovação**: 100% (tempo de execução: 59s)
+  * **Evidência / Origem**: Execução via `flutter test` na branch `agent/gemini/post-c11-validation-and-docs`.
+* **Análise Estática**:
+  * `flutter analyze`: **0 problemas encontrados** (*"No issues found! (ran in 26.8s)"*).
+* **Ambiente e Ferramentas**:
+  * Flutter SDK 3.47.7 (Dart 3.13.5).
+* **Escopo e Cobertura Funcional**:
+  * 48 arquivos de teste em `apps/mobile/test/` cobrindo fluxos completos de autenticação segura via `FlutterSecureStorage`, ciclo de vida de contas, navegação, feeds, criação multi-alvo com validação geoespacial, scanner óptico de código de barras e QR Code, discussões aninhadas, notificações e visualização/gestão de respostas oficiais de empresas com selo de verificação.
+
+---
+
+### 12.3 Painel Administrativo Web (`apps/admin` — React / TypeScript / Vitest)
+* **Resultados da Execução Mais Recente Comprovada**:
+  * **Testes Executados**: **78 testes**
+  * **Falhas**: `0`
+  * **Erros**: `0`
+  * **Ignorados / Skipped**: `0`
+  * **Taxa de Aprovação**: 100% (tempo de execução: 41.44s)
+  * **Evidência / Origem**: Execução via `npx vitest run` na branch `agent/gemini/post-c11-validation-and-docs`.
+* **Compilação e Build de Produção**:
+  * `npx tsc && npx vite build`: Concluído com **código 0** e zero erros de compilação em 442ms (dist gerado em `apps/admin/dist/`).
+* **Ambiente e Ferramentas**:
+  * Node.js, Vitest, `@testing-library/react`, TypeScript 5.
+* **Escopo e Cobertura Funcional**:
+  * 16 arquivos de teste em `apps/admin/src/` cobrindo cliente HTTP com renovação de sessão e trava de concorrência, dashboard com contadores em tempo real, filas de moderação de avaliações e discussões, fila de solicitações de reivindicação de locais (`place_claim_requests`) e nova fila de triagem de respostas oficiais removidas (`RemovedBusinessResponsesQueue`) com modal de restauração auditada (`RestoreBusinessResponseModal`), recuperação de paginação fora de intervalo e tolerância a `fieldErrors` como Record e Array.
 
 ---
 
