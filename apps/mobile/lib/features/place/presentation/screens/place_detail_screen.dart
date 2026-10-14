@@ -12,6 +12,11 @@ import '../state/place_detail_notifier.dart';
 import '../state/place_detail_state.dart';
 import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
 import 'package:rewit_mobile/features/business/presentation/widgets/claim_place_bottom_sheet.dart';
+import '../../domain/repositories/place_commercial_repository.dart';
+import '../state/place_commercial_notifier.dart';
+import '../widgets/place_opening_hours_section.dart';
+import '../widgets/place_amenities_section.dart';
+import '../widgets/place_commercial_offers_section.dart';
 
 /// Tela completa de detalhe de um Local Físico (Place) no catálogo Rewit (C5.2).
 ///
@@ -23,6 +28,8 @@ class PlaceDetailScreen extends StatefulWidget {
   final PlaceDetailNotifier? notifier;
   final ProductRepository? productRepository;
   final BusinessRepository? businessRepository;
+  final PlaceCommercialRepository? commercialRepository;
+  final PlaceCommercialNotifier? commercialNotifier;
 
   const PlaceDetailScreen({
     super.key,
@@ -31,6 +38,8 @@ class PlaceDetailScreen extends StatefulWidget {
     this.notifier,
     this.productRepository,
     this.businessRepository,
+    this.commercialRepository,
+    this.commercialNotifier,
   });
 
   @override
@@ -40,6 +49,8 @@ class PlaceDetailScreen extends StatefulWidget {
 class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
   late final PlaceDetailNotifier _notifier;
   bool _ownsNotifier = false;
+  PlaceCommercialNotifier? _commercialNotifier;
+  bool _ownsCommercialNotifier = false;
   final ScrollController _scrollController = ScrollController();
   List<ProductDetail>? _placeProducts;
 
@@ -58,6 +69,16 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
       throw StateError('PlaceRepository ou PlaceDetailNotifier deve ser fornecido para PlaceDetailScreen.');
     }
 
+    if (widget.commercialNotifier != null) {
+      _commercialNotifier = widget.commercialNotifier;
+    } else if (widget.commercialRepository != null) {
+      _commercialNotifier = PlaceCommercialNotifier(
+        repository: widget.commercialRepository!,
+        placeId: widget.placeId,
+      );
+      _ownsCommercialNotifier = true;
+    }
+
     _scrollController.addListener(_onScroll);
 
     if (_notifier.state is PlaceDetailInitial) {
@@ -65,6 +86,9 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
     }
     if (widget.productRepository != null) {
       _loadPlaceProducts();
+    }
+    if (_commercialNotifier != null) {
+      _commercialNotifier!.loadAll();
     }
   }
 
@@ -88,6 +112,9 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
     _scrollController.dispose();
     if (_ownsNotifier) {
       _notifier.dispose();
+    }
+    if (_ownsCommercialNotifier) {
+      _commercialNotifier?.dispose();
     }
     super.dispose();
   }
@@ -224,10 +251,11 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
 
     return RefreshIndicator(
       onRefresh: () async {
-        await _notifier.refresh();
-        if (widget.productRepository != null) {
-          await _loadPlaceProducts();
-        }
+        await Future.wait([
+          _notifier.refresh(),
+          if (widget.productRepository != null) _loadPlaceProducts(),
+          if (_commercialNotifier != null) _commercialNotifier!.refresh(),
+        ]);
       },
       child: ListView(
         controller: _scrollController,
@@ -451,7 +479,47 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
             ),
           ),
 
-          // 4.1 Produtos com presença registrada neste local (C5.3)
+          // 4.1 Informações Comerciais (Horários F2.1, Comodidades F2.2, Ofertas F2.3)
+          if (_commercialNotifier != null) ...[
+            ListenableBuilder(
+              listenable: _commercialNotifier!,
+              builder: (context, _) {
+                final commState = _commercialNotifier!.state;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 16),
+                    PlaceOpeningHoursSection(
+                      state: commState.openingHoursState,
+                      onRetry: () => _commercialNotifier!.loadOpeningHours(),
+                    ),
+                    const SizedBox(height: 12),
+                    PlaceAmenitiesSection(
+                      state: commState.amenitiesState,
+                      onRetry: () => _commercialNotifier!.loadAmenities(),
+                    ),
+                    const SizedBox(height: 20),
+                    PlaceCommercialOffersSection(
+                      state: commState.offersState,
+                      onRetry: () => _commercialNotifier!.loadOffers(),
+                      onLoadMore: () => _commercialNotifier!.loadMoreOffers(),
+                      onOfferTap: (productId) {
+                        Navigator.of(context).pushNamed(
+                          AppRouter.productDetail,
+                          arguments: {
+                            'productId': productId,
+                            'contextPlace': place,
+                          },
+                        );
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+
+          // 4.2 Produtos com presença registrada neste local (C5.3)
           if (_placeProducts != null && _placeProducts!.isNotEmpty) ...[
             const SizedBox(height: 24),
             Text(

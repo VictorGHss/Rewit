@@ -14,6 +14,7 @@ import 'package:rewit_mobile/features/notifications/domain/repositories/notifica
 import 'package:rewit_mobile/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:rewit_mobile/features/notifications/presentation/state/notifications_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_commercial_repository.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
@@ -65,6 +66,7 @@ class AppRouter {
   final SearchRepository? searchRepository;
   final UserProfileRepository? userProfileRepository;
   final PlaceRepository? placeRepository;
+  final PlaceCommercialRepository? placeCommercialRepository;
   final ProductRepository? productRepository;
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
@@ -83,6 +85,7 @@ class AppRouter {
     this.searchRepository,
     this.userProfileRepository,
     this.placeRepository,
+    this.placeCommercialRepository,
     this.productRepository,
     this.notificationRepository,
     this.notificationsNotifier,
@@ -240,6 +243,7 @@ class AppRouter {
             repository: placeRepository,
             productRepository: productRepository,
             businessRepository: businessRepository,
+            commercialRepository: placeCommercialRepository,
           ),
           settings: settings,
         );
