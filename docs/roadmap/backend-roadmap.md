@@ -2,13 +2,13 @@
 
 > **Data de Atualização**: 14/10/2026\
 > **Status do Repositório**: Verde e Estabilizado\
-> **Checkpoint Atual (HEAD)**: base funcional de referência `dfd84ae` (*"feat: adicionar fila administrativa de respostas oficiais removidas"*)\
-> **Branch**: `origin/main` (commit `dfd84ae0d0b7e14558b03ee08abe359e2dcd5057`)\
-> **Validação Pós-C11**: branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d` (base `dfd84ae` + documentação pós-C11 + testes de integração de segurança da consulta de respostas oficiais removidas)\
-> **Validação Atual (política B)**: branch `agent/claude/business-response-eligibility-policy`, commit `8b5dd28` sobre `033a1ab` (merge do PR #2); os commits seguintes da branch só alteram o roadmap\
+> **Base Integrada Atual (Política B)**: commit `033a1ab4f25223968ccc67fe12ceddc1684804a8` (merge do PR #2 sobre a base funcional histórica original `dfd84ae0d0b7e14558b03ee08abe359e2dcd5057`)\
+> **Branch Atual de Trabalho**: `agent/claude/business-response-eligibility-policy`\
+> **Referência da Validação Atual**: commit `b36732221e185a5c2de3b5b78018327ad43ceb76` (validado pelo Gemini em clone isolado; código implementado e testado no commit `8b5dd287f62c173ed5e4bacb4cccd046b35a856c`, com commits seguintes exclusivamente documentais `fd373c3` e `b367322`)\
+> **Validação Pós-C11 (Histórica)**: branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d` (base `dfd84ae` + documentação pós-C11 + testes de integração de segurança da consulta de respostas oficiais removidas)\
 > **Resultados Mais Recentes por Suíte de Testes (Execuções Individuais)**:\
 > - **Backend (Spring Boot / Maven)**: **1.860 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados, `BUILD SUCCESS`) via `./mvnw clean test` em containers reais, no commit `8b5dd28` da branch da política B. A validação pós-C11 anterior registrou 1.842 na branch integrada (commit `7b9473d`). Inventário estático do código em `8b5dd28` (não é resultado de execução): 202 arquivos `.java` em `backend/src/test/`, 199 deles com testes, e 1.838 métodos anotados (1.831 `@Test` e 7 `@ParameterizedTest`). Registros históricos: 1.271 testes no STEP 29.3 (`2d49b38`) e 1.462 no último total registrado neste roadmap antes da consolidação pós-C11 (`298d0bc`)\
-> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) via `flutter test` em 59s; análise estática `flutter analyze` com 0 pendências (48 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`). Evidência de execução anterior do Gemini, não reexecutada na integração pós-C11 nem no ciclo da política B, que não alterou o mobile\
+> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) em 48 arquivos via `flutter test` em 59s; análise estática `flutter analyze` com 0 pendências (*"No issues found!"*, código de término 0). Nova validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 no commit `b367322` em clone isolado (Flutter SDK 3.47.7, Dart 3.13.5), confirmando compatibilidade plena sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação a `033a1ab`. A execução anterior do Gemini (pré-política B, branch `agent/gemini/post-c11-validation-and-docs`) também registrou 618 testes verdes e análise estática limpa\
 > - **Admin (React / Vitest)**: **82 testes executados e aprovados** (0 falhas, 0 erros) em 16 arquivos via `vitest run`, com `eslint` sem pendências e build de produção `tsc && vite build` concluído, no ciclo da política B (conteúdo do commit `8b5dd28`). A execução anterior do Gemini (branch `agent/gemini/post-c11-validation-and-docs`) registrou 78 testes\
 > *Nota Metodológica*: Cada módulo opera com runners e ambientes independentes (JVM/Maven, Dart/Flutter e Node/Vitest). Não há pipeline de execução unificado do monorepo, mantendo-se os resultados de execução individuais e sem somas agregadas heterogêneas.\
 > **Working Tree**: `Limpo`\
@@ -1103,14 +1103,14 @@ Por possuírem granularidades e ambientes distintos (especialmente no backend, o
 
 ### 12.2 Aplicativo Mobile (`apps/mobile` — Flutter / Dart)
 * **Resultados da Execução Mais Recente Comprovada**:
-  * **Testes Executados**: **618 testes**
+  * **Testes Executados**: **618 testes** em 48 arquivos
   * **Falhas**: `0`
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
   * **Taxa de Aprovação**: 100% (tempo de execução: 59s)
-  * **Evidência / Origem**: Execução via `flutter test` na branch `agent/gemini/post-c11-validation-and-docs`. Resultado anterior, não reexecutado no ciclo da política B, que não alterou o mobile.
+  * **Evidência / Origem**: Nova validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 em clone isolado sobre o commit `b367322` da branch `agent/claude/business-response-eligibility-policy` (`All tests passed!`), confirmando compatibilidade plena com a política B sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação à base integrada `033a1ab`. A validação anterior do Gemini (pré-política B, realizada na branch `agent/gemini/post-c11-validation-and-docs`) também registrou os mesmos 618 testes aprovados em 59s.
 * **Análise Estática**:
-  * `flutter analyze`: **0 problemas encontrados** (*"No issues found! (ran in 26.8s)"*).
+  * `flutter analyze`: **0 problemas encontrados** (*"No issues found!"*, código de término 0 em 39.6s na validação da política B; 26.8s na execução anterior).
 * **Ambiente e Ferramentas**:
   * Flutter SDK 3.47.7 (Dart 3.13.5).
 * **Escopo e Cobertura Funcional**:
@@ -1163,7 +1163,7 @@ O ecossistema Rewit concluiu formalmente os ciclos C2, C3, C5.1, C9, C10 e C11. 
    - **Validações executadas** (no commit `8b5dd28`):
      - Backend: `./mvnw clean test` com 1.860 testes, 0 falhas, 0 erros e 0 ignorados (18 novos), incluindo a matriz de estados nas listagens, paginação e contagem, paridade entre a regra Java e o SQL nas listagens e na consulta administrativa, restauração bloqueada por motivo e fluxo HTTP com suspensão e reintegração do administrador.
      - Admin: `vitest run` com 82 testes aprovados (4 novos), `eslint` sem pendências e `tsc && vite build` concluído.
-     - Mobile: não reexecutado; o contrato público não mudou.
+     - Mobile: não reexecutado no commit de código `8b5dd28` (contrato público inalterado); validação posterior de compatibilidade executada pelo Gemini no commit `b367322` em clone isolado (618 testes aprovados, `flutter analyze` limpo, sem alterações em `apps/mobile/` em relação a `033a1ab`; ver §12.2).
      - Desempenho: `EXPLAIN ANALYZE` no PostgreSQL local com massa sintética (100.100 respostas) dentro de transação desfeita: a listagem segue o índice único parcial e resolve conta, administrador e local por chave (cerca de 0,1 ms por página); a fila administrativa sem filtro levou 27 ms, a maior parte na subconsulta `other_active` que já existia. Não é medição de produção.
    - **Limitações e questões pendentes**:
      - Uma resposta ativa oculta continua ocupando a vaga da empresa no alvo; para publicar outra, a empresa precisa retirá-la. Mudar isso exige decisão adicional.
