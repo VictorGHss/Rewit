@@ -27,7 +27,7 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
     - Suíte com 618 testes automatizados aprovados no Flutter (`flutter test`).
 - **Segurança e Validação de Moderação em Runtime (`C10`)**:
   - Implementação da `ModeratorRolePolicy` no backend, validando permissões de moderação e estado da conta do moderador em tempo real contra o banco de dados em endpoints administrativos sensíveis.
-  - Mitigação de vulnerabilidades decorrentes de tokens JWT válidos após revogação de privilégios (*stale tokens*), encerrando a sessão com HTTP 403 padronizado via RFC 7807.
+  - Mitigação de tokens JWT ainda válidos após a revogação de privilégios (*stale tokens*): operações não autorizadas são bloqueadas com HTTP 403 (`FORBIDDEN`, RFC 7807) após a revalidação da política de papéis. Essa resposta não revoga nem encerra a sessão.
 
 ---
 

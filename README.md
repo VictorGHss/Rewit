@@ -221,7 +221,7 @@ flutter run
 
 - **Segurança de Moderação em Runtime e Mitigação de Stale Tokens (C10)**:
   - Verificação dinâmica em tempo de execução das permissões de moderação e do status da conta do moderador (`ModeratorRolePolicy`) diretamente contra o banco de dados;
-  - Mitigação de vulnerabilidades decorrentes de tokens JWT válidos após revogação de privilégios (`403 Forbidden` padronizado via RFC 7807 e encerramento de sessão).
+  - Mitigação de tokens JWT ainda válidos após a revogação de privilégios: operações não autorizadas são bloqueadas com `403 FORBIDDEN` (RFC 7807) após a revalidação da política de papéis. Essa resposta não revoga nem encerra a sessão.
 
 - **Respostas Oficiais Comerciais e Moderação Multiplataforma (Fase 2 / C11)**:
   - **Backend REST API**: Publicação, consulta e exclusão de respostas oficiais de estabelecimentos comerciais a avaliações (`/api/v1/reviews/{reviewId}/business-responses`) e discussões raiz (`/api/v1/discussions/{discussionId}/business-responses`), com unicidade de resposta ativa por par (empresa, alvo), rate limiting distribuído com Redis (`BUSINESS_RESPONSE_CREATION`), fila administrativa de respostas removidas (`/api/v1/admin/business-responses/removed`) e moderação/restauração formal auditada com justificativa obrigatória (15 a 1.000 caracteres);

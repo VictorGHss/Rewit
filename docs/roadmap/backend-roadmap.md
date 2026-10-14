@@ -2,12 +2,13 @@
 
 > **Data de Atualização**: 14/10/2026\
 > **Status do Repositório**: Verde e Estabilizado\
-> **Checkpoint Atual (HEAD)**: commit `dfd84ae` (*"feat: adicionar fila administrativa de respostas oficiais removidas"*)\
+> **Checkpoint Atual (HEAD)**: base funcional de referência `dfd84ae` (*"feat: adicionar fila administrativa de respostas oficiais removidas"*)\
 > **Branch**: `origin/main` (commit `dfd84ae0d0b7e14558b03ee08abe359e2dcd5057`)\
+> **Validação Pós-C11**: branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d` (base `dfd84ae` + documentação pós-C11 + testes de integração de segurança da consulta de respostas oficiais removidas)\
 > **Resultados Mais Recentes por Suíte de Testes (Execuções Individuais)**:\
-> - **Backend (Spring Boot / Maven)**: **1.842 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados) via `./mvnw clean test` em containers reais (comprovado na branch `agent/claude/c11-hardening-removed-responses`; baseline histórico fundacional: 1.462 testes no STEP 29.3; inventário de código: 200 arquivos de teste e 1.830 métodos anotados com `@Test`/`@ParameterizedTest`)\
-> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) via `flutter test` em 59s; análise estática `flutter analyze` com 0 pendências (48 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`)\
-> - **Admin (React / Vitest)**: **78 testes executados e aprovados** (0 falhas, 0 erros) via `vitest run` em 41.44s; build de produção `tsc && vite build` com sucesso em 442ms (16 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`)\
+> - **Backend (Spring Boot / Maven)**: **1.842 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados) via `./mvnw clean test` em containers reais, na branch integrada (commit `7b9473d`); a mesma contagem foi obtida antes na branch `agent/claude/c11-hardening-removed-responses`. Inventário estático do código (não é resultado de execução): 202 arquivos `.java` em `backend/src/test/`, 199 deles com testes, e 1.820 métodos anotados (1.813 `@Test` e 7 `@ParameterizedTest`). Registros históricos: 1.271 testes no STEP 29.3 (`2d49b38`) e 1.462 no último total registrado neste roadmap antes da consolidação pós-C11 (`298d0bc`)\
+> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) via `flutter test` em 59s; análise estática `flutter analyze` com 0 pendências (48 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`). Evidência de execução anterior do Gemini, não reexecutada na integração\
+> - **Admin (React / Vitest)**: **78 testes executados e aprovados** (0 falhas, 0 erros) via `vitest run` em 41.44s; build de produção `tsc && vite build` com sucesso em 442ms (16 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`). Evidência de execução anterior do Gemini, não reexecutada na integração\
 > *Nota Metodológica*: Cada módulo opera com runners e ambientes independentes (JVM/Maven, Dart/Flutter e Node/Vitest). Não há pipeline de execução unificado do monorepo, mantendo-se os resultados de execução individuais e sem somas agregadas heterogêneas.\
 > **Working Tree**: `Limpo`\
 > **Próximo Trabalho**: Consolidação documental pós-C11, preparação da proposta de Gestão de Estabelecimentos Reivindicados / Catálogo Local (Fase 2 Comercial) e resolução de decisões pendentes (ADR-011)
@@ -27,7 +28,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1842, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS` (baseline atualizado pós-C11; baseline histórico fundacional do STEP 29.3: 1.462 testes). A suíte usa PostgreSQL, SeaweedFS e Redis reais.
+*Resultado esperado*: `Tests run: 1842, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS` (validação pós-C11 na branch integrada, commit `7b9473d`; registros históricos: 1.271 testes no STEP 29.3 e 1.462 em `298d0bc`). A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -1086,14 +1087,15 @@ Por possuírem granularidades e ambientes distintos (especialmente no backend, o
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
   * **Taxa de Aprovação**: 100%
-  * **Evidência / Origem**: Execução documentada na branch `agent/claude/c11-hardening-removed-responses` pós-C11 (`Tests run: 1842, Failures: 0, Errors: 0, Skipped: 0`).
+  * **Evidência / Origem**: Execução na branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d` (`Tests run: 1842, Failures: 0, Errors: 0, Skipped: 0`); a mesma contagem foi obtida antes na branch `agent/claude/c11-hardening-removed-responses` (`a65f8b3`).
   * **Ambiente de Teste**: Maven (`./mvnw clean test`), Java 25 LTS, JUnit 5 e Spring Boot 4.1.1 sob perfil `local`, orquestrando containers reais de PostgreSQL 18 + PostGIS 3.6, Redis 7 e SeaweedFS (compatível S3).
 * **Inventário Estático de Código de Teste**:
-  * **Arquivos de Teste**: 200 arquivos em `backend/src/test/`.
-  * **Métodos Anotados de Teste**: 1.830 declarações no código-fonte (1.823 com anotação `@Test` e 7 com `@ParameterizedTest`). A expansão das invocações parametrizadas pelo runner Surefire gera os 1.842 casos executados.
+  * **Arquivos de Teste**: 202 arquivos `.java` em `backend/src/test/`, dos quais 199 contêm métodos de teste (os demais são classes de apoio).
+  * **Métodos Anotados de Teste**: 1.820 declarações no código-fonte da branch integrada (1.813 com anotação `@Test` e 7 com `@ParameterizedTest`); na base `dfd84ae`, 1.815 (1.808 e 7). Na execução, os 7 métodos parametrizados geram 29 invocações, que somadas aos 1.813 métodos `@Test` resultam nos 1.842 casos executados.
 * **Histórico de Baselines do Backend**:
-  * *Baseline Fundacional (STEP 29.3)*: 1.462 testes verdes na consolidação dos passos 24 a 29 (Cold Start, Content Lifecycle, Moderação Admin V1, Outbox, Storage GC e Session Cleanup).
-  * *Evolução Pós-Fundação (Ciclos C2 a C11)*: Inclusão de 380 testes de execução adicionais cobrindo ciclo de vida de contas (`C2`), moderação e denúncias de discussões (`C3`), normalização e unaccent de catálogo (`C5.1`), contas comerciais e reivindicação de locais (`C9`), revalidação de privilégios de moderação contra stale tokens (`C10`) e respostas oficiais comerciais (`C11`).
+  * *STEP 29.3* (`2d49b38`): 1.271 testes verdes no checkpoint do Session Cleanup, que fechou os passos 24 a 29 (Cold Start, Content Lifecycle, Moderação Admin V1, Outbox, Storage GC e Session Cleanup).
+  * *Último registro antes da consolidação pós-C11* (`298d0bc`, 06/10/2026): 1.462 testes verdes, depois da Observabilidade V1 (1.293 testes em `22b465e`), do rate limiting distribuído, do estado da conta nas mutações (`C2` Fase 1) e das denúncias e moderação de discussões (`C3`).
+  * *Evolução posterior a `298d0bc`*: 380 testes de execução adicionais (1.842 − 1.462), cobrindo o ciclo de vida e o purge de contas (`C2`), normalização e unaccent de catálogo (`C5.1`), contas comerciais e reivindicação de locais (`C9`), revalidação de privilégios de moderação contra stale tokens (`C10`) e respostas oficiais comerciais (`C11`).
 
 ---
 
