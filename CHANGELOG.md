@@ -3,6 +3,32 @@
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/), e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.3.0] - 2026-10-14
+
+### Adicionado
+- **Respostas Oficiais de Empresas a Avaliações e Discussões (`C11`)**:
+  - **Backend Central (`backend`)**:
+    - Endpoints para publicação de respostas oficiais a avaliações (`POST /api/v1/reviews/{reviewId}/business-responses`) e discussões raiz (`POST /api/v1/discussions/{discussionId}/business-responses`), com validação de payload (até 2.000 caracteres) e garantia de no máximo uma resposta ativa por par (empresa, alvo).
+    - Endpoints de consulta paginada de respostas oficiais ativas por avaliação e discussão (`GET /.../business-responses`), e verificação de elegibilidade (`GET /api/v1/reviews/{reviewId}/business-responses/eligibility`).
+    - Remoção autônoma da própria resposta pela empresa com HTTP 204 (`DELETE /api/v1/business-responses/{responseId}`).
+    - Fila administrativa de consulta de respostas oficiais removidas (`GET /api/v1/admin/business-responses/removed`) com paginação e filtros dinâmicos por avaliação, discussão, conta comercial, local e autor da remoção (`BUSINESS` ou `MODERATION`).
+    - Ação administrativa de moderação (`POST /api/v1/admin/business-responses/{responseId}/moderate`) permitindo remoção e restauração auditada (`RESTORE_RESPONSE`) com justificativa formal obrigatória (15 a 1.000 caracteres) e código de motivo.
+    - Migrações Flyway `V24__business_responses.sql` (tabelas `business_responses` e `business_response_moderation_audit_logs`) e `V25__business_responses_removed_index.sql` (índice parcial `idx_business_responses_removed`).
+    - Proteção distribuída contra abuso via rate limit deslizante no Redis (`BUSINESS_RESPONSE_CREATION`), com fallback resiliente em memória e resposta HTTP 429 RFC 7807 (`Retry-After`).
+  - **Painel Administrativo Web (`apps/admin`)**:
+    - Nova aba "Respostas Oficiais Removidas" integrada à navegação principal e badges operacionais.
+    - Fila de triagem `RemovedBusinessResponsesQueue` com visualização tabular completa, filtros dinâmicos por autor da remoção (`BUSINESS` vs `MODERATION`), dados do estabelecimento e local, data de criação, data de remoção e data da última moderação (`moderatedAt`).
+    - Modal de restauração auditado `RestoreBusinessResponseModal` com validação de justificativa, confirmação prévia, e tratamento robusto de conflitos concorrentes (`409`, `403`, `404`) com recarga reativa e sem mutação otimista.
+    - Recuperação resiliente de páginas em caso de remoções que deixem a paginação fora do intervalo válido.
+    - Suíte Vitest expandida para 78 testes cobrindo todos os fluxos da nova área com 100% de aprovação.
+  - **Aplicativo Mobile (`apps/mobile`)**:
+    - Exibição visual destacada de respostas oficiais de estabelecimentos em avaliações e discussões com crachá de verificação oficial da empresa proprietária.
+    - Ações contextuais de resposta oficial para proprietários verificados diretamente na tela de detalhes, com suporte a criação e exclusão.
+    - Suíte com 618 testes automatizados aprovados no Flutter (`flutter test`).
+- **Segurança e Validação de Moderação em Runtime (`C10`)**:
+  - Implementação da `ModeratorRolePolicy` no backend, validando permissões de moderação e estado da conta do moderador em tempo real contra o banco de dados em endpoints administrativos sensíveis.
+  - Mitigação de tokens JWT ainda válidos após a revogação de privilégios (*stale tokens*): operações não autorizadas são bloqueadas com HTTP 403 (`FORBIDDEN`, RFC 7807) após a revalidação da política de papéis. Essa resposta não revoga nem encerra a sessão.
+
 ---
 
 ## [0.2.0] - 2026-10-09

@@ -171,6 +171,10 @@ flutter run
 - [ADR-007: Evolução em Fases do Scanner e Visão Computacional](docs/decisions/ADR-007-scanner-and-vision-evolution.md)
 - [ADR-008: Separação de Reputação e Recompensas Cosméticas](docs/decisions/ADR-008-reputation-and-rewards-separation.md)
 - [ADR-009: Modelo de Review Target e Raiz Polimórfica (RateableTarget)](docs/decisions/ADR-009-review-target-model.md)
+- [ADR-010: Garbage Collection e Retenção de Objetos Órfãos no Storage](docs/decisions/ADR-010-storage-garbage-collection.md)
+- [ADR-011: Retenção e Expiração de Sessões de Usuários](docs/decisions/ADR-011-session-retention-and-cleanup.md)
+- [ADR-012: Observabilidade e Rastreabilidade Distribuída](docs/decisions/ADR-012-observability.md)
+- [ADR-013: Rate Limiting Distribuído e Proteção Contra Abuso](docs/decisions/ADR-013-distributed-rate-limiting.md)
 - [Relatório de Auditoria da Fundação](docs/development/foundation-audit.md)
 - [Matriz de Versões Homologadas](docs/development/versions.md)
 
@@ -209,15 +213,26 @@ flutter run
   - Proteção integral de privacidade, sem expor IDs de autores ou denunciantes.
 
 - **Contas Comerciais e Reivindicação de Locais (Fase 2 / C9)**:
-  - APIs REST para abertura de contas comerciais (`/api/v1/business-accounts`), listagem de contas do usuário logado e submissão de solicitações de reivindicação de locais físicos;
+  - APIs REST para abertura de contas comerciais (`/api/v1/business-accounts`), listagem de contas do usuário logado e submissão de solicitações de reivindicação de locais físicos (tabela `place_claim_requests`), vinculando o local via `places.claimed_by_business_id`;
   - Fila administrativa de reivindicações (`/api/v1/admin/place-claims`) para análise e decisão (`APPROVE` / `REJECT`) por moderadores e administradores;
   - Experiência mobile para administradores em "Minhas empresas", com acompanhamento de status e solicitação direta na tela de detalhes de locais;
   - Painel administrativo web com fila de triagem de solicitações, filtros por status e modal de decisão auditado com justificativa obrigatória;
   - Preservação estrita de privacidade: dados fiscais e evidências restritos ao proprietário e à moderação, sem exposição de identificadores internos de usuários.
 
+- **Segurança de Moderação em Runtime e Mitigação de Stale Tokens (C10)**:
+  - Verificação dinâmica em tempo de execução das permissões de moderação e do status da conta do moderador (`ModeratorRolePolicy`) diretamente contra o banco de dados;
+  - Mitigação de tokens JWT ainda válidos após a revogação de privilégios: operações não autorizadas são bloqueadas com `403 FORBIDDEN` (RFC 7807) após a revalidação da política de papéis. Essa resposta não revoga nem encerra a sessão.
+
+- **Respostas Oficiais Comerciais e Moderação Multiplataforma (Fase 2 / C11)**:
+  - **Backend REST API**: Publicação, consulta e exclusão de respostas oficiais de estabelecimentos comerciais a avaliações (`/api/v1/reviews/{reviewId}/business-responses`) e discussões raiz (`/api/v1/discussions/{discussionId}/business-responses`), com unicidade de resposta ativa por par (empresa, alvo), rate limiting distribuído com Redis (`BUSINESS_RESPONSE_CREATION`), fila administrativa de respostas removidas (`/api/v1/admin/business-responses/removed`) e moderação/restauração formal auditada com justificativa obrigatória (15 a 1.000 caracteres);
+  - **Cliente Mobile (Flutter)**: Renderização destacada de respostas oficiais com selo de verificação da empresa proprietária em avaliações e discussões, além de fluxo de resposta para proprietários verificados;
+  - **Painel Administrativo Web (React + TypeScript + Vite)**: Nova área "Respostas Oficiais Removidas" com fila de triagem paginada, filtros avançados (`BUSINESS` / `MODERATION`), visualização contextual de datas (`moderatedAt`), status de restaurabilidade (`restorable`) e modal de restauração com tratamento de conflitos e recarga reativa.
+
 ### 7.2 Funcionalidades Planejadas (Fases Futuras)
 
-- Gestão avançada de estabelecimentos e respostas a avaliações por proprietários verificados (Fase 2);
+- Gestão avançada de estabelecimentos e catálogo local por proprietários verificados (Fase 2);
+- Eventos temporais de estabelecimentos físicos (Fase 2);
+- Provedor real de notificações push para dispositivos móveis (Fase 2);
 - Catálogo global e curadoria de marcas e produtos (Fase 2);
 - Perfis corporativos, métricas comerciais e anúncios patrocinados (Fase 3);
 - Microserviço autônomo de visão computacional em Python com embeddings visuais (`services/vision`).
