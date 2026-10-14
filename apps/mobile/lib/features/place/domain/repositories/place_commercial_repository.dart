@@ -15,4 +15,3 @@ abstract class PlaceCommercialRepository {
     int size = 50,
   });
 }
-

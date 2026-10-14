@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_commercial_entities.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_commercial_repository.dart';
@@ -13,10 +14,15 @@ class _FakeCommercialRepository implements PlaceCommercialRepository {
   Exception? amenitiesException;
   Exception? offersException;
 
+  Future<PlaceOpeningHours> Function(String placeId)? onGetOpeningHours;
+  Future<PlaceAmenities> Function(String placeId)? onGetAmenities;
+  Future<PlaceOffersPage> Function(String placeId, int page, int size)? onGetOffers;
+
   int requestedOffersPage = -1;
 
   @override
   Future<PlaceOpeningHours> getOpeningHours(String placeId) async {
+    if (onGetOpeningHours != null) return onGetOpeningHours!(placeId);
     if (openingHoursException != null) throw openingHoursException!;
     return openingHoursToReturn ??
         const PlaceOpeningHours(
@@ -35,6 +41,7 @@ class _FakeCommercialRepository implements PlaceCommercialRepository {
 
   @override
   Future<PlaceAmenities> getAmenities(String placeId) async {
+    if (onGetAmenities != null) return onGetAmenities!(placeId);
     if (amenitiesException != null) throw amenitiesException!;
     return amenitiesToReturn ??
         const PlaceAmenities(
@@ -47,6 +54,7 @@ class _FakeCommercialRepository implements PlaceCommercialRepository {
   @override
   Future<PlaceOffersPage> getOffers(String placeId, {int page = 0, int size = 50}) async {
     requestedOffersPage = page;
+    if (onGetOffers != null) return onGetOffers!(placeId, page, size);
     if (offersException != null) throw offersException!;
     return offersPageToReturn ??
         PlaceOffersPage(
@@ -78,6 +86,12 @@ void main() {
     setUp(() {
       repository = _FakeCommercialRepository();
       notifier = PlaceCommercialNotifier(repository: repository, placeId: 'place-test');
+    });
+
+    tearDown(() {
+      if (!notifier.isDisposed) {
+        notifier.dispose();
+      }
     });
 
     test('loadAll carrega as três seções com sucesso', () async {
@@ -216,6 +230,137 @@ void main() {
       expect(notifier.state.openingHoursState, isA<SectionLoaded<PlaceOpeningHours>>());
       expect(notifier.state.amenitiesState, isA<SectionLoaded<PlaceAmenities>>());
       expect(notifier.state.offersState, isA<SectionLoaded<PlaceOffersData>>());
+    });
+
+    test('C1: resposta atrasada de loadMoreOffers é descartada após recarga completa e não sobrescreve estado', () async {
+      const offerA = PlaceProductOffer(
+        product: OfferedProductSummary(
+          id: 'prod-A',
+          name: 'Produto A',
+          category: 'BEBIDA',
+        ),
+        availability: 'AVAILABLE',
+        price: 10.0,
+      );
+
+      const offerB = PlaceProductOffer(
+        product: OfferedProductSummary(
+          id: 'prod-B',
+          name: 'Produto B',
+          category: 'COMIDA',
+        ),
+        availability: 'AVAILABLE',
+        price: 25.0,
+      );
+
+      // 1. A lista inicial contém a oferta A
+      repository.offersPageToReturn = const PlaceOffersPage(
+        content: [offerA],
+        pageNumber: 0,
+        pageSize: 1,
+        totalElements: 2,
+        totalPages: 2,
+        isLast: false,
+      );
+      await notifier.loadOffers();
+
+      final initialData = (notifier.state.offersState as SectionLoaded<PlaceOffersData>).data;
+      expect(initialData.offers.length, 1);
+      expect(initialData.offers.first.product.id, 'prod-A');
+
+      // 2. Inicie o carregamento da próxima página e mantenha a resposta pendente via Completer
+      final paginationCompleter = Completer<PlaceOffersPage>();
+      repository.onGetOffers = (placeId, page, size) {
+        if (page == 1) {
+          return paginationCompleter.future;
+        }
+        return Future.value(const PlaceOffersPage(
+          content: [],
+          pageNumber: 0,
+          pageSize: 50,
+          totalElements: 0,
+          totalPages: 0,
+          isLast: true,
+        ));
+      };
+
+      final loadMoreFuture = notifier.loadMoreOffers();
+      expect(
+        (notifier.state.offersState as SectionLoaded<PlaceOffersData>).data.isLoadingMore,
+        isTrue,
+      );
+
+      // 3. Inicie uma atualização completa e faça essa atualização terminar com uma lista vazia
+      await notifier.loadOffers();
+
+      final reloadedData = (notifier.state.offersState as SectionLoaded<PlaceOffersData>).data;
+      expect(reloadedData.offers, isEmpty, reason: 'atualização completa resultou em catálogo vazio');
+      expect(reloadedData.currentPage, 0);
+      expect(reloadedData.isLastPage, isTrue);
+
+      // 4. Libere a resposta atrasada da paginação, que contém A e B
+      paginationCompleter.complete(const PlaceOffersPage(
+        content: [offerA, offerB],
+        pageNumber: 1,
+        pageSize: 1,
+        totalElements: 2,
+        totalPages: 2,
+        isLast: true,
+      ));
+
+      await loadMoreFuture;
+
+      // 5. Confirme que a interface continua sem ofertas antigas, que a paginação corresponde ao resultado
+      // mais recente e que não há flags de carregamento indevidamente presas
+      final finalData = (notifier.state.offersState as SectionLoaded<PlaceOffersData>).data;
+      expect(finalData.offers, isEmpty, reason: 'resposta obsoleta de paginação não pode poluir catálogo recarregado');
+      expect(finalData.currentPage, 0);
+      expect(finalData.isLastPage, isTrue);
+      expect(finalData.isLoadingMore, isFalse, reason: 'flag isLoadingMore não deve ser alterada por resposta obsoleta');
+      expect(finalData.loadMoreError, isNull);
+    });
+
+    test('B1: descarte do notifier durante chamada assíncrona não dispara exceção nem notifica após dispose', () async {
+      final hoursCompleter = Completer<PlaceOpeningHours>();
+      final amenitiesCompleter = Completer<PlaceAmenities>();
+      final offersCompleter = Completer<PlaceOffersPage>();
+
+      repository.onGetOpeningHours = (_) => hoursCompleter.future;
+      repository.onGetAmenities = (_) => amenitiesCompleter.future;
+      repository.onGetOffers = (_, __, ___) => offersCompleter.future;
+
+      var listenerCallCount = 0;
+      var notificationsAfterDispose = 0;
+
+      notifier.addListener(() {
+        listenerCallCount++;
+        if (notifier.isDisposed) {
+          notificationsAfterDispose++;
+        }
+      });
+
+      // Dispara as chamadas assíncronas concorrentes
+      final loadAllFuture = notifier.loadAll();
+      expect(listenerCallCount, greaterThan(0), reason: 'deve notificar estados Loading iniciais');
+
+      // Descarta o notifier enquanto as três chamadas ainda estão pendentes
+      notifier.dispose();
+      expect(notifier.isDisposed, isTrue);
+
+      // Libera as respostas pendentes (inclusive erros para testar os blocos catch)
+      hoursCompleter.completeError(Exception('Falha de rede tardia em horários'));
+      amenitiesCompleter.complete(const PlaceAmenities(
+        placeId: 'p-1',
+        configured: true,
+        amenities: [],
+      ));
+      offersCompleter.completeError(Exception('Falha de rede tardia em ofertas'));
+
+      // Aguarda a conclusão sem lançar exceção
+      await expectLater(loadAllFuture, completes);
+
+      // Confirma que nenhuma notificação foi emitida após o descarte
+      expect(notificationsAfterDispose, 0, reason: 'nenhum notifyListeners deve ser disparado após dispose()');
     });
   });
 }

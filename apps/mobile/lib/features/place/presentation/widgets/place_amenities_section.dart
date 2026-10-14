@@ -180,4 +180,3 @@ class PlaceAmenitiesSection extends StatelessWidget {
     return const SizedBox.shrink();
   }
 }
-

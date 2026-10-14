@@ -157,4 +157,3 @@ class PlaceCommercialState {
       amenitiesState.hashCode ^
       offersState.hashCode;
 }
-

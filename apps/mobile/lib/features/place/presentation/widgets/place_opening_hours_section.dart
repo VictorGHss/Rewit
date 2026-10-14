@@ -169,4 +169,3 @@ class PlaceOpeningHoursSection extends StatelessWidget {
     return const SizedBox.shrink();
   }
 }
-

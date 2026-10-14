@@ -341,4 +341,3 @@ class PlaceCommercialOffersSection extends StatelessWidget {
     );
   }
 }
-

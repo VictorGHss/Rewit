@@ -47,4 +47,3 @@ class PlaceCommercialRepositoryImpl implements PlaceCommercialRepository {
     return PlaceOffersPageDto.fromJson(decoded).toEntity();
   }
 }
-
