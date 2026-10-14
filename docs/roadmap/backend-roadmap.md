@@ -1121,18 +1121,18 @@ Por possuírem granularidades e ambientes distintos (especialmente no backend, o
 
 ### 12.2 Aplicativo Mobile (`apps/mobile` — Flutter / Dart)
 * **Resultados da Execução Mais Recente Comprovada**:
-  * **Testes Executados**: **618 testes** em 48 arquivos
+  * **Testes Executados**: **643 testes** em 52 arquivos (618 testes pré-existentes + 25 testes novos do STEP F2.4)
   * **Falhas**: `0`
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
   * **Taxa de Aprovação**: 100%
-  * **Evidência / Origem**: Nova validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 em clone isolado sobre o commit `b367322` da branch `agent/claude/business-response-eligibility-policy` (`All tests passed!`), confirmando compatibilidade plena com a política B sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação à base integrada `033a1ab`. A validação histórica anterior do Gemini (pré-política B, realizada na branch `agent/gemini/post-c11-validation-and-docs`) também aprovou os mesmos 618 testes; o tempo de 59s pertence somente a essa execução histórica, e a validação da política B em `b367322` não tem duração registrada aqui.
+  * **Evidência / Origem**: Execução completa via `flutter test` em 49s na branch `agent/gemini/step-f2-4-mobile-commercial-details` sobre a base `0ac60915916f09a20a1f819ed0b489447a0edd27` (`main` com F2.1, F2.2 e F2.3 / PR #7 integrados), confirmando a entrega do STEP F2.4 com 643 testes verdes e zero regressões.
 * **Análise Estática**:
-  * `flutter analyze`: **0 problemas encontrados** (*"No issues found!"*, código de término 0 em 39.6s na validação da política B; 26.8s na execução anterior).
+  * `flutter analyze`: **0 problemas encontrados** (*"No issues found!"*, código de término 0 em 6.5s).
 * **Ambiente e Ferramentas**:
   * Flutter SDK 3.47.7 (Dart 3.13.5).
 * **Escopo e Cobertura Funcional**:
-  * 48 arquivos de teste em `apps/mobile/test/` cobrindo fluxos completos de autenticação segura via `FlutterSecureStorage`, ciclo de vida de contas, navegação, feeds, criação multi-alvo com validação geoespacial, scanner óptico de código de barras e QR Code, discussões aninhadas, notificações e visualização/gestão de respostas oficiais de empresas com selo de verificação.
+  * 52 arquivos de teste em `apps/mobile/test/` cobrindo fluxos completos de autenticação segura via `FlutterSecureStorage`, ciclo de vida de contas, navegação, feeds, criação multi-alvo com validação geoespacial, scanner óptico de código de barras e QR Code, discussões aninhadas, notificações, respostas oficiais comerciais e **consumo e exibição resiliente de informações comerciais no detalhe do local (horários de funcionamento F2.1, comodidades F2.2 e ofertas comerciais oficiais paginadas F2.3)**.
 
 ---
 
@@ -1271,9 +1271,9 @@ Implementado na branch `agent/claude/place-amenities-management` a partir da bas
 
 ---
 
-### 13.4 Fase 2 Comercial — STEP F2.3: Ofertas Comerciais de Produtos por Estabelecimento (Implementado, PR aberto)
+### 13.4 Fase 2 Comercial — STEP F2.3: Ofertas Comerciais de Produtos por Estabelecimento (Concluído e integrado)
 
-Implementado na branch `agent/claude/step-f2-3-product-offers` a partir de `main` em `60e9b0ca76f05708b39319ad8955de0e635f10ba` (F2.1, F2.2 e PR #6 integrados). Publicado em PR para `main`, sem merge.
+Implementado na branch `agent/claude/step-f2-3-product-offers` a partir de `main` em `60e9b0ca76f05708b39319ad8955de0e635f10ba` (F2.1, F2.2 e PR #6 integrados). Auditado de forma independente e integrado em `main` pelo PR #7 no merge commit `0ac60915916f09a20a1f819ed0b489447a0edd27`, consolidando a migração `V28__place_product_offers.sql`.
 
 #### Decisões de produto implementadas
 * **D1 — Preço**: opcional, `NUMERIC(12, 2)`, sempre BRL. `null` = não divulgado; `0.00` = gratuito; negativo, mais de duas casas ou acima de `9999999999.99` são recusados. Sem multimoeda.
@@ -1300,21 +1300,57 @@ Implementado na branch `agent/claude/step-f2-3-product-offers` a partir de `main
 * **Mutação da trava** (cópia temporária isolada): trocando `findByIdForUpdate` por `findById` em `OfferCommandChecks`, `concurrentWritesSerializeOnPlaceLock` e `writeWaitsForConcurrentOwnerChangeAndIsRefused` falharam com `a gravação deveria estar esperando a trava de places`; sem a mutação, passam.
 * **Verificação do trigger T2**: numa transação desfeita no PostgreSQL local, a troca de titular levou as ofertas do local de 1 a 0; com o trigger desabilitado (mutação), a oferta sobreviveu. O trigger continuou habilitado após o rollback.
 * **Mutação da condição T2** (cópia isolada contra um banco temporário próprio, `rewit_mut_f23`, migrado do zero e apagado depois, para não alterar o checksum da V28 no banco compartilhado): com a condição antiga `business_account_id IS DISTINCT FROM NEW.claimed_by_business_id`, `ownerChangeRemovesEveryOfferEvenOfIncomingAccount` falhou com `expected: <0> but was: <1>`, enquanto o cenário A → B original continuou passando; com a condição corrigida, passa.
-* **Banco local**: como a V28 ainda não está em `main`, a correção foi feita na própria V28. No PostgreSQL local, a V28 antiga (com 47 linhas de oferta criadas só pelos testes) foi desfeita numa transação e reaplicada pelo Flyway com o novo checksum.
+* **Banco local**: como a V28 ainda não estava em `main`, a correção foi feita na própria V28. No PostgreSQL local, a V28 antiga (com 47 linhas de oferta criadas só pelos testes) foi desfeita numa transação e reaplicada pelo Flyway com o novo checksum.
 * **Suíte completa** (`./mvnw clean test`, working tree sobre `60e9b0c` com o F2.3): **1.981 testes, 0 falhas, 0 erros, 0 ignorados**, `BUILD SUCCESS` em 3m03s, com a T2 endurecida. A primeira versão do PR registrou 1.980.
-* Mobile e admin não foram alterados nem reexecutados: os endpoints são novos e ainda sem consumidor.
-
-#### Limitações conhecidas
-* Não há trava de produto: um produto desativado entre a verificação e o commit do PUT deixa uma oferta que a leitura já oculta.
-* O preço é a última gravação; não há histórico de preços.
-* Desvincular o local apaga as ofertas, coerente com T2; se o produto quiser tratar a desvinculação como inelegibilidade temporária, a regra do trigger precisa mudar.
 
 ---
 
-### 13.5 Próximos Passos da Fase 2 Comercial
-* **STEP F2.3**: revisar e integrar o PR das ofertas comerciais (§13.4).
-* **Transferência formal de titularidade para horários e comodidades**: ainda não decidida. A decisão T2 vale só para ofertas; horários (F2.1) e comodidades (F2.2) continuam com a regra F2 de ocultação, inclusive o retorno à titular anterior (§13.2 A3 e §13.3). Um futuro fluxo de transferência deve decidir se invalida essas configurações.
+### 13.5 Fase 2 Comercial — STEP F2.4: Mobile — Informações Comerciais no Detalhe do Local (Concluído)
+
+Implementado na branch `agent/gemini/step-f2-4-mobile-commercial-details` a partir da base integrada `0ac60915916f09a20a1f819ed0b489447a0edd27` (merge do PR #7 com a V28).
+
+#### Escopo entregue no Flutter (`apps/mobile/`)
+* **Consumo e endpoints**:
+  * Adicionados endpoints dedicados em `ApiEndpoints`: `placeOpeningHours`, `placeAmenities` e `placeOffers`.
+  * `PlaceCommercialRepository` e `PlaceCommercialRepositoryImpl` consumindo:
+    * `GET /api/v1/places/{placeId}/opening-hours`
+    * `GET /api/v1/places/{placeId}/amenities`
+    * `GET /api/v1/places/{placeId}/offers?page=0&size=50`
+* **Entidades e DTOs resilientes**:
+  * `PlaceOpeningHours`, `DaySchedule`, `TimeInterval`: manipulação de horários semanais, múltiplos intervalos e dias fechados.
+  * `PlaceAmenities`, `PlaceAmenityItem`: mapeamento de comodidades do catálogo oficial com rótulos amigáveis em português e ícones Material correspondentes (`Icons.wifi`, `Icons.ac_unit`, `Icons.pets`, `Icons.local_parking`, etc.).
+  * `PlaceOffersPage`, `PlaceProductOffer`, `OfferedProductSummary`: tratamento de paginação de catálogo comercial, disponibilidade (`AVAILABLE`, `OUT_OF_STOCK`) e preços opcionais em BRL.
+* **Gerenciamento de estado desacoplado**:
+  * `PlaceCommercialState` e `PlaceCommercialNotifier`: estados imutáveis isolados (`SectionState<T>`) para cada seção comercial (`openingHoursState`, `amenitiesState`, `offersState`).
+  * Concorrência resiliente: `loadAll()` dispara as três consultas em paralelo; uma falha de rede ou HTTP 5xx em horários, comodidades ou ofertas não bloqueia nem contamina as demais, nem impede a renderização dos dados principais do local, estatísticas ou avaliações comunitárias.
+  * Tratamento de erro sutil: faixas de alerta suaves com botão de nova tentativa ("Tentar novamente") restrito à seção com falha.
+  * Paginação contínua de ofertas: `loadMoreOffers()` com descarte de itens duplicados por `product.id` e preservação do estado carregado anterior em caso de erro na página subsequente.
+* **Experiência do Usuário na `PlaceDetailScreen`**:
+  * **Horários**: grade semanal com destaque para Segunda a Domingo, múltiplos turnos formatados ("08:00 às 12:00, 13:30 às 18:00") e indicação clara de dias fechados ("Fechado"). Quando `configured = false`, exibe aviso discreto "Horários não informados pelo estabelecimento." sem expor detalhes internos.
+  * **Comodidades**: chips com ícones temáticos e rótulos legíveis. Diferenciação visual entre `configured = false` ("Comodidades não informadas pelo estabelecimento.") e `configured = true` com lista vazia ("O estabelecimento declarou não oferecer comodidades deste catálogo.").
+  * **Ofertas Oficiais**:
+    * Cartões de produtos oferecidos com identificação de nome, marca/modelo, badge de disponibilidade ("Disponível" em verde / "Sem estoque" em cinza).
+    * Preço formatado em Real: `null` exibe "Preço não informado", `0.00` exibe "Gratuito" e valores positivos formatados como "R$ XX,XX".
+    * Botão de paginação "Carregar mais ofertas (X de Y)" que desaparece automaticamente ao atingir a última página.
+    * Toque no cartão direciona para a tela de detalhes do produto (`AppRouter.productDetail`) injetando o contexto do estabelecimento (`contextPlace: place`).
+  * **Separação conceitual estrita**: a seção de ofertas oficiais ("Ofertas Oficiais do Estabelecimento") é visualmente distinta da seção de presenças comunitárias ("Produtos neste local"), mantendo os dois fluxos desacoplados e operando sem conflitos.
+  * **Atualização (Pull-to-refresh)**: o `RefreshIndicator` da tela atualiza simultaneamente os dados básicos do local, avaliações comunitárias, produtos comunitários e todas as seções comerciais.
+
+#### Testes e validação
+* **Suíte mobile completa**: **643 testes executados, 0 falhas** (`All tests passed!`), código de saída 0 em 49s.
+* **Novas suítes dedicadas (25 testes adicionais)**:
+  * `place_commercial_dtos_test.dart` (6 testes): parsing de JSONs com sucesso, validação de dias, comodidades conhecidas/desconhecidas, paginação e desserialização resiliente de preços e disponibilidade.
+  * `place_commercial_repository_test.dart` (4 testes): integração com `RewitHttpClient`, cabeçalhos de autenticação e propagação correta de respostas.
+  * `place_commercial_notifier_test.dart` (6 testes): concorrência de carga, isolamento de falhas, paginação incremental com deduplicação por produto e retenção de estado em falha.
+  * `place_detail_screen_commercial_test.dart` (9 testes): integração de interface completa, grade de horários, alternância `configured = false` vs `configured = true`, catálogo de comodidades com ícones, preços BRL / Gratuito / Ausente, paginação de ofertas na tela, navegação com `contextPlace`, falhas isoladas sem bloqueio da tela e pull-to-refresh.
+* **Preservação de testes existentes**: 10/10 testes legados de `place_detail_screen_test.dart` e todos os testes de produto, busca, avaliação e navegação continuam passando integralmente.
+* **Análise estática**: `flutter analyze` finalizado com **0 problemas** (*"No issues found!"*).
+
+---
+
+### 13.6 Próximos Passos da Fase 2 Comercial
+* **Transferência formal de titularidade para horários e comodidades**: ainda não decidida. A decisão T2 vale exclusivamente para ofertas (invalidação definitiva via trigger V28); horários (F2.1) e comodidades (F2.2) continuam sob a regra F2 de ocultação com retorno automático caso o local retorne à mesma titularidade (§13.2 A3 e §13.3). Um futuro fluxo de transferência deve decidir se invalida essas configurações.
 * **Transição de Notificações**: Transição do provedor mock do Outbox Pattern (`MockNotificationAdapter`) para push real (FCM/APNs).
 
 > [!NOTE]
-> O subsistema de Moderação Administrativa e Respostas Oficiais está 100% operacional em backend, mobile e admin. As duas primeiras fatias da Fase 2 Comercial estão integradas em `main`: F2.1 (Horários de Funcionamento, `a9b24f0`) e F2.2 (Comodidades, `60e9b0c`). A terceira (F2.3, Ofertas Comerciais) está implementada no backend com PR aberto. Nenhuma delas altera mobile ou admin.
+> O subsistema de Moderação Administrativa e Respostas Oficiais está 100% operacional em backend, mobile e admin. Todas as quatro fatias da Fase 2 Comercial estão concluídas: F2.1 (Horários de Funcionamento no backend, `a9b24f0`), F2.2 (Comodidades no backend, `60e9b0c`), F2.3 (Ofertas Comerciais no backend, `0ac6091`) e F2.4 (Informações Comerciais no Mobile Flutter, branch `agent/gemini/step-f2-4-mobile-commercial-details`).

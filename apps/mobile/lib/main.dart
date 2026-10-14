@@ -11,6 +11,7 @@ import 'package:rewit_mobile/features/business/data/repositories/business_respon
 import 'package:rewit_mobile/features/discussions/data/repositories/discussion_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/data/repositories/feed_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
+import 'package:rewit_mobile/features/place/data/repositories/place_commercial_repository_impl.dart';
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
@@ -53,6 +54,7 @@ void main() async {
   final searchRepository = SearchRepositoryImpl(httpClient: httpClient);
   final userProfileRepository = UserProfileRepositoryImpl(httpClient: httpClient);
   final placeRepository = PlaceRepositoryImpl(httpClient: httpClient);
+  final placeCommercialRepository = PlaceCommercialRepositoryImpl(httpClient: httpClient);
   final productRepository = ProductRepositoryImpl(httpClient: httpClient);
   final mediaRepository = ReviewMediaRepositoryImpl(client: httpClient);
   final mediaPickerService = ImagePickerMediaService();
@@ -80,6 +82,7 @@ void main() async {
     searchRepository: searchRepository,
     userProfileRepository: userProfileRepository,
     placeRepository: placeRepository,
+    placeCommercialRepository: placeCommercialRepository,
     productRepository: productRepository,
     notificationRepository: notificationRepository,
     businessRepository: businessRepository,

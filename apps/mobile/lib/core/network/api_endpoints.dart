@@ -104,4 +104,10 @@ class ApiEndpoints {
       '/api/v1/discussions/$discussionId/business-responses';
   static String businessResponse(String responseId) =>
       '/api/v1/business-responses/$responseId';
+
+  // Informações Comerciais de Estabelecimentos (F2.1, F2.2, F2.3)
+  static String placeOpeningHours(String placeId) => '/api/v1/places/$placeId/opening-hours';
+  static String placeAmenities(String placeId) => '/api/v1/places/$placeId/amenities';
+  static String placeOffers(String placeId, {int page = 0, int size = 50}) =>
+      '/api/v1/places/$placeId/offers?page=$page&size=$size';
 }
