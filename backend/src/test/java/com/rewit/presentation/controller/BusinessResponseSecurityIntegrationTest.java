@@ -24,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -35,12 +36,16 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -54,6 +59,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class BusinessResponseSecurityIntegrationTest {
 
     private static final String JUSTIFICATION = "Violação das diretrizes da comunidade verificada formalmente.";
+    private static final String REMOVED_RESPONSES_PATH = "/api/v1/admin/business-responses/removed";
 
     @Autowired
     private WebApplicationContext webApplicationContext;
@@ -445,8 +451,181 @@ class BusinessResponseSecurityIntegrationTest {
     }
 
     // ---------------------------------------------------------------------------------------------------------
+    // 6. Consulta administrativa de respostas removidas: papéis, revalidação, isolamento e erros
+    // ---------------------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("ADMIN consulta removidas: só REMOVED, mais recente primeiro, paginação e filtros por alvo e origem")
+    void adminQueriesRemovedResponsesWithFiltersAndPagination() throws Exception {
+        TestUser businessAdmin = registerUser("q_adm_biz");
+        TestUser reviewer = registerUser("q_adm_rev");
+        TestUser admin = withRole(registerUser("q_adm_admin"), "ADMIN");
+
+        UUID placeId = createPlace();
+        UUID firstReviewId = createReview(reviewer.id(), placeId, "PUBLIC", ReviewStatus.ACTIVE);
+        UUID secondReviewId = createReview(reviewer.id(), placeId, "PUBLIC", ReviewStatus.ACTIVE);
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        // Removida pela moderação; depois, na outra avaliação, uma retirada pela empresa e a nova resposta ativa
+        UUID moderatedId = publishReviewResponse(businessAdmin, firstReviewId, accountId, placeId, "Resposta moderada");
+        moderate(admin, moderatedId, BusinessResponseModerationAction.REMOVE_RESPONSE, "SPAM")
+                .andExpect(status().isOk());
+        UUID withdrawnId = publishReviewResponse(businessAdmin, secondReviewId, accountId, placeId, "Resposta retirada");
+        mockMvc.perform(withToken(delete("/api/v1/business-responses/{responseId}", withdrawnId), businessAdmin))
+                .andExpect(status().isNoContent());
+        publishReviewResponse(businessAdmin, secondReviewId, accountId, placeId, "Resposta ativa");
+
+        // Página 0: a remoção mais recente, da empresa, com outra resposta ativa no alvo e sem contexto de moderação
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH)
+                        .param("businessAccountId", accountId.toString())
+                        .param("size", "1"), admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(withdrawnId.toString()))
+                .andExpect(jsonPath("$.content[0].reviewId").value(secondReviewId.toString()))
+                .andExpect(jsonPath("$.content[0].removedBy").value("BUSINESS"))
+                .andExpect(jsonPath("$.content[0].restorable").value(false))
+                .andExpect(jsonPath("$.content[0].otherActiveResponse").value(true))
+                .andExpect(jsonPath("$.content[0].moderationReasonCode").value(nullValue()))
+                .andExpect(jsonPath("$.content[0].moderatedAt").value(nullValue()))
+                .andExpect(jsonPath("$.content[0].authorUserId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].taxId").doesNotExist())
+                .andExpect(jsonPath("$.content[0].moderatorUserId").doesNotExist())
+                .andExpect(jsonPath("$.pageNumber").value(0))
+                .andExpect(jsonPath("$.pageSize").value(1))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.isLast").value(false));
+
+        // Página 1: a removida pela moderação, restaurável, com o motivo da decisão; a resposta ativa nunca aparece
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH)
+                        .param("businessAccountId", accountId.toString())
+                        .param("size", "1")
+                        .param("page", "1"), admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(moderatedId.toString()))
+                .andExpect(jsonPath("$.content[0].removedBy").value("MODERATION"))
+                .andExpect(jsonPath("$.content[0].restorable").value(true))
+                .andExpect(jsonPath("$.content[0].otherActiveResponse").value(false))
+                .andExpect(jsonPath("$.content[0].moderationReasonCode").value("SPAM"))
+                .andExpect(jsonPath("$.content[0].moderationJustification").value(JUSTIFICATION))
+                .andExpect(jsonPath("$.isLast").value(true));
+
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH)
+                        .param("businessAccountId", accountId.toString())
+                        .param("reviewId", firstReviewId.toString()), admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(moderatedId.toString()));
+
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH)
+                        .param("businessAccountId", accountId.toString())
+                        .param("removedBy", "BUSINESS"), admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(withdrawnId.toString()));
+    }
+
+    @Test
+    @DisplayName("Consulta de removidas revalida o cargo no banco: rebaixado a USER recebe 403 FORBIDDEN; ADMIN rebaixado a MODERATOR segue autorizado")
+    void removedResponsesQueryRevalidatesCurrentRole() throws Exception {
+        TestUser moderator = withRole(registerUser("q_demoted_mod"), "MODERATOR");
+        TestUser admin = withRole(registerUser("q_demoted_adm"), "ADMIN");
+
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("size", "1"), moderator))
+                .andExpect(status().isOk());
+
+        // Os tokens antigos continuam com o claim da emissão (MODERATOR e ADMIN)
+        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.id());
+        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", admin.id());
+
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("size", "1"), moderator))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("size", "1"), admin))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("Promovido a MODERATOR no banco com token antigo de USER: barrado pelo papel do token (403) até um novo login")
+    void promotedUserNeedsNewTokenToQueryRemovedResponses() throws Exception {
+        TestUser user = registerUser("q_promoted");
+        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", user.id());
+
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("size", "1"), user))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("size", "1"), login(user)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("Moderador suspenso com token ainda válido: consulta de removidas recusada com 401 ACCOUNT_DISABLED")
+    void suspendedModeratorCannotQueryRemovedResponses() throws Exception {
+        TestUser admin = withRole(registerUser("q_susp_admin"), "ADMIN");
+        TestUser moderator = withRole(registerUser("q_susp_mod"), "MODERATOR");
+
+        mockMvc.perform(withToken(post("/api/v1/admin/users/{userId}/suspend", moderator.id()), admin))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("size", "1"), moderator))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+    }
+
+    @Test
+    @DisplayName("Parâmetros inválidos na consulta de removidas: 400 RFC 7807 com code, sem ecoar o valor recebido")
+    void removedResponsesQueryRejectsInvalidParameters() throws Exception {
+        TestUser moderator = withRole(registerUser("q_params_mod"), "MODERATOR");
+
+        List<String[]> cases = List.of(
+                new String[]{"reviewId", "nao-e-uuid", "TYPE_MISMATCH"},
+                new String[]{"businessAccountId", "nao-e-uuid", "TYPE_MISMATCH"},
+                new String[]{"removedBy", "ORIGEM_INEXISTENTE", "TYPE_MISMATCH"},
+                new String[]{"size", "abc", "TYPE_MISMATCH"},
+                new String[]{"page", "-1", "INVALID_PAGE"},
+                new String[]{"size", "0", "INVALID_PAGE_SIZE"},
+                new String[]{"size", "51", "INVALID_PAGE_SIZE"}
+        );
+
+        for (String[] invalid : cases) {
+            ResultActions result = mockMvc.perform(withToken(
+                            get(REMOVED_RESPONSES_PATH).param(invalid[0], invalid[1]), moderator))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.code").value(invalid[2]));
+            // Valor fora do tipo é texto arbitrário do cliente: o detail nomeia o parâmetro, nunca devolve o valor
+            if ("TYPE_MISMATCH".equals(invalid[2])) {
+                result.andExpect(jsonPath("$.detail").value(not(containsString(invalid[1]))));
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------------------
+
+    private UUID publishReviewResponse(TestUser businessAdmin, UUID reviewId, UUID accountId, UUID placeId,
+                                       String content) throws Exception {
+        MvcResult result = mockMvc.perform(withToken(
+                post("/api/v1/reviews/{reviewId}/business-responses", reviewId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(publishBody(accountId, placeId, content)), businessAdmin))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return UUID.fromString(read(result).get("id").asText());
+    }
+
+    private ResultActions moderate(TestUser moderator, UUID responseId, BusinessResponseModerationAction action,
+                                   String reasonCode) throws Exception {
+        return mockMvc.perform(withToken(
+                post("/api/v1/admin/business-responses/{responseId}/moderate", responseId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(moderateBody(action, reasonCode, JUSTIFICATION)), moderator));
+    }
 
     private String publishBody(UUID accountId, UUID placeId, String content) throws Exception {
         return objectMapper.writeValueAsString(Map.of(
