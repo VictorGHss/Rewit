@@ -2,9 +2,9 @@
 
 > **Data de Atualização**: 14/10/2026\
 > **Status do Repositório**: Verde e Estabilizado\
-> **Base Integrada Atual (F2.3 em main)**: commit `0ac60915916f09a20a1f819ed0b489447a0edd27` (merge do PR #7, F2.3 com a migração V28, sobre `60e9b0ca76f05708b39319ad8955de0e635f10ba`, merge do PR #5, F2.2 com V27; sobre `569fb8843966f7adff459e03638d2a439b35c1fb`, merge do PR #6 com as correções de avisos da IDE; ambos sobre `a9b24f02b59781e6ec660953233ec0c360fdb4df`, merge do PR #4 com o F2.1, que veio depois da Política B em `5909410382b819a4d60d626154ff8ce8d4e53973`)\
-> **Branch Atual de Trabalho**: `agent/gemini/step-f2-4-mobile-commercial-details` (STEP F2.4, informações comerciais no mobile; §13.5)\
-> **Referência da Validação Atual**: branch `agent/gemini/step-f2-4-mobile-commercial-details` (STEP F2.4, 27 testes novos no mobile: 645 testes verdes; §13.5)\
+> **Base Integrada Atual (F2.4 em main)**: commit `83716ec6a4ed4fbf813af87137f2e640860687ca` (merge do PR #8, F2.4 com informações comerciais no mobile no commit `7a9254b78f12e04b56444e4279564850de1b9028`; sobre `0ac60915916f09a20a1f819ed0b489447a0edd27`, merge do PR #7 com o F2.3 e a migração V28; sobre `60e9b0ca76f05708b39319ad8955de0e635f10ba`, merge do PR #5, F2.2 com V27; sobre `569fb8843966f7adff459e03638d2a439b35c1fb`, merge do PR #6 com as correções de avisos da IDE; ambos sobre `a9b24f02b59781e6ec660953233ec0c360fdb4df`, merge do PR #4 com o F2.1, que veio depois da Política B em `5909410382b819a4d60d626154ff8ce8d4e53973`)\
+> **Branch Atual de Trabalho**: `agent/gemini/roadmap-post-f2-4-sync` (sincronização documental do roadmap pós-merge do PR #8; §13.5 e §13.6)\
+> **Validação do F2.4 (Histórica Integrada)**: branch `agent/gemini/step-f2-4-mobile-commercial-details` (commit `7a9254b`, 27 testes novos no mobile: 645 testes verdes em 52 arquivos e análise estática `flutter analyze --no-pub` sem problemas antes do merge; integrada em `main` via PR #8 no commit `83716ec`; §13.5)\
 > **Validação do F2.3 (Histórica Integrada)**: branch `agent/claude/step-f2-3-product-offers` (32 testes novos; integrada em `main` via PR #7 no commit `0ac6091`; §13.4)\
 > **Validação do F2.2 (Histórica Integrada)**: branch `agent/claude/place-amenities-management` (HEAD `b025337`, integrada em `main` via PR #5 no commit `60e9b0c`; §13.3)\
 > **Validação do F2.1 (Histórica Integrada)**: branch `agent/gemini/commercial-opening-hours` (Fatia F2.1 concluída com 54 novos testes dedicados e correções pós-auditoria independente F1, F2 com implementação da decisão de produto sobre elegibilidade e visibilidade, F3, F4, F5 e F6)\
@@ -17,11 +17,11 @@
 >   - **Execução F2.1 (Histórica Integrada)**: **1.914 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados, `BUILD SUCCESS`) via `./mvnw clean test` em 3m23s na branch `agent/gemini/commercial-opening-hours`, orquestrando containers reais de PostgreSQL 18 + PostGIS 3.6, Redis 7 e SeaweedFS. Inventário estático do código de teste atual: 206 arquivos `.java` em `backend/src/test/`, 203 arquivos com testes, 1.885 declarações `@Test` e 7 declarações `@ParameterizedTest` (totalizando 1.892 declarações anotadas), cujos métodos parametrizados geram 29 invocações de teste, totalizando exatamente 1.914 casos de teste executados (1.885 + 29 = 1.914). Inclui 54 novos testes dedicados ao F2.1 (13 de domínio, 8 de caso de uso, 9 de controller REST e 24 de segurança/integração com validação determinística de lock). Rastreabilidade da execução: a suíte completa de 1.914 testes foi executada sobre a working tree com base `6e80a611e24cfd4d6f58557bd1210b8365b4180f` contendo a implementação funcional de F2, árvore posteriormente consolidada no commit funcional `5649fa3` (e documentada em `ba95e55`).\
 >   - **Execução da Política B (Histórica Integrada)**: **1.860 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados, `BUILD SUCCESS`) via `./mvnw clean test` em containers reais no commit `8b5dd28` da branch da política B. Inventário estático em `8b5dd28`: 202 arquivos `.java` em `backend/src/test/`, 199 deles com testes, e 1.838 métodos anotados (1.831 `@Test` e 7 `@ParameterizedTest`).\
 >   - **Validação pós-C11 anterior**: 1.842 testes na branch integrada (commit `7b9473d`). Registros históricos: 1.271 testes no STEP 29.3 (`2d49b38`) e 1.462 no último total registrado neste roadmap antes da consolidação pós-C11 (`298d0bc`).\
-> - **Mobile (Flutter / Dart)**: **645 testes executados e aprovados** (0 falhas, 0 erros) em 52 arquivos via `flutter test --no-pub` em 38s na branch `agent/gemini/step-f2-4-mobile-commercial-details`; análise estática `flutter analyze --no-pub` com 0 problemas (*"No issues found!"*, código de término 0 em 5.9s). Inclui 27 novos testes dedicados ao STEP F2.4 (6 de DTOs, 4 de repositório, 8 de notifier com descarte e cancelamento de paginação obsoleta C1/B1, e 9 de integração de tela; §13.5). 618 testes pré-existentes preservados.\
+> - **Mobile (Flutter / Dart)**: **645 testes executados e aprovados** (0 falhas, 0 erros) em 52 arquivos via `flutter test --no-pub` em 38s executados antes do merge na branch `agent/gemini/step-f2-4-mobile-commercial-details` (integrada em `main` via PR #8); análise estática `flutter analyze --no-pub` com 0 problemas (*"No issues found!"*, código de término 0 em 5.9s). Inclui 27 novos testes dedicados ao STEP F2.4 (6 de DTOs, 4 de repositório, 8 de notifier com descarte e cancelamento de paginação obsoleta C1/B1, e 9 de integração de tela; §13.5). 618 testes pré-existentes preservados.\
 > - **Admin (React / Vitest)**: **82 testes executados e aprovados** (0 falhas, 0 erros) em 16 arquivos via `vitest run`, com `eslint` sem pendências e build de produção `tsc && vite build` concluído, no ciclo da política B (conteúdo do commit `8b5dd28`). A execução anterior do Gemini (branch `agent/gemini/post-c11-validation-and-docs`) registrou 78 testes. O STEP F2.1 não introduz alterações no admin; o STEP F2.2 também não, e o admin não foi reexecutado nele. O STEP F2.3 também não altera nem reexecuta o admin.\
 > *Nota Metodológica*: Cada módulo opera com runners e ambientes independentes (JVM/Maven, Dart/Flutter e Node/Vitest). Não há pipeline de execução unificado do monorepo, mantendo-se os resultados de execução individuais e sem somas agregadas heterogêneas.\
 > **Working Tree**: `Limpo`\
-> **Próximo Trabalho**: Validação final e preparação para abertura de PR da branch `agent/gemini/step-f2-4-mobile-commercial-details` (STEP F2.4, §13.5); decisão formal de transferência para horários e comodidades segue pendente (§13.6).
+> **Próximo Trabalho**: Decisão formal sobre a política de transferência de titularidade para horários e comodidades (§13.6); avaliação dos candidatos a trabalho futuro (interface móvel para gestão comercial por empresas, refatorações B2 e B3 no mobile e transição do mock de push para provedor real).
 
 ---
 
@@ -98,7 +98,7 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Contas Comerciais & Reivindicações (C9)** | ✅ CONCLUÍDO | [BusinessAccountController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/BusinessAccountController.java), [AdminPlaceClaimController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/AdminPlaceClaimController.java), tabela `place_claim_requests` via [V23](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V23__place_claim_requests.sql), aprovação/rejeição auditada com justificativa obrigatória e vínculo a `places.claimed_by_business_id`. | Evolução para gestão comercial do estabelecimento reivindicado. |
 | **Endurecimento de Autorização de Moderação (C10)** | ✅ CONCLUÍDO | [ModeratorRolePolicy.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/ModeratorRolePolicy.java), revalidação em tempo de execução de papéis de moderação e estado ativo da conta contra o PostgreSQL em todas as rotas de moderação e consultas administrativas, mitigando tokens antigos (stale JWT). | Manter checagens sem bypass. |
 | **Respostas Oficiais de Empresas (C11)** | ✅ CONCLUÍDO | [BusinessResponseController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/BusinessResponseController.java), [AdminBusinessResponseModerationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/AdminBusinessResponseModerationController.java), tabelas `business_responses` e auditoria via [V24](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V24__business_responses.sql) e [V25](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V25__business_responses_removed_index.sql), respostas a avaliações e discussões raiz, rate limiting distribuído `BUSINESS_RESPONSE_CREATION`, moderação e fila administrativa de respostas removidas com restauração. | Manter isolamento de dados pessoais do autor da empresa. |
-| **Aplicativo Mobile (Flutter)** | 🟡 EM VALIDAÇÃO LOCAL | 13 módulos em Clean Architecture (`apps/mobile/lib/features/`), scanner de código de barras/QR Code, geolocalização sob demanda, criação multi-alvo, respostas oficiais, consumo comercial de horários, comodidades e ofertas oficiais (F2.4), 645 testes verdes (`flutter test --no-pub`). | Validação final e abertura de PR do STEP F2.4. |
+| **Aplicativo Mobile (Flutter)** | ✅ CONCLUÍDO (F2.4 em main) | 13 módulos em Clean Architecture (`apps/mobile/lib/features/`), scanner de código de barras/QR Code, geolocalização sob demanda, criação multi-alvo, respostas oficiais, consumo e renderização comercial de horários, comodidades e ofertas oficiais (F2.4), 645 testes verdes históricos na branch do PR #8 (`flutter test --no-pub`). | Avaliar candidatos a trabalho futuro (gestão comercial por empresas e refatorações B2/B3). |
 | **Painel Administrativo Web (React)** | ✅ CONCLUÍDO | React 18, TypeScript, Vite (`apps/admin/`), autenticação com sessionStorage e renovação de token, dashboard de contadores, filas de denúncias de reviews, discussões, reivindicações de locais e respostas oficiais removidas, 82 testes verdes (`vitest run`). | Manter consistência de tipagem e isolamento de PII. |
 | **Painel Administrativo Web (React)** | ✅ CONCLUÍDO | React 18, TypeScript, Vite (`apps/admin/`), autenticação com sessionStorage e renovação de token, dashboard de contadores, filas de denúncias de reviews, discussões, reivindicações de locais e respostas oficiais removidas, 82 testes verdes (`vitest run`). | Manter consistência de tipagem e isolamento de PII. |
 | **Prontidão de Produção** | ⏳ PENDENTE | Sem backup/restore documentado, sem testes de carga automatizados. | Elaborar runbooks de backup WAL e suíte k6/Gatling. |
@@ -1128,7 +1128,7 @@ Por possuírem granularidades e ambientes distintos (especialmente no backend, o
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
   * **Taxa de Aprovação**: 100%
-  * **Evidência / Origem**: Execução completa via `flutter test --no-pub` em 38s na branch `agent/gemini/step-f2-4-mobile-commercial-details` sobre a base `0ac60915916f09a20a1f819ed0b489447a0edd27` (`main` com F2.1, F2.2 e F2.3 / PR #7 integrados), cobrindo o STEP F2.4 com 645 testes verdes e zero regressões.
+  * **Evidência / Origem**: Execução completa via `flutter test --no-pub` em 38s executada antes do merge na branch `agent/gemini/step-f2-4-mobile-commercial-details` sobre a base `0ac60915916f09a20a1f819ed0b489447a0edd27` (contendo o código e os testes do F2.4 com 645 testes verdes e zero regressões); integrada em `main` pelo PR #8 no merge commit `83716ec6a4ed4fbf813af87137f2e640860687ca`.
 * **Análise Estática**:
   * `flutter analyze --no-pub`: **0 problemas encontrados** (*"No issues found!"*, código de término 0 em 5.9s).
 * **Ambiente e Ferramentas**:
@@ -1313,9 +1313,9 @@ Implementado na branch `agent/claude/step-f2-3-product-offers` a partir de `main
 
 ---
 
-### 13.5 Fase 2 Comercial — STEP F2.4: Mobile — Informações Comerciais no Detalhe do Local (Implementado na branch local, não integrado em main)
+### 13.5 Fase 2 Comercial — STEP F2.4: Mobile — Informações Comerciais no Detalhe do Local (Concluído e integrado em main)
 
-Implementado na branch `agent/gemini/step-f2-4-mobile-commercial-details` a partir da base integrada `0ac60915916f09a20a1f819ed0b489447a0edd27` (merge do PR #7 com a V28).
+Implementado na branch `agent/gemini/step-f2-4-mobile-commercial-details` a partir da base integrada `0ac60915916f09a20a1f819ed0b489447a0edd27` (merge do PR #7 com a V28), auditado de forma independente, corrigido pós-auditoria (commits `76de378827e5a26e0111616f7ae72d264ab66baa` e `7a9254b78f12e04b56444e4279564850de1b9028`) e integrado em `main` pelo PR #8 no merge commit `83716ec6a4ed4fbf813af87137f2e640860687ca`.
 
 #### Escopo entregue no Flutter (`apps/mobile/`)
 * **Consumo e endpoints**:
@@ -1346,8 +1346,8 @@ Implementado na branch `agent/gemini/step-f2-4-mobile-commercial-details` a part
   * **Separação conceitual estrita**: a seção de ofertas oficiais ("Ofertas Oficiais do Estabelecimento") é visualmente distinta da seção de presenças comunitárias ("Produtos neste local"), mantendo os dois fluxos desacoplados e operando sem conflitos.
   * **Atualização (Pull-to-refresh)**: o `RefreshIndicator` da tela atualiza simultaneamente os dados básicos do local, avaliações comunitárias, produtos comunitários e todas as seções comerciais.
 
-#### Testes e validação
-* **Suíte mobile completa**: **645 testes executados, 0 falhas, 0 erros** (`All tests passed!`), código de saída 0 em 38s via `flutter test --no-pub`.
+#### Testes e validação (Histórica pré-merge na branch)
+* **Suíte mobile completa**: **645 testes executados, 0 falhas, 0 erros** (`All tests passed!`), código de saída 0 em 38s via `flutter test --no-pub` em 52 arquivos executados antes do merge na branch `agent/gemini/step-f2-4-mobile-commercial-details`.
 * **Novas suítes dedicadas (27 testes adicionais)**:
   * `place_commercial_dtos_test.dart` (6 testes): parsing de JSONs com sucesso, validação de dias, comodidades conhecidas/desconhecidas, paginação e desserialização resiliente de preços e disponibilidade.
   * `place_commercial_repository_test.dart` (4 testes): integração com `RewitHttpClient`, cabeçalhos de autenticação e propagação correta de respostas.
@@ -1358,10 +1358,26 @@ Implementado na branch `agent/gemini/step-f2-4-mobile-commercial-details` a part
 
 ---
 
-### 13.6 Próximos Passos da Fase 2 Comercial
-* **STEP F2.4**: validação final das correções pós-auditoria (C1, B1, C2 e C3), publicação da branch `agent/gemini/step-f2-4-mobile-commercial-details` e abertura de Pull Request para `main` das informações comerciais no mobile (§13.5).
-* **Transferência formal de titularidade para horários e comodidades**: ainda não decidida. A decisão T2 vale exclusivamente para ofertas (invalidação definitiva via trigger V28); horários (F2.1) e comodidades (F2.2) continuam sob a regra F2 de ocultação com retorno automático caso o local retorne à mesma titularidade (§13.2 A3 e §13.3). Um futuro fluxo de transferência deve decidir se invalida essas configurações.
-* **Transição de Notificações**: Transição do provedor mock do Outbox Pattern (`MockNotificationAdapter`) para push real (FCM/APNs).
+### 13.6 Próximos Passos e Candidatos a Trabalho Futuro da Fase 2 Comercial
+
+Com a integração do PR #8 em `main` (`83716ec6a4ed4fbf813af87137f2e640860687ca`), quatro fatias comerciais estão integradas:
+* **F2.1**: Horários de funcionamento semanais no backend (Flyway `V26`, commit `a9b24f02b59781e6ec660953233ec0c360fdb4df`, PR #4; §13.2).
+* **F2.2**: Comodidades de estabelecimentos no backend (Flyway `V27`, commit `60e9b0ca76f05708b39319ad8955de0e635f10ba`, PR #5; §13.3).
+* **F2.3**: Ofertas comerciais de produtos no backend (Flyway `V28` e trigger T2, commit `0ac60915916f09a20a1f819ed0b489447a0edd27`, PR #7; §13.4).
+* **F2.4**: Visualização e renderização de informações comerciais no aplicativo Flutter (commit `83716ec6a4ed4fbf813af87137f2e640860687ca`, PR #8; §13.5).
+
+#### Decisões Pendentes e Regras Vigentes
+* **Transferência formal de titularidade para horários e comodidades**: ainda não decidida. A decisão T2 vale exclusivamente para ofertas (invalidação definitiva de todas as ofertas anteriores via trigger `V28`; §13.4). Já os horários (F2.1) e comodidades (F2.2) permanecem sob a regra F2 de ocultação com retorno automático caso o local retorne à mesma titularidade (§13.2 A3 e §13.3). Um futuro fluxo de transferência deve decidir se invalida essas configurações.
+* **Limitações do F2.3 mantidas**: permanecem as limitações documentadas em §13.4 (não há trava de produto no PUT de oferta, o preço gravado reflete o último estado sem histórico de preços, e a desvinculação de local apaga as ofertas associadas).
+
+#### Candidatos a Trabalho Futuro (Não Implementados)
+* **Interface móvel para empresas administrarem informações comerciais**: expansão das funcionalidades corporativas no aplicativo Flutter para permitir que os administradores de estabelecimentos configurem horários de funcionamento, comodidades e ofertas comerciais diretamente pelo celular.
+* **Melhorias de baixa prioridade no aplicativo mobile (itens B2 e B3 apontados na auditoria do F2.4)**:
+  * **B2**: Refatoração estrutural dos cards e blocos de ofertas comerciais da `PlaceDetailScreen` em componentes/widgets menores e isolados.
+  * **B3**: Desacoplamento da lógica do builder de abas em classes especialistas dedicadas.
+* **Transição de Provedor de Notificações**: transição futura do provedor mock do Outbox Pattern (`MockNotificationAdapter`) para push real (FCM/APNs).
+
+---
 
 > [!NOTE]
-> O subsistema de Moderação Administrativa e Respostas Oficiais está 100% operacional em backend, mobile e admin. As três primeiras fatias da Fase 2 Comercial estão integradas em `main`: F2.1 (Horários de Funcionamento no backend, `a9b24f0`), F2.2 (Comodidades no backend, `60e9b0c`) e F2.3 (Ofertas Comerciais no backend, `0ac6091`). A quarta fatia (STEP F2.4, Informações Comerciais no Mobile Flutter) está implementada e validada com 645 testes verdes na branch de trabalho `agent/gemini/step-f2-4-mobile-commercial-details`, aguardando publicação e integração em `main`.
+> O ecossistema encontra-se estabilizado com as quatro fatias da Fase 2 Comercial integradas em `main`: F2.1 (Horários no backend, PR #4 em `a9b24f0`), F2.2 (Comodidades no backend, PR #5 em `60e9b0c`), F2.3 (Ofertas comerciais no backend, PR #7 em `0ac6091`) e F2.4 (Visualização de informações comerciais no aplicativo Flutter, PR #8 em `83716ec`). As decisões pendentes sobre transferência para horários e comodidades seguem isoladas, e os candidatos a trabalho futuro permanecem catalogados sem implementação antecipada.
