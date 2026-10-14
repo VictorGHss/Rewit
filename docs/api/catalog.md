@@ -468,9 +468,12 @@ Produto sem códigos públicos: `{"identifiers": []}`.
 * **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
 * **Propósito**: Retorna a grade semanal recorrente dos horários de funcionamento do estabelecimento físico.
 * **Local indisponível**: Local fora de `ACTIVE` ou inexistente responde `404 PLACE_NOT_FOUND` (indistinguível).
-* **Estrutura de Resposta**:
+* **Estrutura de Resposta e Elegibilidade Comercial (Decisão F2)**:
   * Se o local ainda não possui horários configurados: responde `200 OK` com `configured = false` e `days = []`.
-  * Se o local já possui horários configurados: responde `200 OK` com `configured = true` e a lista completa dos 7 dias da semana ordenados de 1 (Segunda-feira) a 7 (Domingo). Dias sem expediente são retornados com `closed = true` e `intervals = []`.
+  * **Elegibilidade da representação e ocultação protetiva**: Se o local possui horários gravados, mas a representação comercial titular deixar temporariamente de ser elegível (por exemplo: conta comercial pendente/não aprovada, usuário administrador suspenso, desativado ou inoperante, ou estabelecimento não mais vinculado/reivindicado por essa conta comercial), os horários ficam automaticamente ocultos do público. O endpoint responde `200 OK` com `configured = false` e `days = []`, sendo indistinguível de um local sem horários cadastrados e não revelando se há registros persistidos de uma representação inelegível.
+  * **Reversibilidade sem reescrita**: Se a mesma representação comercial voltar a ser elegível e continuar sendo a responsável pelo estabelecimento, a configuração previamente armazenada volta a ser visível automaticamente, sem exigir nova gravação e sem modificar a auditoria ou os timestamps (`created_at`/`updated_at`).
+  * **Transferência de reivindicação**: Se o estabelecimento passar a ser reivindicado por outra conta comercial (titular B), os horários armazenados em nome da conta anterior (titular A) permanecem ocultos (`configured = false`, `days = []`) até que a conta B configure sua própria grade via `PUT /api/v1/places/{id}/opening-hours`. A simples perda de elegibilidade ou desvinculação da conta anterior nunca apaga registros do banco de dados.
+  * **Horários visíveis**: Se o local possui horários configurados e a representação comercial responsável está plenamente elegível, responde `200 OK` com `configured = true` e a lista completa dos 7 dias da semana ordenados de 1 (Segunda-feira) a 7 (Domingo). Dias sem expediente são retornados com `closed = true` e `intervals = []`.
 
 #### Resposta (`200 OK`) - Horários Configurados
 ```json
@@ -505,7 +508,7 @@ Produto sem códigos públicos: `{"identifiers": []}`.
 }
 ```
 
-#### Resposta (`200 OK`) - Sem Horários Cadastrados
+#### Resposta (`200 OK`) - Sem Horários Cadastrados ou Representação Inelegível
 ```json
 {
   "placeId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -540,7 +543,7 @@ Produto sem códigos públicos: `{"identifiers": []}`.
   * Dias fechados (`closed = true`): rejeita qualquer intervalo enviado (`400 INVALID_OPENING_HOURS`).
   * Dias abertos (`closed = false`): exige pelo menos um intervalo válido (`400 INVALID_OPENING_HOURS`).
   * Múltiplos intervalos no mesmo dia são permitidos, mas não podem se sobrepor nem colidir (`400 OPENING_HOURS_OVERLAPPING_INTERVALS`).
-* **Substituição Atômica**: Os horários anteriores do local são substituídos integralmente em transação única.
+* **Substituição Atômica e Transferência**: Os horários anteriores do local são substituídos integralmente em transação única. Caso o estabelecimento tenha sido transferido para uma nova conta comercial, ao salvar com sucesso via `PUT`, a configuração anterior é substituída atomicamente e a nova configuração passa a ser associada à nova conta comercial e ao seu administrador. A simples perda de elegibilidade anterior nunca apaga registros do banco de dados.
 
 #### Requisição
 ```json
