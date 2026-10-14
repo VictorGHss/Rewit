@@ -12,6 +12,7 @@ import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
+import com.rewit.domain.enums.BusinessResponseRestorationBlocker;
 import com.rewit.domain.enums.Role;
 import com.rewit.domain.model.User;
 import org.junit.jupiter.api.BeforeEach;
@@ -142,12 +143,38 @@ class QueryAdminRemovedBusinessResponsesUseCaseTest {
         List<AdminRemovedBusinessResponseView> views = useCase.execute(actor, null, 0, 20).content();
 
         assertTrue(views.get(0).restorable());
+        assertEquals(List.of(), views.get(0).restorationBlockers());
         assertFalse(views.get(1).restorable());
         assertTrue(views.get(1).otherActiveResponse());
+        assertEquals(List.of(BusinessResponseRestorationBlocker.OTHER_ACTIVE_RESPONSE), views.get(1).restorationBlockers());
         assertFalse(views.get(2).restorable());
+        assertEquals(List.of(BusinessResponseRestorationBlocker.REMOVED_BY_BUSINESS), views.get(2).restorationBlockers());
         assertFalse(views.get(3).restorable());
+        assertEquals(List.of(BusinessResponseRestorationBlocker.REMOVED_BY_BUSINESS,
+                BusinessResponseRestorationBlocker.OTHER_ACTIVE_RESPONSE), views.get(3).restorationBlockers());
         assertEquals("SPAM", views.get(0).moderationReasonCode());
         assertNull(views.get(2).moderationReasonCode());
+    }
+
+    @Test
+    @DisplayName("Bloqueios de elegibilidade: cada critério falso vira um bloqueio; restorable só sem nenhum, na ordem do enum")
+    void eligibilityBlockers() {
+        when(businessResponseRepository.findRemovedForModeration(RemovedBusinessResponseFilter.none(), 0, 20))
+                .thenReturn(PageResult.of(List.of(
+                        record(BusinessResponseRemovalSource.MODERATION, false, false, true, true),
+                        record(BusinessResponseRemovalSource.MODERATION, false, true, false, true),
+                        record(BusinessResponseRemovalSource.MODERATION, false, true, true, false),
+                        record(BusinessResponseRemovalSource.BUSINESS, true, false, false, false)), 0, 20, 4));
+
+        List<AdminRemovedBusinessResponseView> views = useCase.execute(actor, null, 0, 20).content();
+
+        assertEquals(List.of(BusinessResponseRestorationBlocker.ACCOUNT_NOT_APPROVED), views.get(0).restorationBlockers());
+        assertEquals(List.of(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL),
+                views.get(1).restorationBlockers());
+        assertEquals(List.of(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED), views.get(2).restorationBlockers());
+        assertEquals(List.of(BusinessResponseRestorationBlocker.values()), views.get(3).restorationBlockers());
+        assertTrue(views.stream().noneMatch(view -> view.restorable()));
+        assertTrue(views.stream().allMatch(view -> view.restorable() == view.restorationBlockers().isEmpty()));
     }
 
     @Test
@@ -176,11 +203,19 @@ class QueryAdminRemovedBusinessResponsesUseCaseTest {
                         || component.getName().equals("moderatorUserId")));
     }
 
+    /** Representação elegível. */
     private static RemovedBusinessResponseRecord record(BusinessResponseRemovalSource removedBy, boolean otherActive) {
+        return record(removedBy, otherActive, true, true, true);
+    }
+
+    private static RemovedBusinessResponseRecord record(BusinessResponseRemovalSource removedBy, boolean otherActive,
+                                                        boolean accountApproved, boolean administratorOperational,
+                                                        boolean placeRepresented) {
         boolean moderated = removedBy == BusinessResponseRemovalSource.MODERATION;
         return new RemovedBusinessResponseRecord(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 UUID.randomUUID(), "Padaria Central LTDA", UUID.randomUUID(), "Centro", "Resposta", NOW, removedBy,
                 NOW.plusSeconds(60), otherActive, moderated ? "SPAM" : null,
-                moderated ? "Conteúdo promocional fora das regras" : null, moderated ? NOW.plusSeconds(60) : null);
+                moderated ? "Conteúdo promocional fora das regras" : null, moderated ? NOW.plusSeconds(60) : null,
+                accountApproved, administratorOperational, placeRepresented);
     }
 }

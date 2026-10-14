@@ -197,7 +197,9 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
         // Sem filtro, idx_business_responses_removed (V25) entrega as linhas já na ordem da página. A outra resposta
         // ativa sai dos índices únicos parciais da V24, um por tipo de alvo: cada EXISTS repete o predicado do seu
         // índice (IS NOT DISTINCT FROM impediria o uso de ambos); a última remoção da moderação, de
-        // idx_business_response_audit_response (response_id, created_at), uma linha por resposta da página
+        // idx_business_response_audit_response (response_id, created_at), uma linha por resposta da página. Os três
+        // critérios de elegibilidade da representação saem dos mesmos predicados das leituras públicas, por chave
+        // primária; COALESCE porque o local sem vínculo daria NULL, não FALSE
         Query query = entityManager.createNativeQuery("""
                 SELECT r.id, r.review_id, r.discussion_id, b.id AS business_account_id, b.corporate_name,
                        p.id AS place_id, p.name, r.content, r.created_at, r.removed_by, r.removed_at,
@@ -212,10 +214,13 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
                                            AND o.business_account_id = r.business_account_id
                                            AND o.status = 'ACTIVE')
                        END AS other_active,
-                       m.reason_code, m.justification, m.created_at AS moderated_at
-                FROM business_responses r
-                JOIN business_accounts b ON b.id = r.business_account_id
-                JOIN places p ON p.id = r.place_id
+                       m.reason_code, m.justification, m.created_at AS moderated_at,
+                """
+                + " COALESCE(" + ACCOUNT_APPROVED + ", FALSE) AS account_approved,"
+                + " COALESCE(" + ADMINISTRATOR_OPERATIONAL + ", FALSE) AS administrator_operational,"
+                + " COALESCE(" + PLACE_REPRESENTED + ", FALSE) AS place_represented"
+                + " FROM business_responses r" + REPRESENTATION_JOINS + """
+
                 LEFT JOIN LATERAL (
                     SELECT a.reason_code, a.justification, a.created_at
                     FROM business_response_moderation_audit_logs a
@@ -257,7 +262,8 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
         return new RemovedBusinessResponseRecord((UUID) row[0], (UUID) row[1], (UUID) row[2], (UUID) row[3],
                 (String) row[4], (UUID) row[5], (String) row[6], (String) row[7], toInstant(row[8]),
                 BusinessResponseRemovalSource.valueOf((String) row[9]), toInstant(row[10]), (Boolean) row[11],
-                (String) row[12], (String) row[13], row[14] == null ? null : toInstant(row[14]));
+                (String) row[12], (String) row[13], row[14] == null ? null : toInstant(row[14]), (Boolean) row[15],
+                (Boolean) row[16], (Boolean) row[17]);
     }
 
     private static BusinessResponseView toView(Object[] row) {

@@ -4,6 +4,7 @@ import com.rewit.application.dto.business.BusinessResponseDtos.AdminRemovedBusin
 import com.rewit.application.dto.business.BusinessResponseDtos.BusinessResponseModerationResult;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
+import com.rewit.domain.enums.BusinessResponseRestorationBlocker;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponseModerationAuditLog;
 import jakarta.validation.constraints.NotBlank;
@@ -11,6 +12,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -83,6 +85,7 @@ public final class AdminBusinessResponseModerationDtos {
     /**
      * Projeção administrativa de resposta oficial removida (C11).
      * Preserva todo o contexto da moderação e auditoria, sem expor authorUserId, taxId ou moderatorUserId.
+     * {@code restorationBlockers} diz por que a restauração seria recusada agora; {@code restorable} é a lista vazia.
      */
     public record AdminRemovedBusinessResponseResponse(
             UUID id,
@@ -100,7 +103,8 @@ public final class AdminBusinessResponseModerationDtos {
             boolean otherActiveResponse,
             String moderationReasonCode,
             String moderationJustification,
-            Instant moderatedAt
+            Instant moderatedAt,
+            List<BusinessResponseRestorationBlocker> restorationBlockers
     ) {
         public static AdminRemovedBusinessResponseResponse fromView(AdminRemovedBusinessResponseView view) {
             if (view == null) {
@@ -122,7 +126,8 @@ public final class AdminBusinessResponseModerationDtos {
                     view.otherActiveResponse(),
                     view.moderationReasonCode(),
                     view.moderationJustification(),
-                    view.moderatedAt()
+                    view.moderatedAt(),
+                    view.restorationBlockers()
             );
         }
     }

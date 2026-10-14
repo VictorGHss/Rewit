@@ -605,6 +605,61 @@ class BusinessResponseSecurityIntegrationTest {
     }
 
     // ---------------------------------------------------------------------------------------------------------
+    // 7. Decisão B: elegibilidade da representação pela API real
+    // ---------------------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Administrador da empresa suspenso: resposta some da lista pública, a fila aponta o bloqueio e a "
+            + "restauração recusa 409; reintegrado, a resposta volta sozinha e a restauração passa")
+    void businessAdministratorSuspensionFollowsEligibility() throws Exception {
+        TestUser admin = withRole(registerUser("b_admin"), "ADMIN");
+        TestUser moderator = withRole(registerUser("b_mod"), "MODERATOR");
+        TestUser businessAdmin = registerUser("b_biz");
+        TestUser reviewer = registerUser("b_rev");
+        UUID placeId = createPlace();
+        UUID activeReviewId = createReview(reviewer.id(), placeId, "PUBLIC", ReviewStatus.ACTIVE);
+        UUID removedReviewId = createReview(reviewer.id(), placeId, "PUBLIC", ReviewStatus.ACTIVE);
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+        UUID activeId = publishReviewResponse(businessAdmin, activeReviewId, accountId, placeId, "Resposta ativa");
+        UUID removedId = publishReviewResponse(businessAdmin, removedReviewId, accountId, placeId, "Resposta removida");
+        moderate(moderator, removedId, BusinessResponseModerationAction.REMOVE_RESPONSE, "SPAM").andExpect(status().isOk());
+
+        mockMvc.perform(withToken(post("/api/v1/admin/users/{userId}/suspend", businessAdmin.id()), admin))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(withToken(get("/api/v1/reviews/{reviewId}/business-responses", activeReviewId), reviewer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.totalElements").value(0));
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("reviewId", removedReviewId.toString()), moderator))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(removedId.toString()))
+                .andExpect(jsonPath("$.content[0].restorable").value(false))
+                .andExpect(jsonPath("$.content[0].restorationBlockers.length()").value(1))
+                .andExpect(jsonPath("$.content[0].restorationBlockers[0]").value("ADMINISTRATOR_NOT_OPERATIONAL"));
+        moderate(moderator, removedId, BusinessResponseModerationAction.RESTORE_RESPONSE, "APPEAL_ACCEPTED")
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("BUSINESS_RESPONSE_NOT_RESTORABLE"))
+                .andExpect(jsonPath("$.detail").value(containsString("não está operacional")))
+                .andExpect(jsonPath("$.detail").value(not(containsString("suspens"))));
+
+        mockMvc.perform(withToken(post("/api/v1/admin/users/{userId}/reinstate", businessAdmin.id()), admin))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(withToken(get("/api/v1/reviews/{reviewId}/business-responses", activeReviewId), reviewer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(activeId.toString()));
+        mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("reviewId", removedReviewId.toString()), moderator))
+                .andExpect(jsonPath("$.content[0].restorable").value(true))
+                .andExpect(jsonPath("$.content[0].restorationBlockers.length()").value(0));
+        moderate(moderator, removedId, BusinessResponseModerationAction.RESTORE_RESPONSE, "APPEAL_ACCEPTED")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.newStatus").value("ACTIVE"));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------------------
 

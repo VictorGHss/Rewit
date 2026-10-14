@@ -5,8 +5,10 @@ import com.rewit.application.dto.business.BusinessResponseDtos.ModerateBusinessR
 import com.rewit.application.port.BusinessAccountRepository;
 import com.rewit.application.port.BusinessResponseModerationAuditLogRepository;
 import com.rewit.application.port.BusinessResponseRepository;
+import com.rewit.application.service.BusinessRepresentationPolicy;
 import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.BusinessRepresentationIneligibility;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponse;
@@ -18,7 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Moderação administrativa de uma resposta oficial de empresa (C11): remoção ou restauração, com auditoria
@@ -33,6 +37,11 @@ import java.util.UUID;
  *   <li>Transições do domínio: remover exige resposta ativa ({@code 409 BUSINESS_RESPONSE_ALREADY_REMOVED} se já
  *       removida, pela empresa ou pela moderação); restaurar só desfaz remoção da moderação
  *       ({@code 409 BUSINESS_RESPONSE_NOT_RESTORABLE}).</li>
+ *   <li>Restaurar exige a representação elegível agora (decisão B: conta aprovada, administrador atual operacional,
+ *       local ativo vinculado à conta), avaliada por {@link BusinessRepresentationPolicy#currentIneligibility} sem
+ *       lock: travar o local depois da resposta inverteria a ordem da publicação, que trava o local antes de gravar a
+ *       resposta. Inelegível responde {@code 409 BUSINESS_RESPONSE_NOT_RESTORABLE}; se a elegibilidade cair depois da
+ *       checagem, a resposta restaurada fica oculta pela leitura pública até voltar.</li>
  *   <li>Restaurar quando a empresa já tem outra resposta ativa no mesmo alvo responde
  *       {@code 409 BUSINESS_RESPONSE_ALREADY_EXISTS}: pela checagem prévia ou, numa corrida, pela violação de
  *       {@code uq_business_responses_review_active}/{@code uq_business_responses_discussion_active}. A exceção sai do
@@ -50,11 +59,13 @@ public class ModerateBusinessResponseUseCase {
     private final BusinessResponseModerationAuditLogRepository auditLogRepository;
     private final BusinessAccountRepository businessAccountRepository;
     private final ModeratorRolePolicy moderatorRolePolicy;
+    private final BusinessRepresentationPolicy representationPolicy;
 
     public ModerateBusinessResponseUseCase(BusinessResponseRepository businessResponseRepository,
                                            BusinessResponseModerationAuditLogRepository auditLogRepository,
                                            BusinessAccountRepository businessAccountRepository,
-                                           ModeratorRolePolicy moderatorRolePolicy) {
+                                           ModeratorRolePolicy moderatorRolePolicy,
+                                           BusinessRepresentationPolicy representationPolicy) {
         this.businessResponseRepository = Objects.requireNonNull(businessResponseRepository,
                 "BusinessResponseRepository must not be null");
         this.auditLogRepository = Objects.requireNonNull(auditLogRepository,
@@ -62,6 +73,8 @@ public class ModerateBusinessResponseUseCase {
         this.businessAccountRepository = Objects.requireNonNull(businessAccountRepository,
                 "BusinessAccountRepository must not be null");
         this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
+        this.representationPolicy = Objects.requireNonNull(representationPolicy,
+                "BusinessRepresentationPolicy must not be null");
     }
 
     @Transactional
@@ -93,6 +106,11 @@ public class ModerateBusinessResponseUseCase {
             response.removeByModeration(now);
         } else {
             response.restoreByModeration(now);
+            Set<BusinessRepresentationIneligibility> ineligibility = representationPolicy.currentIneligibility(
+                    response.getBusinessAccountId(), response.getPlaceId());
+            if (!ineligibility.isEmpty()) {
+                throw representationNotEligible(ineligibility);
+            }
             // Checagem prévia da unicidade; o índice parcial continua sendo a garantia numa corrida
             boolean anotherActive = businessResponseRepository
                     .findActive(response.getReviewId(), response.getDiscussionId(), response.getBusinessAccountId())
@@ -119,6 +137,23 @@ public class ModerateBusinessResponseUseCase {
                 previousStatus, saved.getStatus(), now));
 
         return BusinessResponseModerationResult.of(auditLog, saved);
+    }
+
+    /**
+     * O mesmo código das demais restaurações recusadas; o motivo vai no detalhe, sem o estado pessoal do
+     * administrador.
+     */
+    private static BusinessException representationNotEligible(Set<BusinessRepresentationIneligibility> reasons) {
+        String detail = reasons.stream()
+                .map(reason -> switch (reason) {
+                    case ACCOUNT_NOT_APPROVED -> "a conta comercial não está aprovada";
+                    case ADMINISTRATOR_NOT_OPERATIONAL -> "o administrador da conta comercial não está operacional";
+                    case PLACE_NOT_REPRESENTED -> "o local não está ativo ou não está vinculado à conta comercial";
+                })
+                .collect(Collectors.joining("; "));
+        return new BusinessException("A representação comercial da resposta não está elegível (" + detail
+                + "); a resposta removida não pode ser restaurada", HttpStatus.CONFLICT,
+                "BUSINESS_RESPONSE_NOT_RESTORABLE");
     }
 
     private static BusinessException activeResponseExists() {

@@ -1,7 +1,9 @@
 package com.rewit.application.dto.business;
 
+import com.rewit.application.service.BusinessRepresentationPolicy;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
+import com.rewit.domain.enums.BusinessResponseRestorationBlocker;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.BusinessResponse;
@@ -9,6 +11,7 @@ import com.rewit.domain.model.BusinessResponseModerationAuditLog;
 import com.rewit.domain.model.Place;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -167,7 +170,8 @@ public final class BusinessResponseDtos {
 
     /**
      * Resposta removida como a persistência a lê, com o contexto da última decisão de remoção da moderação (nulo
-     * quando a remoção foi da empresa) e se a empresa tem hoje outra resposta ativa no mesmo alvo.
+     * quando a remoção foi da empresa), se a empresa tem hoje outra resposta ativa no mesmo alvo e os três critérios
+     * de elegibilidade da representação, calculados agora pelo banco.
      */
     public record RemovedBusinessResponseRecord(
             UUID id,
@@ -184,17 +188,23 @@ public final class BusinessResponseDtos {
             boolean otherActiveResponse,
             String moderationReasonCode,
             String moderationJustification,
-            Instant moderatedAt
+            Instant moderatedAt,
+            boolean accountApproved,
+            boolean administratorOperational,
+            boolean placeRepresented
     ) {
     }
 
     /**
      * Resposta removida na consulta administrativa. Sem o autor pessoal nem o documento da empresa.
      *
-     * @param restorable          a restauração passaria agora: removida pela moderação
-     *                            ({@link BusinessResponse#isRestorableByModeration}) e sem outra resposta ativa da
-     *                            empresa no alvo. É uma indicação; a moderação revalida tudo com a resposta travada
+     * @param restorable          a restauração passaria agora: nenhum bloqueio em {@code restorationBlockers}. É
+     *                            uma indicação; a moderação revalida tudo com a resposta travada
      * @param otherActiveResponse a empresa publicou outra resposta ativa no mesmo alvo depois desta
+     * @param restorationBlockers por que a restauração seria recusada agora, na ordem do enum: removida pela empresa
+     *                            ({@link BusinessResponse#isRestorableByModeration}), outra resposta ativa no alvo e
+     *                            os motivos de inelegibilidade da representação, avaliados pela mesma regra
+     *                            ({@link BusinessRepresentationPolicy#evaluate}) que a restauração aplica
      */
     public record AdminRemovedBusinessResponseView(
             UUID id,
@@ -212,16 +222,29 @@ public final class BusinessResponseDtos {
             boolean otherActiveResponse,
             String moderationReasonCode,
             String moderationJustification,
-            Instant moderatedAt
+            Instant moderatedAt,
+            List<BusinessResponseRestorationBlocker> restorationBlockers
     ) {
+        public AdminRemovedBusinessResponseView {
+            restorationBlockers = List.copyOf(restorationBlockers);
+        }
+
         public static AdminRemovedBusinessResponseView of(RemovedBusinessResponseRecord record) {
-            boolean restorable = BusinessResponse.isRestorableByModeration(BusinessResponseStatus.REMOVED, record.removedBy())
-                    && !record.otherActiveResponse();
+            List<BusinessResponseRestorationBlocker> blockers = new ArrayList<>();
+            if (!BusinessResponse.isRestorableByModeration(BusinessResponseStatus.REMOVED, record.removedBy())) {
+                blockers.add(BusinessResponseRestorationBlocker.REMOVED_BY_BUSINESS);
+            }
+            if (record.otherActiveResponse()) {
+                blockers.add(BusinessResponseRestorationBlocker.OTHER_ACTIVE_RESPONSE);
+            }
+            BusinessRepresentationPolicy.evaluate(record.accountApproved(), record.administratorOperational(),
+                            record.placeRepresented())
+                    .forEach(reason -> blockers.add(BusinessResponseRestorationBlocker.of(reason)));
             return new AdminRemovedBusinessResponseView(record.id(), record.reviewId(), record.discussionId(),
                     record.businessAccountId(), record.corporateName(), record.placeId(), record.placeName(),
-                    record.content(), record.createdAt(), record.removedBy(), record.removedAt(), restorable,
+                    record.content(), record.createdAt(), record.removedBy(), record.removedAt(), blockers.isEmpty(),
                     record.otherActiveResponse(), record.moderationReasonCode(), record.moderationJustification(),
-                    record.moderatedAt());
+                    record.moderatedAt(), blockers);
         }
     }
 }

@@ -12,6 +12,7 @@ import com.rewit.common.exception.BusinessException;
 import com.rewit.common.exception.GlobalExceptionHandler;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
+import com.rewit.domain.enums.BusinessResponseRestorationBlocker;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.presentation.dto.admin.AdminBusinessResponseModerationDtos.ModerateBusinessResponseRequest;
 import org.junit.jupiter.api.BeforeEach;
@@ -273,7 +274,8 @@ class AdminBusinessResponseModerationControllerUnitTest {
                 false,
                 "INAPPROPRIATE_CONTENT",
                 "Linguagem incompatível com diretrizes.",
-                moderatedAt
+                moderatedAt,
+                List.of()
         );
 
         PageResult<AdminRemovedBusinessResponseView> pageResult = PageResult.of(
@@ -311,6 +313,8 @@ class AdminBusinessResponseModerationControllerUnitTest {
                 .andExpect(jsonPath("$.content[0].removedBy").value("MODERATION"))
                 .andExpect(jsonPath("$.content[0].removedAt").value("2026-10-11T14:00:00Z"))
                 .andExpect(jsonPath("$.content[0].restorable").value(true))
+                .andExpect(jsonPath("$.content[0].restorationBlockers").isArray())
+                .andExpect(jsonPath("$.content[0].restorationBlockers.length()").value(0))
                 .andExpect(jsonPath("$.content[0].otherActiveResponse").value(false))
                 .andExpect(jsonPath("$.content[0].moderationReasonCode").value("INAPPROPRIATE_CONTENT"))
                 .andExpect(jsonPath("$.content[0].moderationJustification").value("Linguagem incompatível com diretrizes."))
@@ -492,7 +496,8 @@ class AdminBusinessResponseModerationControllerUnitTest {
                 false,
                 "TERMS_OF_SERVICE",
                 "Justificativa completa da moderação de remoção.",
-                moderatedAt
+                moderatedAt,
+                List.of()
         );
 
         when(queryAdminRemovedBusinessResponsesUseCase.execute(
@@ -512,6 +517,48 @@ class AdminBusinessResponseModerationControllerUnitTest {
                 .andExpect(jsonPath("$.content[0].moderationReasonCode").value("TERMS_OF_SERVICE"))
                 .andExpect(jsonPath("$.content[0].moderationJustification").value("Justificativa completa da moderação de remoção."))
                 .andExpect(jsonPath("$.content[0].moderatedAt").value("2026-10-12T09:30:00Z"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/admin/business-responses/removed - restorationBlockers serializa os motivos estáveis, na ordem da view")
+    void shouldSerializeRestorationBlockers() throws Exception {
+        AdminRemovedBusinessResponseView view = new AdminRemovedBusinessResponseView(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                null,
+                UUID.randomUUID(),
+                "Empresa Teste",
+                UUID.randomUUID(),
+                "Local Teste",
+                "Conteúdo",
+                Instant.parse("2026-10-10T10:00:00Z"),
+                BusinessResponseRemovalSource.MODERATION,
+                Instant.parse("2026-10-11T10:00:00Z"),
+                false,
+                true,
+                "SPAM",
+                "Justificativa completa da moderação de remoção.",
+                Instant.parse("2026-10-11T10:00:00Z"),
+                List.of(BusinessResponseRestorationBlocker.OTHER_ACTIVE_RESPONSE,
+                        BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
+                        BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED)
+        );
+        when(queryAdminRemovedBusinessResponsesUseCase.execute(
+                eq(moderatorUserId),
+                any(RemovedBusinessResponseFilter.class),
+                eq(0),
+                eq(20)
+        )).thenReturn(PageResult.of(List.of(view), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/admin/business-responses/removed")
+                        .principal(authentication)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].restorable").value(false))
+                .andExpect(jsonPath("$.content[0].restorationBlockers.length()").value(3))
+                .andExpect(jsonPath("$.content[0].restorationBlockers[0]").value("OTHER_ACTIVE_RESPONSE"))
+                .andExpect(jsonPath("$.content[0].restorationBlockers[1]").value("ADMINISTRATOR_NOT_OPERATIONAL"))
+                .andExpect(jsonPath("$.content[0].restorationBlockers[2]").value("PLACE_NOT_REPRESENTED"));
     }
 
     @Test

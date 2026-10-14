@@ -7,6 +7,7 @@ import com.rewit.application.dto.business.BusinessResponseDtos.ModerateBusinessR
 import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseFilter;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishDiscussionBusinessResponseCommand;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishReviewBusinessResponseCommand;
+import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseRecord;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.BusinessResponseModerationAuditLogRepository;
 import com.rewit.application.port.BusinessResponseRepository;
@@ -23,10 +24,13 @@ import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
+import com.rewit.domain.enums.BusinessResponseRestorationBlocker;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.domain.model.BusinessResponseModerationAuditLog;
 import com.rewit.domain.model.ReviewDiscussion;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +53,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -110,6 +115,9 @@ class BusinessResponsePersistenceIntegrationTest {
 
     @Autowired
     private BusinessRepresentationPolicy representationPolicy;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     /** Precisão do TIMESTAMPTZ: comparar instantes depois de ida e volta ao banco. */
     private final Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -644,6 +652,116 @@ class BusinessResponsePersistenceIntegrationTest {
         BusinessResponseView again = publishUseCase.execute(command(f, secondPlace, "Pelo segundo local"),
                 now.plusSeconds(3));
         assertEquals(List.of(again.id()), viewIds(responseRepository.findActiveReviewResponseViews(f.review(), 0, 10)));
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Restauração revalida a elegibilidade no banco: a consulta sinaliza o bloqueio, a restauração recusa "
+            + "409 sem gravar nem auditar, e passa quando a representação volta a ser elegível")
+    void restoreRevalidatesCurrentEligibility() {
+        Fixture f = fixture();
+        UUID moderator = insertModerator();
+        BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Resposta"), now);
+        moderateUseCase.execute(moderation(published.id(), moderator, BusinessResponseModerationAction.REMOVE_RESPONSE,
+                now.plusSeconds(10)));
+        String rowSql = "SELECT status, removed_by, removed_at, updated_at FROM business_responses WHERE id = ?";
+        Map<String, Object> removedRow = jdbcTemplate.queryForMap(rowSql, published.id());
+        RemovedBusinessResponseFilter byReview = new RemovedBusinessResponseFilter(f.review(), null, null, null, null);
+
+        record Blocked(BusinessResponseRestorationBlocker blocker, Runnable apply, Runnable revert) {
+        }
+        Runnable approve = () -> setVerification(f.business(), "APPROVED");
+        Runnable reactivate = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
+        Runnable reopen = () -> jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
+        List<Blocked> cases = List.of(
+                new Blocked(BusinessResponseRestorationBlocker.ACCOUNT_NOT_APPROVED,
+                        () -> setVerification(f.business(), "PENDING"), approve),
+                new Blocked(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
+                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.SUSPENDED), reactivate),
+                new Blocked(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
+                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.DELETED), reactivate),
+                new Blocked(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED,
+                        () -> jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
+                new Blocked(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED,
+                        () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place()),
+                        () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+                                f.business(), f.place())));
+
+        for (Blocked blocked : cases) {
+            blocked.apply().run();
+            // Mudança feita por fora do JPA na mesma transação: a releitura da restauração precisa vê-la, como numa
+            // requisição nova
+            forgetLoadedEntities();
+            AdminRemovedBusinessResponseView view = removedQueryUseCase.execute(moderator, byReview, 0, 20).content().get(0);
+            assertFalse(view.restorable(), blocked.blocker().name());
+            assertEquals(List.of(blocked.blocker()), view.restorationBlockers());
+
+            BusinessException ex = assertThrows(BusinessException.class, () -> moderateUseCase.execute(moderation(
+                    published.id(), moderator, BusinessResponseModerationAction.RESTORE_RESPONSE, now.plusSeconds(20))));
+            assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+            assertEquals("BUSINESS_RESPONSE_NOT_RESTORABLE", ex.getErrorCode());
+            assertEquals(removedRow, jdbcTemplate.queryForMap(rowSql, published.id()));
+            assertEquals(1, auditLogRepository.findByResponseId(published.id()).size());
+            blocked.revert().run();
+            forgetLoadedEntities();
+        }
+
+        AdminRemovedBusinessResponseView eligible = removedQueryUseCase.execute(moderator, byReview, 0, 20).content().get(0);
+        assertTrue(eligible.restorable());
+        assertEquals(List.of(), eligible.restorationBlockers());
+        BusinessResponseModerationResult restored = moderateUseCase.execute(moderation(published.id(), moderator,
+                BusinessResponseModerationAction.RESTORE_RESPONSE, now.plusSeconds(30)));
+        assertEquals(BusinessResponseStatus.ACTIVE, restored.newStatus());
+        assertEquals(2, auditLogRepository.findByResponseId(published.id()).size());
+        assertEquals(List.of(published.id()), viewIds(responseRepository.findActiveReviewResponseViews(f.review(), 0, 10)));
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Paridade na consulta administrativa: os bloqueios de elegibilidade de cada removida são os motivos de "
+            + "BusinessRepresentationPolicy para a mesma representação")
+    void removedQueryBlockersMatchJavaPolicy() {
+        Fixture f = fixture();
+        Map<UUID, Set<BusinessResponseRestorationBlocker>> expected = new HashMap<>();
+        int sequence = 0;
+        for (String verification : List.of("APPROVED", "PENDING", "REJECTED")) {
+            for (AccountStatus administratorStatus : AccountStatus.values()) {
+                for (String placeState : List.of("REPRESENTED", "CLOSED", "UNCLAIMED", "OTHER_BUSINESS")) {
+                    UUID admin = insertUser();
+                    UUID business = insertBusiness(admin);
+                    UUID place = representedPlace(f, business);
+                    BusinessResponse removed = BusinessResponse.publish(f.review(), null, business, place, admin,
+                            "Paridade " + sequence, now.plusMillis(sequence));
+                    removed.removeByModeration(now.plusSeconds(1).plusMillis(sequence));
+                    UUID response = responseRepository.save(removed).getId();
+                    sequence++;
+                    setVerification(business, verification);
+                    setAccountStatus(admin, administratorStatus);
+                    switch (placeState) {
+                        case "CLOSED" -> jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", place);
+                        case "UNCLAIMED" ->
+                                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", place);
+                        case "OTHER_BUSINESS" -> jdbcTemplate.update(
+                                "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
+                        default -> {
+                        }
+                    }
+                    Set<BusinessResponseRestorationBlocker> blockers = new HashSet<>();
+                    representationPolicy.currentIneligibility(business, place)
+                            .forEach(reason -> blockers.add(BusinessResponseRestorationBlocker.of(reason)));
+                    expected.put(response, blockers);
+                }
+            }
+        }
+
+        PageResult<RemovedBusinessResponseRecord> page = responseRepository.findRemovedForModeration(
+                new RemovedBusinessResponseFilter(f.review(), null, null, null, null), 0, 100);
+        assertEquals(expected.size(), page.totalElements());
+        for (RemovedBusinessResponseRecord record : page.content()) {
+            AdminRemovedBusinessResponseView view = AdminRemovedBusinessResponseView.of(record);
+            assertEquals(expected.get(record.id()), Set.copyOf(view.restorationBlockers()), record.content());
+            assertEquals(expected.get(record.id()).isEmpty(), view.restorable(), record.content());
+        }
     }
 
     @Test
@@ -1273,6 +1391,12 @@ class BusinessResponsePersistenceIntegrationTest {
         jdbcTemplate.update("UPDATE users SET account_status = ?, is_active = ?, deleted_at = ? WHERE id = ?",
                 status.name(), status == AccountStatus.ACTIVE,
                 status == AccountStatus.DELETED ? Timestamp.from(now) : null, userId);
+    }
+
+    /** Sincroniza e esvazia o contexto de persistência, para o JPA reler o que foi alterado direto no banco. */
+    private void forgetLoadedEntities() {
+        entityManager.flush();
+        entityManager.clear();
     }
 
     private void setVerification(UUID business, String verificationStatus) {
