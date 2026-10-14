@@ -480,6 +480,31 @@ class PlaceProductOffersIntegrationTest {
     }
 
     @Test
+    @DisplayName("T2: a troca de titular apaga todas as ofertas do local, inclusive linha já associada à conta que entra")
+    void ownerChangeRemovesEveryOfferEvenOfIncomingAccount() throws Exception {
+        TestUser adminA = registerUser("t2_all_a");
+        UUID placeId = createPlace("ACTIVE");
+        UUID accountA = approvedOwner(adminA, placeId);
+        TestUser adminB = registerUser("t2_all_b");
+        UUID accountB = createAccount(adminB);
+        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountB);
+        UUID productOfA = product("ACTIVE");
+        putOffer(adminA, placeId, productOfA, body(accountA, "AVAILABLE", "10.00", null)).andExpect(status().isOk());
+
+        // Estado semeado só para testar a garantia do banco: a API nunca grava oferta de conta que não é a titular.
+        UUID productOfB = product("ACTIVE");
+        jdbcTemplate.update("INSERT INTO place_product_offers (id, place_id, product_id, business_account_id,"
+                        + " availability, price, currency, updated_by_user_id) VALUES (?, ?, ?, ?, 'AVAILABLE', 1.00, 'BRL', ?)",
+                UUID.randomUUID(), placeId, productOfB, accountB, adminB.id());
+        assertEquals(2, offerCount(placeId));
+
+        transferOwnership(placeId, accountB);
+
+        assertEquals(0, offerCount(placeId), "nenhuma oferta presente na troca sobrevive, nem a da conta que entra");
+        assertEquals(0, list(adminB, placeId, 0, 20).get("totalElements").asLong());
+    }
+
+    @Test
     @DisplayName("T2: desvincular e reivindicar de novo pelo fluxo oficial não recupera as ofertas da mesma conta")
     void unlinkAndOfficialReclaimDoNotRestoreOffers() throws Exception {
         TestUser admin = registerUser("t2_reclaim");

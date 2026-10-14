@@ -41,12 +41,13 @@ CREATE TABLE place_product_offers (
 CREATE INDEX idx_place_product_offers_business ON place_product_offers (business_account_id);
 CREATE INDEX idx_place_product_offers_product ON place_product_offers (product_id);
 
+-- Apaga todas as ofertas do local, sem filtrar por conta: nenhuma linha presente no
+-- momento da troca sobrevive, nem uma que já estivesse associada à conta que entra.
 CREATE OR REPLACE FUNCTION fn_invalidate_place_product_offers_on_owner_change()
 RETURNS TRIGGER AS $$
 BEGIN
     DELETE FROM place_product_offers
-    WHERE place_id = NEW.id
-      AND business_account_id IS DISTINCT FROM NEW.claimed_by_business_id;
+    WHERE place_id = NEW.id;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
