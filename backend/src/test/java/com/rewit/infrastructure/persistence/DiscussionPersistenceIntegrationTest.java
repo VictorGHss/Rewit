@@ -277,6 +277,43 @@ class DiscussionPersistenceIntegrationTest {
     }
 
     @Test
+    @DisplayName("4b. Empate em created_at desempata por id ASC nas três leituras paginadas do adapter")
+    void shouldBreakCreatedAtTiesByIdInEveryPagedRead() {
+        User author = createTestUser("tie_author");
+        User commenter = createTestUser("tie_user");
+        Review review = createTestReview(author, createTestPlace(), "PUBLIC");
+
+        List<UUID> roots = new java.util.ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            roots.add(discussionService.createDiscussion(new CreateDiscussionCommand(
+                    review.getId(), commenter.getId(), null, "Raiz " + i)).id());
+        }
+        UUID repliedRoot = roots.get(0);
+        List<UUID> replies = new java.util.ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            replies.add(discussionService.createDiscussion(new CreateDiscussionCommand(
+                    review.getId(), author.getId(), repliedRoot, "Resposta " + i)).id());
+        }
+        jdbcTemplate.update("UPDATE review_discussions SET created_at = TIMESTAMPTZ '2026-01-01 12:00:00+00' "
+                + "WHERE review_id = ?", review.getId());
+
+        // O PostgreSQL compara UUID byte a byte, a mesma ordem da forma textual em minúsculas.
+        java.util.Comparator<UUID> postgresOrder = java.util.Comparator.comparing(UUID::toString);
+        List<UUID> all = new java.util.ArrayList<>(roots);
+        all.addAll(replies);
+        all.sort(postgresOrder);
+        roots.sort(postgresOrder);
+        replies.sort(postgresOrder);
+
+        assertEquals(all, discussionRepository.findActiveByReviewId(review.getId(), 0, 10).content().stream()
+                .map(ReviewDiscussion::getId).toList());
+        assertEquals(roots, discussionRepository.findThreadRootsVisibleTo(review.getId(), commenter.getId(), 0, 10)
+                .content().stream().map(ReviewDiscussion::getId).toList());
+        assertEquals(replies, discussionRepository.findRepliesVisibleTo(repliedRoot, commenter.getId(), 0, 10)
+                .content().stream().map(ReviewDiscussion::getId).toList());
+    }
+
+    @Test
     @DisplayName("5. Soft delete: marca como REMOVED, exclui da listagem ativa mas preserva linha no PostgreSQL")
     void shouldPerformSoftDeleteWithoutPhysicalDeletion() {
         User author = createTestUser("soft_author");
