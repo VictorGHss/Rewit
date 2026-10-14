@@ -10,7 +10,6 @@ import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.service.BusinessRepresentationPolicy;
 import com.rewit.application.service.ReviewVisibilityPolicy;
 import com.rewit.common.exception.BusinessException;
-import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.domain.model.Place;
@@ -86,7 +85,7 @@ public class GetBusinessResponseEligibilityUseCase {
         }
 
         List<BusinessAccount> approved = businessAccountRepository.findByUserId(actorUserId).stream()
-                .filter(account -> account.getVerificationStatus() == VerificationStatus.APPROVED)
+                .filter(account -> BusinessRepresentationPolicy.isApproved(account))
                 .toList();
         if (approved.isEmpty()) {
             return new BusinessResponseEligibilityView(reviewId, true, List.of());

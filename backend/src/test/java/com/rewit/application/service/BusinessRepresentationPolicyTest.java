@@ -6,6 +6,7 @@ import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.enums.BusinessRepresentationIneligibility;
 import com.rewit.domain.enums.Role;
 import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.BusinessAccount;
@@ -20,6 +21,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 
 import java.time.Instant;
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -221,5 +224,98 @@ class BusinessRepresentationPolicyTest {
         assertFalse(BusinessRepresentationPolicy.represents(account, place(id, "A", null, "ACTIVE")));
         assertFalse(BusinessRepresentationPolicy.represents(account, place(id, "A", UUID.randomUUID(), "ACTIVE")));
         assertFalse(BusinessRepresentationPolicy.represents(account, null));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // Elegibilidade da representação (decisão B): sem ator, para restauração e leitura pública
+    // ---------------------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("evaluate: cada critério falso é um motivo, os três são independentes e só o conjunto vazio é elegível")
+    void evaluateCriteriaMatrix() {
+        for (boolean approved : new boolean[] {true, false}) {
+            for (boolean operational : new boolean[] {true, false}) {
+                for (boolean represented : new boolean[] {true, false}) {
+                    Set<BusinessRepresentationIneligibility> expected = EnumSet.noneOf(BusinessRepresentationIneligibility.class);
+                    if (!approved) {
+                        expected.add(BusinessRepresentationIneligibility.ACCOUNT_NOT_APPROVED);
+                    }
+                    if (!operational) {
+                        expected.add(BusinessRepresentationIneligibility.ADMINISTRATOR_NOT_OPERATIONAL);
+                    }
+                    if (!represented) {
+                        expected.add(BusinessRepresentationIneligibility.PLACE_NOT_REPRESENTED);
+                    }
+                    assertEquals(expected, BusinessRepresentationPolicy.evaluate(approved, operational, represented));
+                }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("evaluate com objetos: só APPROVED é aprovada; local segue represents; conta ausente não representa")
+    void evaluateLoadedObjects() {
+        UUID placeId = UUID.randomUUID();
+        Place represented = place(placeId, "A", accountId, "ACTIVE");
+        for (VerificationStatus status : VerificationStatus.values()) {
+            BusinessAccount account = account(accountId, actor, status);
+            boolean approved = status == VerificationStatus.APPROVED;
+            assertEquals(approved, BusinessRepresentationPolicy.isApproved(account));
+            assertEquals(approved, BusinessRepresentationPolicy.evaluate(account, true, represented).isEmpty());
+        }
+        BusinessAccount approved = account(accountId, actor, VerificationStatus.APPROVED);
+        assertEquals(Set.of(BusinessRepresentationIneligibility.PLACE_NOT_REPRESENTED),
+                BusinessRepresentationPolicy.evaluate(approved, true, place(placeId, "A", accountId, "CLOSED")));
+        assertEquals(Set.of(BusinessRepresentationIneligibility.PLACE_NOT_REPRESENTED),
+                BusinessRepresentationPolicy.evaluate(approved, true, place(placeId, "A", UUID.randomUUID(), "ACTIVE")));
+        assertEquals(EnumSet.allOf(BusinessRepresentationIneligibility.class),
+                BusinessRepresentationPolicy.evaluate(null, false, represented));
+    }
+
+    @Test
+    @DisplayName("currentIneligibility: avalia o administrador atual da conta, não um ator, e lê o local sem lock")
+    void currentIneligibilityUsesAccountAdministratorWithoutLocks() {
+        UUID administrator = UUID.randomUUID();
+        UUID placeId = UUID.randomUUID();
+        when(businessAccountRepository.findById(accountId))
+                .thenReturn(Optional.of(account(accountId, administrator, VerificationStatus.APPROVED)));
+        when(placeRepository.findById(placeId)).thenReturn(Optional.of(place(placeId, "A", accountId, "ACTIVE")));
+        User deleted = User.rehydrate(administrator, "adm@rewit.test", "hash", AuthProvider.LOCAL, null,
+                AccountStatus.DELETED, true, Role.USER, NOW, NOW, NOW);
+
+        when(userRepository.findById(administrator)).thenReturn(Optional.of(user(administrator, AccountStatus.ACTIVE, Role.USER)));
+        assertTrue(policy.currentIneligibility(accountId, placeId).isEmpty());
+
+        for (Optional<User> inoperative : List.of(
+                Optional.of(user(administrator, AccountStatus.DEACTIVATED, Role.USER)),
+                Optional.of(user(administrator, AccountStatus.SUSPENDED, Role.USER)),
+                Optional.of(deleted),
+                Optional.<User>empty())) {
+            when(userRepository.findById(administrator)).thenReturn(inoperative);
+            assertEquals(Set.of(BusinessRepresentationIneligibility.ADMINISTRATOR_NOT_OPERATIONAL),
+                    policy.currentIneligibility(accountId, placeId));
+        }
+
+        verify(userRepository, never()).findById(actor);
+        verify(placeRepository, never()).findByIdForUpdate(any());
+    }
+
+    @Test
+    @DisplayName("currentIneligibility: conta inexistente reúne os três motivos; local inexistente não é representado")
+    void currentIneligibilityWithMissingEntities() {
+        UUID placeId = UUID.randomUUID();
+        when(businessAccountRepository.findById(accountId)).thenReturn(Optional.empty());
+        when(placeRepository.findById(placeId)).thenReturn(Optional.of(place(placeId, "A", accountId, "ACTIVE")));
+
+        assertEquals(EnumSet.allOf(BusinessRepresentationIneligibility.class),
+                policy.currentIneligibility(accountId, placeId));
+        verify(userRepository, never()).findById(any());
+
+        UUID missingPlace = UUID.randomUUID();
+        when(businessAccountRepository.findById(accountId))
+                .thenReturn(Optional.of(account(accountId, actor, VerificationStatus.APPROVED)));
+        when(placeRepository.findById(missingPlace)).thenReturn(Optional.empty());
+        assertEquals(Set.of(BusinessRepresentationIneligibility.PLACE_NOT_REPRESENTED),
+                policy.currentIneligibility(accountId, missingPlace));
     }
 }
