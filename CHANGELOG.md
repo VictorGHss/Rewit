@@ -13,7 +13,7 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
     - Remoção autônoma da própria resposta pela empresa com HTTP 204 (`DELETE /api/v1/business-responses/{responseId}`).
     - Fila administrativa de consulta de respostas oficiais removidas (`GET /api/v1/admin/business-responses/removed`) com paginação e filtros dinâmicos por avaliação, discussão, conta comercial, local e autor da remoção (`BUSINESS` ou `MODERATION`).
     - Ação administrativa de moderação (`POST /api/v1/admin/business-responses/{responseId}/moderate`) permitindo remoção e restauração auditada (`RESTORE_RESPONSE`) com justificativa formal obrigatória (15 a 1.000 caracteres) e código de motivo.
-    - Migrações Flyway `V24__create_business_official_responses.sql` e `V25__add_moderation_reason_to_business_official_responses.sql`.
+    - Migrações Flyway `V24__business_responses.sql` (tabelas `business_responses` e `business_response_moderation_audit_logs`) e `V25__business_responses_removed_index.sql` (índice parcial `idx_business_responses_removed`).
     - Proteção distribuída contra abuso via rate limit deslizante no Redis (`BUSINESS_RESPONSE_CREATION`), com fallback resiliente em memória e resposta HTTP 429 RFC 7807 (`Retry-After`).
   - **Painel Administrativo Web (`apps/admin`)**:
     - Nova aba "Respostas Oficiais Removidas" integrada à navegação principal e badges operacionais.

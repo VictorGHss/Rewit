@@ -4,10 +4,11 @@
 > **Status do Repositório**: Verde e Estabilizado\
 > **Checkpoint Atual (HEAD)**: commit `dfd84ae` (*"feat: adicionar fila administrativa de respostas oficiais removidas"*)\
 > **Branch**: `origin/main` (commit `dfd84ae0d0b7e14558b03ee08abe359e2dcd5057`)\
-> **Total de Testes Automatizados no Monorepo**: `2.524` (0 failures, 0 errors, 0 skipped)\
-> - **Backend (Spring Boot)**: 199 arquivos de teste, ~1.828 métodos `@Test` catalogados (1.462 testes nos ciclos históricos da fundação)\
+> **Inventário de Testes Catalogados no Monorepo**: `2.526` métodos/casos declarados\
+> - **Backend (Spring Boot)**: 200 arquivos de teste, 1.830 métodos de teste declarados (1.823 `@Test` e 7 `@ParameterizedTest`); baseline histórico executado: 1.462 testes verdes (STEP 29.3)\
 > - **Mobile (Flutter)**: 48 arquivos de teste, 618 testes executados e aprovados via `flutter test` (100%)\
 > - **Admin (React)**: 16 arquivos de teste, 78 testes executados e aprovados via `vitest run` (100%)\
+> **Validação Multiplataforma Recente (Mobile + Admin)**: 696 testes executados e aprovados (0 falhas, 0 erros)\
 > **Working Tree**: `Limpo`\
 > **Próximo Trabalho**: Consolidação documental pós-C11, preparação da proposta de Gestão de Estabelecimentos Reivindicados / Catálogo Local (Fase 2 Comercial) e resolução de decisões pendentes (ADR-011)
 
@@ -1072,27 +1073,33 @@ Os gates dos passos fundacionais de Cold Start (24.5), Ciclo de Vida de Avaliaç
 
 ## 12. Estado Atual da Suíte de Testes do Monorepo
 
-* **Total de Testes Automatizados no Monorepo**: `2.524`
+### 12.1 Validação Multiplataforma Recente (Mobile e Admin)
+* **Módulos Validados nesta Sessão**: `apps/mobile` e `apps/admin`
+* **Testes Executados e Aprovados**: **696 testes** (618 Mobile + 78 Admin)
 * **Falhas**: `0`
 * **Erros**: `0`
 * **Ignorados / Skipped**: `0`
+* **Taxa de Sucesso**: 100%
 
-### 12.1 Métricas por Módulo do Projeto
+### 12.2 Inventário Consolidado de Testes do Monorepo
+
+O monorepo possui **2.526 testes catalogados** distribuídos em seus três módulos:
 
 1. **Backend (Spring Boot / JUnit 5)**:
-   - **Inventário de Testes**: 199 arquivos de teste com aproximadamente **1.828 métodos `@Test`** catalogados cobrindo domínio puro, segurança, use cases transacionais, persistência com PostgreSQL/PostGIS real, Redis real, SeaweedFS real, MockMvc e controllers.
-   - **Baseline de Execução Histórica**: 1.462 testes nos ciclos históricos da fundação e outbox; 366 testes adicionados nos ciclos C2, C3, C5.1, C9, C10 e C11.
-   - **Perfil de Execução**: `local` contra containers reais orquestrados via Docker Compose.
+   - **Inventário de Código de Teste**: 200 arquivos de teste em `backend/src/test/`, com **1.830 métodos de teste declarados** (1.823 com anotação `@Test` e 7 com `@ParameterizedTest`), cobrindo domínio puro, segurança, use cases transacionais, persistência com PostgreSQL/PostGIS real, Redis real, SeaweedFS real, MockMvc e controllers REST.
+   - **Baseline Histórico Executado**: 1.462 testes executados e aprovados com sucesso no fechamento formal do STEP 29.3 (`Tests run: 1462, Failures: 0, Errors: 0, Skipped: 0`). Os 368 métodos de teste adicionados nos ciclos C2, C3, C5.1, C9, C10 e C11 encontram-se implementados no código e sua execução completa ocorre contra containers reais orquestrados via Docker Compose (`./mvnw clean test`).
+   - **Perfil de Execução**: `local` com containers dedicados.
 
 2. **Aplicativo Mobile (Flutter / Dart)**:
    - **Arquivos de Teste**: 48 arquivos em `apps/mobile/test/`.
    - **Testes Executados e Aprovados**: **618 testes** executados via `flutter test` (100% de sucesso em 59s).
+   - **Análise Estática**: `flutter analyze` sem nenhum erro ou aviso (`No issues found!`).
    - **Cobertura Funcional**: Autenticação, ciclo de vida de contas, navegação, feeds, criação multi-alvo com geolocalização precisa, detalhes de locais e produtos, scanner de código de barras/QR Code, discussões, notificações e respostas oficiais de empresas.
 
 3. **Painel Administrativo Web (React / TypeScript / Vitest)**:
    - **Arquivos de Teste**: 16 arquivos em `apps/admin/src/`.
-   - **Testes Executados e Aprovados**: **78 testes** executados via `vitest run` (100% de sucesso).
-   - **Build de Produção**: `tsc && vite build` concluído com sucesso e zero erros de compilação.
+   - **Testes Executados e Aprovados**: **78 testes** executados via `vitest run` (100% de sucesso em 41.44s).
+   - **Build de Produção**: `npx tsc && npx vite build` concluído com sucesso e zero erros de compilação em 442ms.
    - **Cobertura Funcional**: Autenticação administrativa com sessionStorage, renovação de tokens com trava de concorrência, dashboard com contadores em tempo real, filas de denúncias de reviews e discussões, fila de reivindicações de locais e fila de respostas oficiais removidas com restauração auditada e compatibilidade a `fieldErrors` como Record e Array.
 
 ---
@@ -1104,10 +1111,10 @@ O ecossistema Rewit concluiu formalmente os ciclos C2, C3, C5.1, C9, C10 e C11. 
 ### 13.1 Decisões Arquiteturais Pendentes
 
 1. **Decisão de Produto/Jurídico sobre IP/User-Agent em Sessões Ativas (ADR-011)**:
-   - O job técnico de expurgo de sessões expiradas e sanitização de metadados de sessões inativas está concluído (STEP 29.3).
-   - Permanece pendente a decisão jurídica quanto à base legal e necessidade de coleta de IP e User-Agent enquanto a sessão está ativa. A [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) permanece formalmente como **Proposto** até parecer final.
+   - O job técnico de expurgo de sessões expiradas e sanitização de metadados de sessões inativas está integralmente implementado e testado no código (STEP 29.3 / `CleanupAuthSessionsUseCase`).
+   - Permanece pendente a decisão jurídica quanto à base legal e necessidade de coleta de IP e User-Agent enquanto a sessão está ativa. A [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) permanece formalmente com status **Proposto** até parecer final.
 2. **Homologação das ADRs 012 e 013**:
-   - As implementações de Observabilidade V1 (ADR-012) e Rate Limiting Distribuído (ADR-013) encontram-se 100% operacionais no código e com suítes de teste verdes. Recomenda-se a aprovação formal dessas ADRs pelo mantenedor.
+   - As implementações de Observabilidade V1 (ADR-012) e Rate Limiting Distribuído (ADR-013) encontram-se 100% operacionais no código e com suítes de teste verdes. Seus documentos de decisão permanecem com status formal **Proposto**, cabendo a aprovação formal ao mantenedor do projeto para manter a governança documental.
 
 ### 13.2 Proposta de Continuidade para a Próxima Fase
 A próxima etapa de desenvolvimento deve focar na **Gestão de Estabelecimentos Reivindicados e Catálogo Local**, expandindo a capacidade das contas comerciais aprovadas de configurar horários de funcionamento, comodidades e produtos disponíveis no local, consolidando a Fase 2 do produto.

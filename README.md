@@ -213,7 +213,7 @@ flutter run
   - Proteção integral de privacidade, sem expor IDs de autores ou denunciantes.
 
 - **Contas Comerciais e Reivindicação de Locais (Fase 2 / C9)**:
-  - APIs REST para abertura de contas comerciais (`/api/v1/business-accounts`), listagem de contas do usuário logado e submissão de solicitações de reivindicação de locais físicos;
+  - APIs REST para abertura de contas comerciais (`/api/v1/business-accounts`), listagem de contas do usuário logado e submissão de solicitações de reivindicação de locais físicos (tabela `place_claim_requests`), vinculando o local via `places.claimed_by_business_id`;
   - Fila administrativa de reivindicações (`/api/v1/admin/place-claims`) para análise e decisão (`APPROVE` / `REJECT`) por moderadores e administradores;
   - Experiência mobile para administradores em "Minhas empresas", com acompanhamento de status e solicitação direta na tela de detalhes de locais;
   - Painel administrativo web com fila de triagem de solicitações, filtros por status e modal de decisão auditado com justificativa obrigatória;
@@ -224,7 +224,7 @@ flutter run
   - Mitigação de vulnerabilidades decorrentes de tokens JWT válidos após revogação de privilégios (`403 Forbidden` padronizado via RFC 7807 e encerramento de sessão).
 
 - **Respostas Oficiais Comerciais e Moderação Multiplataforma (Fase 2 / C11)**:
-  - **Backend REST API**: Publicação, consulta e exclusão de respostas oficiais de estabelecimentos comerciais a avaliações e discussões raiz (`/api/v1/business-accounts/{id}/.../official-response`), com unicidade de resposta ativa por par (empresa, alvo), rate limiting distribuído com Redis (`BUSINESS_RESPONSE_CREATION`), fila administrativa de respostas removidas (`/api/v1/admin/business-responses/removed`) e moderação/restauração formal auditada com justificativa obrigatória (15 a 1.000 caracteres);
+  - **Backend REST API**: Publicação, consulta e exclusão de respostas oficiais de estabelecimentos comerciais a avaliações (`/api/v1/reviews/{reviewId}/business-responses`) e discussões raiz (`/api/v1/discussions/{discussionId}/business-responses`), com unicidade de resposta ativa por par (empresa, alvo), rate limiting distribuído com Redis (`BUSINESS_RESPONSE_CREATION`), fila administrativa de respostas removidas (`/api/v1/admin/business-responses/removed`) e moderação/restauração formal auditada com justificativa obrigatória (15 a 1.000 caracteres);
   - **Cliente Mobile (Flutter)**: Renderização destacada de respostas oficiais com selo de verificação da empresa proprietária em avaliações e discussões, além de fluxo de resposta para proprietários verificados;
   - **Painel Administrativo Web (React + TypeScript + Vite)**: Nova área "Respostas Oficiais Removidas" com fila de triagem paginada, filtros avançados (`BUSINESS` / `MODERATION`), visualização contextual de datas (`moderatedAt`), status de restaurabilidade (`restorable`) e modal de restauração com tratamento de conflitos e recarga reativa.
 
