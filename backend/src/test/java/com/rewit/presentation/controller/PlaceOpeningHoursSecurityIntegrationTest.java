@@ -511,12 +511,20 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         CountDownLatch lockAcquired = new CountDownLatch(1);
         CountDownLatch releaseLock = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger holderPidRef = new java.util.concurrent.atomic.AtomicInteger();
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
-            // 1. Conexão de teste mantém o lock FOR UPDATE sobre o estabelecimento
+            // 1. Transação de teste obtém o PID da sua conexão e adquire lock FOR SHARE sobre o estabelecimento.
+            // O lock FOR SHARE conflita com o FOR UPDATE (ou FOR NO KEY UPDATE) da leitura do caso de uso,
+            // mas é compatível com o FOR KEY SHARE executado pelo PostgreSQL na validação de FK durante INSERTs.
             Future<?> lockHolder = executor.submit(() -> tx.executeWithoutResult(status -> {
-                jdbcTemplate.queryForObject("SELECT id FROM places WHERE id = ? FOR UPDATE", UUID.class, placeId);
+                Integer pid = jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class);
+                if (pid == null) {
+                    throw new IllegalStateException("Não foi possível obter pg_backend_pid da conexão de teste");
+                }
+                holderPidRef.set(pid);
+                jdbcTemplate.queryForObject("SELECT id FROM places WHERE id = ? FOR SHARE", UUID.class, placeId);
                 lockAcquired.countDown();
                 try {
                     if (!releaseLock.await(10, TimeUnit.SECONDS)) {
@@ -528,7 +536,9 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 }
             }));
 
-            assertTrue(lockAcquired.await(5, TimeUnit.SECONDS), "Transação inicial deve adquirir o lock do local");
+            assertTrue(lockAcquired.await(5, TimeUnit.SECONDS), "Transação inicial deve adquirir o lock FOR SHARE do local");
+            int holderPid = holderPidRef.get();
+            assertTrue(holderPid > 0, "PID da sessão bloqueadora deve ser positivo");
 
             // 2. Operação de atualização de horários é iniciada por outra transação
             Future<Integer> updateResult = executor.submit(() -> {
@@ -543,8 +553,9 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 }
             });
 
-            // 3. Comprova que a atualização ficou bloqueada no PostgreSQL antes de liberar a primeira transação
-            waitForLockWaiter();
+            // 3. Comprova positivamente que a requisição está bloqueada no SELECT com lock pessimista na tabela places,
+            // tendo como bloqueador direto o PID da transação de teste (holderPid)
+            waitForPlaceLockWaiter(holderPid);
 
             // 4. Libera a primeira transação (commit que libera o lock)
             releaseLock.countDown();
@@ -572,19 +583,31 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         }
     }
 
-    /** Espera alguma sessão bloqueada em lock de linha (a atualização parada no FOR UPDATE do local). */
-    private void waitForLockWaiter() throws InterruptedException {
+    /**
+     * Espera e comprova de forma determinística que a requisição de atualização está bloqueada
+     * especificamente no SELECT com lock pessimista na tabela places, sendo bloqueada pela sessão de teste (holderPid).
+     */
+    private void waitForPlaceLockWaiter(int holderPid) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        String sql = """
+                SELECT count(*)
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid()
+                  AND ? = ANY(pg_blocking_pids(pid))
+                  AND wait_event_type = 'Lock'
+                  AND query ILIKE '%places%'
+                  AND (query ILIKE '%for update%' OR query ILIKE '%for no key update%')
+                  AND query NOT ILIKE 'INSERT%'
+                """;
         while (System.nanoTime() < deadline) {
-            Integer waiters = jdbcTemplate.queryForObject(
-                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
-                    Integer.class);
+            Integer waiters = jdbcTemplate.queryForObject(sql, Integer.class, holderPid);
             if (waiters != null && waiters > 0) {
                 return;
             }
             Thread.sleep(25);
         }
-        fail("A atualização de horários deveria estar bloqueada aguardando o lock do local no PostgreSQL");
+        fail("A atualização de horários deveria estar bloqueada aguardando o lock pessimista da tabela places pelo PID " + holderPid);
     }
 
     @Test
