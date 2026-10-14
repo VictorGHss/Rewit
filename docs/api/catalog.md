@@ -695,6 +695,91 @@ Mesmo formato de 2.16, com `configured = true` e as comodidades gravadas em orde
 
 ---
 
+### 2.18 Ofertas Comerciais de um Local (GET /api/v1/places/{id}/offers)
+* **Método**: `GET`
+* **Rota**: `/api/v1/places/{id}/offers?page=0&size=20`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Vitrine oficial do estabelecimento (F2.3): produtos globais que a empresa titular oferta no local, com disponibilidade e preço opcional. É separada da presença comunitária (`POST /products/{id}/presence` e `GET /places/{id}/products`, 2.5 e 2.12), que não muda.
+* **Paginação**: `page` a partir de 0 (`400 INVALID_PAGE` se negativa) e `size` de 1 a 50, padrão 20 (`400 INVALID_PAGE_SIZE`). Ordenação por nome do produto e id.
+* **Local indisponível**: Local fora de `ACTIVE` ou inexistente responde `404 PLACE_NOT_FOUND` (indistinguível).
+* **O que aparece**:
+  * Só ofertas da conta comercial titular atual do local, com produto global `ACTIVE`. Produto desativado some da vitrine sem a oferta ser apagada e volta se for reativado.
+  * Titular inelegível (conta pendente ou rejeitada, administrador inoperante) ou local sem titular responde página vazia (`content = []`, `totalElements = 0`), sem preço, disponibilidade ou identificadores. O banco não muda; a mesma conta, elegível de novo, volta a ter as ofertas visíveis.
+  * **Troca de titular (decisão T2)**: quando `places.claimed_by_business_id` muda (outra conta, ou o local fica sem titular), todas as ofertas do local são apagadas na mesma transação, por um trigger da V28, sem exceção para a conta que entra. Uma empresa que volte a ser titular não recupera ofertas, preços nem disponibilidade antigos: precisa cadastrá-los de novo. Hoje não existe API de transferência; a regra vale para qualquer caminho que altere o vínculo. A decisão vale só para ofertas: horários (2.13) e comodidades (2.16) seguem a regra F2 de ocultação e não são apagados.
+* **Campos**: `product` (resumo do produto global: `id`, `name`, `brand`, `model`, `category`, `imageUrl`), `availability` (`AVAILABLE` ou `OUT_OF_STOCK`), `price` (número com duas casas ou `null` quando não divulgado; `0.00` é gratuito) e `currency` (sempre `BRL`). Não expõe conta comercial, autor nem datas.
+
+#### Resposta (`200 OK`)
+```json
+{
+  "content": [
+    {
+      "product": {
+        "id": "8d0f2b1e-4a55-4c3f-9a8e-2f6b7c1d9e10",
+        "name": "Café Torrado 500g",
+        "brand": "Marca",
+        "model": null,
+        "category": "BEBIDA",
+        "imageUrl": null
+      },
+      "availability": "AVAILABLE",
+      "price": 12.90,
+      "currency": "BRL"
+    }
+  ],
+  "pageNumber": 0,
+  "pageSize": 20,
+  "totalElements": 1,
+  "totalPages": 1,
+  "isLast": true
+}
+```
+
+---
+
+### 2.19 Criação ou Atualização de Oferta (PUT /api/v1/places/{id}/offers/{productId})
+* **Método**: `PUT`
+* **Rota**: `/api/v1/places/{id}/offers/{productId}`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Cria a oferta do produto global no local ou substitui os termos da oferta existente. Um produto por operação; não substitui a lista inteira. O produto global e a presença comunitária nunca são alterados.
+* **Idempotência**: repetir o mesmo estado (titular, disponibilidade, preço pelo valor e moeda) não regrava a linha nem muda `updated_at`. Mudança de termos preserva o id e a data de criação da oferta e registra o novo autor.
+* **Validação do payload** (antes de qualquer leitura, trava ou escrita; erro não altera nada):
+  * `businessAccountId` e `availability` obrigatórios (`400 VALIDATION_ERROR` com `fieldErrors`).
+  * `availability` fora de `AVAILABLE`/`OUT_OF_STOCK`, inclusive em minúsculas: `400 INVALID_OFFER_AVAILABILITY`.
+  * `price` opcional: omitido ou `null` = não divulgado (limpa o preço anterior); `0` = gratuito; negativo, mais de duas casas decimais ou acima de `9999999999.99`: `400 INVALID_OFFER_PRICE`.
+  * `currency` opcional: ausente = `BRL`; qualquer outro valor (inclusive `"brl"`): `400 UNSUPPORTED_CURRENCY`.
+  * JSON malformado ou `price` não numérico: `400 MALFORMED_REQUEST`.
+* **Autorização** (Política B, mesma ordem de 2.14 e 2.17):
+  * Autor com conta pessoal operacional (`401 ACCOUNT_DISABLED`).
+  * Conta comercial existente e administrada pelo autor (`404 BUSINESS_ACCOUNT_NOT_FOUND`) e aprovada (`409 BUSINESS_ACCOUNT_NOT_APPROVED` se `PENDING` ou `REJECTED`).
+  * Local ativo (`404 PLACE_NOT_FOUND`) e reivindicado agora pela conta (`403 BUSINESS_NOT_RESPONSIBLE`).
+  * Produto global existente e `ACTIVE` (`404 PRODUCT_NOT_FOUND` para inexistente, `INACTIVE` ou `DISCONTINUED`).
+* **Concorrência**: A linha do local é travada (`SELECT ... FOR NO KEY UPDATE`) antes de conferir a representação e gravar. Gravações simultâneas no mesmo local são serializadas e terminam com uma oferta inteira. Uma troca de titular concorrente também espera ou é esperada: se vier antes, o PUT recebe `403`; se vier depois, apaga também a oferta recém-gravada.
+
+#### Requisição
+```json
+{
+  "businessAccountId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "availability": "AVAILABLE",
+  "price": 12.90,
+  "currency": "BRL"
+}
+```
+
+#### Resposta (`200 OK`)
+Um item no formato de 2.18 (`product`, `availability`, `price`, `currency`), tanto na criação quanto na atualização.
+
+---
+
+### 2.20 Retirada de Oferta (DELETE /api/v1/places/{id}/offers/{productId})
+* **Método**: `DELETE`
+* **Rota**: `/api/v1/places/{id}/offers/{productId}?businessAccountId={uuid}`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Retira a oferta individual da vitrine. Não altera o produto global nem a presença comunitária. Funciona também para produto global já desativado.
+* **Conta comercial**: `businessAccountId` é obrigatório na query (`400 MISSING_PARAMETER`; UUID inválido responde `400 TYPE_MISMATCH`). Não serve como prova: a mesma cadeia de autorização e a trava do PUT são aplicadas.
+* **Respostas**: `204 No Content` ao retirar. Oferta inexistente para a conta no local responde `404 PLACE_PRODUCT_OFFER_NOT_FOUND`, avaliado só depois de o autor provar que representa o local; para os demais, os erros são os da autorização (`401`, `404 BUSINESS_ACCOUNT_NOT_FOUND`, `409`, `404 PLACE_NOT_FOUND`, `403`).
+
+---
+
 ## 3. Códigos de Erro Esperados
 * `400 Bad Request`:
   * Payload malformado, valores de coordenadas fora do intervalo WGS 84, identificador inválido (`Erro de Validação de Dados`).
@@ -706,9 +791,10 @@ Mesmo formato de 2.16, com `configured = true` e as comodidades gravadas em orde
   * Produto por código: tipo fora de `EAN`/`UPC`/`GTIN`/`ISBN` (`INVALID_IDENTIFIER_TYPE`) ou valor vazio, longo demais ou com caractere inválido (`INVALID_IDENTIFIER_VALUE`).
   * Horários de funcionamento: identificadores ausentes (`MISSING_PLACE_ID`, `MISSING_BUSINESS_ACCOUNT_ID`), dia da semana inválido (`INVALID_DAY_OF_WEEK`), dia repetido na requisição (`DUPLICATE_DAY_OF_WEEK`), incoerência entre dia fechado e intervalos (`INVALID_OPENING_HOURS`), intervalo com horário de abertura igual ou posterior ao fechamento (`INVALID_OPENING_HOURS_INTERVAL`), ou intervalos sobrepostos no mesmo dia (`OPENING_HOURS_OVERLAPPING_INTERVALS`).
   * Comodidades: código fora do catálogo (`INVALID_AMENITY_CODE`), código repetido na requisição (`DUPLICATE_AMENITY`), `businessAccountId`/`amenities` ausentes, lista acima de 50 elementos ou elemento nulo (`VALIDATION_ERROR`), `amenities` que não seja lista (`MALFORMED_REQUEST`).
+  * Ofertas comerciais: preço negativo, com mais de duas casas ou acima do máximo (`INVALID_OFFER_PRICE`), moeda diferente de `BRL` (`UNSUPPORTED_CURRENCY`), disponibilidade fora de `AVAILABLE`/`OUT_OF_STOCK` (`INVALID_OFFER_AVAILABILITY`), `businessAccountId`/`availability` ausentes (`VALIDATION_ERROR`), preço não numérico (`MALFORMED_REQUEST`), `businessAccountId` ausente no DELETE (`MISSING_PARAMETER`), página negativa (`INVALID_PAGE`) e tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
 * `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
-* `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`, `PUT /places/{id}/opening-hours`, `PUT /places/{id}/amenities`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido.
+* `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`, `PUT /places/{id}/opening-hours`, `PUT /places/{id}/amenities`, `PUT` e `DELETE /places/{id}/offers/{productId}`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido.
 * `403 Forbidden`: Conta comercial não responde pelo estabelecimento informado (`BUSINESS_NOT_RESPONSIBLE`).
-* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`). No detalhe público, nos horários de funcionamento e nas comodidades, local fora de `ACTIVE` também responde `PLACE_NOT_FOUND`, indistinguível de inexistente. Conta comercial inexistente ou de outro usuário responde `BUSINESS_ACCOUNT_NOT_FOUND`.
-* `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`). Conta comercial pendente de aprovação ao tentar configurar horários (`BUSINESS_ACCOUNT_NOT_APPROVED`); nas comodidades, conta pendente ou rejeitada (`BUSINESS_ACCOUNT_NOT_APPROVED`).
+* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`). No detalhe público, nos horários de funcionamento, nas comodidades e nas ofertas, local fora de `ACTIVE` também responde `PLACE_NOT_FOUND`, indistinguível de inexistente. Conta comercial inexistente ou de outro usuário responde `BUSINESS_ACCOUNT_NOT_FOUND`. Na oferta, produto global inexistente ou fora de `ACTIVE` responde `PRODUCT_NOT_FOUND` e oferta inexistente no DELETE responde `PLACE_PRODUCT_OFFER_NOT_FOUND`.
+* `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`). Conta comercial pendente de aprovação ao tentar configurar horários (`BUSINESS_ACCOUNT_NOT_APPROVED`); nas comodidades e nas ofertas, conta pendente ou rejeitada (`BUSINESS_ACCOUNT_NOT_APPROVED`).
 * `429 Too Many Requests` (`RATE_LIMIT_EXCEEDED`): limite de buscas do usuário atingido (busca global e produto por código); acompanha `Retry-After`.
