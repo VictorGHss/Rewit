@@ -292,11 +292,12 @@ Empresas com contas comerciais aprovadas podem responder oficialmente a comentá
 | Método | Rota | Descrição |
 |---|---|---|
 | `POST` | `/api/v1/discussions/{discussionId}/business-responses` | Publica resposta oficial ao comentário raiz. Payload: `businessAccountId`, `placeId`, `content` (até 2000 caracteres) |
-| `GET` | `/api/v1/discussions/{discussionId}/business-responses` | Lista paginada das respostas oficiais ativas do comentário (`page`, `size` até 50) |
+| `GET` | `/api/v1/discussions/{discussionId}/business-responses` | Lista paginada das respostas oficiais ativas do comentário cuja representação comercial está elegível agora (`page`, `size` até 50); `totalElements` conta só as listadas |
 
 Regras:
 * Apenas comentários raiz (`parentId == null`) e ativos aceitam respostas oficiais. Resposta a respostas ou comentário inativo responde `409 DISCUSSION_NOT_RESPONDABLE`.
-* Uma única resposta ativa por empresa e comentário (`409 BUSINESS_RESPONSE_ALREADY_EXISTS`).
+* Uma única resposta ativa por empresa e comentário (`409 BUSINESS_RESPONSE_ALREADY_EXISTS`), mesmo que a ativa esteja oculta por inelegibilidade.
+* A visibilidade segue a elegibilidade corrente da representação (conta aprovada, administrador operacional, local ativo e vinculado), como nas respostas a avaliações ([reviews.md §3.12](reviews.md)).
 * Sujeito ao rate limit `BUSINESS_RESPONSE_CREATION` (10 requisições por usuário a cada 60 s).
 
 ---
