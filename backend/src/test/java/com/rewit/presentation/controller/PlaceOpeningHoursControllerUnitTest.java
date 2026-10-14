@@ -221,5 +221,48 @@ class PlaceOpeningHoursControllerUnitTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
-}
 
+    @Test
+    @DisplayName("PUT /api/v1/places/{placeId}/opening-hours deve rejeitar lista de dias com elemento nulo (F1)")
+    void shouldRejectPutWithNullDaysElement() throws Exception {
+        String jsonPayload = """
+                {
+                    "businessAccountId": "%s",
+                    "days": [null]
+                }
+                """.formatted(businessAccountId);
+
+        mockMvc.perform(put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .principal(auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonPayload)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("PUT /api/v1/places/{placeId}/opening-hours deve rejeitar lista de intervalos com elemento nulo (F1)")
+    void shouldRejectPutWithNullIntervalsElement() throws Exception {
+        String jsonPayload = """
+                {
+                    "businessAccountId": "%s",
+                    "days": [
+                        {
+                            "dayOfWeek": 1,
+                            "closed": false,
+                            "intervals": [null]
+                        }
+                    ]
+                }
+                """.formatted(businessAccountId);
+
+        mockMvc.perform(put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .principal(auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonPayload)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+}

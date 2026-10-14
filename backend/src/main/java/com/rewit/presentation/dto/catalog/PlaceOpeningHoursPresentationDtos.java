@@ -16,6 +16,7 @@ import jakarta.validation.constraints.NotNull;
 import java.time.LocalTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -53,13 +54,12 @@ public final class PlaceOpeningHoursPresentationDtos {
             @Schema(example = "false", description = "Indica se o estabelecimento estará fechado no dia")
             boolean closed,
 
-            @Valid
             @Schema(description = "Lista de intervalos de funcionamento no dia (obrigatório se closed for false)")
-            List<TimeIntervalRequest> intervals
+            List<@NotNull(message = "O intervalo de funcionamento não pode ser nulo") @Valid TimeIntervalRequest> intervals
     ) {
         public DayScheduleCommand toCommand() {
             List<TimeIntervalCommand> intervalCommands = intervals != null
-                    ? intervals.stream().map(TimeIntervalRequest::toCommand).toList()
+                    ? intervals.stream().filter(Objects::nonNull).map(TimeIntervalRequest::toCommand).toList()
                     : Collections.emptyList();
             return new DayScheduleCommand(dayOfWeek, closed, intervalCommands);
         }
@@ -72,13 +72,12 @@ public final class PlaceOpeningHoursPresentationDtos {
             UUID businessAccountId,
 
             @NotNull(message = "A lista de dias de funcionamento é obrigatória")
-            @Valid
             @Schema(description = "Programação semanal dos dias de funcionamento")
-            List<DayScheduleRequest> days
+            List<@NotNull(message = "O dia de funcionamento não pode ser nulo") @Valid DayScheduleRequest> days
     ) {
         public UpdatePlaceOpeningHoursCommand toCommand(UUID actorUserId, UUID placeId) {
             List<DayScheduleCommand> dayCommands = days != null
-                    ? days.stream().map(DayScheduleRequest::toCommand).toList()
+                    ? days.stream().filter(Objects::nonNull).map(DayScheduleRequest::toCommand).toList()
                     : Collections.emptyList();
             return new UpdatePlaceOpeningHoursCommand(actorUserId, placeId, businessAccountId, dayCommands);
         }
@@ -140,4 +139,3 @@ public final class PlaceOpeningHoursPresentationDtos {
         }
     }
 }
-
