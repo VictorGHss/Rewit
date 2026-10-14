@@ -579,6 +579,122 @@ Retorna a grade semanal completa de 7 dias no formato de `PlaceOpeningHoursRespo
 
 ---
 
+### 2.15 Catálogo de Comodidades (GET /api/v1/places/amenity-options)
+* **Método**: `GET`
+* **Rota**: `/api/v1/places/amenity-options`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Lista as comodidades aceitas por `PUT /api/v1/places/{id}/amenities` (F2.2). O catálogo é controlado: não há texto livre, e o código é estável na API e no banco (`CHECK chk_place_amenity_code`, V27).
+* **Escopo**: Apenas características físicas e factuais do local. Ficam fora alegações subjetivas ("ambiente agradável"), preços, horários (ver 2.13/2.14), delivery, disponibilidade de produtos e serviços avaliáveis: atendimento, delivery e drive-thru continuam em `services` (`PlaceService`, um `RateableTarget`, ADR-009), que não é reutilizado aqui.
+* **Ordem**: A resposta segue a ordem do catálogo, que também é a ordem usada na leitura das comodidades de um local.
+
+| Código | Rótulo |
+| :--- | :--- |
+| `WIFI` | Wi-Fi para clientes |
+| `PARKING` | Estacionamento |
+| `WHEELCHAIR_ACCESSIBLE` | Acesso para cadeira de rodas |
+| `ACCESSIBLE_RESTROOM` | Banheiro acessível |
+| `CUSTOMER_RESTROOM` | Banheiro para clientes |
+| `AIR_CONDITIONING` | Ar-condicionado |
+| `OUTDOOR_SEATING` | Área externa |
+| `PET_FRIENDLY` | Aceita animais de estimação |
+
+Incluir um código exige nova constante em `PlaceAmenity` e migração que amplie o `CHECK`; remover exige antes tratar as seleções gravadas. O teste de integração compara o enum com o `CHECK`.
+
+#### Resposta (`200 OK`)
+```json
+{
+  "options": [
+    { "code": "WIFI", "label": "Wi-Fi para clientes" },
+    { "code": "PARKING", "label": "Estacionamento" }
+  ]
+}
+```
+(Exemplo truncado: a resposta traz os oito códigos da tabela.)
+
+---
+
+### 2.16 Consulta de Comodidades (GET /api/v1/places/{id}/amenities)
+* **Método**: `GET`
+* **Rota**: `/api/v1/places/{id}/amenities`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Retorna as comodidades declaradas pela empresa titular do estabelecimento (F2.2).
+* **Local indisponível**: Local fora de `ACTIVE` ou inexistente responde `404 PLACE_NOT_FOUND` (indistinguível).
+* **Estados da resposta** (mesma regra de visibilidade da Decisão F2 aplicada aos horários em 2.13):
+  * **Nunca configurado**: `configured = false`, `amenities = []`.
+  * **Configurado sem comodidades**: `configured = true`, `amenities = []`. A empresa declarou que o local não oferece nenhuma comodidade do catálogo; é diferente de nunca ter configurado.
+  * **Configurado com comodidades**: `configured = true` e a lista em ordem de catálogo, cada item com `code` e `label`.
+  * **Representação inelegível**: se a conta comercial que gravou deixar de ser elegível (conta não aprovada, administrador inoperante, local desvinculado ou reivindicado por outra conta), a resposta é igual à de nunca configurado. Não expõe seleção, conta comercial, autor nem datas.
+  * **Reversibilidade sem reescrita**: a mesma representação, de novo elegível, volta a ter a configuração visível sem nova gravação e sem alterar `created_at`/`updated_at`.
+  * **Transferência**: a nova titular não herda a configuração da anterior; a leitura fica como nunca configurada até a nova titular gravar a sua via `PUT`. Se o local voltar à titular anterior antes de a nova gravar, a configuração antiga (ainda dela) volta a aparecer; se a nova já tiver gravado, a configuração passa a ser da nova e fica oculta para a anterior até que esta grave de novo.
+  * Inelegibilidade, desvinculação ou transferência nunca apagam registros do banco.
+
+#### Resposta (`200 OK`) - Comodidades Configuradas
+```json
+{
+  "placeId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "configured": true,
+  "amenities": [
+    { "code": "WIFI", "label": "Wi-Fi para clientes" },
+    { "code": "PET_FRIENDLY", "label": "Aceita animais de estimação" }
+  ]
+}
+```
+
+#### Resposta (`200 OK`) - Sem Configuração ou Representação Inelegível
+```json
+{
+  "placeId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "configured": false,
+  "amenities": []
+}
+```
+
+---
+
+### 2.17 Configuração de Comodidades de Estabelecimento Reivindicado (PUT /api/v1/places/{id}/amenities)
+* **Método**: `PUT`
+* **Rota**: `/api/v1/places/{id}/amenities`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Substitui integralmente a seleção de comodidades do estabelecimento reivindicado pela conta comercial (F2.2). Códigos omitidos deixam de estar selecionados; lista vazia declara que o local não oferece nenhuma comodidade.
+* **Validação do payload** (antes de qualquer leitura, trava ou escrita; erro não altera nada):
+  * `businessAccountId` obrigatório (`400 VALIDATION_ERROR`, `fieldErrors.businessAccountId`).
+  * `amenities` obrigatório, no máximo 50 elementos (`400 VALIDATION_ERROR`, `fieldErrors.amenities`). Elemento nulo responde `400 VALIDATION_ERROR` com `fieldErrors["amenities[i]"]`.
+  * Código fora do catálogo, inclusive com caixa ou espaços diferentes (`"wifi"`, `" WIFI"`): `400 INVALID_AMENITY_CODE`.
+  * Código repetido na mesma requisição: `400 DUPLICATE_AMENITY`.
+  * JSON malformado ou `amenities` que não seja lista: `400 MALFORMED_REQUEST`.
+* **Autorização** (Política B, mesma ordem de 2.14):
+  * Autor com conta pessoal operacional (`401 ACCOUNT_DISABLED`).
+  * Conta comercial existente e administrada pelo autor (`404 BUSINESS_ACCOUNT_NOT_FOUND` se inexistente ou de outro usuário) e aprovada (`409 BUSINESS_ACCOUNT_NOT_APPROVED` se `PENDING` ou `REJECTED`).
+  * Local ativo (`404 PLACE_NOT_FOUND`) e reivindicado agora pela conta informada (`403 BUSINESS_NOT_RESPONSIBLE` se de outra conta ou sem titular).
+* **Concorrência**: A linha do local é travada (`SELECT ... FOR NO KEY UPDATE`) antes de conferir a representação e gravar. Gravações simultâneas no mesmo local, e com reivindicações ou transferências que travam o local, são serializadas; o resultado final é sempre uma seleção inteira, nunca a mistura de duas.
+* **Auditoria**: A configuração guarda a conta comercial e o usuário da última gravação (`business_account_id`, `updated_by_user_id`), `created_at` da primeira gravação e `updated_at` da última. Esses campos não aparecem na API.
+
+#### Requisição
+```json
+{
+  "businessAccountId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "amenities": ["WIFI", "PET_FRIENDLY"]
+}
+```
+
+#### Resposta (`200 OK`)
+Mesmo formato de 2.16, com `configured = true` e as comodidades gravadas em ordem de catálogo.
+
+#### Resposta (`400 Bad Request`) - Código fora do catálogo
+```json
+{
+  "type": "https://api.rewit.app/errors/invalid_amenity_code",
+  "title": "Regra de Negócio Violada",
+  "status": 400,
+  "detail": "Comodidade desconhecida: use um código do catálogo de comodidades",
+  "instance": "/api/v1/places/3fa85f64-5717-4562-b3fc-2c963f66afa6/amenities",
+  "code": "INVALID_AMENITY_CODE",
+  "timestamp": "2026-10-14T12:00:00Z"
+}
+```
+
+---
+
 ## 3. Códigos de Erro Esperados
 * `400 Bad Request`:
   * Payload malformado, valores de coordenadas fora do intervalo WGS 84, identificador inválido (`Erro de Validação de Dados`).
@@ -589,9 +705,10 @@ Retorna a grade semanal completa de 7 dias no formato de `PlaceOpeningHoursRespo
   * Produtos de um local: página negativa (`INVALID_PAGE`), tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
   * Produto por código: tipo fora de `EAN`/`UPC`/`GTIN`/`ISBN` (`INVALID_IDENTIFIER_TYPE`) ou valor vazio, longo demais ou com caractere inválido (`INVALID_IDENTIFIER_VALUE`).
   * Horários de funcionamento: identificadores ausentes (`MISSING_PLACE_ID`, `MISSING_BUSINESS_ACCOUNT_ID`), dia da semana inválido (`INVALID_DAY_OF_WEEK`), dia repetido na requisição (`DUPLICATE_DAY_OF_WEEK`), incoerência entre dia fechado e intervalos (`INVALID_OPENING_HOURS`), intervalo com horário de abertura igual ou posterior ao fechamento (`INVALID_OPENING_HOURS_INTERVAL`), ou intervalos sobrepostos no mesmo dia (`OPENING_HOURS_OVERLAPPING_INTERVALS`).
+  * Comodidades: código fora do catálogo (`INVALID_AMENITY_CODE`), código repetido na requisição (`DUPLICATE_AMENITY`), `businessAccountId`/`amenities` ausentes, lista acima de 50 elementos ou elemento nulo (`VALIDATION_ERROR`), `amenities` que não seja lista (`MALFORMED_REQUEST`).
 * `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
-* `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`, `PUT /places/{id}/opening-hours`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido.
+* `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`, `PUT /places/{id}/opening-hours`, `PUT /places/{id}/amenities`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido.
 * `403 Forbidden`: Conta comercial não responde pelo estabelecimento informado (`BUSINESS_NOT_RESPONSIBLE`).
-* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`). No detalhe público e nos horários de funcionamento, local fora de `ACTIVE` também responde `PLACE_NOT_FOUND`, indistinguível de inexistente. Conta comercial inexistente ou de outro usuário responde `BUSINESS_ACCOUNT_NOT_FOUND`.
-* `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`). Conta comercial pendente de aprovação ao tentar configurar horários (`BUSINESS_ACCOUNT_NOT_APPROVED`).
+* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`). No detalhe público, nos horários de funcionamento e nas comodidades, local fora de `ACTIVE` também responde `PLACE_NOT_FOUND`, indistinguível de inexistente. Conta comercial inexistente ou de outro usuário responde `BUSINESS_ACCOUNT_NOT_FOUND`.
+* `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`). Conta comercial pendente de aprovação ao tentar configurar horários (`BUSINESS_ACCOUNT_NOT_APPROVED`); nas comodidades, conta pendente ou rejeitada (`BUSINESS_ACCOUNT_NOT_APPROVED`).
 * `429 Too Many Requests` (`RATE_LIMIT_EXCEEDED`): limite de buscas do usuário atingido (busca global e produto por código); acompanha `Retry-After`.
