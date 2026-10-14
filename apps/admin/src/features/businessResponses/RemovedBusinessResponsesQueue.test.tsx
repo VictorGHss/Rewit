@@ -145,6 +145,109 @@ describe('RemovedBusinessResponsesQueue', () => {
     });
   });
 
+  describe('restorationBlockers (decisão B)', () => {
+    const blocked = (
+      id: string,
+      corporateName: string,
+      restorationBlockers: AdminRemovedBusinessResponse['restorationBlockers']
+    ): AdminRemovedBusinessResponse => ({
+      ...sampleResponses.content[0],
+      id,
+      corporateName,
+      restorable: (restorationBlockers ?? []).length === 0,
+      restorationBlockers,
+    });
+
+    const renderRows = async (rows: AdminRemovedBusinessResponse[]) => {
+      vi.mocked(businessResponsesApi.listRemovedBusinessResponses).mockResolvedValueOnce({
+        ...sampleResponses,
+        content: rows,
+        totalElements: rows.length,
+      });
+      render(<RemovedBusinessResponsesQueue />);
+      await waitFor(() => {
+        expect(screen.getByText(rows[0].corporateName)).toBeInTheDocument();
+      });
+    };
+
+    const rowOf = (corporateName: string) => screen.getByText(corporateName).closest('tr') as HTMLElement;
+
+    it('explica cada motivo de elegibilidade isolado e mantém a restauração bloqueada', async () => {
+      await renderRows([
+        blocked('b-1', 'Conta Pendente', ['ACCOUNT_NOT_APPROVED']),
+        blocked('b-2', 'Administrador Inoperante', ['ADMINISTRATOR_NOT_OPERATIONAL']),
+        blocked('b-3', 'Local Sem Vínculo', ['PLACE_NOT_REPRESENTED']),
+      ]);
+
+      expect(within(rowOf('Conta Pendente')).getByText('A conta comercial não está aprovada.')).toBeInTheDocument();
+      expect(
+        within(rowOf('Administrador Inoperante')).getByText('O administrador da conta comercial não está operacional.')
+      ).toBeInTheDocument();
+      expect(
+        within(rowOf('Local Sem Vínculo')).getByText(
+          'O local não está ativo ou não está vinculado à conta comercial.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.getAllByText('Não restaurável').length).toBe(3);
+      screen.getAllByRole('button', { name: 'Restaurar' }).forEach((btn) => expect(btn).toBeDisabled());
+      expect(screen.queryByRole('button', { name: /restaurar resposta/i })).not.toBeInTheDocument();
+      // Estado pessoal do administrador nunca aparece
+      expect(screen.queryByText(/suspens|desativad|excluíd/i)).not.toBeInTheDocument();
+    });
+
+    it('lista todos os motivos combinados na mesma linha, na ordem recebida', async () => {
+      await renderRows([
+        blocked('b-4', 'Vários Bloqueios', [
+          'OTHER_ACTIVE_RESPONSE',
+          'ADMINISTRATOR_NOT_OPERATIONAL',
+          'PLACE_NOT_REPRESENTED',
+        ]),
+      ]);
+
+      const row = rowOf('Vários Bloqueios');
+      const reasons = [
+        'A empresa já possui outra resposta ativa para este mesmo alvo.',
+        'O administrador da conta comercial não está operacional.',
+        'O local não está ativo ou não está vinculado à conta comercial.',
+      ];
+      reasons.forEach((reason) => expect(within(row).getByText(reason)).toBeInTheDocument());
+      expect(within(row).getByRole('button', { name: 'Restaurar' })).toHaveAttribute('title', reasons.join(' '));
+    });
+
+    it('lista vazia com restorable libera a restauração; motivo desconhecido cai na explicação genérica', async () => {
+      await renderRows([
+        blocked('b-5', 'Elegível', []),
+        blocked('b-6', 'Motivo Futuro', [
+          'NOVO_MOTIVO' as unknown as NonNullable<AdminRemovedBusinessResponse['restorationBlockers']>[number],
+        ]),
+      ]);
+
+      expect(within(rowOf('Elegível')).getByRole('button', { name: /restaurar resposta/i })).toBeEnabled();
+      expect(
+        within(rowOf('Motivo Futuro')).getByText('Esta resposta não atende aos critérios para restauração administrativa.')
+      ).toBeInTheDocument();
+    });
+
+    it('sem o campo (API anterior) deduz os motivos de removedBy e otherActiveResponse', async () => {
+      await renderRows([
+        {
+          ...sampleResponses.content[1],
+          corporateName: 'Empresa Legada',
+          otherActiveResponse: true,
+          restorationBlockers: undefined,
+        },
+      ]);
+
+      const row = rowOf('Empresa Legada');
+      expect(
+        within(row).getByText(
+          'Removida pela própria empresa (somente remoções realizadas pela moderação podem ser restauradas).'
+        )
+      ).toBeInTheDocument();
+      expect(within(row).getByText('A empresa já possui outra resposta ativa para este mesmo alvo.')).toBeInTheDocument();
+    });
+  });
+
   it('exibe mensagem quando não há registros retornados', async () => {
     vi.mocked(businessResponsesApi.listRemovedBusinessResponses).mockResolvedValueOnce({
       content: [],

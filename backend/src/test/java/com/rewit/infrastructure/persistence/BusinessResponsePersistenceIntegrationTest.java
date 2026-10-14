@@ -7,11 +7,13 @@ import com.rewit.application.dto.business.BusinessResponseDtos.ModerateBusinessR
 import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseFilter;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishDiscussionBusinessResponseCommand;
 import com.rewit.application.dto.business.BusinessResponseDtos.PublishReviewBusinessResponseCommand;
+import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseRecord;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.BusinessResponseModerationAuditLogRepository;
 import com.rewit.application.port.BusinessResponseRepository;
 import com.rewit.application.port.DiscussionRepository;
 import com.rewit.application.port.ReviewRepository;
+import com.rewit.application.service.BusinessRepresentationPolicy;
 import com.rewit.application.usecase.ListDiscussionBusinessResponsesUseCase;
 import com.rewit.application.usecase.ModerateBusinessResponseUseCase;
 import com.rewit.application.usecase.PublishDiscussionBusinessResponseUseCase;
@@ -19,12 +21,16 @@ import com.rewit.application.usecase.PublishReviewBusinessResponseUseCase;
 import com.rewit.application.usecase.QueryAdminRemovedBusinessResponsesUseCase;
 import com.rewit.application.usecase.RemoveBusinessResponseUseCase;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
+import com.rewit.domain.enums.BusinessResponseRestorationBlocker;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.domain.model.BusinessResponseModerationAuditLog;
 import com.rewit.domain.model.ReviewDiscussion;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +53,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -105,6 +112,12 @@ class BusinessResponsePersistenceIntegrationTest {
 
     @Autowired
     private QueryAdminRemovedBusinessResponsesUseCase removedQueryUseCase;
+
+    @Autowired
+    private BusinessRepresentationPolicy representationPolicy;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     /** Precisão do TIMESTAMPTZ: comparar instantes depois de ida e volta ao banco. */
     private final Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -448,10 +461,13 @@ class BusinessResponsePersistenceIntegrationTest {
     @DisplayName("Visão pública: só respostas ativas diretas, com empresa e local, em ordem estável e paginada")
     void publicViewPage() {
         Fixture f = fixture();
-        UUID otherBusiness = insertBusiness(insertUser());
+        // A outra empresa responde pelo próprio local: representação elegível, como exige a decisão B
+        UUID otherAdmin = insertUser();
+        UUID otherBusiness = insertBusiness(otherAdmin);
+        UUID otherPlace = representedPlace(f, otherBusiness);
         BusinessResponse first = responseRepository.save(publish(f, null, "Primeira"));
         BusinessResponse second = responseRepository.save(BusinessResponse.publish(f.review(), null, otherBusiness,
-                f.place(), f.businessAdmin(), "Segunda", now.plusSeconds(1)));
+                otherPlace, otherAdmin, "Segunda", now.plusSeconds(1)));
         responseRepository.save(publish(f, f.rootDiscussion(), "No comentário"));
         BusinessResponse removed = BusinessResponse.publish(f.review(), null, insertBusiness(insertUser()), f.place(),
                 f.businessAdmin(), "Removida", now.plusSeconds(2));
@@ -473,6 +489,279 @@ class BusinessResponsePersistenceIntegrationTest {
         PageResult<BusinessResponseView> secondPage = responseRepository.findActiveReviewResponseViews(f.review(), 1, 1);
         assertEquals(2, secondPage.totalElements());
         assertEquals(List.of(second.getId()), secondPage.content().stream().map(v -> v.id()).toList());
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // Decisão B: as listas públicas seguem a elegibilidade corrente da representação
+    // ---------------------------------------------------------------------------------------------------------
+
+    @Test
+    @Transactional
+    @DisplayName("Listas públicas ocultam a representação inelegível em conteúdo e contagem, isolam as outras empresas "
+            + "e a reexibem quando volta a ser elegível, sem alterar a linha nem a auditoria")
+    void publicListingsFollowCurrentEligibility() {
+        Fixture f = fixture();
+        BusinessResponse onReview = responseRepository.save(publish(f, null, "Da empresa A"));
+        BusinessResponse onComment = responseRepository.save(publish(f, f.rootDiscussion(), "Da empresa A no comentário"));
+        UUID otherAdmin = insertUser();
+        UUID otherBusiness = insertBusiness(otherAdmin);
+        UUID otherPlace = representedPlace(f, otherBusiness);
+        BusinessResponse otherOnReview = responseRepository.save(BusinessResponse.publish(f.review(), null,
+                otherBusiness, otherPlace, otherAdmin, "Da empresa B", now.plusSeconds(1)));
+        BusinessResponse otherOnComment = responseRepository.save(BusinessResponse.publish(f.review(),
+                f.rootDiscussion(), otherBusiness, otherPlace, otherAdmin, "Da empresa B no comentário",
+                now.plusSeconds(1)));
+        String rowSql = "SELECT status, removed_by, removed_at, updated_at FROM business_responses WHERE id = ?";
+        Map<String, Object> reviewRowBefore = jdbcTemplate.queryForMap(rowSql, onReview.getId());
+        Map<String, Object> commentRowBefore = jdbcTemplate.queryForMap(rowSql, onComment.getId());
+        List<UUID> allOnReview = List.of(onReview.getId(), otherOnReview.getId());
+        List<UUID> allOnComment = List.of(onComment.getId(), otherOnComment.getId());
+
+        record StateChange(String name, Runnable apply, Runnable revert) {
+        }
+        Runnable approve = () -> setVerification(f.business(), "APPROVED");
+        Runnable reactivate = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
+        Runnable reopen = () -> jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
+        Runnable reclaim = () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+                f.business(), f.place());
+        List<StateChange> changes = List.of(
+                new StateChange("conta PENDING", () -> setVerification(f.business(), "PENDING"), approve),
+                new StateChange("conta REJECTED", () -> setVerification(f.business(), "REJECTED"), approve),
+                new StateChange("administrador DEACTIVATED",
+                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.DEACTIVATED), reactivate),
+                new StateChange("administrador SUSPENDED",
+                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.SUSPENDED), reactivate),
+                new StateChange("administrador DELETED",
+                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.DELETED), reactivate),
+                new StateChange("local INACTIVE",
+                        () -> jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
+                new StateChange("local CLOSED",
+                        () -> jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.place()), reopen),
+                new StateChange("local sem vínculo", () -> jdbcTemplate.update(
+                        "UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place()), reclaim),
+                new StateChange("local vinculado a outra empresa", () -> jdbcTemplate.update(
+                        "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, f.place()), reclaim));
+
+        assertPublicResponses(f, allOnReview, allOnComment, "elegível");
+        for (StateChange change : changes) {
+            change.apply().run();
+            assertPublicResponses(f, List.of(otherOnReview.getId()), List.of(otherOnComment.getId()), change.name());
+            change.revert().run();
+            assertPublicResponses(f, allOnReview, allOnComment, "de volta após " + change.name());
+        }
+
+        // Inelegibilidade não remove: estado, remoção e auditoria intactos
+        assertEquals(reviewRowBefore, jdbcTemplate.queryForMap(rowSql, onReview.getId()));
+        assertEquals(commentRowBefore, jdbcTemplate.queryForMap(rowSql, onComment.getId()));
+        assertEquals(0, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id IN (?, ?)",
+                onReview.getId(), onComment.getId()));
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Paginação e contagem só sobre as visíveis: a resposta oculta no meio não deixa buraco nem desloca a ordem")
+    void paginationCountsOnlyVisibleResponses() {
+        Fixture f = fixture();
+        BusinessResponse first = responseRepository.save(publish(f, null, "Primeira visível"));
+        UUID hiddenAdmin = insertUser();
+        UUID hiddenBusiness = insertBusiness(hiddenAdmin);
+        responseRepository.save(BusinessResponse.publish(f.review(), null, hiddenBusiness,
+                representedPlace(f, hiddenBusiness), hiddenAdmin, "Oculta", now.plusSeconds(1)));
+        setAccountStatus(hiddenAdmin, AccountStatus.SUSPENDED);
+        UUID lastAdmin = insertUser();
+        UUID lastBusiness = insertBusiness(lastAdmin);
+        BusinessResponse last = responseRepository.save(BusinessResponse.publish(f.review(), null, lastBusiness,
+                representedPlace(f, lastBusiness), lastAdmin, "Segunda visível", now.plusSeconds(2)));
+
+        PageResult<BusinessResponseView> page0 = responseRepository.findActiveReviewResponseViews(f.review(), 0, 1);
+        PageResult<BusinessResponseView> page1 = responseRepository.findActiveReviewResponseViews(f.review(), 1, 1);
+        PageResult<BusinessResponseView> page2 = responseRepository.findActiveReviewResponseViews(f.review(), 2, 1);
+
+        assertEquals(List.of(first.getId()), viewIds(page0));
+        assertEquals(List.of(last.getId()), viewIds(page1));
+        assertTrue(page2.content().isEmpty());
+        for (PageResult<BusinessResponseView> page : List.of(page0, page1, page2)) {
+            assertEquals(2, page.totalElements());
+            assertEquals(2, page.totalPages());
+        }
+        assertFalse(page0.isLast());
+        assertTrue(page1.isLast());
+        PageResult<BusinessResponse> domainPage = responseRepository.findActiveReviewResponses(f.review(), 1, 1);
+        assertEquals(List.of(last.getId()), domainPage.content().stream().map(r -> r.getId()).toList());
+        assertEquals(2, domainPage.totalElements());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Paridade: a lista pública mostra exatamente as representações que BusinessRepresentationPolicy "
+            + "considera elegíveis, em toda a matriz de conta, administrador e local")
+    void publicFilterMatchesJavaPolicy() {
+        Fixture f = fixture();
+        List<UUID> expected = new ArrayList<>();
+        int sequence = 0;
+        for (String verification : List.of("APPROVED", "PENDING", "REJECTED")) {
+            for (AccountStatus administratorStatus : AccountStatus.values()) {
+                for (String placeState : List.of("REPRESENTED", "INACTIVE", "CLOSED", "UNCLAIMED", "OTHER_BUSINESS")) {
+                    UUID admin = insertUser();
+                    UUID business = insertBusiness(admin);
+                    UUID place = representedPlace(f, business);
+                    UUID response = responseRepository.save(BusinessResponse.publish(f.review(), null, business, place,
+                            admin, "Paridade " + sequence, now.plusMillis(sequence))).getId();
+                    sequence++;
+                    setVerification(business, verification);
+                    setAccountStatus(admin, administratorStatus);
+                    switch (placeState) {
+                        case "INACTIVE", "CLOSED" ->
+                                jdbcTemplate.update("UPDATE places SET status = ? WHERE id = ?", placeState, place);
+                        case "UNCLAIMED" ->
+                                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", place);
+                        case "OTHER_BUSINESS" -> jdbcTemplate.update(
+                                "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
+                        default -> {
+                        }
+                    }
+                    if (representationPolicy.currentIneligibility(business, place).isEmpty()) {
+                        expected.add(response);
+                    }
+                }
+            }
+        }
+
+        PageResult<BusinessResponseView> page = responseRepository.findActiveReviewResponseViews(f.review(), 0, 100);
+        assertEquals(1, expected.size(), "só APPROVED + ACTIVE + local representado é elegível");
+        assertEquals(expected, viewIds(page));
+        assertEquals(expected.size(), page.totalElements());
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Resposta ativa oculta continua ocupando a vaga da empresa no alvo: nova publicação por outro local "
+            + "recebe 409 até a empresa retirar a oculta")
+    void hiddenActiveResponseStillHoldsUniqueness() {
+        Fixture f = fixture();
+        UUID secondPlace = representedPlace(f, f.business());
+        BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Pelo primeiro local"), now);
+        jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.place());
+        assertTrue(responseRepository.findActiveReviewResponseViews(f.review(), 0, 10).content().isEmpty());
+
+        BusinessException duplicate = assertThrows(BusinessException.class,
+                () -> publishUseCase.execute(command(f, secondPlace, "Pelo segundo local"), now.plusSeconds(1)));
+        assertEquals("BUSINESS_RESPONSE_ALREADY_EXISTS", duplicate.getErrorCode());
+
+        removeUseCase.execute(f.businessAdmin(), published.id(), now.plusSeconds(2));
+        BusinessResponseView again = publishUseCase.execute(command(f, secondPlace, "Pelo segundo local"),
+                now.plusSeconds(3));
+        assertEquals(List.of(again.id()), viewIds(responseRepository.findActiveReviewResponseViews(f.review(), 0, 10)));
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Restauração revalida a elegibilidade no banco: a consulta sinaliza o bloqueio, a restauração recusa "
+            + "409 sem gravar nem auditar, e passa quando a representação volta a ser elegível")
+    void restoreRevalidatesCurrentEligibility() {
+        Fixture f = fixture();
+        UUID moderator = insertModerator();
+        BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Resposta"), now);
+        moderateUseCase.execute(moderation(published.id(), moderator, BusinessResponseModerationAction.REMOVE_RESPONSE,
+                now.plusSeconds(10)));
+        String rowSql = "SELECT status, removed_by, removed_at, updated_at FROM business_responses WHERE id = ?";
+        Map<String, Object> removedRow = jdbcTemplate.queryForMap(rowSql, published.id());
+        RemovedBusinessResponseFilter byReview = new RemovedBusinessResponseFilter(f.review(), null, null, null, null);
+
+        record Blocked(BusinessResponseRestorationBlocker blocker, Runnable apply, Runnable revert) {
+        }
+        Runnable approve = () -> setVerification(f.business(), "APPROVED");
+        Runnable reactivate = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
+        Runnable reopen = () -> jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
+        List<Blocked> cases = List.of(
+                new Blocked(BusinessResponseRestorationBlocker.ACCOUNT_NOT_APPROVED,
+                        () -> setVerification(f.business(), "PENDING"), approve),
+                new Blocked(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
+                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.SUSPENDED), reactivate),
+                new Blocked(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
+                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.DELETED), reactivate),
+                new Blocked(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED,
+                        () -> jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
+                new Blocked(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED,
+                        () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place()),
+                        () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+                                f.business(), f.place())));
+
+        for (Blocked blocked : cases) {
+            blocked.apply().run();
+            // Mudança feita por fora do JPA na mesma transação: a releitura da restauração precisa vê-la, como numa
+            // requisição nova
+            forgetLoadedEntities();
+            AdminRemovedBusinessResponseView view = removedQueryUseCase.execute(moderator, byReview, 0, 20).content().get(0);
+            assertFalse(view.restorable(), blocked.blocker().name());
+            assertEquals(List.of(blocked.blocker()), view.restorationBlockers());
+
+            BusinessException ex = assertThrows(BusinessException.class, () -> moderateUseCase.execute(moderation(
+                    published.id(), moderator, BusinessResponseModerationAction.RESTORE_RESPONSE, now.plusSeconds(20))));
+            assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+            assertEquals("BUSINESS_RESPONSE_NOT_RESTORABLE", ex.getErrorCode());
+            assertEquals(removedRow, jdbcTemplate.queryForMap(rowSql, published.id()));
+            assertEquals(1, auditLogRepository.findByResponseId(published.id()).size());
+            blocked.revert().run();
+            forgetLoadedEntities();
+        }
+
+        AdminRemovedBusinessResponseView eligible = removedQueryUseCase.execute(moderator, byReview, 0, 20).content().get(0);
+        assertTrue(eligible.restorable());
+        assertEquals(List.of(), eligible.restorationBlockers());
+        BusinessResponseModerationResult restored = moderateUseCase.execute(moderation(published.id(), moderator,
+                BusinessResponseModerationAction.RESTORE_RESPONSE, now.plusSeconds(30)));
+        assertEquals(BusinessResponseStatus.ACTIVE, restored.newStatus());
+        assertEquals(2, auditLogRepository.findByResponseId(published.id()).size());
+        assertEquals(List.of(published.id()), viewIds(responseRepository.findActiveReviewResponseViews(f.review(), 0, 10)));
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("Paridade na consulta administrativa: os bloqueios de elegibilidade de cada removida são os motivos de "
+            + "BusinessRepresentationPolicy para a mesma representação")
+    void removedQueryBlockersMatchJavaPolicy() {
+        Fixture f = fixture();
+        Map<UUID, Set<BusinessResponseRestorationBlocker>> expected = new HashMap<>();
+        int sequence = 0;
+        for (String verification : List.of("APPROVED", "PENDING", "REJECTED")) {
+            for (AccountStatus administratorStatus : AccountStatus.values()) {
+                for (String placeState : List.of("REPRESENTED", "CLOSED", "UNCLAIMED", "OTHER_BUSINESS")) {
+                    UUID admin = insertUser();
+                    UUID business = insertBusiness(admin);
+                    UUID place = representedPlace(f, business);
+                    BusinessResponse removed = BusinessResponse.publish(f.review(), null, business, place, admin,
+                            "Paridade " + sequence, now.plusMillis(sequence));
+                    removed.removeByModeration(now.plusSeconds(1).plusMillis(sequence));
+                    UUID response = responseRepository.save(removed).getId();
+                    sequence++;
+                    setVerification(business, verification);
+                    setAccountStatus(admin, administratorStatus);
+                    switch (placeState) {
+                        case "CLOSED" -> jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", place);
+                        case "UNCLAIMED" ->
+                                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", place);
+                        case "OTHER_BUSINESS" -> jdbcTemplate.update(
+                                "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
+                        default -> {
+                        }
+                    }
+                    Set<BusinessResponseRestorationBlocker> blockers = new HashSet<>();
+                    representationPolicy.currentIneligibility(business, place)
+                            .forEach(reason -> blockers.add(BusinessResponseRestorationBlocker.of(reason)));
+                    expected.put(response, blockers);
+                }
+            }
+        }
+
+        PageResult<RemovedBusinessResponseRecord> page = responseRepository.findRemovedForModeration(
+                new RemovedBusinessResponseFilter(f.review(), null, null, null, null), 0, 100);
+        assertEquals(expected.size(), page.totalElements());
+        for (RemovedBusinessResponseRecord record : page.content()) {
+            AdminRemovedBusinessResponseView view = AdminRemovedBusinessResponseView.of(record);
+            assertEquals(expected.get(record.id()), Set.copyOf(view.restorationBlockers()), record.content());
+            assertEquals(expected.get(record.id()).isEmpty(), view.restorable(), record.content());
+        }
     }
 
     @Test
@@ -1087,6 +1376,52 @@ class BusinessResponsePersistenceIntegrationTest {
         jdbcTemplate.update("INSERT INTO review_discussions (id, review_id, user_id, content) VALUES (?, ?, ?, 'Comentário')",
                 id, reviewId, userId);
         return id;
+    }
+
+    /** Local ativo, vinculado à conta e associado à avaliação do fixture: representação elegível por esse local. */
+    private UUID representedPlace(Fixture f, UUID business) {
+        UUID place = insertPlace();
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", business, place);
+        jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 4)", f.review(), place);
+        return place;
+    }
+
+    /** Estado pessoal coerente com as constraints de users (is_active e deleted_at acompanham account_status). */
+    private void setAccountStatus(UUID userId, AccountStatus status) {
+        jdbcTemplate.update("UPDATE users SET account_status = ?, is_active = ?, deleted_at = ? WHERE id = ?",
+                status.name(), status == AccountStatus.ACTIVE,
+                status == AccountStatus.DELETED ? Timestamp.from(now) : null, userId);
+    }
+
+    /** Sincroniza e esvazia o contexto de persistência, para o JPA reler o que foi alterado direto no banco. */
+    private void forgetLoadedEntities() {
+        entityManager.flush();
+        entityManager.clear();
+    }
+
+    private void setVerification(UUID business, String verificationStatus) {
+        jdbcTemplate.update("UPDATE business_accounts SET verification_status = ? WHERE id = ?", verificationStatus,
+                business);
+    }
+
+    /** As quatro leituras de respostas ativas listam exatamente as esperadas, com contagem do mesmo conjunto. */
+    private void assertPublicResponses(Fixture f, List<UUID> onReview, List<UUID> onComment, String state) {
+        PageResult<BusinessResponseView> reviewPage = responseRepository.findActiveReviewResponseViews(f.review(), 0, 10);
+        assertEquals(onReview, viewIds(reviewPage), state);
+        assertEquals(onReview.size(), reviewPage.totalElements(), state);
+        PageResult<BusinessResponseView> commentPage =
+                responseRepository.findActiveDiscussionResponseViews(f.rootDiscussion(), 0, 10);
+        assertEquals(onComment, viewIds(commentPage), state);
+        assertEquals(onComment.size(), commentPage.totalElements(), state);
+        PageResult<BusinessResponse> domainPage = responseRepository.findActiveReviewResponses(f.review(), 0, 10);
+        assertEquals(onReview, domainPage.content().stream().map(r -> r.getId()).toList(), state);
+        assertEquals(onReview.size(), domainPage.totalElements(), state);
+        assertEquals(onComment, responseRepository.findActiveDiscussionResponses(List.of(f.rootDiscussion())).stream()
+                .map(r -> r.getId()).toList(), state);
+    }
+
+    private static List<UUID> viewIds(PageResult<BusinessResponseView> page) {
+        return page.content().stream().map(view -> view.id()).toList();
     }
 
     private long count(String sql, Object... args) {

@@ -3,6 +3,7 @@ package com.rewit.application.service;
 import com.rewit.application.port.BusinessAccountRepository;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.BusinessRepresentationIneligibility;
 import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.Place;
@@ -10,7 +11,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -28,10 +32,19 @@ import java.util.UUID;
  *       fora da avaliação).</li>
  * </ol>
  *
+ * <p><b>Elegibilidade da representação</b> (decisão B): publicação, restauração e leitura pública usam os mesmos três
+ * critérios, avaliados por {@link #evaluate}: conta aprovada, administrador atual da conta operacional e local ativo
+ * vinculado à conta. Quem publica é o próprio administrador, então a publicação já os exige pelos passos acima. A
+ * restauração e as leituras não têm um ator comercial: {@link #currentIneligibility} avalia a representação sem ator,
+ * e as leituras públicas repetem os mesmos predicados em SQL (paridade coberta por teste de persistência).
+ *
  * <p><b>Concorrência</b>: o vínculo {@code places.claimed_by_business_id} só é gravado pela decisão de reivindicação,
  * com a linha do local travada (FOR UPDATE). {@link #lockRepresentedPlace} trava o mesmo local antes de ler o vínculo,
  * então a publicação não usa um vínculo que mude antes do commit. A ordem é a do C9 (local antes de conta); a conta
  * é lida sem lock porque a aprovação só avança (PENDING para APPROVED) e nenhum fluxo a revoga.
+ * {@link #currentIneligibility} não trava nada: quem a usa depois de travar a resposta (restauração) não pode travar o
+ * local, que a publicação trava antes de gravar a resposta; a leitura pública, que filtra a cada consulta, é a
+ * garantia final de visibilidade.
  */
 @Component
 public class BusinessRepresentationPolicy {
@@ -75,7 +88,7 @@ public class BusinessRepresentationPolicy {
     /** Conta administrada pelo ator e aprovada: exigência para novas manifestações comerciais. */
     public BusinessAccount requireApprovedAccount(UUID actorUserId, UUID businessAccountId) {
         BusinessAccount account = requireAdministeredAccount(actorUserId, businessAccountId);
-        if (account.getVerificationStatus() != VerificationStatus.APPROVED) {
+        if (!isApproved(account)) {
             throw new BusinessException("A conta comercial ainda não está aprovada para responder", HttpStatus.CONFLICT,
                     "BUSINESS_ACCOUNT_NOT_APPROVED");
         }
@@ -99,6 +112,49 @@ public class BusinessRepresentationPolicy {
         return placeRepository.findByIdForUpdate(placeId)
                 .filter(place -> represents(account, place))
                 .orElseThrow(BusinessRepresentationPolicy::notResponsible);
+    }
+
+    /**
+     * Motivos de inelegibilidade atuais da representação (conta e local de uma resposta), sem ator e sem lock. Conta
+     * inexistente reúne os três motivos; local inexistente conta como não representado.
+     */
+    public Set<BusinessRepresentationIneligibility> currentIneligibility(UUID businessAccountId, UUID placeId) {
+        BusinessAccount account = businessAccountId == null ? null
+                : businessAccountRepository.findById(businessAccountId).orElse(null);
+        boolean administratorOperational = account != null && accountStatusPolicy.isOperational(account.getUserId());
+        Place place = placeId == null ? null : placeRepository.findById(placeId).orElse(null);
+        return evaluate(account, administratorOperational, place);
+    }
+
+    /** {@link #evaluate(boolean, boolean, boolean)} a partir da conta e do local carregados. */
+    public static Set<BusinessRepresentationIneligibility> evaluate(BusinessAccount account,
+                                                                    boolean administratorOperational, Place place) {
+        return evaluate(isApproved(account), administratorOperational, represents(account, place));
+    }
+
+    /**
+     * Regra da elegibilidade: cada critério falso é um motivo; conjunto vazio é representação elegível. Recebe os
+     * critérios já resolvidos para servir tanto aos objetos carregados quanto às colunas calculadas em SQL.
+     */
+    public static Set<BusinessRepresentationIneligibility> evaluate(boolean accountApproved,
+                                                                    boolean administratorOperational,
+                                                                    boolean placeRepresented) {
+        Set<BusinessRepresentationIneligibility> reasons = EnumSet.noneOf(BusinessRepresentationIneligibility.class);
+        if (!accountApproved) {
+            reasons.add(BusinessRepresentationIneligibility.ACCOUNT_NOT_APPROVED);
+        }
+        if (!administratorOperational) {
+            reasons.add(BusinessRepresentationIneligibility.ADMINISTRATOR_NOT_OPERATIONAL);
+        }
+        if (!placeRepresented) {
+            reasons.add(BusinessRepresentationIneligibility.PLACE_NOT_REPRESENTED);
+        }
+        return Collections.unmodifiableSet(reasons);
+    }
+
+    /** Conta aprovada: exigência para novas manifestações e para a elegibilidade da representação. */
+    public static boolean isApproved(BusinessAccount account) {
+        return account != null && account.getVerificationStatus() == VerificationStatus.APPROVED;
     }
 
     /** O local está ativo e vinculado agora à conta. Não verifica a aprovação da conta nem a avaliação. */

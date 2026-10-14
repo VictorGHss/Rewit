@@ -88,6 +88,25 @@ class AccountStatusPolicyTest {
     }
 
     @Test
+    @DisplayName("isOperational avalia terceiros sem lançar: só conta ativa e não excluída é operacional")
+    void isOperationalQueriesWithoutThrowing() {
+        UUID active = UUID.randomUUID();
+        UUID inactive = UUID.randomUUID();
+        UUID deleted = UUID.randomUUID();
+        UUID missing = UUID.randomUUID();
+        when(userRepository.findById(active)).thenReturn(Optional.of(user(active, true, null)));
+        when(userRepository.findById(inactive)).thenReturn(Optional.of(user(inactive, false, null)));
+        when(userRepository.findById(deleted)).thenReturn(Optional.of(user(deleted, false, Instant.now())));
+        when(userRepository.findById(missing)).thenReturn(Optional.empty());
+
+        assertTrue(policy.isOperational(active));
+        assertFalse(policy.isOperational(inactive));
+        assertFalse(policy.isOperational(deleted));
+        assertFalse(policy.isOperational(missing));
+        assertFalse(policy.isOperational(null));
+    }
+
+    @Test
     @DisplayName("Identificador ausente é erro de programação, não uma conta rejeitada")
     void nullActorIsRejectedAsProgrammingError() {
         assertThrows(NullPointerException.class, () -> policy.requireOperational(null));

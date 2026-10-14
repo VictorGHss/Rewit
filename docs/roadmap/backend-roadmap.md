@@ -2,13 +2,14 @@
 
 > **Data de Atualização**: 14/10/2026\
 > **Status do Repositório**: Verde e Estabilizado\
-> **Checkpoint Atual (HEAD)**: base funcional de referência `dfd84ae` (*"feat: adicionar fila administrativa de respostas oficiais removidas"*)\
-> **Branch**: `origin/main` (commit `dfd84ae0d0b7e14558b03ee08abe359e2dcd5057`)\
-> **Validação Pós-C11**: branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d` (base `dfd84ae` + documentação pós-C11 + testes de integração de segurança da consulta de respostas oficiais removidas)\
+> **Base Integrada Atual (Política B)**: commit `033a1ab4f25223968ccc67fe12ceddc1684804a8` (merge do PR #2 sobre a base funcional histórica original `dfd84ae0d0b7e14558b03ee08abe359e2dcd5057`)\
+> **Branch Atual de Trabalho**: `agent/claude/business-response-eligibility-policy`\
+> **Referência da Validação Atual**: commit `b36732221e185a5c2de3b5b78018327ad43ceb76` (validado pelo Gemini em clone isolado; código implementado e testado no commit `8b5dd287f62c173ed5e4bacb4cccd046b35a856c`, com commits seguintes exclusivamente documentais `fd373c3` e `b367322`)\
+> **Validação Pós-C11 (Histórica)**: branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d` (base `dfd84ae` + documentação pós-C11 + testes de integração de segurança da consulta de respostas oficiais removidas)\
 > **Resultados Mais Recentes por Suíte de Testes (Execuções Individuais)**:\
-> - **Backend (Spring Boot / Maven)**: **1.842 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados) via `./mvnw clean test` em containers reais, na branch integrada (commit `7b9473d`); a mesma contagem foi obtida antes na branch `agent/claude/c11-hardening-removed-responses`. Inventário estático do código (não é resultado de execução): 202 arquivos `.java` em `backend/src/test/`, 199 deles com testes, e 1.820 métodos anotados (1.813 `@Test` e 7 `@ParameterizedTest`). Registros históricos: 1.271 testes no STEP 29.3 (`2d49b38`) e 1.462 no último total registrado neste roadmap antes da consolidação pós-C11 (`298d0bc`)\
-> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) via `flutter test` em 59s; análise estática `flutter analyze` com 0 pendências (48 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`). Evidência de execução anterior do Gemini, não reexecutada na integração\
-> - **Admin (React / Vitest)**: **78 testes executados e aprovados** (0 falhas, 0 erros) via `vitest run` em 41.44s; build de produção `tsc && vite build` com sucesso em 442ms (16 arquivos de teste validados na branch `agent/gemini/post-c11-validation-and-docs`). Evidência de execução anterior do Gemini, não reexecutada na integração\
+> - **Backend (Spring Boot / Maven)**: **1.860 testes executados e aprovados** (0 falhas, 0 erros, 0 ignorados, `BUILD SUCCESS`) via `./mvnw clean test` em containers reais, no commit `8b5dd28` da branch da política B. A validação pós-C11 anterior registrou 1.842 na branch integrada (commit `7b9473d`). Inventário estático do código em `8b5dd28` (não é resultado de execução): 202 arquivos `.java` em `backend/src/test/`, 199 deles com testes, e 1.838 métodos anotados (1.831 `@Test` e 7 `@ParameterizedTest`). Registros históricos: 1.271 testes no STEP 29.3 (`2d49b38`) e 1.462 no último total registrado neste roadmap antes da consolidação pós-C11 (`298d0bc`)\
+> - **Mobile (Flutter / Dart)**: **618 testes executados e aprovados** (0 falhas, 0 erros) em 48 arquivos via `flutter test`; análise estática `flutter analyze` com 0 pendências (*"No issues found!"*, código de término 0). Nova validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 no commit `b367322` em clone isolado (Flutter SDK 3.47.7, Dart 3.13.5), confirmando compatibilidade plena sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação a `033a1ab`. A execução anterior do Gemini (pré-política B, branch `agent/gemini/post-c11-validation-and-docs`) também registrou 618 testes verdes e análise estática limpa\
+> - **Admin (React / Vitest)**: **82 testes executados e aprovados** (0 falhas, 0 erros) em 16 arquivos via `vitest run`, com `eslint` sem pendências e build de produção `tsc && vite build` concluído, no ciclo da política B (conteúdo do commit `8b5dd28`). A execução anterior do Gemini (branch `agent/gemini/post-c11-validation-and-docs`) registrou 78 testes\
 > *Nota Metodológica*: Cada módulo opera com runners e ambientes independentes (JVM/Maven, Dart/Flutter e Node/Vitest). Não há pipeline de execução unificado do monorepo, mantendo-se os resultados de execução individuais e sem somas agregadas heterogêneas.\
 > **Working Tree**: `Limpo`\
 > **Próximo Trabalho**: Consolidação documental pós-C11, preparação da proposta de Gestão de Estabelecimentos Reivindicados / Catálogo Local (Fase 2 Comercial) e resolução de decisões pendentes (ADR-011)
@@ -28,7 +29,7 @@ git status
 cd backend
 ./mvnw clean test
 ```
-*Resultado esperado*: `Tests run: 1842, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS` (validação pós-C11 na branch integrada, commit `7b9473d`; registros históricos: 1.271 testes no STEP 29.3 e 1.462 em `298d0bc`). A suíte usa PostgreSQL, SeaweedFS e Redis reais.
+*Resultado esperado*: `Tests run: 1860, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS` (última execução completa no commit `8b5dd28`, branch da política B; validação pós-C11 anterior: 1.842 em `7b9473d`; registros históricos: 1.271 testes no STEP 29.3 e 1.462 em `298d0bc`). A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
 ### 1.2 Regras Arquiteturais Inegociáveis
 1. **PostgreSQL 18 + PostGIS 3.6 como Source of Truth**: Nenhuma entidade existe fora do banco relacional. Google Places é apenas provider externo consultado via Anti-Corruption Layer (ACL).
@@ -89,7 +90,7 @@ A tabela a seguir consolida o estado real verificado no código-fonte, mapeando 
 | **Endurecimento de Autorização de Moderação (C10)** | ✅ CONCLUÍDO | [ModeratorRolePolicy.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/application/service/ModeratorRolePolicy.java), revalidação em tempo de execução de papéis de moderação e estado ativo da conta contra o PostgreSQL em todas as rotas de moderação e consultas administrativas, mitigando tokens antigos (stale JWT). | Manter checagens sem bypass. |
 | **Respostas Oficiais de Empresas (C11)** | ✅ CONCLUÍDO | [BusinessResponseController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/BusinessResponseController.java), [AdminBusinessResponseModerationController.java](file:///d:/Codigos/Projetos/Rewit/backend/src/main/java/com/rewit/presentation/controller/AdminBusinessResponseModerationController.java), tabelas `business_responses` e auditoria via [V24](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V24__business_responses.sql) e [V25](file:///d:/Codigos/Projetos/Rewit/backend/src/main/resources/db/migration/V25__business_responses_removed_index.sql), respostas a avaliações e discussões raiz, rate limiting distribuído `BUSINESS_RESPONSE_CREATION`, moderação e fila administrativa de respostas removidas com restauração. | Manter isolamento de dados pessoais do autor da empresa. |
 | **Aplicativo Mobile (Flutter)** | ✅ CONCLUÍDO | 13 módulos em Clean Architecture (`apps/mobile/lib/features/`), scanner de código de barras/QR Code, geolocalização sob demanda, criação multi-alvo, respostas oficiais, 618 testes verdes (`flutter test`). | Preparar integração com push notifications reais (FCM/APNs). |
-| **Painel Administrativo Web (React)** | ✅ CONCLUÍDO | React 18, TypeScript, Vite (`apps/admin/`), autenticação com sessionStorage e renovação de token, dashboard de contadores, filas de denúncias de reviews, discussões, reivindicações de locais e respostas oficiais removidas, 78 testes verdes (`vitest run`). | Manter consistência de tipagem e isolamento de PII. |
+| **Painel Administrativo Web (React)** | ✅ CONCLUÍDO | React 18, TypeScript, Vite (`apps/admin/`), autenticação com sessionStorage e renovação de token, dashboard de contadores, filas de denúncias de reviews, discussões, reivindicações de locais e respostas oficiais removidas, 82 testes verdes (`vitest run`). | Manter consistência de tipagem e isolamento de PII. |
 | **Prontidão de Produção** | ⏳ PENDENTE | Sem backup/restore documentado, sem testes de carga automatizados. | Elaborar runbooks de backup WAL e suíte k6/Gatling. |
 | **Cache Distribuído em Redis** | 🔮 FUTURO ADIADO | Redis conectado mas sem cache de queries complexas. | Introduzir apenas sob saturação medida do PostgreSQL. |
 | **Machine Learning & Embeddings** | 🔮 FUTURO ADIADO | Arquitetura determinística prioritária; sem ML. | Avaliar apenas após escala de dezenas de milhares de reviews. |
@@ -1082,33 +1083,34 @@ Por possuírem granularidades e ambientes distintos (especialmente no backend, o
 
 ### 12.1 Backend (`backend` — Spring Boot / JUnit 5)
 * **Resultados da Execução Mais Recente Comprovada**:
-  * **Testes Executados**: **1.842 testes**
+  * **Testes Executados**: **1.860 testes**
   * **Falhas**: `0`
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
   * **Taxa de Aprovação**: 100%
-  * **Evidência / Origem**: Execução na branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d` (`Tests run: 1842, Failures: 0, Errors: 0, Skipped: 0`); a mesma contagem foi obtida antes na branch `agent/claude/c11-hardening-removed-responses` (`a65f8b3`).
+  * **Evidência / Origem**: Execução no commit `8b5dd28` da branch `agent/claude/business-response-eligibility-policy` (`Tests run: 1860, Failures: 0, Errors: 0, Skipped: 0`, `BUILD SUCCESS`); os commits seguintes da branch só alteram o roadmap. A validação pós-C11 anterior registrou 1.842 na branch integrada `integration/post-c11-docs-hardening`, commit `7b9473d`.
   * **Ambiente de Teste**: Maven (`./mvnw clean test`), Java 25 LTS, JUnit 5 e Spring Boot 4.1.1 sob perfil `local`, orquestrando containers reais de PostgreSQL 18 + PostGIS 3.6, Redis 7 e SeaweedFS (compatível S3).
 * **Inventário Estático de Código de Teste**:
-  * **Arquivos de Teste**: 202 arquivos `.java` em `backend/src/test/`, dos quais 199 contêm métodos de teste (os demais são classes de apoio).
-  * **Métodos Anotados de Teste**: 1.820 declarações no código-fonte da branch integrada (1.813 com anotação `@Test` e 7 com `@ParameterizedTest`); na base `dfd84ae`, 1.815 (1.808 e 7). Na execução, os 7 métodos parametrizados geram 29 invocações, que somadas aos 1.813 métodos `@Test` resultam nos 1.842 casos executados.
+  * **Arquivos de Teste**: 202 arquivos `.java` em `backend/src/test/` no commit `8b5dd28`, dos quais 199 contêm métodos de teste (os demais são classes de apoio).
+  * **Métodos Anotados de Teste**: 1.838 declarações no código-fonte do commit `8b5dd28` (1.831 com anotação `@Test` e 7 com `@ParameterizedTest`); na validação pós-C11 (`7b9473d`), 1.820 (1.813 e 7), e na base `dfd84ae`, 1.815 (1.808 e 7). Na execução de `8b5dd28`, os 7 métodos parametrizados geram 29 invocações, que somadas aos 1.831 métodos `@Test` resultam nos 1.860 casos executados.
 * **Histórico de Baselines do Backend**:
   * *STEP 29.3* (`2d49b38`): 1.271 testes verdes no checkpoint do Session Cleanup, que fechou os passos 24 a 29 (Cold Start, Content Lifecycle, Moderação Admin V1, Outbox, Storage GC e Session Cleanup).
   * *Último registro antes da consolidação pós-C11* (`298d0bc`, 06/10/2026): 1.462 testes verdes, depois da Observabilidade V1 (1.293 testes em `22b465e`), do rate limiting distribuído, do estado da conta nas mutações (`C2` Fase 1) e das denúncias e moderação de discussões (`C3`).
-  * *Evolução posterior a `298d0bc`*: 380 testes de execução adicionais (1.842 − 1.462), cobrindo o ciclo de vida e o purge de contas (`C2`), normalização e unaccent de catálogo (`C5.1`), contas comerciais e reivindicação de locais (`C9`), revalidação de privilégios de moderação contra stale tokens (`C10`) e respostas oficiais comerciais (`C11`).
+  * *Evolução de `298d0bc` até a validação pós-C11 (`7b9473d`)*: 380 testes de execução adicionais (1.842 − 1.462), cobrindo o ciclo de vida e o purge de contas (`C2`), normalização e unaccent de catálogo (`C5.1`), contas comerciais e reivindicação de locais (`C9`), revalidação de privilégios de moderação contra stale tokens (`C10`) e respostas oficiais comerciais (`C11`).
+  * *Política B de elegibilidade das respostas oficiais* (`8b5dd28`): 18 testes de execução adicionais (1.860 − 1.842), cobrindo a avaliação da representação, o filtro das leituras públicas, o bloqueio da restauração e a consulta administrativa (§13.1).
 
 ---
 
 ### 12.2 Aplicativo Mobile (`apps/mobile` — Flutter / Dart)
 * **Resultados da Execução Mais Recente Comprovada**:
-  * **Testes Executados**: **618 testes**
+  * **Testes Executados**: **618 testes** em 48 arquivos
   * **Falhas**: `0`
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
-  * **Taxa de Aprovação**: 100% (tempo de execução: 59s)
-  * **Evidência / Origem**: Execução via `flutter test` na branch `agent/gemini/post-c11-validation-and-docs`.
+  * **Taxa de Aprovação**: 100%
+  * **Evidência / Origem**: Nova validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 em clone isolado sobre o commit `b367322` da branch `agent/claude/business-response-eligibility-policy` (`All tests passed!`), confirmando compatibilidade plena com a política B sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação à base integrada `033a1ab`. A validação histórica anterior do Gemini (pré-política B, realizada na branch `agent/gemini/post-c11-validation-and-docs`) também aprovou os mesmos 618 testes; o tempo de 59s pertence somente a essa execução histórica, e a validação da política B em `b367322` não tem duração registrada aqui.
 * **Análise Estática**:
-  * `flutter analyze`: **0 problemas encontrados** (*"No issues found! (ran in 26.8s)"*).
+  * `flutter analyze`: **0 problemas encontrados** (*"No issues found!"*, código de término 0 em 39.6s na validação da política B; 26.8s na execução anterior).
 * **Ambiente e Ferramentas**:
   * Flutter SDK 3.47.7 (Dart 3.13.5).
 * **Escopo e Cobertura Funcional**:
@@ -1118,14 +1120,14 @@ Por possuírem granularidades e ambientes distintos (especialmente no backend, o
 
 ### 12.3 Painel Administrativo Web (`apps/admin` — React / TypeScript / Vitest)
 * **Resultados da Execução Mais Recente Comprovada**:
-  * **Testes Executados**: **78 testes**
+  * **Testes Executados**: **82 testes** em 16 arquivos
   * **Falhas**: `0`
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
-  * **Taxa de Aprovação**: 100% (tempo de execução: 41.44s)
-  * **Evidência / Origem**: Execução via `npx vitest run` na branch `agent/gemini/post-c11-validation-and-docs`.
-* **Compilação e Build de Produção**:
-  * `npx tsc && npx vite build`: Concluído com **código 0** e zero erros de compilação em 442ms (dist gerado em `apps/admin/dist/`).
+  * **Taxa de Aprovação**: 100%
+  * **Evidência / Origem**: Execução via `npx vitest run` no ciclo da política B, sobre o conteúdo do commit `8b5dd28` da branch `agent/claude/business-response-eligibility-policy`. A execução anterior do Gemini, na branch `agent/gemini/post-c11-validation-and-docs`, registrou 78 testes em 41.44s.
+* **Compilação, Lint e Build de Produção**:
+  * `npm run build` (`tsc && vite build`): concluído sem erros de compilação no mesmo ciclo (bundle Vite em 167ms; dist gerado em `apps/admin/dist/`); `eslint` sem pendências. Na execução anterior do Gemini, o build levou 442ms.
 * **Ambiente e Ferramentas**:
   * Node.js, Vitest, `@testing-library/react`, TypeScript 5.
 * **Escopo e Cobertura Funcional**:
@@ -1144,9 +1146,8 @@ O ecossistema Rewit concluiu formalmente os ciclos C2, C3, C5.1, C9, C10 e C11. 
    - Permanece pendente a decisão jurídica quanto à base legal e necessidade de coleta de IP e User-Agent enquanto a sessão está ativa. A [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) permanece formalmente com status **Proposto** até parecer final.
 2. **Homologação das ADRs 012 e 013**:
    - As implementações de Observabilidade V1 (ADR-012) e Rate Limiting Distribuído (ADR-013) encontram-se 100% operacionais no código e com suítes de teste verdes. Seus documentos de decisão permanecem com status formal **Proposto**, cabendo a aprovação formal ao mantenedor do projeto para manter a governança documental.
-3. **Decisão de Produto sobre Elegibilidade na Restauração e Visibilidade de Respostas Oficiais (C11)** — **DECIDIDO — opção B aprovada**:
-   - **Comportamento atual do código**: a restauração (`RESTORE_RESPONSE` em `ModerateBusinessResponseUseCase`) verifica a transição de estado (só desfaz remoção da moderação), a unicidade da resposta ativa no alvo e o conflito de interesse do moderador. Ela não revalida o que a publicação exige via `BusinessRepresentationPolicy`: conta comercial aprovada (`verification_status`), usuário administrador operacional (`ACTIVE`, e não `DEACTIVATED`, `SUSPENDED` ou `DELETED`) e local `ACTIVE` vinculado à conta (`places.claimed_by_business_id`). O indicador `restorable` da consulta administrativa também ignora esses estados. A listagem pública não filtra pelo estado da conta, do administrador ou do vínculo, de modo que respostas ativas continuam visíveis mesmo se a representação se tornar inelegível.
-   - **Estados alcançáveis hoje**: pelos fluxos da aplicação, apenas o usuário administrador muda de estado (desativação, suspensão e exclusão). A aprovação da conta só avança (`PENDING` → `APPROVED`) e o vínculo do local só é gravado quando vazio; conta não aprovada, local desvinculado ou local inativo só ocorrem por intervenção direta no banco. Em todos esses estados, no código atual, a restauração responde `200` e a resposta volta à listagem pública (comportamento verificado no hardening do C11, sem teste permanente).
+3. **Decisão de Produto sobre Elegibilidade na Restauração e Visibilidade de Respostas Oficiais (C11)** — **DECIDIDO — opção B aprovada; implementada na branch `agent/claude/business-response-eligibility-policy`, pendente de revisão e integração**:
+   - **Comportamento anterior** (até `033a1ab`): a restauração (`RESTORE_RESPONSE` em `ModerateBusinessResponseUseCase`) verificava só a transição de estado, a unicidade da resposta ativa no alvo e o conflito de interesse do moderador, sem revalidar o que a publicação exige via `BusinessRepresentationPolicy`; o indicador `restorable` e a listagem pública também ignoravam esses estados. No hardening do C11 verificou-se que, com conta não aprovada, administrador inoperante ou local inativo ou desvinculado, a restauração respondia `200` e a resposta voltava à listagem pública.
    - **Contexto histórico das alternativas**: avaliou-se a alternativa *(a)*, que preservaria o desacoplamento atual mantendo visíveis respostas históricas e permitindo sua restauração independente do estado superveniente da representação, versus a alternativa *(b)*, que exige coerência estrita de elegibilidade em todo o ciclo de vida da resposta oficial.
    - **Decisão aprovada pelo mantenedor (Opção B)**:
      - A elegibilidade deve ser coerente e unificada entre a **publicação** de novas respostas oficiais, a **restauração** de respostas removidas e a **visibilidade pública** de respostas ativas.
@@ -1154,14 +1155,21 @@ O ecossistema Rewit concluiu formalmente os ciclos C2, C3, C5.1, C9, C10 e C11. 
      - A **restauração administrativa deve ser bloqueada** enquanto os requisitos de elegibilidade não forem atendidos.
      - Não basta verificar a elegibilidade apenas no instante da restauração, pois respostas já ativas também precisam obedecer à regra de visibilidade pública.
      - Os critérios de elegibilidade a observar são os já consolidados em `BusinessRepresentationPolicy`: conta comercial aprovada (`verification_status = 'APPROVED'`), usuário administrador operacional (`account_status = 'ACTIVE'`) e estabelecimento ativo vinculado à conta (`places.claimed_by_business_id` e `places.status = 'ACTIVE'`).
-   - **Status da implementação**: a decisão de produto está formalmente aprovada, mas a sua **implementação técnica está pendente**, devendo ser planejada e executada em um ciclo próprio. O código atual **ainda não aplica** esta política.
-   - **Itens técnicos a especificar no planejamento da implementação**:
-     - *Impacto sobre o administrador*: como a política trata especificamente os estados de suspensão, desativação ou exclusão do administrador associado à conta comercial.
-     - *Recuperação de elegibilidade e troca de titularidade*: como ocorre a substituição do administrador de uma conta comercial e a subsequente restauração da elegibilidade da representação.
-     - *Reversibilidade da visibilidade*: se respostas ocultadas automaticamente por inelegibilidade voltam a ser exibidas na listagem pública de forma automática quando a representação voltar a cumprir todos os requisitos de elegibilidade.
-     - *Sinalização administrativa*: como a consulta administrativa de respostas removidas deve sinalizar no payload (ex.: detalhamento ou extensão do campo `restorable`) os motivos específicos pelos quais uma resposta não pode ser restaurada no momento da consulta.
-     - *Coerência arquitetural*: como unificar a regra entre publicação (`BusinessRepresentationPolicy`), restauração (`ModerateBusinessResponseUseCase`) e consulta pública de avaliações/discussões sem duplicação de lógica ou divergências entre camadas.
-   - **Dependência**: este planejamento deve anteceder ou ser integrado aos fluxos de gestão avançada de estabelecimentos reivindicados (§13.2), em especial fluxos futuros que venham a permitir transferência de posse, revogação de vínculo de local ou desativação de conta comercial.
+   - **Política implementada** (commits `f7bd9e1`, `4522a18`, `341ef22` e `8b5dd28`, sobre `033a1ab`; sem migration):
+     - *Regra única*: `BusinessRepresentationPolicy.evaluate` define os três critérios com motivos estruturados (`BusinessRepresentationIneligibility`); `currentIneligibility` avalia a representação sem ator e sem lock. A publicação mantém passos, códigos e ordem de locks.
+     - *Leitura pública*: as listagens de respostas a avaliações e a comentários filtram em SQL a representação elegível, com o mesmo FROM/WHERE no conteúdo e na contagem; a resposta oculta não muda de estado nem de auditoria e volta a aparecer automaticamente quando a representação volta a ser elegível (por exemplo, reativação ou reintegração do administrador). Os métodos de listagem sem chamadores em produção usam o mesmo filtro.
+     - *Restauração*: depois da autorização, do conflito de interesse e da transição do domínio, a representação inelegível responde `409 BUSINESS_RESPONSE_NOT_RESTORABLE` com os motivos no `detail`, sem gravar nem auditar. Não há lock no local: travá-lo depois da resposta inverteria a ordem da publicação.
+     - *Consulta administrativa*: campo aditivo `restorationBlockers` (`REMOVED_BY_BUSINESS`, `OTHER_ACTIVE_RESPONSE`, `ACCOUNT_NOT_APPROVED`, `ADMINISTRATOR_NOT_OPERATIONAL`, `PLACE_NOT_REPRESENTED`), com `restorable` verdadeiro só sem bloqueios; o administrador aparece só como não operacional. O painel exibe uma explicação por motivo.
+   - **Validações executadas** (no commit `8b5dd28`):
+     - Backend: `./mvnw clean test` com 1.860 testes, 0 falhas, 0 erros e 0 ignorados (18 novos), incluindo a matriz de estados nas listagens, paginação e contagem, paridade entre a regra Java e o SQL nas listagens e na consulta administrativa, restauração bloqueada por motivo e fluxo HTTP com suspensão e reintegração do administrador.
+     - Admin: `vitest run` com 82 testes aprovados (4 novos), `eslint` sem pendências e `tsc && vite build` concluído.
+     - Mobile: não reexecutado no commit de código `8b5dd28` (contrato público inalterado); validação posterior de compatibilidade executada pelo Gemini no commit `b367322` em clone isolado (618 testes aprovados, `flutter analyze` limpo, sem alterações em `apps/mobile/` em relação a `033a1ab`; ver §12.2).
+     - Desempenho: `EXPLAIN ANALYZE` no PostgreSQL local com massa sintética (100.100 respostas) dentro de transação desfeita: a listagem segue o índice único parcial e resolve conta, administrador e local por chave (cerca de 0,1 ms por página); a fila administrativa sem filtro levou 27 ms, a maior parte na subconsulta `other_active` que já existia. Não é medição de produção.
+   - **Limitações e questões pendentes**:
+     - Uma resposta ativa oculta continua ocupando a vaga da empresa no alvo; para publicar outra, a empresa precisa retirá-la. Mudar isso exige decisão adicional.
+     - Administrador `DELETED` não volta a ser operacional, e não há fluxo de troca do administrador da conta: as respostas dessa conta ficam ocultas. Quando a troca existir, as respostas publicadas sob o administrador anterior reapareceriam sob o novo; isso precisa ser decidido junto com o fluxo.
+     - Não existem fluxos que revoguem a aprovação da conta, removam ou transfiram o vínculo do local, ou desativem o local; hoje esses estados só ocorrem por escrita direta no banco. A leitura pública já os respeita, mas `BusinessRepresentationPolicy` lê a conta sem lock por pressupor que a aprovação só avança: os fluxos da gestão de estabelecimentos reivindicados (§13.2) devem revisitar esse pressuposto e a ordem de locks.
+     - Se a elegibilidade cair entre a checagem e o commit da restauração, a resposta fica restaurada e oculta pela leitura pública até a representação voltar.
 
 ### 13.2 Proposta de Continuidade para a Próxima Fase
 A próxima etapa de desenvolvimento deve focar na **Gestão de Estabelecimentos Reivindicados e Catálogo Local**, expandindo a capacidade das contas comerciais aprovadas de configurar horários de funcionamento, comodidades e produtos disponíveis no local, consolidando a Fase 2 do produto.

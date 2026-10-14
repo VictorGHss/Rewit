@@ -5,8 +5,11 @@ import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessRe
 import com.rewit.application.dto.business.BusinessResponseDtos.RemovedBusinessResponseRecord;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.BusinessResponseRepository;
+import com.rewit.application.service.CatalogService;
+import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.BusinessResponseRemovalSource;
 import com.rewit.domain.enums.BusinessResponseStatus;
+import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.infrastructure.persistence.entity.BusinessResponseJpaEntity;
 import com.rewit.infrastructure.persistence.repository.BusinessResponseJpaRepository;
@@ -14,8 +17,6 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.Query;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +31,22 @@ import java.util.UUID;
 
 @Component
 public class BusinessResponseRepositoryAdapter implements BusinessResponseRepository {
+
+    /** Conta, administrador atual e local da resposta {@code r}: aliases {@code b}, {@code u} e {@code p}. */
+    private static final String REPRESENTATION_JOINS = " JOIN business_accounts b ON b.id = r.business_account_id"
+            + " JOIN users u ON u.id = b.user_id"
+            + " JOIN places p ON p.id = r.place_id";
+
+    // Os três critérios de BusinessRepresentationPolicy.evaluate em SQL, com os mesmos valores de domínio; a paridade
+    // com a avaliação Java é coberta pelo teste de persistência
+    private static final String ACCOUNT_APPROVED = "b.verification_status = '" + VerificationStatus.APPROVED.name() + "'";
+    private static final String ADMINISTRATOR_OPERATIONAL = "u.account_status = '" + AccountStatus.ACTIVE.name() + "'";
+    private static final String PLACE_REPRESENTED = "(p.status = '" + CatalogService.PUBLIC_CATALOG_STATUS + "'"
+            + " AND p.claimed_by_business_id = r.business_account_id)";
+
+    /** Representação elegível (decisão B): só as respostas ativas que a satisfazem são lidas como públicas. */
+    private static final String ELIGIBLE_REPRESENTATION = ACCOUNT_APPROVED + " AND " + ADMINISTRATOR_OPERATIONAL
+            + " AND " + PLACE_REPRESENTED;
 
     private final BusinessResponseJpaRepository repository;
     private final EntityManager entityManager;
@@ -99,13 +116,20 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
         if (reviewId == null) {
             return PageResult.of(List.of(), page, size, 0);
         }
-        Page<BusinessResponseJpaEntity> result = repository
-                .findByReviewIdAndDiscussionIdIsNullAndStatusOrderByCreatedAtAscIdAsc(
-                        reviewId, BusinessResponseStatus.ACTIVE, PageRequest.of(page, size));
-        List<BusinessResponse> content = result.getContent().stream()
-                .map(entity -> entity.toDomain())
+        String where = activeEligibleFrom("r.review_id = :reviewId AND r.discussion_id IS NULL");
+        List<?> rows = entityManager.createNativeQuery("SELECT r.*" + where + " ORDER BY r.created_at ASC, r.id ASC",
+                        BusinessResponseJpaEntity.class)
+                .setParameter("reviewId", reviewId)
+                .setFirstResult(Math.multiplyExact(page, size))
+                .setMaxResults(size)
+                .getResultList();
+        Number total = (Number) entityManager.createNativeQuery("SELECT count(*)" + where)
+                .setParameter("reviewId", reviewId)
+                .getSingleResult();
+        List<BusinessResponse> content = rows.stream()
+                .map(row -> ((BusinessResponseJpaEntity) row).toDomain())
                 .toList();
-        return PageResult.of(content, page, size, result.getTotalElements());
+        return PageResult.of(content, page, size, total.longValue());
     }
 
     @Override
@@ -123,15 +147,15 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
         return findActiveViews("r.discussion_id = :targetId", discussionId, page, size);
     }
 
-    /** Página pública das respostas ativas do alvo, com empresa e local numa única consulta. */
+    /**
+     * Página pública das respostas ativas do alvo, com empresa e local numa única consulta. Conteúdo e contagem usam o
+     * mesmo FROM/WHERE, então {@code totalElements} conta só as respostas de representação elegível que a página lista.
+     */
     private PageResult<BusinessResponseView> findActiveViews(String targetFilter, UUID targetId, int page, int size) {
         if (targetId == null) {
             return PageResult.of(List.of(), page, size, 0);
         }
-        String where = " FROM business_responses r"
-                + " JOIN business_accounts b ON b.id = r.business_account_id"
-                + " JOIN places p ON p.id = r.place_id"
-                + " WHERE " + targetFilter + " AND r.status = 'ACTIVE'";
+        String where = activeEligibleFrom(targetFilter);
         List<?> rows = entityManager.createNativeQuery("SELECT r.id, r.review_id, r.discussion_id,"
                         + " b.id AS business_account_id, b.corporate_name, p.id AS place_id, p.name, r.content,"
                         + " r.created_at" + where
@@ -173,7 +197,9 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
         // Sem filtro, idx_business_responses_removed (V25) entrega as linhas já na ordem da página. A outra resposta
         // ativa sai dos índices únicos parciais da V24, um por tipo de alvo: cada EXISTS repete o predicado do seu
         // índice (IS NOT DISTINCT FROM impediria o uso de ambos); a última remoção da moderação, de
-        // idx_business_response_audit_response (response_id, created_at), uma linha por resposta da página
+        // idx_business_response_audit_response (response_id, created_at), uma linha por resposta da página. Os três
+        // critérios de elegibilidade da representação saem dos mesmos predicados das leituras públicas, por chave
+        // primária; COALESCE porque o local sem vínculo daria NULL, não FALSE
         Query query = entityManager.createNativeQuery("""
                 SELECT r.id, r.review_id, r.discussion_id, b.id AS business_account_id, b.corporate_name,
                        p.id AS place_id, p.name, r.content, r.created_at, r.removed_by, r.removed_at,
@@ -188,10 +214,13 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
                                            AND o.business_account_id = r.business_account_id
                                            AND o.status = 'ACTIVE')
                        END AS other_active,
-                       m.reason_code, m.justification, m.created_at AS moderated_at
-                FROM business_responses r
-                JOIN business_accounts b ON b.id = r.business_account_id
-                JOIN places p ON p.id = r.place_id
+                       m.reason_code, m.justification, m.created_at AS moderated_at,
+                """
+                + " COALESCE(" + ACCOUNT_APPROVED + ", FALSE) AS account_approved,"
+                + " COALESCE(" + ADMINISTRATOR_OPERATIONAL + ", FALSE) AS administrator_operational,"
+                + " COALESCE(" + PLACE_REPRESENTED + ", FALSE) AS place_represented"
+                + " FROM business_responses r" + REPRESENTATION_JOINS + """
+
                 LEFT JOIN LATERAL (
                     SELECT a.reason_code, a.justification, a.created_at
                     FROM business_response_moderation_audit_logs a
@@ -233,7 +262,8 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
         return new RemovedBusinessResponseRecord((UUID) row[0], (UUID) row[1], (UUID) row[2], (UUID) row[3],
                 (String) row[4], (UUID) row[5], (String) row[6], (String) row[7], toInstant(row[8]),
                 BusinessResponseRemovalSource.valueOf((String) row[9]), toInstant(row[10]), (Boolean) row[11],
-                (String) row[12], (String) row[13], row[14] == null ? null : toInstant(row[14]));
+                (String) row[12], (String) row[13], row[14] == null ? null : toInstant(row[14]), (Boolean) row[15],
+                (Boolean) row[16], (Boolean) row[17]);
     }
 
     private static BusinessResponseView toView(Object[] row) {
@@ -263,9 +293,21 @@ public class BusinessResponseRepositoryAdapter implements BusinessResponseReposi
         if (ids.isEmpty()) {
             return List.of();
         }
-        return repository.findByDiscussionIdInAndStatusOrderByCreatedAtAscIdAsc(ids, BusinessResponseStatus.ACTIVE)
-                .stream()
-                .map(entity -> entity.toDomain())
+        List<?> rows = entityManager.createNativeQuery("SELECT r.*"
+                                + activeEligibleFrom("r.discussion_id IN (:discussionIds)")
+                                + " ORDER BY r.created_at ASC, r.id ASC",
+                        BusinessResponseJpaEntity.class)
+                .setParameter("discussionIds", ids)
+                .getResultList();
+        return rows.stream()
+                .map(row -> ((BusinessResponseJpaEntity) row).toDomain())
                 .toList();
+    }
+
+    /** FROM/WHERE das leituras públicas: respostas ativas do alvo cuja representação está elegível agora. */
+    private static String activeEligibleFrom(String targetFilter) {
+        return " FROM business_responses r" + REPRESENTATION_JOINS
+                + " WHERE " + targetFilter + " AND r.status = '" + BusinessResponseStatus.ACTIVE.name() + "'"
+                + " AND " + ELIGIBLE_REPRESENTATION;
     }
 }

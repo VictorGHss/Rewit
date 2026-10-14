@@ -34,12 +34,19 @@ public class AccountStatusPolicy {
      */
     public void requireOperational(UUID actorUserId) {
         Objects.requireNonNull(actorUserId, "actorUserId must not be null");
-        boolean operational = userRepository.findById(actorUserId)
-                .map(account -> account.isOperational())
-                .orElse(false);
-        if (!operational) {
+        if (!isOperational(actorUserId)) {
             throw accountDisabled();
         }
+    }
+
+    /**
+     * Se a conta pode operar agora, sem lançar: para avaliar terceiros, como o administrador de uma conta comercial
+     * (C11). Conta inexistente, desativada, suspensa ou excluída dá {@code false}, sem distinguir o motivo.
+     */
+    public boolean isOperational(UUID userId) {
+        return userId != null && userRepository.findById(userId)
+                .map(account -> account.isOperational())
+                .orElse(false);
     }
 
     /**

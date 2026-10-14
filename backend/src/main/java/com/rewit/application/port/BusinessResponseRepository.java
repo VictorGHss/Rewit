@@ -13,6 +13,11 @@ import java.util.UUID;
 
 /**
  * Porta de persistência das respostas oficiais de empresas (business_responses, C11).
+ *
+ * <p>As listas de respostas ativas ({@code findActive*Responses*}) devolvem só as de representação elegível agora
+ * (decisão B, critérios de {@code BusinessRepresentationPolicy}); a inelegível fica oculta sem mudar de estado e volta
+ * a aparecer quando a representação volta a ser elegível. {@link #findActive} não filtra: serve à unicidade, e uma
+ * resposta oculta continua ocupando a vaga da empresa no alvo.
  */
 public interface BusinessResponseRepository {
 
@@ -29,22 +34,22 @@ public interface BusinessResponseRepository {
     Optional<BusinessResponse> findByIdForUpdate(UUID id);
 
     /**
-     * Resposta ativa da empresa ao alvo, se houver.
+     * Resposta ativa da empresa ao alvo, se houver, elegível ou não: é a vaga da unicidade.
      *
      * @param discussionId comentário raiz; {@code null} para a resposta direta à avaliação
      */
     Optional<BusinessResponse> findActive(UUID reviewId, UUID discussionId, UUID businessAccountId);
 
-    /** Respostas ativas diretas à avaliação (sem comentário), em ordem cronológica. */
+    /** Respostas ativas e elegíveis diretas à avaliação (sem comentário), em ordem cronológica. */
     PageResult<BusinessResponse> findActiveReviewResponses(UUID reviewId, int page, int size);
 
     /**
-     * Página pública das respostas ativas diretas à avaliação, com empresa e local numa única consulta, em ordem
-     * cronológica estável (created_at, id).
+     * Página pública das respostas ativas e elegíveis diretas à avaliação, com empresa e local numa única consulta,
+     * em ordem cronológica estável (created_at, id); a contagem é do mesmo conjunto.
      */
     PageResult<BusinessResponseView> findActiveReviewResponseViews(UUID reviewId, int page, int size);
 
-    /** Página pública das respostas ativas a um comentário, na mesma forma e ordem (created_at, id). */
+    /** Página pública das respostas ativas e elegíveis a um comentário, na mesma forma e ordem (created_at, id). */
     PageResult<BusinessResponseView> findActiveDiscussionResponseViews(UUID discussionId, int page, int size);
 
     /**
@@ -55,6 +60,9 @@ public interface BusinessResponseRepository {
     PageResult<RemovedBusinessResponseRecord> findRemovedForModeration(RemovedBusinessResponseFilter filter, int page,
                                                                         int size);
 
-    /** Respostas ativas aos comentários informados, em ordem cronológica; para compor uma página de comentários. */
+    /**
+     * Respostas ativas e elegíveis aos comentários informados, em ordem cronológica; para compor uma página de
+     * comentários.
+     */
     List<BusinessResponse> findActiveDiscussionResponses(Collection<UUID> discussionIds);
 }

@@ -5,8 +5,10 @@ import com.rewit.application.dto.business.BusinessResponseDtos.ModerateBusinessR
 import com.rewit.application.port.BusinessAccountRepository;
 import com.rewit.application.port.BusinessResponseModerationAuditLogRepository;
 import com.rewit.application.port.BusinessResponseRepository;
+import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.AccountStatusPolicy;
+import com.rewit.application.service.BusinessRepresentationPolicy;
 import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.AccountStatus;
@@ -19,6 +21,7 @@ import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.domain.model.BusinessResponseModerationAuditLog;
+import com.rewit.domain.model.Place;
 import com.rewit.domain.model.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,6 +37,7 @@ import org.springframework.http.HttpStatus;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -42,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
@@ -68,6 +73,8 @@ class ModerateBusinessResponseUseCaseTest {
     private BusinessResponseModerationAuditLogRepository auditLogRepository;
     @Mock
     private BusinessAccountRepository businessAccountRepository;
+    @Mock
+    private PlaceRepository placeRepository;
 
     private ModerateBusinessResponseUseCase useCase;
 
@@ -79,11 +86,15 @@ class ModerateBusinessResponseUseCaseTest {
 
     @BeforeEach
     void setUp() {
+        AccountStatusPolicy accountStatusPolicy = new AccountStatusPolicy(userRepository);
         useCase = new ModerateBusinessResponseUseCase(businessResponseRepository, auditLogRepository,
-                businessAccountRepository, new ModeratorRolePolicy(new AccountStatusPolicy(userRepository), userRepository));
+                businessAccountRepository, new ModeratorRolePolicy(accountStatusPolicy, userRepository),
+                new BusinessRepresentationPolicy(accountStatusPolicy, businessAccountRepository, placeRepository));
         CurrentRoleStubs.defaultRole(userRepository, moderator, Role.MODERATOR);
-        lenient().when(businessAccountRepository.findById(accountId)).thenReturn(Optional.of(new BusinessAccount(accountId,
-                businessAdmin, "Padaria Central LTDA", "12345678000190", VerificationStatus.APPROVED, "FREE", NOW, NOW)));
+        lenient().when(businessAccountRepository.findById(accountId)).thenReturn(Optional.of(account(VerificationStatus.APPROVED)));
+        // Representação elegível por padrão: administrador operacional e local ativo vinculado à conta
+        lenient().when(userRepository.findById(businessAdmin)).thenReturn(Optional.of(administrator(AccountStatus.ACTIVE)));
+        lenient().when(placeRepository.findById(placeId)).thenReturn(Optional.of(place(accountId, "ACTIVE")));
         lenient().when(businessResponseRepository.findActive(any(), any(), any())).thenReturn(Optional.empty());
         lenient().when(businessResponseRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(auditLogRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -257,6 +268,119 @@ class ModerateBusinessResponseUseCaseTest {
     }
 
     @Test
+    @DisplayName("Restaurar com representação inelegível: 409 NOT_RESTORABLE por motivo, sem gravar, auditar nem travar o local")
+    void restoreBlockedByIneligibleRepresentation() {
+        record Scenario(String name, Runnable arrange, String expectedDetail) {
+        }
+        UUID otherBusiness = UUID.randomUUID();
+        List<Scenario> scenarios = List.of(
+                new Scenario("conta PENDING", () -> when(businessAccountRepository.findById(accountId))
+                        .thenReturn(Optional.of(account(VerificationStatus.PENDING))), "a conta comercial não está aprovada"),
+                new Scenario("conta REJECTED", () -> when(businessAccountRepository.findById(accountId))
+                        .thenReturn(Optional.of(account(VerificationStatus.REJECTED))), "a conta comercial não está aprovada"),
+                new Scenario("administrador SUSPENDED", () -> when(userRepository.findById(businessAdmin))
+                        .thenReturn(Optional.of(administrator(AccountStatus.SUSPENDED))),
+                        "o administrador da conta comercial não está operacional"),
+                new Scenario("administrador DEACTIVATED", () -> when(userRepository.findById(businessAdmin))
+                        .thenReturn(Optional.of(administrator(AccountStatus.DEACTIVATED))),
+                        "o administrador da conta comercial não está operacional"),
+                new Scenario("administrador inexistente", () -> when(userRepository.findById(businessAdmin))
+                        .thenReturn(Optional.empty()), "o administrador da conta comercial não está operacional"),
+                new Scenario("local CLOSED", () -> when(placeRepository.findById(placeId))
+                        .thenReturn(Optional.of(place(accountId, "CLOSED"))),
+                        "o local não está ativo ou não está vinculado à conta comercial"),
+                new Scenario("local de outra empresa", () -> when(placeRepository.findById(placeId))
+                        .thenReturn(Optional.of(place(otherBusiness, "ACTIVE"))),
+                        "o local não está ativo ou não está vinculado à conta comercial"),
+                new Scenario("local sem vínculo", () -> when(placeRepository.findById(placeId))
+                        .thenReturn(Optional.of(place(null, "ACTIVE"))),
+                        "o local não está ativo ou não está vinculado à conta comercial"));
+
+        for (Scenario scenario : scenarios) {
+            setUp();
+            scenario.arrange().run();
+            BusinessResponse removed = active(null);
+            removed.removeByModeration(NOW);
+            stored(removed);
+
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> useCase.execute(command(removed.getId(), BusinessResponseModerationAction.RESTORE_RESPONSE)),
+                    scenario.name());
+            assertEquals(HttpStatus.CONFLICT, ex.getStatus(), scenario.name());
+            assertEquals("BUSINESS_RESPONSE_NOT_RESTORABLE", ex.getErrorCode(), scenario.name());
+            assertTrue(ex.getMessage().contains(scenario.expectedDetail()), scenario.name() + ": " + ex.getMessage());
+            assertFalse(ex.getMessage().contains("SUSPENDED") || ex.getMessage().contains("suspens"), scenario.name());
+        }
+        verify(businessResponseRepository, never()).findActive(any(), any(), any());
+        verify(businessResponseRepository, never()).save(any());
+        verify(placeRepository, never()).findByIdForUpdate(any());
+        verifyNoInteractions(auditLogRepository);
+    }
+
+    @Test
+    @DisplayName("Restaurar com vários motivos: um único 409 que lista todos, na ordem dos critérios")
+    void restoreBlockedByCombinedReasons() {
+        when(businessAccountRepository.findById(accountId)).thenReturn(Optional.of(account(VerificationStatus.PENDING)));
+        when(userRepository.findById(businessAdmin)).thenReturn(Optional.of(administrator(AccountStatus.SUSPENDED)));
+        when(placeRepository.findById(placeId)).thenReturn(Optional.of(place(accountId, "INACTIVE")));
+        BusinessResponse removed = active(null);
+        removed.removeByModeration(NOW);
+        stored(removed);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> useCase.execute(command(removed.getId(), BusinessResponseModerationAction.RESTORE_RESPONSE)));
+
+        assertEquals("BUSINESS_RESPONSE_NOT_RESTORABLE", ex.getErrorCode());
+        assertEquals("A representação comercial da resposta não está elegível (a conta comercial não está aprovada; "
+                + "o administrador da conta comercial não está operacional; o local não está ativo ou não está vinculado "
+                + "à conta comercial); a resposta removida não pode ser restaurada", ex.getMessage());
+        verify(businessResponseRepository, never()).save(any());
+        verifyNoInteractions(auditLogRepository);
+    }
+
+    @Test
+    @DisplayName("Ordem na restauração: estado do domínio, depois elegibilidade sem lock, depois unicidade")
+    void restoreChecksStateThenEligibilityThenUniqueness() {
+        // Removida pela empresa e com representação inelegível: vale o erro do domínio, sem avaliar a representação
+        lenient().when(placeRepository.findById(placeId)).thenReturn(Optional.of(place(accountId, "CLOSED")));
+        BusinessResponse withdrawn = active(null);
+        withdrawn.removeByBusiness(NOW);
+        stored(withdrawn);
+        BusinessException domain = assertThrows(BusinessException.class,
+                () -> useCase.execute(command(withdrawn.getId(), BusinessResponseModerationAction.RESTORE_RESPONSE)));
+        assertEquals("Só uma resposta removida pela moderação pode ser restaurada", domain.getMessage());
+        verifyNoInteractions(placeRepository);
+
+        // Elegível: a representação é lida sem lock antes da checagem de unicidade
+        when(placeRepository.findById(placeId)).thenReturn(Optional.of(place(accountId, "ACTIVE")));
+        BusinessResponse removed = active(null);
+        removed.removeByModeration(NOW);
+        stored(removed);
+        useCase.execute(command(removed.getId(), BusinessResponseModerationAction.RESTORE_RESPONSE));
+
+        InOrder order = inOrder(businessResponseRepository, placeRepository, auditLogRepository);
+        order.verify(businessResponseRepository).findByIdForUpdate(removed.getId());
+        order.verify(placeRepository).findById(placeId);
+        order.verify(businessResponseRepository).findActive(reviewId, null, accountId);
+        order.verify(businessResponseRepository).save(any());
+        order.verify(auditLogRepository).save(any());
+        verify(placeRepository, never()).findByIdForUpdate(any());
+    }
+
+    @Test
+    @DisplayName("Remover não depende da elegibilidade: a moderação retira resposta de representação inelegível")
+    void removeIgnoresEligibility() {
+        when(businessAccountRepository.findById(accountId)).thenReturn(Optional.of(account(VerificationStatus.PENDING)));
+        BusinessResponse response = stored(active(null));
+
+        BusinessResponseModerationResult result = useCase.execute(command(response.getId(),
+                BusinessResponseModerationAction.REMOVE_RESPONSE));
+
+        assertEquals(BusinessResponseStatus.REMOVED, result.newStatus());
+        verifyNoInteractions(placeRepository);
+    }
+
+    @Test
     @DisplayName("Corrida na restauração: só os índices de resposta ativa viram 409; outra violação é relançada; sem auditoria")
     void restoreConflictByIndex() {
         for (String index : new String[] {"uq_business_responses_review_active", "uq_business_responses_discussion_active"}) {
@@ -324,6 +448,21 @@ class ModerateBusinessResponseUseCaseTest {
 
     private ModerateBusinessResponseCommand command(UUID responseId, BusinessResponseModerationAction action) {
         return new ModerateBusinessResponseCommand(responseId, moderator, action, " SPAM ", JUSTIFICATION, LATER);
+    }
+
+    private BusinessAccount account(VerificationStatus status) {
+        return new BusinessAccount(accountId, businessAdmin, "Padaria Central LTDA", "12345678000190", status, "FREE",
+                NOW, NOW);
+    }
+
+    private User administrator(AccountStatus status) {
+        return User.rehydrate(businessAdmin, "adm@rewit.test", "hash", AuthProvider.LOCAL, null, status, true,
+                Role.USER, null, NOW, NOW);
+    }
+
+    private Place place(UUID claimedBy, String status) {
+        return new Place(placeId, "Unidade Centro", "slug-" + placeId, "CAFE", null, "Rua A", "Curitiba", "PR", "BR",
+                -25.42, -49.27, 50, "USER", false, claimedBy, status);
     }
 
     private BusinessResponse active(UUID discussionId) {

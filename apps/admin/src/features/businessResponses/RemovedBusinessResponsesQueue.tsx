@@ -9,8 +9,44 @@ import { ApiError } from '../../core/api/client';
 import type {
   AdminRemovedBusinessResponse,
   BusinessResponseRemovalSource,
+  BusinessResponseRestorationBlocker,
   ProblemDetail,
 } from '../../core/types';
+
+const RESTORATION_BLOCKER_EXPLANATIONS: Record<BusinessResponseRestorationBlocker, string> = {
+  REMOVED_BY_BUSINESS:
+    'Removida pela própria empresa (somente remoções realizadas pela moderação podem ser restauradas).',
+  OTHER_ACTIVE_RESPONSE: 'A empresa já possui outra resposta ativa para este mesmo alvo.',
+  ACCOUNT_NOT_APPROVED: 'A conta comercial não está aprovada.',
+  ADMINISTRATOR_NOT_OPERATIONAL: 'O administrador da conta comercial não está operacional.',
+  PLACE_NOT_REPRESENTED: 'O local não está ativo ou não está vinculado à conta comercial.',
+};
+
+const GENERIC_UNRESTORABLE_EXPLANATION = 'Esta resposta não atende aos critérios para restauração administrativa.';
+
+/** Sem `restorationBlockers` (API anterior à decisão B), deduz os dois motivos que o payload já trazia. */
+const restorationBlockersOf = (item: AdminRemovedBusinessResponse): BusinessResponseRestorationBlocker[] => {
+  if (item.restorationBlockers) {
+    return item.restorationBlockers;
+  }
+  const blockers: BusinessResponseRestorationBlocker[] = [];
+  if (item.removedBy === 'BUSINESS') {
+    blockers.push('REMOVED_BY_BUSINESS');
+  }
+  if (item.otherActiveResponse) {
+    blockers.push('OTHER_ACTIVE_RESPONSE');
+  }
+  return blockers;
+};
+
+/** Uma explicação por motivo, na ordem recebida; motivo desconhecido cai na explicação genérica. */
+const getUnrestorableExplanations = (item: AdminRemovedBusinessResponse): string[] => {
+  const explanations = restorationBlockersOf(item).map(
+    (blocker) => RESTORATION_BLOCKER_EXPLANATIONS[blocker] ?? GENERIC_UNRESTORABLE_EXPLANATION
+  );
+  const unique = Array.from(new Set(explanations));
+  return unique.length > 0 ? unique : [GENERIC_UNRESTORABLE_EXPLANATION];
+};
 
 export const RemovedBusinessResponsesQueue: React.FC = () => {
   const [responses, setResponses] = useState<AdminRemovedBusinessResponse[]>([]);
@@ -135,19 +171,6 @@ export const RemovedBusinessResponsesQueue: React.FC = () => {
   const handleRestoreSuccess = () => {
     setFeedbackSuccess('Resposta oficial restaurada com sucesso!');
     fetchResponses();
-  };
-
-  const getUnrestorableExplanation = (item: AdminRemovedBusinessResponse): string => {
-    if (item.removedBy === 'BUSINESS' && item.otherActiveResponse) {
-      return 'Removida pela própria empresa e já existe outra resposta ativa para este alvo.';
-    }
-    if (item.removedBy === 'BUSINESS') {
-      return 'Removida pela própria empresa (somente remoções realizadas pela moderação podem ser restauradas).';
-    }
-    if (item.otherActiveResponse) {
-      return 'A empresa já possui outra resposta ativa para este mesmo alvo.';
-    }
-    return 'Esta resposta não atende aos critérios para restauração administrativa.';
   };
 
   return (
@@ -382,7 +405,7 @@ export const RemovedBusinessResponsesQueue: React.FC = () => {
               </thead>
               <tbody>
                 {responses.map((item) => {
-                  const unrestorableReason = !item.restorable ? getUnrestorableExplanation(item) : '';
+                  const unrestorableReasons = !item.restorable ? getUnrestorableExplanations(item) : [];
 
                   return (
                     <tr
@@ -522,24 +545,27 @@ export const RemovedBusinessResponsesQueue: React.FC = () => {
                               className="btn btn-secondary"
                               style={{ fontSize: '0.8rem', padding: '6px 12px', opacity: 0.5, cursor: 'not-allowed' }}
                               disabled
-                              title={unrestorableReason}
+                              title={unrestorableReasons.join(' ')}
                               aria-disabled="true"
                             >
                               Restaurar
                             </button>
-                            <p
-                              style={{
-                                color: 'var(--accent-danger)',
-                                fontSize: '0.75rem',
-                                marginTop: '6px',
-                                textAlign: 'right',
-                                maxWidth: '200px',
-                                marginLeft: 'auto',
-                                lineHeight: '1.2',
-                              }}
-                            >
-                              {unrestorableReason}
-                            </p>
+                            {unrestorableReasons.map((reason) => (
+                              <p
+                                key={reason}
+                                style={{
+                                  color: 'var(--accent-danger)',
+                                  fontSize: '0.75rem',
+                                  marginTop: '6px',
+                                  textAlign: 'right',
+                                  maxWidth: '200px',
+                                  marginLeft: 'auto',
+                                  lineHeight: '1.2',
+                                }}
+                              >
+                                {reason}
+                              </p>
+                            ))}
                           </div>
                         )}
                       </td>
