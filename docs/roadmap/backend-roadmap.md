@@ -1146,7 +1146,7 @@ O ecossistema Rewit concluiu formalmente os ciclos C2, C3, C5.1, C9, C10 e C11. 
    - Permanece pendente a decisão jurídica quanto à base legal e necessidade de coleta de IP e User-Agent enquanto a sessão está ativa. A [ADR-011](../decisions/ADR-011-session-retention-and-cleanup.md) permanece formalmente com status **Proposto** até parecer final.
 2. **Homologação das ADRs 012 e 013**:
    - As implementações de Observabilidade V1 (ADR-012) e Rate Limiting Distribuído (ADR-013) encontram-se 100% operacionais no código e com suítes de teste verdes. Seus documentos de decisão permanecem com status formal **Proposto**, cabendo a aprovação formal ao mantenedor do projeto para manter a governança documental.
-3. **Decisão de Produto sobre Elegibilidade na Restauração e Visibilidade de Respostas Oficiais (C11)** — **DECIDIDO — opção B aprovada; implementada na branch `agent/claude/business-response-eligibility-policy`, pendente de revisão e integração**:
+3. **Decisão de Produto sobre Elegibilidade na Restauração e Visibilidade de Respostas Oficiais (C11)** — **INTEGRADO em `main` (commit `5909410`, PR #3)**:
    - **Comportamento anterior** (até `033a1ab`): a restauração (`RESTORE_RESPONSE` em `ModerateBusinessResponseUseCase`) verificava só a transição de estado, a unicidade da resposta ativa no alvo e o conflito de interesse do moderador, sem revalidar o que a publicação exige via `BusinessRepresentationPolicy`; o indicador `restorable` e a listagem pública também ignoravam esses estados. No hardening do C11 verificou-se que, com conta não aprovada, administrador inoperante ou local inativo ou desvinculado, a restauração respondia `200` e a resposta voltava à listagem pública.
    - **Contexto histórico das alternativas**: avaliou-se a alternativa *(a)*, que preservaria o desacoplamento atual mantendo visíveis respostas históricas e permitindo sua restauração independente do estado superveniente da representação, versus a alternativa *(b)*, que exige coerência estrita de elegibilidade em todo o ciclo de vida da resposta oficial.
    - **Decisão aprovada pelo mantenedor (Opção B)**:
@@ -1155,24 +1155,59 @@ O ecossistema Rewit concluiu formalmente os ciclos C2, C3, C5.1, C9, C10 e C11. 
      - A **restauração administrativa deve ser bloqueada** enquanto os requisitos de elegibilidade não forem atendidos.
      - Não basta verificar a elegibilidade apenas no instante da restauração, pois respostas já ativas também precisam obedecer à regra de visibilidade pública.
      - Os critérios de elegibilidade a observar são os já consolidados em `BusinessRepresentationPolicy`: conta comercial aprovada (`verification_status = 'APPROVED'`), usuário administrador operacional (`account_status = 'ACTIVE'`) e estabelecimento ativo vinculado à conta (`places.claimed_by_business_id` e `places.status = 'ACTIVE'`).
-   - **Política implementada** (commits `f7bd9e1`, `4522a18`, `341ef22` e `8b5dd28`, sobre `033a1ab`; sem migration):
+   - **Política implementada e integrada**:
      - *Regra única*: `BusinessRepresentationPolicy.evaluate` define os três critérios com motivos estruturados (`BusinessRepresentationIneligibility`); `currentIneligibility` avalia a representação sem ator e sem lock. A publicação mantém passos, códigos e ordem de locks.
      - *Leitura pública*: as listagens de respostas a avaliações e a comentários filtram em SQL a representação elegível, com o mesmo FROM/WHERE no conteúdo e na contagem; a resposta oculta não muda de estado nem de auditoria e volta a aparecer automaticamente quando a representação volta a ser elegível (por exemplo, reativação ou reintegração do administrador). Os métodos de listagem sem chamadores em produção usam o mesmo filtro.
      - *Restauração*: depois da autorização, do conflito de interesse e da transição do domínio, a representação inelegível responde `409 BUSINESS_RESPONSE_NOT_RESTORABLE` com os motivos no `detail`, sem gravar nem auditar. Não há lock no local: travá-lo depois da resposta inverteria a ordem da publicação.
      - *Consulta administrativa*: campo aditivo `restorationBlockers` (`REMOVED_BY_BUSINESS`, `OTHER_ACTIVE_RESPONSE`, `ACCOUNT_NOT_APPROVED`, `ADMINISTRATOR_NOT_OPERATIONAL`, `PLACE_NOT_REPRESENTED`), com `restorable` verdadeiro só sem bloqueios; o administrador aparece só como não operacional. O painel exibe uma explicação por motivo.
-   - **Validações executadas** (no commit `8b5dd28`):
-     - Backend: `./mvnw clean test` com 1.860 testes, 0 falhas, 0 erros e 0 ignorados (18 novos), incluindo a matriz de estados nas listagens, paginação e contagem, paridade entre a regra Java e o SQL nas listagens e na consulta administrativa, restauração bloqueada por motivo e fluxo HTTP com suspensão e reintegração do administrador.
+   - **Validações executadas**:
+     - Backend: `./mvnw clean test` com 1.860 testes, 0 falhas, 0 erros e 0 ignorados (18 novos) na validação da branch, e integrado em `main` via PR #3.
      - Admin: `vitest run` com 82 testes aprovados (4 novos), `eslint` sem pendências e `tsc && vite build` concluído.
-     - Mobile: não reexecutado no commit de código `8b5dd28` (contrato público inalterado); validação posterior de compatibilidade executada pelo Gemini no commit `b367322` em clone isolado (618 testes aprovados, `flutter analyze` limpo, sem alterações em `apps/mobile/` em relação a `033a1ab`; ver §12.2).
-     - Desempenho: `EXPLAIN ANALYZE` no PostgreSQL local com massa sintética (100.100 respostas) dentro de transação desfeita: a listagem segue o índice único parcial e resolve conta, administrador e local por chave (cerca de 0,1 ms por página); a fila administrativa sem filtro levou 27 ms, a maior parte na subconsulta `other_active` que já existia. Não é medição de produção.
+     - Mobile: validado pelo Gemini no commit `b367322` em clone isolado (618 testes aprovados, `flutter analyze` limpo, sem alterações em `apps/mobile/` em relação a `033a1ab`; ver §12.2).
    - **Limitações e questões pendentes**:
      - Uma resposta ativa oculta continua ocupando a vaga da empresa no alvo; para publicar outra, a empresa precisa retirá-la. Mudar isso exige decisão adicional.
      - Administrador `DELETED` não volta a ser operacional, e não há fluxo de troca do administrador da conta: as respostas dessa conta ficam ocultas. Quando a troca existir, as respostas publicadas sob o administrador anterior reapareceriam sob o novo; isso precisa ser decidido junto com o fluxo.
      - Não existem fluxos que revoguem a aprovação da conta, removam ou transfiram o vínculo do local, ou desativem o local; hoje esses estados só ocorrem por escrita direta no banco. A leitura pública já os respeita, mas `BusinessRepresentationPolicy` lê a conta sem lock por pressupor que a aprovação só avança: os fluxos da gestão de estabelecimentos reivindicados (§13.2) devem revisitar esse pressuposto e a ordem de locks.
      - Se a elegibilidade cair entre a checagem e o commit da restauração, a resposta fica restaurada e oculta pela leitura pública até a representação voltar.
 
-### 13.2 Proposta de Continuidade para a Próxima Fase
-A próxima etapa de desenvolvimento deve focar na **Gestão de Estabelecimentos Reivindicados e Catálogo Local**, expandindo a capacidade das contas comerciais aprovadas de configurar horários de funcionamento, comodidades e produtos disponíveis no local, consolidando a Fase 2 do produto.
+---
+
+### 13.2 Fase 2 Comercial — STEP F2.1: Gestão de Horários de Funcionamento (Concluído)
+
+A primeira fatia vertical da Fase 2 Comercial foi integralmente implementada, testada e validada na branch `agent/gemini/commercial-opening-hours` a partir da base integrada `5909410`.
+
+#### Escopo Entregue
+* **Domínio Rico (`com.rewit.domain.model`)**:
+  * `OpeningHoursInterval`: Value Object imutável `[openTime, closeTime)` com validação cronológica (`openTime < closeTime`) e detecção precisa de sobreposição (`overlapsWith`).
+  * `PlaceDaySchedule`: representação diária com suporte a dias fechados (`closed = true`, sem intervalos permitidos) e múltiplos intervalos no mesmo dia (ordenados e sem sobreposição).
+  * `PlaceOpeningHoursSchedule`: Agregado semanal que normaliza e garante a presença dos 7 dias da semana (1 = Segunda a 7 = Domingo, ISO-8601), preenchendo automaticamente dias omitidos como fechados e rejeitando duplicatas.
+* **Persistência Relacional e Migração Flyway V26 (`V26__place_opening_hours.sql`)**:
+  * Tabela mestre `place_opening_hours_schedules`: chave primária `place_id REFERENCES places(id) ON DELETE CASCADE`, auditoria corporativa (`business_account_id`, `updated_by_user_id`, `created_at`, `updated_at`).
+  * Tabela de intervalos `place_opening_hours_intervals`: `id UUID PRIMARY KEY`, `place_id REFERENCES place_opening_hours_schedules(place_id) ON DELETE CASCADE`, `day_of_week SMALLINT (CHECK BETWEEN 1 AND 7)`, `open_time TIME`, `close_time TIME (CHECK open_time < close_time)`.
+  * Índices: `idx_place_opening_hours_intervals_place_day` e `idx_place_opening_hours_schedules_business`.
+* **Casos de Uso e Autorização em Tempo de Execução (`com.rewit.application`)**:
+  * `GetPlaceOpeningHoursUseCase`: leitura pública de horários de estabelecimentos ativos. Retorna `configured = false` se o local não possuir horários cadastrados, ou `configured = true` com os 7 dias completos se configurado. Locais inativos ou inexistentes respondem `404 PLACE_NOT_FOUND` indistinguível.
+  * `UpdatePlaceOpeningHoursUseCase`: validação estrita da autorização via `BusinessRepresentationPolicy`:
+    1. Ator autenticado e com conta pessoal operacional (`401 UNAUTHORIZED` / `401 ACCOUNT_DISABLED`);
+    2. Conta comercial existente e administrada pelo ator (`404 BUSINESS_ACCOUNT_NOT_FOUND` se inexistente ou de outro);
+    3. Conta comercial aprovada (`409 BUSINESS_ACCOUNT_NOT_APPROVED`);
+    4. Estabelecimento ativo e atualmente reivindicado pela conta comercial (`403 BUSINESS_NOT_RESPONSIBLE` se de outra ou desvinculado; `404 PLACE_NOT_FOUND` se inativo);
+    5. Serialização de concorrência com lock exclusivo `SELECT ... FOR UPDATE` no `Place`.
+* **API RESTful e RFC 7807 (`com.rewit.presentation`)**:
+  * `PlaceOpeningHoursController` mapeado em `/api/v1/places/{placeId}/opening-hours`:
+    * `GET`: consulta pública dos horários semanais;
+    * `PUT`: configuração/atualização dos horários com payload JSON estruturado e Bean Validation.
+* **Métricas Reais de Testes**:
+  * **34 novos testes** dedicados em `PlaceOpeningHoursDomainTest`, `PlaceOpeningHoursControllerUnitTest` e `PlaceOpeningHoursSecurityIntegrationTest`.
+  * Execução completa do backend via `./mvnw clean test`: **1.894 testes executados, 0 falhas, 0 erros e 0 ignorados** em 3m13s.
+  * `git diff --check` verificado sem pendências.
+
+---
+
+### 13.3 Próximos Passos da Fase 2 Comercial
+* **STEP F2.2**: Gestão de Comodidades e Características de Estabelecimentos Reivindicados (ex.: Wi-Fi, acessibilidade, estacionamento, pet-friendly).
+* **STEP F2.3**: Catálogo de Produtos e Disponibilidade Local.
+* **Transição de Notificações**: Transição do provedor mock do Outbox Pattern (`MockNotificationAdapter`) para push real (FCM/APNs).
 
 > [!NOTE]
-> O subsistema de Moderação Administrativa e Respostas Oficiais está 100% operacional em backend, mobile e admin. O Outbox Pattern opera com entrega at-least-once com provider mock (`MockNotificationAdapter`), sendo a transição para push real (FCM/APNs) parte das frentes técnicas subsequentes.
+> O subsistema de Moderação Administrativa e Respostas Oficiais está 100% operacional em backend, mobile e admin. A primeira fatia da Fase 2 Comercial (F2.1 - Horários de Funcionamento) está pronta e testada no backend, sem impactos ou alterações no mobile ou no admin.

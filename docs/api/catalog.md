@@ -462,6 +462,114 @@ Produto sem códigos públicos: `{"identifiers": []}`.
 
 ---
 
+### 2.13 Consulta de Horários de Funcionamento (GET /api/v1/places/{id}/opening-hours)
+* **Método**: `GET`
+* **Rota**: `/api/v1/places/{id}/opening-hours`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Retorna a grade semanal recorrente dos horários de funcionamento do estabelecimento físico.
+* **Local indisponível**: Local fora de `ACTIVE` ou inexistente responde `404 PLACE_NOT_FOUND` (indistinguível).
+* **Estrutura de Resposta**:
+  * Se o local ainda não possui horários configurados: responde `200 OK` com `configured = false` e `days = []`.
+  * Se o local já possui horários configurados: responde `200 OK` com `configured = true` e a lista completa dos 7 dias da semana ordenados de 1 (Segunda-feira) a 7 (Domingo). Dias sem expediente são retornados com `closed = true` e `intervals = []`.
+
+#### Resposta (`200 OK`) - Horários Configurados
+```json
+{
+  "placeId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "configured": true,
+  "days": [
+    {
+      "dayOfWeek": 1,
+      "dayName": "MONDAY",
+      "closed": false,
+      "intervals": [
+        { "openTime": "08:00", "closeTime": "12:00" },
+        { "openTime": "14:00", "closeTime": "18:00" }
+      ]
+    },
+    {
+      "dayOfWeek": 2,
+      "dayName": "TUESDAY",
+      "closed": false,
+      "intervals": [
+        { "openTime": "08:00", "closeTime": "18:00" }
+      ]
+    },
+    {
+      "dayOfWeek": 7,
+      "dayName": "SUNDAY",
+      "closed": true,
+      "intervals": []
+    }
+  ]
+}
+```
+
+#### Resposta (`200 OK`) - Sem Horários Cadastrados
+```json
+{
+  "placeId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "configured": false,
+  "days": []
+}
+```
+
+---
+
+### 2.14 Configuração de Horários de Estabelecimento Reivindicado (PUT /api/v1/places/{id}/opening-hours)
+* **Método**: `PUT`
+* **Rota**: `/api/v1/places/{id}/opening-hours`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Permite que o administrador de uma conta comercial aprovada configure ou atualize os horários de funcionamento semanais do estabelecimento que a empresa reivindica (F2.1).
+* **Autorização e Regras de Negócio**:
+  * O autor autenticado precisa ter conta pessoal operacional (`ACTIVE`); contas suspensas ou excluídas recebem `401 ACCOUNT_DISABLED`.
+  * A conta comercial (`businessAccountId`) precisa existir e ser administrada pelo autor (`404 BUSINESS_ACCOUNT_NOT_FOUND` se inexistente ou de outro usuário).
+  * A conta comercial precisa estar aprovada (`409 BUSINESS_ACCOUNT_NOT_APPROVED` se `PENDING`).
+  * O estabelecimento precisa estar ativo e atualmente reivindicado pela conta comercial informada (`403 BUSINESS_NOT_RESPONSIBLE` se de outra empresa ou sem reivindicação; `404 PLACE_NOT_FOUND` se inativo ou inexistente).
+  * Concorrência de atualização é serializada no banco de dados via `SELECT ... FOR UPDATE` no local.
+* **Validação dos Horários**:
+  * `dayOfWeek`: inteiro entre 1 (Segunda-feira) e 7 (Domingo). Rejeita duplicatas no mesmo payload (`400 DUPLICATE_DAY_OF_WEEK`).
+  * Dias omitidos na requisição são automaticamente interpretados como fechados (`closed = true`).
+  * Dias fechados (`closed = true`): rejeita qualquer intervalo enviado (`400 INVALID_OPENING_HOURS`).
+  * Dias abertos (`closed = false`): exige pelo menos um intervalo válido (`400 INVALID_OPENING_HOURS`).
+  * Intervalos: `openTime` deve ser estritamente anterior a `closeTime` (`400 INVALID_OPENING_HOURS_INTERVAL`).
+  * Múltiplos intervalos no mesmo dia são permitidos, mas não podem se sobrepor nem colidir (`400 OPENING_HOURS_OVERLAPPING_INTERVALS`).
+* **Substituição Atômica**: Os horários anteriores do local são substituídos integralmente em transação única.
+
+#### Requisição
+```json
+{
+  "businessAccountId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "days": [
+    {
+      "dayOfWeek": 1,
+      "closed": false,
+      "intervals": [
+        { "openTime": "08:00", "closeTime": "12:00" },
+        { "openTime": "14:00", "closeTime": "18:00" }
+      ]
+    },
+    {
+      "dayOfWeek": 2,
+      "closed": false,
+      "intervals": [
+        { "openTime": "08:00", "closeTime": "18:00" }
+      ]
+    },
+    {
+      "dayOfWeek": 7,
+      "closed": true,
+      "intervals": []
+    }
+  ]
+}
+```
+
+#### Resposta (`200 OK`)
+Retorna a grade semanal completa de 7 dias no formato de `PlaceOpeningHoursResponse`.
+
+---
+
 ## 3. Códigos de Erro Esperados
 * `400 Bad Request`:
   * Payload malformado, valores de coordenadas fora do intervalo WGS 84, identificador inválido (`Erro de Validação de Dados`).
@@ -471,8 +579,10 @@ Produto sem códigos públicos: `{"identifiers": []}`.
   * Busca global: termo vazio (`INVALID_SEARCH_QUERY`), página negativa (`INVALID_PAGE`), tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
   * Produtos de um local: página negativa (`INVALID_PAGE`), tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
   * Produto por código: tipo fora de `EAN`/`UPC`/`GTIN`/`ISBN` (`INVALID_IDENTIFIER_TYPE`) ou valor vazio, longo demais ou com caractere inválido (`INVALID_IDENTIFIER_VALUE`).
+  * Horários de funcionamento: identificadores ausentes (`MISSING_PLACE_ID`, `MISSING_BUSINESS_ACCOUNT_ID`), dia da semana inválido (`INVALID_DAY_OF_WEEK`), dia repetido na requisição (`DUPLICATE_DAY_OF_WEEK`), incoerência entre dia fechado e intervalos (`INVALID_OPENING_HOURS`), intervalo com horário de abertura igual ou posterior ao fechamento (`INVALID_OPENING_HOURS_INTERVAL`), ou intervalos sobrepostos no mesmo dia (`OPENING_HOURS_OVERLAPPING_INTERVALS`).
 * `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
-* `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido. A presença de produto é sempre atribuída ao usuário autenticado.
-* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`). No detalhe público, local ou produto fora de `ACTIVE` também responde `PLACE_NOT_FOUND`/`PRODUCT_NOT_FOUND`, indistinguível de inexistente.
-* `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`).
+* `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`, `PUT /places/{id}/opening-hours`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido.
+* `403 Forbidden`: Conta comercial não responde pelo estabelecimento informado (`BUSINESS_NOT_RESPONSIBLE`).
+* `404 Not Found`: Local, produto ou referência externa não localizada (`PLACE_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `PLACE_EXTERNAL_REFERENCE_NOT_FOUND`). No detalhe público e nos horários de funcionamento, local fora de `ACTIVE` também responde `PLACE_NOT_FOUND`, indistinguível de inexistente. Conta comercial inexistente ou de outro usuário responde `BUSINESS_ACCOUNT_NOT_FOUND`.
+* `409 Conflict`: Conflito de integridade relacional (`PLACE_SLUG_ALREADY_EXISTS`, `IDENTIFIER_ALREADY_EXISTS`, `PRODUCT_PRESENCE_ALREADY_EXISTS`). Conta comercial pendente de aprovação ao tentar configurar horários (`BUSINESS_ACCOUNT_NOT_APPROVED`).
 * `429 Too Many Requests` (`RATE_LIMIT_EXCEEDED`): limite de buscas do usuário atingido (busca global e produto por código); acompanha `Retry-After`.
