@@ -137,7 +137,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         );
 
         // 1. Grava os horários com o administrador comercial
-        MvcResult putResult = mockMvc.perform(withToken(
+        mockMvc.perform(withToken(
                         put("/api/v1/places/{placeId}/opening-hours", placeId)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request)), businessAdmin))
@@ -157,8 +157,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 .andExpect(jsonPath("$.days[5].intervals[1].closeTime").value("19:00"))
                 .andExpect(jsonPath("$.days[6].dayOfWeek").value(7))
                 .andExpect(jsonPath("$.days[6].closed").value(true))
-                .andExpect(jsonPath("$.days[6].intervals").isEmpty())
-                .andReturn();
+                .andExpect(jsonPath("$.days[6].intervals").isEmpty());
 
         // 2. Comprova persistência real nas tabelas do PostgreSQL
         Integer scheduleCount = jdbcTemplate.queryForObject(

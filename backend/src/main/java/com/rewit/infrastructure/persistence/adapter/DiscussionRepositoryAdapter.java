@@ -6,6 +6,8 @@ import com.rewit.domain.enums.DiscussionStatus;
 import com.rewit.domain.model.ReviewDiscussion;
 import com.rewit.infrastructure.persistence.entity.DiscussionJpaEntity;
 import com.rewit.infrastructure.persistence.repository.DiscussionJpaRepository;
+import org.springframework.data.core.PropertyPath;
+import org.springframework.data.core.TypedPropertyPath;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -13,6 +15,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -69,8 +72,8 @@ public class DiscussionRepositoryAdapter implements DiscussionRepository {
             return PageResult.of(List.of(), page, size, 0L);
         }
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Order.asc("createdAt"), Sort.Order.asc("id")));
-        Page<DiscussionJpaEntity> paged = discussionJpaRepository.findByReviewIdAndStatus(reviewId, DiscussionStatus.ACTIVE, pageable);
+        Page<DiscussionJpaEntity> paged = discussionJpaRepository.findByReviewIdAndStatus(reviewId, DiscussionStatus.ACTIVE,
+                chronological(page, size));
 
         List<ReviewDiscussion> domainList = paged.getContent().stream()
                 .map(entity -> entity.toDomain())
@@ -133,8 +136,13 @@ public class DiscussionRepositoryAdapter implements DiscussionRepository {
         return toDomain(discussionJpaRepository.findAllById(ids));
     }
 
+    /** createdAt ASC, id ASC, com referências type-safe via TypedPropertyPath (Spring Data 4.1). */
     private static Pageable chronological(int page, int size) {
-        return PageRequest.of(page, size, Sort.by(Sort.Order.asc("createdAt"), Sort.Order.asc("id")));
+        TypedPropertyPath<DiscussionJpaEntity, Instant> createdAtPath =
+                PropertyPath.of((DiscussionJpaEntity discussion) -> discussion.getCreatedAt());
+        TypedPropertyPath<DiscussionJpaEntity, UUID> idPath =
+                PropertyPath.of((DiscussionJpaEntity discussion) -> discussion.getId());
+        return PageRequest.of(page, size, Sort.by(Sort.Order.asc(createdAtPath), Sort.Order.asc(idPath)));
     }
 
     private static List<ReviewDiscussion> toDomain(List<DiscussionJpaEntity> entities) {
