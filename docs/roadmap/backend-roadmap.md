@@ -1108,7 +1108,7 @@ Por possuírem granularidades e ambientes distintos (especialmente no backend, o
   * **Erros**: `0`
   * **Ignorados / Skipped**: `0`
   * **Taxa de Aprovação**: 100%
-  * **Evidência / Origem**: Nova validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 em clone isolado sobre o commit `b367322` da branch `agent/claude/business-response-eligibility-policy` (`All tests passed!`), confirmando compatibilidade plena com a política B sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação à base integrada `033a1ab`. A validação anterior do Gemini (pré-política B, realizada na branch `agent/gemini/post-c11-validation-and-docs`) também registrou os mesmos 618 testes aprovados em 59s.
+  * **Evidência / Origem**: Nova validação de compatibilidade da política B realizada pelo Gemini em 14/10/2026 em clone isolado sobre o commit `b367322` da branch `agent/claude/business-response-eligibility-policy` (`All tests passed!`), confirmando compatibilidade plena com a política B sem qualquer alteração em `apps/mobile/`, `pubspec.yaml` ou `pubspec.lock` em relação à base integrada `033a1ab`. A validação histórica anterior do Gemini (pré-política B, realizada na branch `agent/gemini/post-c11-validation-and-docs`) também aprovou os mesmos 618 testes; o tempo de 59s pertence somente a essa execução histórica, e a validação da política B em `b367322` não tem duração registrada aqui.
 * **Análise Estática**:
   * `flutter analyze`: **0 problemas encontrados** (*"No issues found!"*, código de término 0 em 39.6s na validação da política B; 26.8s na execução anterior).
 * **Ambiente e Ferramentas**:
