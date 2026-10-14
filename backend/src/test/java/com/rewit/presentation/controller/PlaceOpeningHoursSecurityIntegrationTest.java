@@ -544,15 +544,321 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         doneSignal.await();
         executor.shutdown();
 
-        assertEquals(200, statusA.get());
-        assertEquals(200, statusB.get());
+        assertEquals(200, statusA.get(), "Requisição A deve completar com 200 OK após serialização");
+        assertEquals(200, statusB.get(), "Requisição B deve completar com 200 OK após serialização");
 
-        // A persistência final deve refletir exatamente um dos requests (1 intervalo se A venceu por último, ou 2 intervalos se B venceu)
+        // Demonstra serialização determinística e consistência do estado final:
+        // Apenas 1 registro de schedule deve existir para o local
+        Integer scheduleCount = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId);
+        assertEquals(1, scheduleCount);
+
+        // A persistência final deve refletir exatamente um dos requests:
+        // - se A venceu por último: exatamente 1 intervalo no dia 1 (08:00 - 12:00)
+        // - se B venceu por último: exatamente 2 intervalos no dia 2 (14:00 - 18:00 e 19:00 - 22:00)
         Integer finalIntervalCount = jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?",
                 Integer.class, placeId);
         assertTrue(finalIntervalCount == 1 || finalIntervalCount == 2,
                 "A quantidade de intervalos gravada deve ser estritamente consistente com uma das duas atualizações atômicas");
+
+        if (finalIntervalCount == 1) {
+            Integer dayOfWeek = jdbcTemplate.queryForObject(
+                    "SELECT day_of_week FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
+            assertEquals(1, dayOfWeek, "Se A foi o último a comitar, os intervalos devem pertencer exclusivamente ao dia 1");
+        } else {
+            List<Integer> days = jdbcTemplate.queryForList(
+                    "SELECT day_of_week FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
+            assertTrue(days.stream().allMatch(d -> d == 2), "Se B foi o último a comitar, os intervalos devem pertencer exclusivamente ao dia 2");
+        }
+    }
+
+    @Test
+    @DisplayName("Rejeita quando usuário da conta A tenta configurar horários de local da conta B (403 BUSINESS_NOT_RESPONSIBLE) e preserva dados")
+    void shouldRejectWhenUserOfAccountATriesToConfigurePlaceOfAccountB() throws Exception {
+        // 1. Conta B reivindica placeB e configura horários válidos
+        TestUser adminB = registerUser("biz_b");
+        UUID placeB = createPlace();
+        UUID accountB = createAndApproveBusinessAccount(adminB, placeB);
+
+        UpdatePlaceOpeningHoursRequest initialRequestB = new UpdatePlaceOpeningHoursRequest(
+                accountB,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(18, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeB)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(initialRequestB)), adminB))
+                .andExpect(status().isOk());
+
+        // Confirma 1 intervalo salvo no banco para placeB
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeB));
+
+        // 2. Conta A (usuário A) possui sua própria conta aprovada e seu próprio local placeA
+        TestUser adminA = registerUser("biz_a");
+        UUID placeA = createPlace();
+        UUID accountA = createAndApproveBusinessAccount(adminA, placeA);
+
+        // 3. Usuário A tenta alterar os horários de placeB informando sua conta accountA
+        UpdatePlaceOpeningHoursRequest attackRequest = new UpdatePlaceOpeningHoursRequest(
+                accountA,
+                List.of(new DayScheduleRequest(2, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(10, 0), LocalTime.of(16, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeB)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(attackRequest)), adminA))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("BUSINESS_NOT_RESPONSIBLE"));
+
+        // 4. Asserção direta no banco: os horários de placeB continuam intactos (1 intervalo de Segunda-feira)
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeB));
+        Integer dayOfWeek = jdbcTemplate.queryForObject(
+                "SELECT day_of_week FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeB);
+        assertEquals(1, dayOfWeek);
+    }
+
+    @Test
+    @DisplayName("Rejeita quando conta comercial está no estado REJECTED (409 BUSINESS_ACCOUNT_NOT_APPROVED) e não grava no banco")
+    void shouldRejectWhenBusinessAccountIsRejected() throws Exception {
+        TestUser businessAdmin = registerUser("rej_adm");
+        UUID placeId = createPlace();
+        UUID accountId = createAccount(businessAdmin);
+
+        // Marca a conta comercial expressamente como REJECTED
+        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+
+        UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(18, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)), businessAdmin))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BUSINESS_ACCOUNT_NOT_APPROVED"));
+
+        // Comprova ausência total de gravação no banco
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
+    }
+
+    @Test
+    @DisplayName("Rejeita atualização quando local perde vínculo comercial superveniente e preserva horários anteriores")
+    void shouldRejectWhenPlaceLosesClaimLinkAfterBeingConfigured() throws Exception {
+        // 1. Configura horários válidos inicialmente
+        TestUser businessAdmin = registerUser("former_adm");
+        UUID placeId = createPlace();
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        UpdatePlaceOpeningHoursRequest initialRequest = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(18, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(initialRequest)), businessAdmin))
+                .andExpect(status().isOk());
+
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
+
+        // 2. Local perde o vínculo comercial (ex.: desvinculação administrativa ou transferência)
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
+
+        // 3. Antigo responsável tenta atualizar os horários
+        UpdatePlaceOpeningHoursRequest newRequest = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(3, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(9, 0), LocalTime.of(17, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(newRequest)), businessAdmin))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("BUSINESS_NOT_RESPONSIBLE"));
+
+        // 4. Asserção: horários anteriores continuam rigorosamente preservados no banco
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
+        Integer preservedDay = jdbcTemplate.queryForObject(
+                "SELECT day_of_week FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
+        assertEquals(1, preservedDay);
+    }
+
+    @Test
+    @DisplayName("Audita business_account_id e updated_by_user_id na inserção inicial e na atualização subsequente")
+    void shouldAuditBusinessAccountIdAndUpdatedByUserIdOnCreationAndSubsequentUpdate() throws Exception {
+        TestUser businessAdmin = registerUser("audit_adm");
+        UUID placeId = createPlace();
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        // 1. Inserção inicial
+        UpdatePlaceOpeningHoursRequest initialRequest = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(12, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(initialRequest)), businessAdmin))
+                .andExpect(status().isOk());
+
+        Map<String, Object> initialAudit = jdbcTemplate.queryForMap(
+                "SELECT business_account_id, updated_by_user_id, created_at, updated_at FROM place_opening_hours_schedules WHERE place_id = ?",
+                placeId);
+
+        assertEquals(accountId, initialAudit.get("business_account_id"));
+        assertEquals(businessAdmin.id(), initialAudit.get("updated_by_user_id"));
+        assertNotNull(initialAudit.get("created_at"));
+        assertNotNull(initialAudit.get("updated_at"));
+
+        // 2. Atualização subsequente
+        UpdatePlaceOpeningHoursRequest updatedRequest = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(9, 0), LocalTime.of(17, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updatedRequest)), businessAdmin))
+                .andExpect(status().isOk());
+
+        Map<String, Object> subsequentAudit = jdbcTemplate.queryForMap(
+                "SELECT business_account_id, updated_by_user_id, created_at, updated_at FROM place_opening_hours_schedules WHERE place_id = ?",
+                placeId);
+
+        assertEquals(accountId, subsequentAudit.get("business_account_id"));
+        assertEquals(businessAdmin.id(), subsequentAudit.get("updated_by_user_id"));
+        assertEquals(initialAudit.get("created_at"), subsequentAudit.get("created_at"));
+    }
+
+    @Test
+    @DisplayName("Rejeita payload com dias contendo elemento nulo (400 VALIDATION_ERROR) e não altera dados existentes (F1)")
+    void shouldRejectPutWithNullDaysElementPreservingExistingSchedule() throws Exception {
+        TestUser businessAdmin = registerUser("null_days_adm");
+        UUID placeId = createPlace();
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        // 1. Cadastra agenda inicial válida
+        UpdatePlaceOpeningHoursRequest initialRequest = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(18, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(initialRequest)), businessAdmin))
+                .andExpect(status().isOk());
+
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
+
+        // 2. Envia payload com days: [null]
+        String invalidPayload = """
+                {
+                    "businessAccountId": "%s",
+                    "days": [null]
+                }
+                """.formatted(accountId);
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidPayload)
+                        .accept(MediaType.APPLICATION_JSON), businessAdmin))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        // 3. Comprova no banco que os dados anteriores permanecem 100% intactos
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
+    }
+
+    @Test
+    @DisplayName("Rejeita payload com intervalos contendo elemento nulo (400 VALIDATION_ERROR) e não altera dados existentes (F1)")
+    void shouldRejectPutWithNullIntervalsElementPreservingExistingSchedule() throws Exception {
+        TestUser businessAdmin = registerUser("null_int_adm");
+        UUID placeId = createPlace();
+        UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
+
+        // 1. Cadastra agenda inicial válida
+        UpdatePlaceOpeningHoursRequest initialRequest = new UpdatePlaceOpeningHoursRequest(
+                accountId,
+                List.of(new DayScheduleRequest(1, false, List.of(
+                        new TimeIntervalRequest(LocalTime.of(8, 0), LocalTime.of(18, 0))
+                )))
+        );
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(initialRequest)), businessAdmin))
+                .andExpect(status().isOk());
+
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
+
+        // 2. Envia payload com intervals: [null]
+        String invalidPayload = """
+                {
+                    "businessAccountId": "%s",
+                    "days": [
+                        {
+                            "dayOfWeek": 1,
+                            "closed": false,
+                            "intervals": [null]
+                        }
+                    ]
+                }
+                """.formatted(accountId);
+
+        mockMvc.perform(withToken(
+                put("/api/v1/places/{placeId}/opening-hours", placeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidPayload)
+                        .accept(MediaType.APPLICATION_JSON), businessAdmin))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        // 3. Comprova no banco que os dados anteriores permanecem 100% intactos
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -625,4 +931,3 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         return builder.toString();
     }
 }
-
