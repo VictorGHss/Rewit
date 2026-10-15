@@ -436,10 +436,10 @@ class PlaceAmenitiesIntegrationTest {
         jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
         assertVisible(visitor, placeId, "WIFI", "CUSTOMER_RESTROOM");
 
-        // Vínculo removido e devolvido à mesma conta.
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
-        assertHidden(visitor, placeId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        // Status do local e regravação do mesmo titular não mudam a titularidade (ADR-014): nada é apagado.
+        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", placeId);
+        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = claimed_by_business_id WHERE id = ?", placeId);
         assertVisible(visitor, placeId, "WIFI", "CUSTOMER_RESTROOM");
 
         assertEquals(stored, configurationRow(placeId));
@@ -469,7 +469,7 @@ class PlaceAmenitiesIntegrationTest {
     }
 
     @Test
-    @DisplayName("Transferência: nova titular não herda, a anterior perde a escrita e a nova configura a sua")
+    @DisplayName("Transferência: a configuração de A é apagada (ADR-014), A perde a escrita e B configura a sua")
     void transferHidesPreviousConfigurationUntilNewOwnerConfigures() throws Exception {
         TestUser adminA = registerUser("transfer_a");
         UUID placeId = createPlace();
@@ -484,7 +484,7 @@ class PlaceAmenitiesIntegrationTest {
         putAmenities(adminA, placeId, accountA, "PET_FRIENDLY")
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("BUSINESS_NOT_RESPONSIBLE"));
-        assertEquals(accountA, configurationRow(placeId).get("business_account_id"));
+        assertEquals(0, count("SELECT count(*) FROM place_amenity_configurations WHERE place_id = ?", placeId));
 
         putAmenities(adminB, placeId, accountB, "OUTDOOR_SEATING")
                 .andExpect(status().isOk())
@@ -500,26 +500,28 @@ class PlaceAmenitiesIntegrationTest {
     }
 
     @Test
-    @DisplayName("Retorno à titular anterior: revê a própria configuração se ninguém regravou; não vê a da intermediária")
-    void returnToPreviousOwnerFollowsStoredRepresentation() throws Exception {
+    @DisplayName("Retorno à titular anterior não restaura a configuração invalidada; A precisa configurar de novo (ADR-014)")
+    void returnToPreviousOwnerDoesNotRestoreInvalidatedConfiguration() throws Exception {
         TestUser adminA = registerUser("return_a");
         UUID placeId = createPlace();
         UUID accountA = createApprovedAccountClaiming(adminA, placeId);
         putAmenities(adminA, placeId, accountA, "WIFI").andExpect(status().isOk());
         TestUser visitor = registerUser("return_visitor");
 
-        // B assume e devolve sem configurar: a configuração gravada ainda é de A e volta a aparecer.
+        // A -> B -> A sem B configurar: a configuração de A foi apagada na primeira troca e não volta.
         TestUser adminB = registerUser("return_b");
         UUID accountB = createApprovedAccountClaiming(adminB, placeId);
         assertHidden(visitor, placeId);
         jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountA, placeId);
-        assertVisible(visitor, placeId, "WIFI");
+        assertHidden(visitor, placeId);
+        assertEquals(0, count("SELECT count(*) FROM place_amenity_configurations WHERE place_id = ?", placeId));
 
-        // B assume e configura: a de A foi substituída; ao voltar para A, a de B fica oculta até A regravar.
+        // B assume e configura; ao voltar para A, a de B também é apagada e A configura a sua.
         jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
         putAmenities(adminB, placeId, accountB, "PARKING").andExpect(status().isOk());
         jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountA, placeId);
         assertHidden(visitor, placeId);
+        assertEquals(0, count("SELECT count(*) FROM place_amenity_selections WHERE place_id = ?", placeId));
         putAmenities(adminA, placeId, accountA, "WIFI").andExpect(status().isOk());
         assertVisible(visitor, placeId, "WIFI");
     }
