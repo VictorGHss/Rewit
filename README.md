@@ -175,6 +175,7 @@ flutter run
 - [ADR-011: Retenção e Expiração de Sessões de Usuários](docs/decisions/ADR-011-session-retention-and-cleanup.md)
 - [ADR-012: Observabilidade e Rastreabilidade Distribuída](docs/decisions/ADR-012-observability.md)
 - [ADR-013: Rate Limiting Distribuído e Proteção Contra Abuso](docs/decisions/ADR-013-distributed-rate-limiting.md)
+- [ADR-014: Invalidação de Dados Comerciais na Mudança de Titularidade](docs/decisions/ADR-014-commercial-data-owner-change-invalidation.md)
 - [Relatório de Auditoria da Fundação](docs/development/foundation-audit.md)
 - [Matriz de Versões Homologadas](docs/development/versions.md)
 

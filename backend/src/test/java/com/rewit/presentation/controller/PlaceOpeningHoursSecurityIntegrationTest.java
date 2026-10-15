@@ -695,7 +695,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
     }
 
     @Test
-    @DisplayName("Rejeita atualização quando local perde vínculo comercial superveniente e preserva horários anteriores")
+    @DisplayName("Rejeita atualização quando local perde vínculo comercial superveniente; a desvinculação já invalidou os horários (ADR-014)")
     void shouldRejectWhenPlaceLosesClaimLinkAfterBeingConfigured() throws Exception {
         // 1. Configura horários válidos inicialmente
         TestUser businessAdmin = registerUser("former_adm");
@@ -736,12 +736,11 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("BUSINESS_NOT_RESPONSIBLE"));
 
-        // 4. Asserção: horários anteriores continuam rigorosamente preservados no banco
-        assertEquals(1, jdbcTemplate.queryForObject(
+        // 4. A recusa não grava nada; os horários anteriores já foram apagados pela desvinculação (V29)
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId));
+        assertEquals(0, jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
-        Integer preservedDay = jdbcTemplate.queryForObject(
-                "SELECT day_of_week FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId);
-        assertEquals(1, preservedDay);
     }
 
     @Test
