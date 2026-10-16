@@ -217,7 +217,14 @@ class RewitHttpClient {
       );
     }
 
-    final request = http.MultipartRequest('POST', uri)
+    final abortCompleter = Completer<void>();
+    void triggerAbort() {
+      if (!abortCompleter.isCompleted) {
+        abortCompleter.complete();
+      }
+    }
+
+    final request = http.AbortableMultipartRequest('POST', uri, abortTrigger: abortCompleter.future)
       ..followRedirects = false;
 
     if (requiresAuth && isSameOrigin && _tokenStorage != null) {
@@ -249,20 +256,41 @@ class RewitHttpClient {
       ),
     );
 
+    Timer? abortTimer;
     try {
-      final streamedResponse = await _client.send(request).timeout(getRemainingTimeout());
+      final remainingSendTimeout = getRemainingTimeout();
+      abortTimer = Timer(remainingSendTimeout, triggerAbort);
+
+      final streamedResponse = await _client.send(request).timeout(remainingSendTimeout);
+      abortTimer.cancel();
+      abortTimer = null;
+
+      // Janela A2: se o prazo esgotou após send() completar mas antes da leitura do corpo
+      if (stopwatch.elapsed >= timeout) {
+        triggerAbort();
+        await _discardStream(streamedResponse.stream);
+        throw TimeoutException('Tempo limite total da operação esgotado.', timeout);
+      }
+
       final response = await _buildResponseFromStream(
         streamedResponse,
         remainingTimeout: getRemainingTimeout(),
         maxBytes: defaultMaxResponseBodyBytes,
+        abortCompleter: abortCompleter,
       );
       return _handleResponse(
         response,
         requiresAuth: requiresAuth && isSameOrigin,
       );
     } on TimeoutException {
+      triggerAbort();
+      throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
+    } on http.RequestAbortedException {
       throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
     } on http.ClientException catch (e) {
+      if (e.message.toLowerCase().contains('abort') || e is http.RequestAbortedException) {
+        throw NetworkException('Tempo limite de conexão esgotado (timeout).', e);
+      }
       throw NetworkException('Falha de conexão com o servidor.', e);
     } on ApiException {
       rethrow;
@@ -270,6 +298,8 @@ class RewitHttpClient {
       rethrow;
     } catch (e) {
       throw NetworkException('Erro inesperado na comunicação de rede.', e);
+    } finally {
+      abortTimer?.cancel();
     }
   }
 
@@ -355,20 +385,50 @@ class RewitHttpClient {
           _stripSensitiveHeaders(currentHeaders);
         }
 
-        final request = http.Request(currentMethod, currentUri)
-          ..followRedirects = false;
+        final abortCompleter = Completer<void>();
+        void triggerAbort() {
+          if (!abortCompleter.isCompleted) {
+            abortCompleter.complete();
+          }
+        }
+
+        final request = http.AbortableRequest(
+          currentMethod,
+          currentUri,
+          abortTrigger: abortCompleter.future,
+        )..followRedirects = false;
         request.headers.addAll(currentHeaders);
         if (currentBody != null) {
           request.body = currentBody;
         }
 
-        final streamedResponse = await _client.send(request).timeout(getRemainingTimeout());
+        Timer? abortTimer;
+        http.StreamedResponse streamedResponse;
+        try {
+          final remainingSendTimeout = getRemainingTimeout();
+          abortTimer = Timer(remainingSendTimeout, triggerAbort);
+
+          streamedResponse = await _client.send(request).timeout(remainingSendTimeout);
+        } on TimeoutException {
+          triggerAbort();
+          rethrow;
+        } finally {
+          abortTimer?.cancel();
+        }
+
+        // Janela A2: se o prazo esgotou após send() completar mas antes da leitura do corpo
+        if (stopwatch.elapsed >= timeout) {
+          triggerAbort();
+          await _discardStream(streamedResponse.stream);
+          throw TimeoutException('Tempo limite total da operação esgotado.', timeout);
+        }
 
         if (!_redirectStatusCodes.contains(streamedResponse.statusCode)) {
           final response = await _buildResponseFromStream(
             streamedResponse,
             remainingTimeout: getRemainingTimeout(),
             maxBytes: maxResponseBodyBytes ?? defaultMaxResponseBodyBytes,
+            abortCompleter: abortCompleter,
           );
           return _handleResponse(
             response,
@@ -377,12 +437,24 @@ class RewitHttpClient {
           );
         }
 
+        // Redirecionamento 3xx recebido
         final locationHeader = _extractHeaderCaseInsensitive(streamedResponse.headers, 'location');
+
+        // Política fail-closed: não converter mutações de estado automaticamente em GET
+        if (currentMethod != 'GET') {
+          await _discardStream(streamedResponse.stream);
+          triggerAbort();
+          throw NetworkException(
+            'Redirecionamento automático de método mutador ($currentMethod) não permitido (HTTP ${streamedResponse.statusCode}).',
+          );
+        }
+
         if (locationHeader == null || locationHeader.trim().isEmpty) {
           final response = await _buildResponseFromStream(
             streamedResponse,
             remainingTimeout: getRemainingTimeout(),
             maxBytes: maxResponseBodyBytes ?? defaultMaxResponseBodyBytes,
+            abortCompleter: abortCompleter,
           );
           return _handleResponse(
             response,
@@ -396,17 +468,12 @@ class RewitHttpClient {
           streamedResponse.stream,
           timeout: getRemainingTimeout(),
           maxBytes: _maxRedirectResponseBodyBytes,
+          abortCompleter: abortCompleter,
         );
-
-        // Política fail-closed: não converter mutações de estado automaticamente em GET
-        if (currentMethod != 'GET') {
-          throw NetworkException(
-            'Redirecionamento automático de método mutador ($currentMethod) não permitido (HTTP ${streamedResponse.statusCode}).',
-          );
-        }
 
         redirectsCount++;
         if (redirectsCount > _maxRedirects) {
+          triggerAbort();
           throw const NetworkException('Número máximo de redirecionamentos HTTP excedido.');
         }
 
@@ -428,7 +495,12 @@ class RewitHttpClient {
       }
     } on TimeoutException {
       throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
+    } on http.RequestAbortedException {
+      throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
     } on http.ClientException catch (e) {
+      if (e.message.toLowerCase().contains('abort') || e is http.RequestAbortedException) {
+        throw NetworkException('Tempo limite de conexão esgotado (timeout).', e);
+      }
       throw NetworkException('Falha de conexão com o servidor.', e);
     } on ApiException {
       rethrow;
@@ -439,16 +511,27 @@ class RewitHttpClient {
     }
   }
 
+  /// Descarta e cancela a inscrição no stream imediatamente para liberar sockets e recursos de rede.
+  Future<void> _discardStream(Stream<List<int>> stream) async {
+    try {
+      final subscription = stream.listen((_) {});
+      await subscription.cancel();
+    } catch (_) {
+      // Ignora exceções ao descartar stream já fechado
+    }
+  }
+
   /// Lê com segurança os bytes de [stream] respeitando o limite de tempo [timeout]
   /// e o tamanho máximo de bytes [maxBytes].
   ///
   /// Caso o tempo expire ou o limite de bytes seja atingido, a inscrição no stream é
-  /// explicitamente cancelada para fechar a conexão de rede e evitar consumo contínuo
-  /// de recursos.
+  /// explicitamente cancelada e o [abortCompleter] é acionado para fechar a conexão de rede
+  /// e evitar consumo contínuo de recursos.
   Future<Uint8List> _readStreamWithLimitAndTimeout(
     Stream<List<int>> stream, {
     required Duration timeout,
     int? maxBytes,
+    Completer<void>? abortCompleter,
   }) {
     final completer = Completer<Uint8List>();
     final bytesBuilder = BytesBuilder(copy: false);
@@ -461,7 +544,14 @@ class RewitHttpClient {
       timer = null;
     }
 
+    void triggerAbort() {
+      if (abortCompleter != null && !abortCompleter.isCompleted) {
+        abortCompleter.complete();
+      }
+    }
+
     timer = Timer(timeout, () {
+      triggerAbort();
       subscription?.cancel();
       cleanUp();
       if (!completer.isCompleted) {
@@ -475,6 +565,7 @@ class RewitHttpClient {
       (chunk) {
         totalBytes += chunk.length;
         if (maxBytes != null && totalBytes > maxBytes) {
+          triggerAbort();
           subscription?.cancel();
           cleanUp();
           if (!completer.isCompleted) {
@@ -512,12 +603,14 @@ class RewitHttpClient {
     Stream<List<int>> stream, {
     required Duration timeout,
     required int maxBytes,
+    Completer<void>? abortCompleter,
   }) async {
     try {
       await _readStreamWithLimitAndTimeout(
         stream,
         timeout: timeout,
         maxBytes: maxBytes,
+        abortCompleter: abortCompleter,
       );
     } on NetworkException {
       // Ignora excesso de corpo em redirecionamento intermediário após cancelar stream
@@ -528,11 +621,21 @@ class RewitHttpClient {
     http.StreamedResponse streamedResponse, {
     required Duration remainingTimeout,
     int? maxBytes,
+    Completer<void>? abortCompleter,
   }) async {
+    if (remainingTimeout <= Duration.zero) {
+      if (abortCompleter != null && !abortCompleter.isCompleted) {
+        abortCompleter.complete();
+      }
+      await _discardStream(streamedResponse.stream);
+      throw TimeoutException('Tempo limite total da operação esgotado.', timeout);
+    }
+
     final bodyBytes = await _readStreamWithLimitAndTimeout(
       streamedResponse.stream,
       timeout: remainingTimeout,
       maxBytes: maxBytes,
+      abortCompleter: abortCompleter,
     );
 
     return http.Response.bytes(
