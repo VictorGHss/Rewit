@@ -217,20 +217,20 @@ public class ReviewRepositoryAdapter implements ReviewRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public long countActiveByUserId(UUID userId) {
+    public long countActiveNonAnonymousByUserId(UUID userId) {
         if (userId == null) {
             return 0L;
         }
-        return reviewJpaRepository.countByUserIdAndStatus(userId, "ACTIVE");
+        return reviewJpaRepository.countActiveNonAnonByUserId(userId);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public long countActiveVerifiedByUserId(UUID userId) {
+    public long countActiveVerifiedNonAnonymousByUserId(UUID userId) {
         if (userId == null) {
             return 0L;
         }
-        return reviewJpaRepository.countByUserIdAndStatusAndIsVerifiedOnSiteTrue(userId, "ACTIVE");
+        return reviewJpaRepository.countActiveNonAnonVerifiedByUserId(userId);
     }
 
     private static ReviewTarget toDomain(ReviewTargetJpaEntity entity) {

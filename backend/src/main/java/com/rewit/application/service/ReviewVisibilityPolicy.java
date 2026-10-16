@@ -7,6 +7,7 @@ import com.rewit.domain.model.Review;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -48,8 +49,7 @@ public class ReviewVisibilityPolicy {
             throw new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND");
         }
 
-        String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";
-        switch (visibility.toUpperCase()) {
+        switch (effectiveVisibility(review)) {
             case "PUBLIC" -> {
                 // Público: qualquer usuário autenticado possui acesso legítimo
             }
@@ -68,5 +68,18 @@ public class ReviewVisibilityPolicy {
             }
             default -> throw new BusinessException("Acesso negado a esta avaliação", HttpStatus.FORBIDDEN, "FORBIDDEN");
         }
+    }
+
+    /**
+     * Visibilidade que governa o acesso de terceiros. Uma avaliação anônima com {@code FOLLOWERS} (só em linhas
+     * anteriores à validação do domínio) vale como {@code PRIVATE}: liberar seguidores do autor real tornaria a
+     * diferença de acesso, ao seguir ou deixar de seguir alguém, um oráculo de autoria. O autor mantém o acesso.
+     */
+    public static String effectiveVisibility(Review review) {
+        if (review.isAnonymousWithFollowersVisibility()) {
+            return "PRIVATE";
+        }
+        String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";
+        return visibility.toUpperCase(Locale.ROOT);
     }
 }

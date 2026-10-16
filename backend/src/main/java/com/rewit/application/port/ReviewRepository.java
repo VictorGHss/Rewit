@@ -49,7 +49,12 @@ public interface ReviewRepository {
 
     PageResult<Review> findFeedByFollowing(UUID requesterUserId, int page, int size);
 
-    long countActiveByUserId(UUID userId);
+    /**
+     * Avaliações ACTIVE e não anônimas do usuário, para o perfil público. Contar as anônimas faria o contador do
+     * perfil mudar junto com uma avaliação anônima e revelaria o autor.
+     */
+    long countActiveNonAnonymousByUserId(UUID userId);
 
-    long countActiveVerifiedByUserId(UUID userId);
+    /** Como {@link #countActiveNonAnonymousByUserId}, restrito às verificadas no local. */
+    long countActiveVerifiedNonAnonymousByUserId(UUID userId);
 }

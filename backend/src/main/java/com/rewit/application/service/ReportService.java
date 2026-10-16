@@ -139,8 +139,7 @@ public class ReportService {
     }
 
     private void validateVisibility(Review review, java.util.UUID requesterUserId) {
-        String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";
-        switch (visibility) {
+        switch (ReviewVisibilityPolicy.effectiveVisibility(review)) {
             case "PUBLIC" -> {
                 // Público: qualquer usuário autenticado pode visualizar e denunciar
             }

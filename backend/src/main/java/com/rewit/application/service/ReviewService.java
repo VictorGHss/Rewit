@@ -387,8 +387,8 @@ public class ReviewService {
             throw new BusinessException("Avaliação não encontrada", HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND");
         }
 
-        // Validação de visibilidade
-        String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";
+        // Validação de visibilidade (anônima com FOLLOWERS vale como PRIVATE, ver ReviewVisibilityPolicy)
+        String visibility = ReviewVisibilityPolicy.effectiveVisibility(review);
         if ("PRIVATE".equalsIgnoreCase(visibility)) {
             if (requesterUserId == null || !requesterUserId.equals(review.getUserId())) {
                 throw new BusinessException("Acesso negado a esta avaliação privada", HttpStatus.FORBIDDEN, "FORBIDDEN");

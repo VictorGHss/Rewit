@@ -177,12 +177,14 @@ class FeedV2HydratorIntegrationTest {
         Place place = createPlace();
         RateableTarget target = createTarget(TargetType.PLACE);
 
-        userFollowRepository.follow(requester.getId(), author.getId());
-
         Instant now = Instant.now();
         Review anonymousReview = createReviewWithTargets(author, place, List.of(target), "PUBLIC", ReviewStatus.ACTIVE, false, true, now);
 
-        FeedV2CandidatePage candidatePage = feedV2Service.getCandidatePage(requester.getId(), 0, 10, now);
+        // Anônimas só chegam ao V2 pela descoberta, cuja janela é global; a página é montada direto para não
+        // depender das demais reviews públicas do banco. A chave de autor da anônima é a própria review.
+        FeedCandidate candidate = new FeedCandidate(anonymousReview.getId(), anonymousReview.getId(), target.getId(), now, false, 0, false);
+        FeedV2CandidatePage candidatePage = new FeedV2CandidatePage(
+                List.of(new RankedFeedCandidate(candidate, new FeedScore(0.9))), 0, 10, 1);
         FeedV2PageProjection projection = feedV2Hydrator.hydrate(candidatePage, requester.getId());
 
         assertFalse(projection.isEmpty());

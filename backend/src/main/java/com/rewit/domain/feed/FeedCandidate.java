@@ -9,7 +9,8 @@ import java.util.UUID;
  *
  * <p>Contém somente os sinais necessários ao ranking e à diversidade.
  * Não é DTO HTTP: não expõe coordenadas, perfil, reputação nem identidade pública.
- * {@code authorId} existe apenas para regras internas (diversidade), inclusive em reviews anônimas.
+ * {@code authorId} existe apenas para regras internas (diversidade); em review anônima é uma chave própria da
+ * review, nunca o autor real, para que a ordem do feed não ligue a anônima às reviews identificadas do autor.
  */
 public record FeedCandidate(
         UUID reviewId,

@@ -26,6 +26,10 @@ ReviewController (presentation)
   * O objeto `author` na representação pública não expõe `id`, `handle` ou `avatarUrl`.
   * O campo `displayName` é retornado como `"Anônimo"`.
   * `isAnonymous` é retornado como `true`.
+* **Anonimato e grafo de follows**: esconder o nome não basta se a relação de seguidor delimita quem pode ser o autor. Por isso:
+  * avaliações anônimas não entram nos feeds montados por follows (Feed V1 e candidatos sociais do Feed V2); no Feed V2 elas só aparecem pela descoberta pública, e a diversidade por autor não usa o autor real delas;
+  * uma avaliação anônima não pode ter visibilidade `FOLLOWERS` (`422 ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED` na criação e na edição): com o acesso condicionado a seguir o autor real, seguir e deixar de seguir candidatos revelaria a autoria. Linhas anteriores à regra são tratadas como `PRIVATE` para terceiros (mesma resposta para seguidores e não seguidores); o autor continua lendo e editando;
+  * os contadores do perfil público (`GET /api/v1/users/{id}`) não incluem avaliações anônimas nem os votos `HELPFUL` recebidos nelas.
 * **Autor com conta excluída (`DELETED`, C2)**: a avaliação, as notas, o helpful e os agregados continuam; o objeto `author` vem sem `id`, `handle` e `avatarUrl`, com `displayName = "Usuário excluído"` e `author.isAnonymous = true` (o `isAnonymous` da avaliação não muda). Vale para detalhe, listagem por alvo, Feed V1 e Feed V2. Contas `DEACTIVATED` e `SUSPENDED` não são afetadas.
 * **Autoria contextual (`isMine`)**: O campo booleano `isMine` presente em `ReviewResponse` indica se a avaliação pertence ao usuário autenticado identificado pelo token JWT (`requesterUserId == review.userId`):
   * É calculado dinamicamente por requisição: `true` quando o solicitante for o autor da avaliação, inclusive quando `isAnonymous: true` (permitindo ao cliente habilitar ações exclusivas de autor, como editar ou excluir, preservando o anonimato público perante terceiros);
@@ -114,7 +118,7 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 | `contextPlaceId` | UUID | Não | ID do local físico de contexto da avaliação |
 | `experienceText` | String | Não | Texto geral da experiência |
 | `isAnonymous` | Boolean | Não | Publicar anonimamente (default: `false`) |
-| `visibility` | String | Não | Visibilidade (`PUBLIC`, `PRIVATE`, `FOLLOWERS` - default: `PUBLIC`) |
+| `visibility` | String | Não | Visibilidade (`PUBLIC`, `PRIVATE`, `FOLLOWERS` - default: `PUBLIC`). `FOLLOWERS` não é aceito com `isAnonymous: true` (`422 ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED`) |
 | `userLatitude` | Double | Não | Latitude do usuário sob demanda (-90.0 a 90.0) |
 | `userLongitude` | Double | Não | Longitude do usuário sob demanda (-180.0 a 180.0) |
 | `locationAccuracyMeters` | Double | Não | Precisão reportada do GPS em metros (>= 0.0) |
@@ -205,7 +209,7 @@ Retorna a representação pública da avaliação com alvos, notas, comentários
   * **Seguidor ativo**: Consegue visualizar a publicação (`200 OK`).
   * **Autor**: Sempre consegue visualizar sua própria publicação (`200 OK`).
   * **Não-seguidor**: Recebe `403 Forbidden` (`FORBIDDEN`).
-  * **Anonimização**: Se `isAnonymous = true`, a identidade do autor permanece anônima (`id = null`, `handle = null`, `displayName = "Anônimo"`), mesmo que o requester seja um seguidor ativo.
+  * **Anônima**: a combinação não é aceita (ver §1.2). Uma linha anterior à regra responde a terceiros como `PRIVATE` (`403 FORBIDDEN`, "Acesso negado a esta avaliação privada"), seja o requester seguidor ou não; o mesmo vale para votos `HELPFUL` e denúncias.
 
 ```json
 {
@@ -294,7 +298,7 @@ Quando o alvo existe no catálogo (`rateable_targets`), mas ainda não recebeu a
 #### Regras de Visibilidade e Anonimização:
 * Reviews com `status` diferente de `ACTIVE` (`UNDER_REVIEW` e `REMOVED`) são rigorosamente omitidas da listagem pública.
 * Avaliações com visibilidade `PUBLIC` são acessíveis publicamente.
-* Avaliações com visibilidade `FOLLOWERS` (Step 15.0) dependem do relacionamento de seguidor persistido (`user_follows`): são exibidas exclusivamente para o próprio autor e para usuários autenticados que seguem o autor ativamente. Usuários não seguidores não têm acesso (403 no endpoint individual e omitidas na listagem por target).
+* Avaliações com visibilidade `FOLLOWERS` (Step 15.0) dependem do relacionamento de seguidor persistido (`user_follows`): são exibidas exclusivamente para o próprio autor e para usuários autenticados que seguem o autor ativamente. Usuários não seguidores não têm acesso (403 no endpoint individual e omitidas na listagem por target). Uma anônima `FOLLOWERS` (linha anterior à regra do §1.2) só é listada para o autor.
 * Avaliações com visibilidade `PRIVATE` permanecem restritas ao autor, mesmo que haja relação de seguidor.
 * Quando `isAnonymous: true`, a identidade pública do autor é mascarada (`displayName: "Anônimo"` e campos `id`, `handle`, `avatarUrl` nulos). Coordenadas brutas nunca são expostas, mesmo para seguidores.
 * O array `targets` de cada item da listagem reflete especificamente o alvo consultado.
@@ -527,5 +531,5 @@ Os erros seguem estritamente a especificação RFC 7807 (`ProblemDetail`):
 | `403 Forbidden` | Tentativa de consultar ou interagir com Review `PRIVATE` de terceiro, Review `FOLLOWERS` por usuário que não seja seguidor ativo do autor, moderador tentando moderar resposta da própria empresa ou usuário sem vínculo comercial com o local | `FORBIDDEN` / `SELF_MODERATION_FORBIDDEN` / `BUSINESS_NOT_RESPONSIBLE` |
 | `404 Not Found` | Review inexistente (`id` não encontrado), `contextPlaceId` inexistente, alvo inexistente ou indisponível (place/product fora de `ACTIVE`), conta comercial inexistente ou resposta oficial inexistente | `REVIEW_NOT_FOUND` / `PLACE_NOT_FOUND` / `RATEABLE_TARGET_NOT_FOUND` / `BUSINESS_ACCOUNT_NOT_FOUND` / `BUSINESS_RESPONSE_NOT_FOUND` |
 | `409 Conflict` | Avaliação não aceita respostas oficiais, conta comercial não aprovada, resposta ativa duplicada para a mesma empresa e avaliação, ou resposta não restaurável (removida pela empresa ou com representação inelegível) | `REVIEW_NOT_RESPONDABLE` / `BUSINESS_ACCOUNT_NOT_APPROVED` / `BUSINESS_RESPONSE_ALREADY_EXISTS` / `BUSINESS_RESPONSE_ALREADY_REMOVED` / `BUSINESS_RESPONSE_NOT_RESTORABLE` |
-| `422 Unprocessable Entity` | Violação de regra de negócio do domínio: alvo duplicado no mesmo Review ou nota com mais de 1 casa decimal | `DUPLICATE_REVIEW_TARGET` / `INVALID_RATING_PRECISION` |
+| `422 Unprocessable Entity` | Violação de regra de negócio do domínio: alvo duplicado no mesmo Review, nota com mais de 1 casa decimal ou avaliação anônima com visibilidade `FOLLOWERS` (criação ou edição) | `DUPLICATE_REVIEW_TARGET` / `INVALID_RATING_PRECISION` / `ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED` |
 | `429 Too Many Requests` | Limite de criação de respostas oficiais excedido (10 em 60 s) | `RATE_LIMIT_EXCEEDED` |

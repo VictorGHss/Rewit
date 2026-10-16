@@ -116,7 +116,7 @@ public class ReviewHelpfulService {
             throw new BusinessException("O autor não pode marcar sua própria avaliação como útil", HttpStatus.BAD_REQUEST, "SELF_HELPFUL_FORBIDDEN");
         }
 
-        String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";
+        String visibility = ReviewVisibilityPolicy.effectiveVisibility(review);
         if ("PRIVATE".equalsIgnoreCase(visibility)) {
             throw new BusinessException("Acesso negado a esta avaliação privada", HttpStatus.FORBIDDEN, "FORBIDDEN");
         } else if ("FOLLOWERS".equalsIgnoreCase(visibility)) {

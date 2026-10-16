@@ -54,7 +54,7 @@ A query contract não duplica a paginação da API; ela apenas valida e descreve
 
 ## Anonymous projection
 
-A projeção pública da review não revela identidade do autor quando a review é anônima. A seleção de candidatos pode incluir a review, mas a projeção pública decide como o autor será exibido.
+A projeção pública da review não revela identidade do autor quando a review é anônima. A projeção sozinha não basta: uma seleção que dependa da relação entre requester e autor real (feeds por follows, ramo `FOLLOWERS` da listagem por alvo) revelaria a autoria pelo próprio conjunto selecionado. Por isso essas seleções excluem reviews anônimas, e a descoberta do Feed V2, que as inclui, não usa o autor real delas na diversidade.
 
 Isso separa:
 - `candidate selection`

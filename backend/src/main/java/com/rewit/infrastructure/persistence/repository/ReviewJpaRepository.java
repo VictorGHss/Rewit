@@ -32,6 +32,9 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
 
     List<ReviewJpaEntity> findByStatus(String status);
 
+    // Listagens por alvo (as três ordenações): o ramo FOLLOWERS exige review não anônima. Uma anônima FOLLOWERS
+    // (linha anterior à validação do domínio) só aparece para o autor; se aparecesse para quem segue o autor real,
+    // seguir e deixar de seguir candidatos revelaria a autoria.
     @Query(value = """
         SELECT r, rt FROM ReviewJpaEntity r
         JOIN ReviewTargetJpaEntity rt ON rt.reviewId = r.id AND rt.targetId = :targetId
@@ -42,6 +45,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             OR (
               :requesterUserId IS NOT NULL
               AND r.visibility = 'FOLLOWERS'
+              AND r.isAnonymous = FALSE
               AND EXISTS (
                 SELECT 1 FROM UserFollowJpaEntity uf
                 WHERE uf.followerUserId = :requesterUserId
@@ -62,6 +66,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             OR (
               :requesterUserId IS NOT NULL
               AND r.visibility = 'FOLLOWERS'
+              AND r.isAnonymous = FALSE
               AND EXISTS (
                 SELECT 1 FROM UserFollowJpaEntity uf
                 WHERE uf.followerUserId = :requesterUserId
@@ -88,6 +93,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             OR (
               :requesterUserId IS NOT NULL
               AND r.visibility = 'FOLLOWERS'
+              AND r.isAnonymous = FALSE
               AND EXISTS (
                 SELECT 1 FROM UserFollowJpaEntity uf
                 WHERE uf.followerUserId = :requesterUserId
@@ -108,6 +114,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             OR (
               :requesterUserId IS NOT NULL
               AND r.visibility = 'FOLLOWERS'
+              AND r.isAnonymous = FALSE
               AND EXISTS (
                 SELECT 1 FROM UserFollowJpaEntity uf
                 WHERE uf.followerUserId = :requesterUserId
@@ -134,6 +141,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             OR (
               :requesterUserId IS NOT NULL
               AND r.visibility = 'FOLLOWERS'
+              AND r.isAnonymous = FALSE
               AND EXISTS (
                 SELECT 1 FROM UserFollowJpaEntity uf
                 WHERE uf.followerUserId = :requesterUserId
@@ -154,6 +162,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             OR (
               :requesterUserId IS NOT NULL
               AND r.visibility = 'FOLLOWERS'
+              AND r.isAnonymous = FALSE
               AND EXISTS (
                 SELECT 1 FROM UserFollowJpaEntity uf
                 WHERE uf.followerUserId = :requesterUserId
@@ -170,12 +179,17 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
             Pageable pageable
     );
 
+    /**
+     * Feed V1 dos autores seguidos. Reviews anônimas ficam de fora: num feed montado pelo grafo de follows, a presença
+     * delas restringiria a autoria ao conjunto de seguidos (seguir uma única conta a revelaria).
+     */
     @Query(value = """
         SELECT r FROM ReviewJpaEntity r
         JOIN UserFollowJpaEntity uf ON uf.followedUserId = r.userId
         WHERE uf.followerUserId = :requesterUserId
           AND r.status = 'ACTIVE'
           AND r.visibility IN ('PUBLIC', 'FOLLOWERS')
+          AND r.isAnonymous = FALSE
         ORDER BY r.createdAt DESC, r.id ASC
     """,
     countQuery = """
@@ -184,15 +198,12 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
         WHERE uf.followerUserId = :requesterUserId
           AND r.status = 'ACTIVE'
           AND r.visibility IN ('PUBLIC', 'FOLLOWERS')
+          AND r.isAnonymous = FALSE
     """)
     Page<ReviewJpaEntity> findFeedByFollowing(
             @Param("requesterUserId") UUID requesterUserId,
             Pageable pageable
     );
-
-    long countByUserIdAndStatus(UUID userId, String status);
-
-    long countByUserIdAndStatusAndIsVerifiedOnSiteTrue(UUID userId, String status);
 
     // ------------------------------------------------------------------
     // Queries de Reputação V1 (Step 23.0)
@@ -256,6 +267,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
      *   <li>autor deve estar na lista de seguidos diretos do requester</li>
      *   <li>o próprio requester é excluído automaticamente pela semântica do follow
      *       (self-follow não existe pela constraint chk_no_self_follow)</li>
+     *   <li>reviews anônimas excluídas, como no V1: o grafo de follows revelaria a autoria</li>
      * </ul>
      *
      * <p>Retorna Object[] com as colunas na ordem:
@@ -265,6 +277,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
      *   <li>r.contextPlaceId (UUID, nullable) — target de contexto para diversidade</li>
      *   <li>r.createdAt (Instant)</li>
      *   <li>r.isVerifiedOnSite (boolean)</li>
+     *   <li>r.isAnonymous (boolean)</li>
      * </ol>
      *
      * <p>Ordenação determinística: createdAt DESC, id ASC.
@@ -285,12 +298,14 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
                r.userId,
                r.contextPlaceId,
                r.createdAt,
-               r.isVerifiedOnSite
+               r.isVerifiedOnSite,
+               r.isAnonymous
         FROM ReviewJpaEntity r
         JOIN UserFollowJpaEntity uf ON uf.followedUserId = r.userId
         WHERE uf.followerUserId = :requesterId
           AND r.status = 'ACTIVE'
           AND r.visibility IN ('PUBLIC', 'FOLLOWERS')
+          AND r.isAnonymous = FALSE
         ORDER BY r.createdAt DESC, r.id ASC
     """)
     List<Object[]> findFeedV2Candidates(
@@ -315,6 +330,7 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
      *   <li>r.contextPlaceId (UUID, nullable) — target de contexto para diversidade</li>
      *   <li>r.createdAt (Instant)</li>
      *   <li>r.isVerifiedOnSite (boolean)</li>
+     *   <li>r.isAnonymous (boolean) — anônimas entram, mas o adapter não usa o autor real delas na diversidade</li>
      * </ol>
      *
      * <p>Ordenação determinística: createdAt DESC, id ASC.
@@ -324,7 +340,8 @@ public interface ReviewJpaRepository extends JpaRepository<ReviewJpaEntity, UUID
                r.userId,
                r.contextPlaceId,
                r.createdAt,
-               r.isVerifiedOnSite
+               r.isVerifiedOnSite,
+               r.isAnonymous
         FROM ReviewJpaEntity r
         WHERE r.status = 'ACTIVE'
           AND r.visibility = 'PUBLIC'
