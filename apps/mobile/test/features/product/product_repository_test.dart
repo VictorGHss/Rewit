@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
+import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/product/data/models/product_dtos.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
 
@@ -352,6 +353,40 @@ void main() {
 
       expect(mockBaseClient.capturedRequest?.url.path, '/api/v1/products/prod-100/image');
       expect(bytes, equals(fakeBytes));
+    });
+
+    test('getProductImageBytes envia Authorization apenas para a origem da API e omite em URL externa', () async {
+      final tokenStorage = InMemoryTokenStorage();
+      await tokenStorage.saveTokens(
+        accessToken: 'fake-test-token',
+        refreshToken: 'fake-refresh-token',
+      );
+      final authClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockBaseClient,
+        tokenStorage: tokenStorage,
+      );
+      final authRepository = ProductRepositoryImpl(httpClient: authClient);
+
+      final fakeBytes = Uint8List.fromList([137, 80, 78, 71]);
+      mockBaseClient.responseToReturn = http.Response.bytes(
+        fakeBytes,
+        200,
+        headers: {'content-type': 'image/png'},
+      );
+
+      final sameOriginBytes = await authRepository.getProductImageBytes(
+        'https://api.rewit.test/api/v1/products/prod-100/image',
+      );
+      expect(sameOriginBytes, equals(fakeBytes));
+      expect(mockBaseClient.capturedRequest?.headers['authorization'], 'Bearer fake-test-token');
+
+      final externalBytes = await authRepository.getProductImageBytes(
+        'https://images.external-cdn.test/prod-100.png',
+      );
+      expect(externalBytes, equals(fakeBytes));
+      expect(mockBaseClient.capturedRequest?.url.host, 'images.external-cdn.test');
+      expect(mockBaseClient.capturedRequest?.headers.containsKey('authorization'), isFalse);
     });
   });
 }

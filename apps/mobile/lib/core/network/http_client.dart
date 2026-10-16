@@ -127,6 +127,38 @@ class RewitHttpClient {
     );
   }
 
+  static const int _maxRedirects = 5;
+  static const Set<int> _redirectStatusCodes = {301, 302, 303, 307, 308};
+
+  /// Verifica se [pathOrUrl] resolve para a mesma origem (`scheme`, `host` e `port` efetiva)
+  /// configurada em [baseUrl].
+  bool isSameOriginUrl(String pathOrUrl) {
+    try {
+      final targetUri = _buildUri(pathOrUrl, null);
+      return isSameOriginUri(targetUri);
+    } on NetworkException {
+      return false;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  /// Verifica se [targetUri] possui exatamente a mesma origem (`scheme`, `host` e `port` efetiva)
+  /// da [baseUrl] configurada na instância.
+  bool isSameOriginUri(Uri targetUri) {
+    final baseUri = Uri.tryParse(baseUrl.trim());
+    if (baseUri == null || !_isValidHttpOriginUri(baseUri)) {
+      return false;
+    }
+    if (!_isValidHttpOriginUri(targetUri)) {
+      return false;
+    }
+
+    return baseUri.scheme.toLowerCase() == targetUri.scheme.toLowerCase() &&
+        baseUri.host.toLowerCase() == targetUri.host.toLowerCase() &&
+        _effectivePort(baseUri) == _effectivePort(targetUri);
+  }
+
   /// Executa uma requisição POST multipart (para upload de arquivos binários).
   Future<http.Response> postMultipart(
     String path, {
@@ -139,9 +171,23 @@ class RewitHttpClient {
     bool requiresAuth = true,
   }) async {
     final uri = _buildUri(path, queryParameters);
-    final request = http.MultipartRequest('POST', uri);
+    final isSameOrigin = isSameOriginUri(uri);
 
-    if (requiresAuth && _tokenStorage != null) {
+    if (requiresAuth && !isSameOrigin) {
+      throw const NetworkException(
+        'Autenticação bloqueada para destino fora da origem da API.',
+      );
+    }
+    if (!isSameOrigin && _containsAuthorizationHeader(headers)) {
+      throw const NetworkException(
+        'Cabeçalho Authorization não permitido para destino fora da origem da API.',
+      );
+    }
+
+    final request = http.MultipartRequest('POST', uri)
+      ..followRedirects = false;
+
+    if (requiresAuth && isSameOrigin && _tokenStorage != null) {
       final token = await _tokenStorage.getAccessToken();
       if (token != null && token.isNotEmpty) {
         request.headers['Authorization'] = 'Bearer $token';
@@ -150,6 +196,9 @@ class RewitHttpClient {
     request.headers['Accept'] = 'application/json';
     if (headers != null) {
       request.headers.addAll(headers);
+    }
+    if (!isSameOrigin) {
+      _stripAuthorizationHeaders(request.headers);
     }
 
     MediaType? contentType;
@@ -170,7 +219,10 @@ class RewitHttpClient {
     try {
       final streamedResponse = await _client.send(request).timeout(timeout);
       final response = await http.Response.fromStream(streamedResponse);
-      return _handleResponse(response, requiresAuth: requiresAuth);
+      return _handleResponse(
+        response,
+        requiresAuth: requiresAuth && isSameOrigin,
+      );
     } on TimeoutException {
       throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
     } on http.ClientException catch (e) {
@@ -184,16 +236,23 @@ class RewitHttpClient {
     }
   }
 
-  /// Recupera os bytes brutos de um recurso autenticado (ex: download de imagem sanitizada).
+  /// Recupera os bytes brutos de um recurso (ex: download de imagem sanitizada ou pública).
+  ///
+  /// Quando [requiresAuth] não é informado, aplica autenticação apenas para destinos
+  /// pertencentes à mesma origem de [baseUrl], mantendo downloads externos públicos
+  /// sem envio de token. Se [requiresAuth] for explicitamente `true` para uma origem
+  /// externa, a chamada falha explicitamente com [NetworkException].
   Future<Uint8List> getBytes(
     String path, {
     Map<String, String>? headers,
-    bool requiresAuth = true,
+    bool? requiresAuth,
   }) async {
+    final uri = _buildUri(path, null);
+    final effectiveRequiresAuth = requiresAuth ?? isSameOriginUri(uri);
     final response = await get(
       path,
       headers: headers,
-      requiresAuth: requiresAuth,
+      requiresAuth: effectiveRequiresAuth,
     );
     return response.bodyBytes;
   }
@@ -207,8 +266,12 @@ class RewitHttpClient {
     bool requiresAuth = true,
     bool treatInvalidCredentialsAsBusinessError = false,
   }) async {
-    final uri = _buildUri(path, queryParameters);
-    final mergedHeaders = await _buildHeaders(headers, requiresAuth: requiresAuth);
+    final initialUri = _buildUri(path, queryParameters);
+    final initialHeaders = await _buildHeaders(
+      headers,
+      targetUri: initialUri,
+      requiresAuth: requiresAuth,
+    );
 
     String? encodedBody;
     if (body != null) {
@@ -219,33 +282,82 @@ class RewitHttpClient {
       }
     }
 
-    try {
-      http.Response response;
-      switch (method.toUpperCase()) {
-        case 'GET':
-          response = await _client.get(uri, headers: mergedHeaders).timeout(timeout);
-          break;
-        case 'POST':
-          response = await _client.post(uri, headers: mergedHeaders, body: encodedBody).timeout(timeout);
-          break;
-        case 'PUT':
-          response = await _client.put(uri, headers: mergedHeaders, body: encodedBody).timeout(timeout);
-          break;
-        case 'PATCH':
-          response = await _client.patch(uri, headers: mergedHeaders, body: encodedBody).timeout(timeout);
-          break;
-        case 'DELETE':
-          response = await _client.delete(uri, headers: mergedHeaders, body: encodedBody).timeout(timeout);
-          break;
-        default:
-          throw UnsupportedError('Método HTTP $method não suportado.');
-      }
+    final normalizedMethod = method.toUpperCase();
+    if (!_isSupportedMethod(normalizedMethod)) {
+      throw UnsupportedError('Método HTTP $method não suportado.');
+    }
 
-      return _handleResponse(
-        response,
-        requiresAuth: requiresAuth,
-        treatInvalidCredentialsAsBusinessError: treatInvalidCredentialsAsBusinessError,
-      );
+    try {
+      var currentUri = initialUri;
+      var currentMethod = normalizedMethod;
+      var currentBody = encodedBody;
+      final currentHeaders = Map<String, String>.from(initialHeaders);
+      var allowAuthOnCurrentHop = requiresAuth && isSameOriginUri(currentUri);
+      var redirectsCount = 0;
+
+      while (true) {
+        if (!allowAuthOnCurrentHop || !isSameOriginUri(currentUri)) {
+          allowAuthOnCurrentHop = false;
+          _stripAuthorizationHeaders(currentHeaders);
+        }
+
+        final request = http.Request(currentMethod, currentUri)
+          ..followRedirects = false;
+        request.headers.addAll(currentHeaders);
+        if (currentBody != null) {
+          request.body = currentBody;
+        }
+
+        final streamedResponse = await _client.send(request).timeout(timeout);
+        final response = await http.Response.fromStream(streamedResponse);
+
+        if (!_redirectStatusCodes.contains(response.statusCode)) {
+          return _handleResponse(
+            response,
+            requiresAuth: allowAuthOnCurrentHop,
+            treatInvalidCredentialsAsBusinessError: treatInvalidCredentialsAsBusinessError,
+          );
+        }
+
+        final locationHeader = _extractHeaderCaseInsensitive(response.headers, 'location');
+        if (locationHeader == null || locationHeader.trim().isEmpty) {
+          return _handleResponse(
+            response,
+            requiresAuth: allowAuthOnCurrentHop,
+            treatInvalidCredentialsAsBusinessError: treatInvalidCredentialsAsBusinessError,
+          );
+        }
+
+        redirectsCount++;
+        if (redirectsCount > _maxRedirects) {
+          throw const NetworkException('Número máximo de redirecionamentos HTTP excedido.');
+        }
+
+        final nextUri = _resolveRedirectUri(currentUri, locationHeader.trim());
+        final nextIsSameOrigin = isSameOriginUri(nextUri);
+
+        final convertsToGet = response.statusCode == 301 ||
+            response.statusCode == 302 ||
+            response.statusCode == 303;
+
+        if (!nextIsSameOrigin && !convertsToGet && currentMethod != 'GET') {
+          throw const NetworkException(
+            'Redirecionamento de requisição não-GET para origem externa bloqueado.',
+          );
+        }
+
+        if (convertsToGet && currentMethod != 'GET') {
+          currentMethod = 'GET';
+          currentBody = null;
+        }
+
+        if (!nextIsSameOrigin) {
+          allowAuthOnCurrentHop = false;
+          _stripAuthorizationHeaders(currentHeaders);
+        }
+
+        currentUri = nextUri;
+      }
     } on TimeoutException {
       throw const NetworkException('Tempo limite de conexão esgotado (timeout).');
     } on http.ClientException catch (e) {
@@ -259,23 +371,49 @@ class RewitHttpClient {
     }
   }
 
+  bool _isSupportedMethod(String method) {
+    switch (method) {
+      case 'GET':
+      case 'POST':
+      case 'PUT':
+      case 'PATCH':
+      case 'DELETE':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   Uri _buildUri(String path, Map<String, dynamic>? queryParameters) {
-    if (path.startsWith('http://') || path.startsWith('https://')) {
-      final uri = Uri.parse(path);
-      if (queryParameters != null && queryParameters.isNotEmpty) {
-        final sanitizedParams = queryParameters.map(
-          (key, value) => MapEntry(key, value?.toString() ?? ''),
-        );
-        return uri.replace(queryParameters: sanitizedParams);
-      }
-      return uri;
+    final trimmedPath = path.trim();
+
+    if (trimmedPath.startsWith('//')) {
+      final baseUri = Uri.tryParse(baseUrl.trim());
+      final scheme = (baseUri != null && baseUri.hasScheme) ? baseUri.scheme.toLowerCase() : 'https';
+      final uri = Uri.parse('$scheme:$trimmedPath');
+      return _applyQueryParameters(uri, queryParameters);
+    }
+
+    final hasHttpScheme = RegExp(r'^https?://', caseSensitive: false).hasMatch(trimmedPath);
+    if (hasHttpScheme) {
+      final uri = Uri.parse(trimmedPath);
+      return _applyQueryParameters(uri, queryParameters);
+    }
+
+    final hasOtherScheme = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*:').hasMatch(trimmedPath);
+    if (hasOtherScheme) {
+      throw const NetworkException('Esquema de URL não suportado.');
     }
 
     final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-    final cleanPath = path.startsWith('/') ? path : '/$path';
+    final cleanPath = trimmedPath.startsWith('/') ? trimmedPath : '/$trimmedPath';
     final fullUrl = '$cleanBase$cleanPath';
 
     final uri = Uri.parse(fullUrl);
+    return _applyQueryParameters(uri, queryParameters);
+  }
+
+  Uri _applyQueryParameters(Uri uri, Map<String, dynamic>? queryParameters) {
     if (queryParameters != null && queryParameters.isNotEmpty) {
       final sanitizedParams = queryParameters.map(
         (key, value) => MapEntry(key, value?.toString() ?? ''),
@@ -285,16 +423,85 @@ class RewitHttpClient {
     return uri;
   }
 
+  Uri _resolveRedirectUri(Uri currentUri, String location) {
+    final resolved = currentUri.resolve(location);
+    if (!_isValidHttpOriginUri(resolved)) {
+      throw const NetworkException('Destino de redirecionamento HTTP inválido ou não suportado.');
+    }
+    return resolved;
+  }
+
+  bool _isValidHttpOriginUri(Uri uri) {
+    if (!uri.hasScheme || !uri.hasAuthority || uri.host.isEmpty) {
+      return false;
+    }
+    if (uri.userInfo.isNotEmpty) {
+      return false;
+    }
+    final scheme = uri.scheme.toLowerCase();
+    return scheme == 'http' || scheme == 'https';
+  }
+
+  int _effectivePort(Uri uri) {
+    if (uri.hasPort) {
+      return uri.port;
+    }
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme == 'https') {
+      return 443;
+    }
+    if (scheme == 'http') {
+      return 80;
+    }
+    return uri.port;
+  }
+
+  bool _containsAuthorizationHeader(Map<String, String>? headers) {
+    if (headers == null || headers.isEmpty) {
+      return false;
+    }
+    return headers.keys.any((key) => key.toLowerCase() == 'authorization');
+  }
+
+  void _stripAuthorizationHeaders(Map<String, String> headers) {
+    headers.removeWhere((key, _) => key.toLowerCase() == 'authorization');
+  }
+
+  String? _extractHeaderCaseInsensitive(Map<String, String> headers, String targetKey) {
+    final lowerTarget = targetKey.toLowerCase();
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == lowerTarget) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
+
   Future<Map<String, String>> _buildHeaders(
     Map<String, String>? customHeaders, {
+    required Uri targetUri,
     required bool requiresAuth,
   }) async {
+    final isSameOrigin = isSameOriginUri(targetUri);
+
+    if (requiresAuth && !isSameOrigin) {
+      throw const NetworkException(
+        'Autenticação bloqueada para destino fora da origem da API.',
+      );
+    }
+
+    if (!isSameOrigin && _containsAuthorizationHeader(customHeaders)) {
+      throw const NetworkException(
+        'Cabeçalho Authorization não permitido para destino fora da origem da API.',
+      );
+    }
+
     final headers = <String, String>{
       'Accept': 'application/json',
       'Content-Type': 'application/json; charset=UTF-8',
     };
 
-    if (requiresAuth && _tokenStorage != null) {
+    if (requiresAuth && isSameOrigin && _tokenStorage != null) {
       final token = await _tokenStorage.getAccessToken();
       if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
@@ -303,6 +510,10 @@ class RewitHttpClient {
 
     if (customHeaders != null) {
       headers.addAll(customHeaders);
+    }
+
+    if (!isSameOrigin) {
+      _stripAuthorizationHeaders(headers);
     }
 
     return headers;

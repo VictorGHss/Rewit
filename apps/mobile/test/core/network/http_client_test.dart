@@ -342,5 +342,317 @@ void main() {
         throwsA(isA<NetworkException>()),
       );
     });
+
+    group('Isolamento de autenticação por origem (Security Hotfix S1)', () {
+      const testJwt = 'test-only-fake-jwt-token';
+
+      setUp(() async {
+        await tokenStorage.saveTokens(
+          accessToken: testJwt,
+          refreshToken: 'test-only-fake-refresh-token',
+        );
+      });
+
+      test('1. requisição autenticada para a mesma origem (relativa e absoluta com porta padrão) inclui o token', () async {
+        final mockClient = MockBaseClient((request) async {
+          expect(request.headers['authorization'], 'Bearer $testJwt');
+          return http.StreamedResponse(Stream.value(utf8.encode('{"ok":true}')), 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await client.get('/api/v1/me', requiresAuth: true);
+        await client.get('https://api.rewit.test/api/v1/me', requiresAuth: true);
+        await client.get('https://API.REWIT.TEST:443/api/v1/me', requiresAuth: true);
+
+        expect(mockClient.recordedRequests, hasLength(3));
+        for (final req in mockClient.recordedRequests) {
+          expect(req.headers['authorization'], 'Bearer $testJwt');
+        }
+      });
+
+      test('2. requisição para outro host não transmite o token', () async {
+        final mockClient = MockBaseClient((request) async {
+          expect(request.headers.containsKey('authorization'), isFalse);
+          expect(request.headers.containsKey('Authorization'), isFalse);
+          return http.StreamedResponse(Stream.value([1, 2, 3, 4]), 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final bytes = await client.getBytes('https://cdn.other-host.test/assets/photo.png');
+        expect(bytes, equals([1, 2, 3, 4]));
+
+        await client.get('https://other-host.test/public-info', requiresAuth: false);
+
+        expect(mockClient.recordedRequests, hasLength(2));
+        for (final req in mockClient.recordedRequests) {
+          expect(req.headers.containsKey('authorization'), isFalse);
+        }
+      });
+
+      test('3. requisição para host com nome semelhante mas origem diferente não transmite o token', () async {
+        final mockClient = MockBaseClient((request) async {
+          expect(request.headers.containsKey('authorization'), isFalse);
+          return http.StreamedResponse(Stream.value([10, 20]), 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final lookalikeUrls = [
+          'https://api.rewit.test.evil.test/image.png',
+          'https://evil-api.rewit.test/image.png',
+          'https://sub.api.rewit.test/image.png',
+          'https://api.rewit.test@evil.test/image.png',
+          '//api.rewit.test.evil.test/image.png',
+        ];
+
+        for (final url in lookalikeUrls) {
+          expect(client.isSameOriginUrl(url), isFalse, reason: 'URL $url não deve ser considerada mesma origem');
+          await expectLater(
+            client.get(url, requiresAuth: true),
+            throwsA(isA<NetworkException>()),
+          );
+        }
+
+        // Nenhuma chamada autenticada para host semelhante chegou a ser emitida
+        expect(mockClient.recordedRequests, isEmpty);
+
+        // Mesmo em getBytes (fluxo público para origem externa), o token nunca é enviado
+        await client.getBytes('https://api.rewit.test.evil.test/image.png');
+        await client.getBytes('https://evil-api.rewit.test/image.png');
+        expect(mockClient.recordedRequests, hasLength(2));
+        for (final req in mockClient.recordedRequests) {
+          expect(req.headers.containsKey('authorization'), isFalse);
+        }
+      });
+
+      test('4. diferença de esquema ou porta aplica a regra de origem corretamente', () async {
+        final mockClient = MockBaseClient((request) async {
+          return http.StreamedResponse(Stream.value([42]), 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        // Esquema diferente (http vs https) e porta diferente (8443 vs 443)
+        expect(client.isSameOriginUrl('http://api.rewit.test/api/v1/me'), isFalse);
+        expect(client.isSameOriginUrl('https://api.rewit.test:8443/api/v1/me'), isFalse);
+        expect(client.isSameOriginUrl('https://api.rewit.test:443/api/v1/me'), isTrue);
+
+        // Exigindo autenticação em esquema/porta divergentes: bloqueia antes do envio
+        await expectLater(
+          client.get('http://api.rewit.test/api/v1/me', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.get('https://api.rewit.test:8443/api/v1/me', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        expect(mockClient.recordedRequests, isEmpty);
+
+        // Em getBytes sem forçar requiresAuth: baixa como público sem enviar token quando esquema ou porta divergem
+        await client.getBytes('http://api.rewit.test/public.png');
+        await client.getBytes('https://api.rewit.test:8443/public.png');
+        // E envia token quando esquema e porta efetiva coincidem (:443)
+        await client.getBytes('https://api.rewit.test:443/protected.png');
+
+        expect(mockClient.recordedRequests, hasLength(3));
+        expect(mockClient.recordedRequests[0].headers.containsKey('authorization'), isFalse);
+        expect(mockClient.recordedRequests[1].headers.containsKey('authorization'), isFalse);
+        expect(mockClient.recordedRequests[2].headers['authorization'], 'Bearer $testJwt');
+      });
+
+      test('5. carregamento público de uma imagem externa continua funcionando sem autenticação indevida', () async {
+        final pngBytes = [137, 80, 78, 71, 13, 10, 26, 10];
+        final mockClient = MockBaseClient((request) async {
+          expect(request.url.toString(), 'https://images.external-catalog.test/products/cafe.png');
+          expect(request.headers.containsKey('authorization'), isFalse);
+          return http.StreamedResponse(
+            Stream.value(pngBytes),
+            200,
+            headers: {'content-type': 'image/png'},
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final result = await client.getBytes(
+          'https://images.external-catalog.test/products/cafe.png',
+        );
+
+        expect(result, equals(pngBytes));
+        expect(mockClient.recordedRequests, hasLength(1));
+        expect(mockClient.recordedRequests.single.headers.containsKey('authorization'), isFalse);
+      });
+
+      test('6. URL externa que exija autenticação falha de forma explícita e segura sem transmitir o token', () async {
+        final mockClient = MockBaseClient((request) async {
+          fail('Nenhuma requisição de rede deve ser enviada quando origem externa exige autenticação');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('https://external.test/secret', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.post('https://external.test/secret', body: {'a': 1}, requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.put('https://external.test/secret', body: {'a': 1}, requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.patch('https://external.test/secret', body: {'a': 1}, requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.delete('https://external.test/secret', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.postMultipart(
+            'https://external.test/upload',
+            fieldName: 'file',
+            fileBytes: [1, 2, 3],
+            filename: 'a.png',
+            requiresAuth: true,
+          ),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.getBytes('https://external.test/private.png', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.get(
+            'https://external.test/custom-header',
+            requiresAuth: false,
+            headers: {'Authorization': 'Bearer $testJwt'},
+          ),
+          throwsA(isA<NetworkException>()),
+        );
+
+        expect(mockClient.recordedRequests, isEmpty);
+      });
+
+      test('7. redirecionamento para origem externa não encaminha o token ao destino externo', () async {
+        final imageBytes = [137, 80, 78, 71];
+        final mockClient = MockBaseClient((request) async {
+          expect(request.followRedirects, isFalse);
+
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/reviews/rev-1/media/med-1') {
+            expect(request.headers['authorization'], 'Bearer $testJwt');
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': 'https://cdn.external-storage.test/bucket/med-1.png'},
+            );
+          }
+
+          if (request.url.toString() == 'https://cdn.external-storage.test/bucket/med-1.png') {
+            expect(request.headers.containsKey('authorization'), isFalse);
+            expect(request.headers.containsKey('Authorization'), isFalse);
+            return http.StreamedResponse(
+              Stream.value(imageBytes),
+              200,
+              headers: {'content-type': 'image/png'},
+            );
+          }
+
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final result = await client.getBytes('/api/v1/reviews/rev-1/media/med-1');
+
+        expect(result, equals(imageBytes));
+        expect(mockClient.recordedRequests, hasLength(2));
+        expect(
+          mockClient.recordedRequests[0].headers['authorization'],
+          'Bearer $testJwt',
+        );
+        expect(
+          mockClient.recordedRequests[1].headers.containsKey('authorization'),
+          isFalse,
+        );
+      });
+
+      test('redirecionamento dentro da mesma origem preserva o token, mas bloqueia mutação não-GET redirecionada 307 para origem externa', () async {
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/old-endpoint') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': '/api/v1/new-endpoint'},
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/new-endpoint') {
+            expect(request.headers['authorization'], 'Bearer $testJwt');
+            return http.StreamedResponse(
+              Stream.value(utf8.encode('{"redirected":true}')),
+              200,
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/mutate') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              307,
+              headers: {'location': 'https://external.test/mutate'},
+            );
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final getResponse = await client.get('/api/v1/old-endpoint');
+        expect(getResponse.statusCode, 200);
+        expect(mockClient.recordedRequests, hasLength(2));
+        expect(mockClient.recordedRequests[1].headers['authorization'], 'Bearer $testJwt');
+
+        await expectLater(
+          client.post('/api/v1/mutate', body: {'x': 1}),
+          throwsA(isA<NetworkException>()),
+        );
+        // A requisição POST não foi reenviada ao host externo após o 307
+        expect(mockClient.recordedRequests, hasLength(3));
+      });
+    });
   });
 }
