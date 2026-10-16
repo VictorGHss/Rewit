@@ -130,6 +130,30 @@ class RewitHttpClient {
   static const int _maxRedirects = 5;
   static const Set<int> _redirectStatusCodes = {301, 302, 303, 307, 308};
 
+  /// Limite máximo padrão para download de mídia e imagens (10 MB),
+  /// derivado do contrato de mídia do Rewit ([ReviewMedia.MAX_FILE_SIZE_BYTES]).
+  static const int defaultMaxImageSizeBytes = 10 * 1024 * 1024;
+
+  /// Limite máximo de leitura para o corpo de respostas intermediárias de redirecionamento (16 KB),
+  /// evitando acúmulo desnecessário de memória durante múltiplos saltos HTTP 3xx.
+  static const int _maxRedirectResponseBodyBytes = 16 * 1024;
+
+  /// Limite máximo de leitura para respostas de texto/JSON da API (15 MB),
+  /// prevenindo ataques de esgotamento de memória por payloads excessivos.
+  static const int defaultMaxResponseBodyBytes = 15 * 1024 * 1024;
+
+  /// Cabeçalhos sensíveis que devem ser permanentemente removidos quando a requisição
+  /// sai da origem configurada da API.
+  static const Set<String> _sensitiveHeaderNames = {
+    'authorization',
+    'cookie',
+    'proxy-authorization',
+    'set-cookie',
+    'x-csrf-token',
+    'x-xsrf-token',
+    'x-api-key',
+  };
+
   /// Verifica se [pathOrUrl] resolve para a mesma origem (`scheme`, `host` e `port` efetiva)
   /// configurada em [baseUrl].
   bool isSameOriginUrl(String pathOrUrl) {
@@ -170,6 +194,15 @@ class RewitHttpClient {
     Map<String, dynamic>? queryParameters,
     bool requiresAuth = true,
   }) async {
+    final stopwatch = Stopwatch()..start();
+    Duration getRemainingTimeout() {
+      final remaining = timeout - stopwatch.elapsed;
+      if (remaining <= Duration.zero) {
+        throw TimeoutException('Tempo limite total da operação esgotado.', timeout);
+      }
+      return remaining;
+    }
+
     final uri = _buildUri(path, queryParameters);
     final isSameOrigin = isSameOriginUri(uri);
 
@@ -178,9 +211,9 @@ class RewitHttpClient {
         'Autenticação bloqueada para destino fora da origem da API.',
       );
     }
-    if (!isSameOrigin && _containsAuthorizationHeader(headers)) {
+    if (!isSameOrigin && _containsSensitiveHeader(headers)) {
       throw const NetworkException(
-        'Cabeçalho Authorization não permitido para destino fora da origem da API.',
+        'Cabeçalhos sensíveis de autenticação não são permitidos para destino fora da origem da API.',
       );
     }
 
@@ -198,7 +231,7 @@ class RewitHttpClient {
       request.headers.addAll(headers);
     }
     if (!isSameOrigin) {
-      _stripAuthorizationHeaders(request.headers);
+      _stripSensitiveHeaders(request.headers);
     }
 
     MediaType? contentType;
@@ -217,8 +250,12 @@ class RewitHttpClient {
     );
 
     try {
-      final streamedResponse = await _client.send(request).timeout(timeout);
-      final response = await http.Response.fromStream(streamedResponse);
+      final streamedResponse = await _client.send(request).timeout(getRemainingTimeout());
+      final response = await _buildResponseFromStream(
+        streamedResponse,
+        remainingTimeout: getRemainingTimeout(),
+        maxBytes: defaultMaxResponseBodyBytes,
+      );
       return _handleResponse(
         response,
         requiresAuth: requiresAuth && isSameOrigin,
@@ -238,6 +275,9 @@ class RewitHttpClient {
 
   /// Recupera os bytes brutos de um recurso (ex: download de imagem sanitizada ou pública).
   ///
+  /// Aplica limite estrito de bytes [maxBytes] (padrão de 10 MB, alinhado ao contrato
+  /// do Rewit), interrompendo imediatamente o consumo de rede caso a resposta exceda o teto.
+  ///
   /// Quando [requiresAuth] não é informado, aplica autenticação apenas para destinos
   /// pertencentes à mesma origem de [baseUrl], mantendo downloads externos públicos
   /// sem envio de token. Se [requiresAuth] for explicitamente `true` para uma origem
@@ -246,13 +286,16 @@ class RewitHttpClient {
     String path, {
     Map<String, String>? headers,
     bool? requiresAuth,
+    int maxBytes = defaultMaxImageSizeBytes,
   }) async {
     final uri = _buildUri(path, null);
     final effectiveRequiresAuth = requiresAuth ?? isSameOriginUri(uri);
-    final response = await get(
-      path,
+    final response = await _send(
+      method: 'GET',
+      path: path,
       headers: headers,
       requiresAuth: effectiveRequiresAuth,
+      maxResponseBodyBytes: maxBytes,
     );
     return response.bodyBytes;
   }
@@ -265,7 +308,17 @@ class RewitHttpClient {
     Map<String, dynamic>? queryParameters,
     bool requiresAuth = true,
     bool treatInvalidCredentialsAsBusinessError = false,
+    int? maxResponseBodyBytes,
   }) async {
+    final stopwatch = Stopwatch()..start();
+    Duration getRemainingTimeout() {
+      final remaining = timeout - stopwatch.elapsed;
+      if (remaining <= Duration.zero) {
+        throw TimeoutException('Tempo limite total da operação esgotado.', timeout);
+      }
+      return remaining;
+    }
+
     final initialUri = _buildUri(path, queryParameters);
     final initialHeaders = await _buildHeaders(
       headers,
@@ -289,16 +342,17 @@ class RewitHttpClient {
 
     try {
       var currentUri = initialUri;
-      var currentMethod = normalizedMethod;
-      var currentBody = encodedBody;
+      final currentMethod = normalizedMethod;
+      final currentBody = encodedBody;
       final currentHeaders = Map<String, String>.from(initialHeaders);
       var allowAuthOnCurrentHop = requiresAuth && isSameOriginUri(currentUri);
+      var hasLeftOrigin = !isSameOriginUri(currentUri);
       var redirectsCount = 0;
 
       while (true) {
-        if (!allowAuthOnCurrentHop || !isSameOriginUri(currentUri)) {
+        if (hasLeftOrigin || !allowAuthOnCurrentHop || !isSameOriginUri(currentUri)) {
           allowAuthOnCurrentHop = false;
-          _stripAuthorizationHeaders(currentHeaders);
+          _stripSensitiveHeaders(currentHeaders);
         }
 
         final request = http.Request(currentMethod, currentUri)
@@ -308,10 +362,14 @@ class RewitHttpClient {
           request.body = currentBody;
         }
 
-        final streamedResponse = await _client.send(request).timeout(timeout);
-        final response = await http.Response.fromStream(streamedResponse);
+        final streamedResponse = await _client.send(request).timeout(getRemainingTimeout());
 
-        if (!_redirectStatusCodes.contains(response.statusCode)) {
+        if (!_redirectStatusCodes.contains(streamedResponse.statusCode)) {
+          final response = await _buildResponseFromStream(
+            streamedResponse,
+            remainingTimeout: getRemainingTimeout(),
+            maxBytes: maxResponseBodyBytes ?? defaultMaxResponseBodyBytes,
+          );
           return _handleResponse(
             response,
             requiresAuth: allowAuthOnCurrentHop,
@@ -319,12 +377,31 @@ class RewitHttpClient {
           );
         }
 
-        final locationHeader = _extractHeaderCaseInsensitive(response.headers, 'location');
+        final locationHeader = _extractHeaderCaseInsensitive(streamedResponse.headers, 'location');
         if (locationHeader == null || locationHeader.trim().isEmpty) {
+          final response = await _buildResponseFromStream(
+            streamedResponse,
+            remainingTimeout: getRemainingTimeout(),
+            maxBytes: maxResponseBodyBytes ?? defaultMaxResponseBodyBytes,
+          );
           return _handleResponse(
             response,
             requiresAuth: allowAuthOnCurrentHop,
             treatInvalidCredentialsAsBusinessError: treatInvalidCredentialsAsBusinessError,
+          );
+        }
+
+        // Lê e descarta com limite o corpo da resposta 3xx intermediária para liberar a conexão
+        await _drainStreamWithLimit(
+          streamedResponse.stream,
+          timeout: getRemainingTimeout(),
+          maxBytes: _maxRedirectResponseBodyBytes,
+        );
+
+        // Política fail-closed: não converter mutações de estado automaticamente em GET
+        if (currentMethod != 'GET') {
+          throw NetworkException(
+            'Redirecionamento automático de método mutador ($currentMethod) não permitido (HTTP ${streamedResponse.statusCode}).',
           );
         }
 
@@ -336,24 +413,15 @@ class RewitHttpClient {
         final nextUri = _resolveRedirectUri(currentUri, locationHeader.trim());
         final nextIsSameOrigin = isSameOriginUri(nextUri);
 
-        final convertsToGet = response.statusCode == 301 ||
-            response.statusCode == 302 ||
-            response.statusCode == 303;
-
-        if (!nextIsSameOrigin && !convertsToGet && currentMethod != 'GET') {
-          throw const NetworkException(
-            'Redirecionamento de requisição não-GET para origem externa bloqueado.',
-          );
-        }
-
-        if (convertsToGet && currentMethod != 'GET') {
-          currentMethod = 'GET';
-          currentBody = null;
-        }
-
         if (!nextIsSameOrigin) {
+          hasLeftOrigin = true;
           allowAuthOnCurrentHop = false;
-          _stripAuthorizationHeaders(currentHeaders);
+          _stripSensitiveHeaders(currentHeaders);
+        } else if (hasLeftOrigin) {
+          // Se saiu da origem em qualquer ponto da cadeia, a remoção de credenciais é permanente:
+          // ao retornar à origem da API, não recoloque as credenciais sensíveis.
+          allowAuthOnCurrentHop = false;
+          _stripSensitiveHeaders(currentHeaders);
         }
 
         currentUri = nextUri;
@@ -371,6 +439,113 @@ class RewitHttpClient {
     }
   }
 
+  /// Lê com segurança os bytes de [stream] respeitando o limite de tempo [timeout]
+  /// e o tamanho máximo de bytes [maxBytes].
+  ///
+  /// Caso o tempo expire ou o limite de bytes seja atingido, a inscrição no stream é
+  /// explicitamente cancelada para fechar a conexão de rede e evitar consumo contínuo
+  /// de recursos.
+  Future<Uint8List> _readStreamWithLimitAndTimeout(
+    Stream<List<int>> stream, {
+    required Duration timeout,
+    int? maxBytes,
+  }) {
+    final completer = Completer<Uint8List>();
+    final bytesBuilder = BytesBuilder(copy: false);
+    var totalBytes = 0;
+    StreamSubscription<List<int>>? subscription;
+    Timer? timer;
+
+    void cleanUp() {
+      timer?.cancel();
+      timer = null;
+    }
+
+    timer = Timer(timeout, () {
+      subscription?.cancel();
+      cleanUp();
+      if (!completer.isCompleted) {
+        completer.completeError(
+          TimeoutException('Tempo limite excedido na leitura do corpo da resposta.', timeout),
+        );
+      }
+    });
+
+    subscription = stream.listen(
+      (chunk) {
+        totalBytes += chunk.length;
+        if (maxBytes != null && totalBytes > maxBytes) {
+          subscription?.cancel();
+          cleanUp();
+          if (!completer.isCompleted) {
+            completer.completeError(
+              NetworkException(
+                'Tamanho da resposta excede o limite permitido de $maxBytes bytes.',
+              ),
+            );
+          }
+          return;
+        }
+        bytesBuilder.add(chunk);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        cleanUp();
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      },
+      onDone: () {
+        cleanUp();
+        if (!completer.isCompleted) {
+          completer.complete(bytesBuilder.takeBytes());
+        }
+      },
+      cancelOnError: true,
+    );
+
+    return completer.future;
+  }
+
+  /// Drena e descarta com segurança os bytes de [stream] para respostas intermediárias 3xx,
+  /// respeitando o limite de bytes e timeout para não manter conexões abertas nem consumir memória.
+  Future<void> _drainStreamWithLimit(
+    Stream<List<int>> stream, {
+    required Duration timeout,
+    required int maxBytes,
+  }) async {
+    try {
+      await _readStreamWithLimitAndTimeout(
+        stream,
+        timeout: timeout,
+        maxBytes: maxBytes,
+      );
+    } on NetworkException {
+      // Ignora excesso de corpo em redirecionamento intermediário após cancelar stream
+    }
+  }
+
+  Future<http.Response> _buildResponseFromStream(
+    http.StreamedResponse streamedResponse, {
+    required Duration remainingTimeout,
+    int? maxBytes,
+  }) async {
+    final bodyBytes = await _readStreamWithLimitAndTimeout(
+      streamedResponse.stream,
+      timeout: remainingTimeout,
+      maxBytes: maxBytes,
+    );
+
+    return http.Response.bytes(
+      bodyBytes,
+      streamedResponse.statusCode,
+      request: streamedResponse.request,
+      headers: streamedResponse.headers,
+      isRedirect: streamedResponse.isRedirect,
+      persistentConnection: streamedResponse.persistentConnection,
+      reasonPhrase: streamedResponse.reasonPhrase,
+    );
+  }
+
   bool _isSupportedMethod(String method) {
     switch (method) {
       case 'GET':
@@ -386,30 +561,34 @@ class RewitHttpClient {
 
   Uri _buildUri(String path, Map<String, dynamic>? queryParameters) {
     final trimmedPath = path.trim();
+    Uri uri;
 
     if (trimmedPath.startsWith('//')) {
       final baseUri = Uri.tryParse(baseUrl.trim());
       final scheme = (baseUri != null && baseUri.hasScheme) ? baseUri.scheme.toLowerCase() : 'https';
-      final uri = Uri.parse('$scheme:$trimmedPath');
-      return _applyQueryParameters(uri, queryParameters);
+      uri = Uri.parse('$scheme:$trimmedPath');
+    } else {
+      final hasHttpScheme = RegExp(r'^https?://', caseSensitive: false).hasMatch(trimmedPath);
+      if (hasHttpScheme) {
+        uri = Uri.parse(trimmedPath);
+      } else {
+        final hasOtherScheme = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*:').hasMatch(trimmedPath);
+        if (hasOtherScheme) {
+          throw const NetworkException('Esquema de URL não suportado.');
+        }
+
+        final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+        final cleanPath = trimmedPath.startsWith('/') ? trimmedPath : '/$trimmedPath';
+        final fullUrl = '$cleanBase$cleanPath';
+
+        uri = Uri.parse(fullUrl);
+      }
     }
 
-    final hasHttpScheme = RegExp(r'^https?://', caseSensitive: false).hasMatch(trimmedPath);
-    if (hasHttpScheme) {
-      final uri = Uri.parse(trimmedPath);
-      return _applyQueryParameters(uri, queryParameters);
+    if (uri.userInfo.isNotEmpty) {
+      throw const NetworkException('URLs com credenciais embutidas (userinfo) não são permitidas.');
     }
 
-    final hasOtherScheme = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*:').hasMatch(trimmedPath);
-    if (hasOtherScheme) {
-      throw const NetworkException('Esquema de URL não suportado.');
-    }
-
-    final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-    final cleanPath = trimmedPath.startsWith('/') ? trimmedPath : '/$trimmedPath';
-    final fullUrl = '$cleanBase$cleanPath';
-
-    final uri = Uri.parse(fullUrl);
     return _applyQueryParameters(uri, queryParameters);
   }
 
@@ -456,15 +635,15 @@ class RewitHttpClient {
     return uri.port;
   }
 
-  bool _containsAuthorizationHeader(Map<String, String>? headers) {
+  bool _containsSensitiveHeader(Map<String, String>? headers) {
     if (headers == null || headers.isEmpty) {
       return false;
     }
-    return headers.keys.any((key) => key.toLowerCase() == 'authorization');
+    return headers.keys.any((key) => _sensitiveHeaderNames.contains(key.toLowerCase()));
   }
 
-  void _stripAuthorizationHeaders(Map<String, String> headers) {
-    headers.removeWhere((key, _) => key.toLowerCase() == 'authorization');
+  void _stripSensitiveHeaders(Map<String, String> headers) {
+    headers.removeWhere((key, _) => _sensitiveHeaderNames.contains(key.toLowerCase()));
   }
 
   String? _extractHeaderCaseInsensitive(Map<String, String> headers, String targetKey) {
@@ -490,9 +669,9 @@ class RewitHttpClient {
       );
     }
 
-    if (!isSameOrigin && _containsAuthorizationHeader(customHeaders)) {
+    if (!isSameOrigin && _containsSensitiveHeader(customHeaders)) {
       throw const NetworkException(
-        'Cabeçalho Authorization não permitido para destino fora da origem da API.',
+        'Cabeçalhos sensíveis de autenticação não são permitidos para destino fora da origem da API.',
       );
     }
 
@@ -513,7 +692,7 @@ class RewitHttpClient {
     }
 
     if (!isSameOrigin) {
-      _stripAuthorizationHeaders(headers);
+      _stripSensitiveHeaders(headers);
     }
 
     return headers;

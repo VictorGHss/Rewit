@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/core/error/api_exception.dart';
@@ -652,6 +653,385 @@ void main() {
         );
         // A requisição POST não foi reenviada ao host externo após o 307
         expect(mockClient.recordedRequests, hasLength(3));
+      });
+    });
+
+    group('Endurecimento de transporte HTTP (Security S1.1)', () {
+      const testJwt = 'valid-jwt-token-s1-1';
+
+      setUp(() async {
+        await tokenStorage.saveTokens(
+          accessToken: testJwt,
+          refreshToken: 'refresh-token',
+        );
+      });
+
+      test('1. Timeout durante a leitura lenta do corpo cancela a inscrição do stream', () async {
+        final streamController = StreamController<List<int>>();
+        var subscriptionCancelled = false;
+        streamController.onCancel = () {
+          subscriptionCancelled = true;
+        };
+
+        final mockClient = MockBaseClient((request) async {
+          // Envia o cabeçalho 200 imediatamente, mas o corpo emite lentamente e não conclui
+          streamController.add(utf8.encode('{"partial":'));
+          return http.StreamedResponse(
+            streamController.stream,
+            200,
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          timeout: const Duration(milliseconds: 60),
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/slow-body'),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Tempo limite'),
+            ),
+          ),
+        );
+
+        // Aguarda ciclo de microtarefas para confirmar cancelamento do stream
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(subscriptionCancelled, isTrue);
+        await streamController.close();
+      });
+
+      test('2. Prazo total da operação excedido após múltiplos redirecionamentos', () async {
+        final mockClient = MockBaseClient((request) async {
+          await Future<void>.delayed(const Duration(milliseconds: 35));
+          if (request.url.path == '/hop1') {
+            return http.StreamedResponse(const Stream.empty(), 302, headers: {'location': '/hop2'});
+          }
+          if (request.url.path == '/hop2') {
+            return http.StreamedResponse(const Stream.empty(), 302, headers: {'location': '/hop3'});
+          }
+          if (request.url.path == '/hop3') {
+            return http.StreamedResponse(Stream.value(utf8.encode('{"done": true}')), 200);
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          timeout: const Duration(milliseconds: 60),
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/hop1'),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Tempo limite'),
+            ),
+          ),
+        );
+
+        // Atingiu no máximo 2 hops antes de estourar o timeout acumulado
+        expect(mockClient.recordedRequests.length, lessThanOrEqualTo(2));
+      });
+
+      test('3. Resposta de imagem que excede o limite de bytes interrompe o stream', () async {
+        final streamController = StreamController<List<int>>();
+        var subscriptionCancelled = false;
+        streamController.onCancel = () {
+          subscriptionCancelled = true;
+        };
+
+        final mockClient = MockBaseClient((request) async {
+          // Emite chunks totalizando 1500 bytes
+          streamController.add(List.filled(600, 1));
+          streamController.add(List.filled(900, 2));
+          return http.StreamedResponse(streamController.stream, 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.getBytes('/large-image.jpg', maxBytes: 1024),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('excede o limite permitido de 1024 bytes'),
+            ),
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(subscriptionCancelled, isTrue);
+        await streamController.close();
+      });
+
+      test('4. Redirecionamento 301/302 de PUT, PATCH e DELETE falha de forma explícita sem conversão para GET', () async {
+        for (final method in ['PUT', 'PATCH', 'DELETE']) {
+          final mockClient = MockBaseClient((request) async {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': '/target-resource'},
+            );
+          });
+
+          final client = RewitHttpClient(
+            baseUrl: 'https://api.rewit.test',
+            client: mockClient,
+            tokenStorage: tokenStorage,
+          );
+
+          Future<http.Response> execute() {
+            switch (method) {
+              case 'PUT':
+                return client.put('/item', body: {'val': 1});
+              case 'PATCH':
+                return client.patch('/item', body: {'val': 2});
+              case 'DELETE':
+                return client.delete('/item');
+              default:
+                throw UnimplementedError();
+            }
+          }
+
+          await expectLater(
+            execute(),
+            throwsA(
+              isA<NetworkException>().having(
+                (e) => e.message,
+                'message',
+                contains('Redirecionamento automático de método mutador ($method) não permitido'),
+              ),
+            ),
+          );
+
+          // Nenhuma requisição convertida para GET foi emitida ao /target-resource
+          expect(mockClient.recordedRequests, hasLength(1));
+          expect(mockClient.recordedRequests.first.method, method);
+        }
+      });
+
+      test('5. Remoção de Authorization, Cookie e Proxy-Authorization ao trocar de origem', () async {
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.host == 'api.rewit.test') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': 'https://external-cdn.test/image.png'},
+            );
+          }
+          if (request.url.host == 'external-cdn.test') {
+            return http.StreamedResponse(
+              Stream.value(Uint8List.fromList([1, 2, 3])),
+              200,
+            );
+          }
+          fail('Host inesperado: ${request.url.host}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final bytes = await client.getBytes(
+          '/api/v1/download',
+          headers: {
+            'Cookie': 'session_token=xyz987',
+            'Proxy-Authorization': 'Basic cHJveHk6c2VjcmV0',
+            'X-Custom-Client': 'MobileApp',
+          },
+        );
+
+        expect(bytes, equals(Uint8List.fromList([1, 2, 3])));
+        expect(mockClient.recordedRequests, hasLength(2));
+
+        // Primeiro salto (origem API)
+        final req1 = mockClient.recordedRequests[0];
+        expect(req1.headers['authorization'], 'Bearer $testJwt');
+        expect(req1.headers['cookie'], 'session_token=xyz987');
+        expect(req1.headers['proxy-authorization'], 'Basic cHJveHk6c2VjcmV0');
+        expect(req1.headers['x-custom-client'], 'MobileApp');
+
+        // Segundo salto (host externo)
+        final req2 = mockClient.recordedRequests[1];
+        expect(req2.headers.containsKey('authorization'), isFalse);
+        expect(req2.headers.containsKey('cookie'), isFalse);
+        expect(req2.headers.containsKey('proxy-authorization'), isFalse);
+        expect(req2.headers['x-custom-client'], 'MobileApp');
+      });
+
+      test('6. Cadeia A → externo → A não recupera credenciais automaticamente', () async {
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.toString() == 'https://api.rewit.test/hop1') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': 'https://tracker.external.test/hop2'},
+            );
+          }
+          if (request.url.toString() == 'https://tracker.external.test/hop2') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': 'https://api.rewit.test/hop3'},
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/hop3') {
+            return http.StreamedResponse(
+              Stream.value(utf8.encode('{"chain_done": true}')),
+              200,
+            );
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final response = await client.get('/hop1');
+        expect(response.statusCode, 200);
+        expect(mockClient.recordedRequests, hasLength(3));
+
+        // Hop 1 (origem inicial): possui Authorization
+        expect(mockClient.recordedRequests[0].headers['authorization'], 'Bearer $testJwt');
+
+        // Hop 2 (externo): despido de Authorization
+        expect(mockClient.recordedRequests[1].headers.containsKey('authorization'), isFalse);
+
+        // Hop 3 (retorno à origem A): NÃO recupera Authorization
+        expect(mockClient.recordedRequests[2].headers.containsKey('authorization'), isFalse);
+      });
+
+      test('7. URLs iniciais contendo userinfo são rejeitadas antes do envio', () async {
+        final mockClient = MockBaseClient((request) async {
+          fail('Nenhuma requisição HTTP deveria ter sido emitida.');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final invalidUrls = [
+          'https://user:password@api.rewit.test/path',
+          'http://admin:secret@external.test/resource',
+          '//user:secret@api.rewit.test/data',
+        ];
+
+        for (final url in invalidUrls) {
+          await expectLater(
+            client.get(url),
+            throwsA(
+              isA<NetworkException>().having(
+                (e) => e.message,
+                'message',
+                contains('userinfo'),
+              ),
+            ),
+          );
+        }
+
+        expect(mockClient.recordedRequests, isEmpty);
+      });
+
+      test('8. Redirecionamentos válidos de GET com Location relativo funcionam e preservam token', () async {
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/old-location') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': '/api/v1/new-location'},
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/new-location') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              301,
+              headers: {'location': 'subpath'},
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/subpath') {
+            return http.StreamedResponse(
+              Stream.value(utf8.encode('{"success": true}')),
+              200,
+            );
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final response = await client.get('/api/v1/old-location');
+        expect(response.statusCode, 200);
+        expect(response.body, '{"success": true}');
+        expect(mockClient.recordedRequests, hasLength(3));
+
+        for (final req in mockClient.recordedRequests) {
+          expect(req.headers['authorization'], 'Bearer $testJwt');
+        }
+      });
+
+      test('9. Requisições autenticadas normais permanecem plenamente funcionais', () async {
+        final mockClient = MockBaseClient((request) async {
+          expect(request.headers['authorization'], 'Bearer $testJwt');
+          expect(request.headers['accept'], 'application/json');
+          return http.StreamedResponse(
+            Stream.value(utf8.encode('{"method": "${request.method}"}')),
+            200,
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final getRes = await client.get('/test');
+        expect(getRes.statusCode, 200);
+        expect(getRes.body, '{"method": "GET"}');
+
+        final postRes = await client.post('/test', body: {'x': 1});
+        expect(postRes.statusCode, 200);
+        expect(postRes.body, '{"method": "POST"}');
+
+        final putRes = await client.put('/test', body: {'x': 2});
+        expect(putRes.statusCode, 200);
+        expect(putRes.body, '{"method": "PUT"}');
+
+        final patchRes = await client.patch('/test', body: {'x': 3});
+        expect(patchRes.statusCode, 200);
+        expect(patchRes.body, '{"method": "PATCH"}');
+
+        final delRes = await client.delete('/test');
+        expect(delRes.statusCode, 200);
+        expect(delRes.body, '{"method": "DELETE"}');
+
+        expect(mockClient.recordedRequests, hasLength(5));
       });
     });
   });
