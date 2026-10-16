@@ -6,6 +6,7 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import '../../domain/entities/device_location.dart';
+import '../../domain/entities/review_privacy_rules.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/repositories/review_creation_repository.dart';
 import 'review_create_state.dart';
@@ -99,6 +100,14 @@ class ReviewCreateNotifier extends ChangeNotifier {
   String? get experienceText => _experienceText;
   bool get isAnonymous => _isAnonymous;
   String get visibility => _visibility;
+
+  /// Se o anonimato pode ser ligado com a visibilidade atual (não pode com `FOLLOWERS`).
+  bool get canEnableAnonymous =>
+      ReviewPrivacyRules.canSetAnonymous(value: true, visibility: _visibility);
+
+  /// Se [value] pode ser escolhida como visibilidade com o anonimato atual (`FOLLOWERS` exige avaliação identificada).
+  bool isVisibilityOptionAvailable(String value) =>
+      ReviewPrivacyRules.canSelectVisibility(value: value, isAnonymous: _isAnonymous);
   double? get userLatitude => _userLatitude;
   double? get userLongitude => _userLongitude;
   double? get locationAccuracyMeters => _locationAccuracyMeters;
@@ -237,15 +246,22 @@ class ReviewCreateNotifier extends ChangeNotifier {
   }
 
   /// Alterna o modo de publicação anônima.
+  ///
+  /// Ligar o anonimato com visibilidade `FOLLOWERS` é ignorado: a combinação é recusada pelo backend e a
+  /// visibilidade escolhida não é trocada por conta própria. A tela explica o motivo e desativa a opção.
   void setAnonymous(bool value) {
     if (_isDisposed || isSubmitting) return;
+    if (!ReviewPrivacyRules.canSetAnonymous(value: value, visibility: _visibility)) return;
     _isAnonymous = value;
     _safeNotifyListeners();
   }
 
   /// Define o nível de visibilidade da publicação.
+  ///
+  /// `FOLLOWERS` é ignorada numa avaliação anônima, sem mudar o anonimato escolhido (ver [setAnonymous]).
   void setVisibility(String value) {
     if (_isDisposed || isSubmitting) return;
+    if (!ReviewPrivacyRules.canSelectVisibility(value: value, isAnonymous: _isAnonymous)) return;
     _visibility = value;
     _safeNotifyListeners();
   }
@@ -502,6 +518,10 @@ class ReviewCreateNotifier extends ChangeNotifier {
       return 'Visibilidade inválida. Escolha Público, Privado ou Seguidores.';
     }
 
+    if (!ReviewPrivacyRules.isAllowed(isAnonymous: _isAnonymous, visibility: _visibility)) {
+      return ReviewPrivacyRules.incompatibleCombinationMessage;
+    }
+
     if (_userLatitude != null && (_userLatitude! < -90.0 || _userLatitude! > 90.0)) {
       return 'A latitude deve estar entre -90.0 e 90.0.';
     }
@@ -673,7 +693,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
     } on ApiException catch (e) {
       if (_isDisposed) return false;
       _state = ReviewCreateError(
-        message: e.detail,
+        message: ReviewPrivacyRules.messageForError(e.errorCode, e.detail),
         statusCode: e.statusCode,
         errorCode: e.errorCode,
         retryAfterSeconds: e.retryAfterSeconds,

@@ -5,6 +5,7 @@ import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/review_privacy_rules.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
@@ -16,6 +17,7 @@ class FakeEditFeedRepository implements FeedRepository {
   Completer<FeedReview>? updateCompleter;
   bool shouldThrow409 = false;
   bool shouldThrowNetwork = false;
+  ApiException? exceptionToThrow;
 
   final FeedReview baseReview;
 
@@ -25,6 +27,10 @@ class FakeEditFeedRepository implements FeedRepository {
   Future<FeedReview> updateReview(String reviewId, UpdateReviewInput input) async {
     lastUpdateReviewId = reviewId;
     lastUpdateInput = input;
+
+    if (exceptionToThrow != null) {
+      throw exceptionToThrow!;
+    }
 
     if (shouldThrow409) {
       throw const ApiException(ProblemDetail(
@@ -239,6 +245,148 @@ void main() {
 
       // Entrada do usuário preservada
       expect(find.text('Tentativa de alteração com janela expirada'), findsOneWidget);
+    });
+
+    testWidgets('5. edição de avaliação anônima válida permite troca de visibilidade e salva', (tester) async {
+      configureLargeScreen(tester);
+      final anonymousReview = sampleReview.copyWith(isAnonymous: true, visibility: 'PUBLIC');
+      final fakeRepo = FakeEditFeedRepository(baseReview: anonymousReview);
+
+      await tester.pumpWidget(createTestWidget(
+        review: anonymousReview,
+        repository: fakeRepo,
+      ));
+      await tester.pumpAndSettle();
+
+      // Registro legado NÃO deve ser exibido
+      expect(find.byKey(const Key('legacy_privacy_notice')), findsNothing);
+
+      // Aviso explicativo de que seguidores não está disponível para anônimos
+      expect(find.byKey(const Key('edit_followers_unavailable_hint')), findsOneWidget);
+      expect(find.text(ReviewPrivacyRules.followersUnavailableForAnonymous), findsOneWidget);
+
+      // Altera visibilidade para Privada
+      final dropdownFinder = find.byKey(const Key('edit_visibility_dropdown'));
+      await tester.ensureVisible(dropdownFinder);
+      await tester.tap(dropdownFinder);
+      await tester.pumpAndSettle();
+
+      final privateItem = find.text('Privada (apenas você)').last;
+      await tester.tap(privateItem);
+      await tester.pumpAndSettle();
+
+      // Clica em Salvar
+      final saveButton = find.byKey(const Key('submit_edit_button'));
+      await tester.ensureVisible(saveButton);
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+
+      expect(fakeRepo.lastUpdateReviewId, 'rev-edit-test-1');
+      expect(fakeRepo.lastUpdateInput?.isAnonymous, isTrue);
+      expect(fakeRepo.lastUpdateInput?.visibility, 'PRIVATE');
+    });
+
+    testWidgets('6. abertura e resolução explícita de um registro legado', (tester) async {
+      configureLargeScreen(tester);
+      final legacyReview = sampleReview.copyWith(isAnonymous: true, visibility: 'FOLLOWERS');
+      final fakeRepo = FakeEditFeedRepository(baseReview: legacyReview);
+
+      await tester.pumpWidget(createTestWidget(
+        review: legacyReview,
+        repository: fakeRepo,
+      ));
+      await tester.pumpAndSettle();
+
+      // Aviso legado em destaque
+      expect(find.byKey(const Key('legacy_privacy_notice')), findsOneWidget);
+      expect(find.text(ReviewPrivacyRules.legacyCombinationNotice), findsOneWidget);
+
+      // Botão Salvar desabilitado
+      final saveButtonFinder = find.byKey(const Key('submit_edit_button'));
+      await tester.ensureVisible(saveButtonFinder);
+      final saveButtonWidget = tester.widget<FilledButton>(saveButtonFinder);
+      expect(saveButtonWidget.onPressed, isNull);
+
+      // Autor resolve explicitamente escolhendo Pública
+      final dropdownFinder = find.byKey(const Key('edit_visibility_dropdown'));
+      await tester.ensureVisible(dropdownFinder);
+      await tester.tap(dropdownFinder);
+      await tester.pumpAndSettle();
+
+      final publicItem = find.text('Pública (visível a todos)').last;
+      await tester.tap(publicItem);
+      await tester.pumpAndSettle();
+
+      // O aviso legado desaparece e o botão Salvar é reabilitado
+      expect(find.byKey(const Key('legacy_privacy_notice')), findsNothing);
+      final reenabledSaveButton = tester.widget<FilledButton>(saveButtonFinder);
+      expect(reenabledSaveButton.onPressed, isNotNull);
+
+      // Submete com sucesso
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(fakeRepo.lastUpdateReviewId, 'rev-edit-test-1');
+      expect(fakeRepo.lastUpdateInput?.isAnonymous, isTrue);
+      expect(fakeRepo.lastUpdateInput?.visibility, 'PUBLIC');
+    });
+
+    testWidgets('7. preservação dos dados e mensagem orientativa diante de uma falha (HTTP 422)', (tester) async {
+      configureLargeScreen(tester);
+      final fakeRepo = FakeEditFeedRepository(baseReview: sampleReview);
+      fakeRepo.exceptionToThrow = const ApiException(
+        ProblemDetail(
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: 'Avaliações anônimas não podem ter visibilidade restrita a seguidores',
+          code: 'ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED',
+        ),
+      );
+
+      await tester.pumpWidget(createTestWidget(
+        review: sampleReview,
+        repository: fakeRepo,
+      ));
+      await tester.pumpAndSettle();
+
+      // Altera o texto da experiência
+      final textField = find.byKey(const Key('edit_experience_text_field'));
+      await tester.enterText(textField, 'Texto que deve ser preservado mesmo após falha 422');
+
+      final saveButton = find.byKey(const Key('submit_edit_button'));
+      await tester.ensureVisible(saveButton);
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+
+      // Mensagem orientativa amigável mapeada de ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED
+      expect(find.text(ReviewPrivacyRules.incompatibleCombinationMessage), findsWidgets);
+
+      // Conteúdo digitado pelo usuário preservado no formulário
+      expect(find.text('Texto que deve ser preservado mesmo após falha 422'), findsOneWidget);
+    });
+
+    testWidgets('8. nenhuma requisição inválida enviada ao repositório para registro legado incompatível', (tester) async {
+      configureLargeScreen(tester);
+      final legacyReview = sampleReview.copyWith(isAnonymous: true, visibility: 'FOLLOWERS');
+      final fakeRepo = FakeEditFeedRepository(baseReview: legacyReview);
+
+      await tester.pumpWidget(createTestWidget(
+        review: legacyReview,
+        repository: fakeRepo,
+      ));
+      await tester.pumpAndSettle();
+
+      // Botão de salvar no AppBar e no fim da tela ambos desabilitados
+      final appBarSaveButton = tester.widget<TextButton>(find.byKey(const Key('save_review_edit_button')));
+      expect(appBarSaveButton.onPressed, isNull);
+
+      final bottomSaveButton = tester.widget<FilledButton>(find.byKey(const Key('submit_edit_button')));
+      expect(bottomSaveButton.onPressed, isNull);
+
+      // Nenhuma chamada enviada ao repositório
+      expect(fakeRepo.lastUpdateInput, isNull);
+      expect(fakeRepo.lastUpdateReviewId, isNull);
     });
   });
 }

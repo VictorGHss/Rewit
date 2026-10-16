@@ -5,6 +5,7 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import '../../domain/entities/review_creation_input.dart';
+import '../../domain/entities/review_privacy_rules.dart';
 import '../../domain/repositories/review_creation_repository.dart';
 import '../state/review_create_notifier.dart';
 import '../state/review_create_state.dart';
@@ -433,6 +434,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 const SizedBox(height: 8),
 
                 DropdownButtonFormField<String>(
+                  key: const Key('create_visibility_dropdown'),
                   initialValue: _notifier.visibility,
                   decoration: const InputDecoration(
                     labelText: 'Quem pode ver sua avaliação',
@@ -440,16 +442,17 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     isDense: true,
                     border: OutlineInputBorder(),
                   ),
-                  items: const [
-                    DropdownMenuItem(
+                  items: [
+                    const DropdownMenuItem(
                       value: 'PUBLIC',
                       child: Text('Público (visível a toda a comunidade)'),
                     ),
                     DropdownMenuItem(
                       value: 'FOLLOWERS',
-                      child: Text('Seguidores (apenas quem te segue)'),
+                      enabled: _notifier.isVisibilityOptionAvailable('FOLLOWERS'),
+                      child: const Text('Seguidores (apenas quem te segue)'),
                     ),
-                    DropdownMenuItem(
+                    const DropdownMenuItem(
                       value: 'PRIVATE',
                       child: Text('Privado (apenas você)'),
                     ),
@@ -464,18 +467,33 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 ),
                 const SizedBox(height: 12),
 
+                if (_notifier.isAnonymous) ...[
+                  const SizedBox(height: 6),
+                  const Text(
+                    ReviewPrivacyRules.followersUnavailableForAnonymous,
+                    key: Key('create_followers_unavailable_hint'),
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+                const SizedBox(height: 6),
+
                 SwitchListTile(
+                  key: const Key('create_anonymous_switch'),
                   contentPadding: EdgeInsets.zero,
                   value: _notifier.isAnonymous,
-                  onChanged: isSubmitting
+                  // Ligar o anonimato com "Seguidores" fica bloqueado; desligar é sempre possível
+                  onChanged: isSubmitting || (!_notifier.isAnonymous && !_notifier.canEnableAnonymous)
                       ? null
                       : (val) {
                           _notifier.setAnonymous(val);
                         },
                   title: const Text('Publicar como Anônimo'),
-                  subtitle: const Text(
-                    'Seu nome e perfil não serão exibidos publicamente na avaliação.',
-                    style: TextStyle(fontSize: 12),
+                  subtitle: Text(
+                    !_notifier.isAnonymous && !_notifier.canEnableAnonymous
+                        ? ReviewPrivacyRules.anonymousUnavailableForFollowers
+                        : 'Seu nome e perfil não serão exibidos publicamente na avaliação.',
+                    key: const Key('create_anonymous_switch_subtitle'),
+                    style: const TextStyle(fontSize: 12),
                   ),
                 ),
                 const SizedBox(height: 12),
