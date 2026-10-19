@@ -1,6 +1,8 @@
 package com.rewit.infrastructure.persistence.repository;
 
 import com.rewit.infrastructure.persistence.entity.PlaceMediaReportJpaEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -18,5 +20,7 @@ public interface PlaceMediaReportJpaRepository extends JpaRepository<PlaceMediaR
     List<PlaceMediaReportJpaEntity> findByPlaceMediaId(UUID placeMediaId);
 
     List<PlaceMediaReportJpaEntity> findByStatusOrderByCreatedAtAsc(String status);
+
+    Page<PlaceMediaReportJpaEntity> findByStatusOrderByCreatedAtAsc(String status, Pageable pageable);
 }
 

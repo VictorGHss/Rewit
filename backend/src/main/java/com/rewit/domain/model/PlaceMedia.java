@@ -139,6 +139,24 @@ public class PlaceMedia {
         return this.status == ReviewMediaStatus.ACTIVE;
     }
 
+    public boolean isUnderReview() {
+        return this.status == ReviewMediaStatus.UNDER_REVIEW;
+    }
+
+    public boolean isRemoved() {
+        return this.status == ReviewMediaStatus.REMOVED;
+    }
+
+    public void markActive() {
+        this.status = ReviewMediaStatus.ACTIVE;
+        this.updatedAt = Instant.now();
+    }
+
+    public void setStatus(ReviewMediaStatus status) {
+        this.status = Objects.requireNonNull(status, "status must not be null");
+        this.updatedAt = Instant.now();
+    }
+
     public boolean isPrimary() {
         return this.isPrimary;
     }

@@ -41,12 +41,28 @@ public class PlaceMediaReportJpaEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "decided_by_user_id")
+    private UUID decidedByUserId;
+
+    @Column(name = "decided_at")
+    private Instant decidedAt;
+
+    @Column(name = "decision_notes", length = 500)
+    private String decisionNotes;
+
     public PlaceMediaReportJpaEntity() {
     }
 
     public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
                                      String reason, String detail, String status,
                                      Instant createdAt, Instant updatedAt) {
+        this(id, placeMediaId, reporterUserId, reason, detail, status, createdAt, updatedAt, null, null, null);
+    }
+
+    public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
+                                     String reason, String detail, String status,
+                                     Instant createdAt, Instant updatedAt,
+                                     UUID decidedByUserId, Instant decidedAt, String decisionNotes) {
         this.id = id != null ? id : UUID.randomUUID();
         this.placeMediaId = placeMediaId;
         this.reporterUserId = reporterUserId;
@@ -55,6 +71,42 @@ public class PlaceMediaReportJpaEntity {
         this.status = status != null ? status : "PENDING";
         this.createdAt = createdAt != null ? createdAt : Instant.now();
         this.updatedAt = updatedAt != null ? updatedAt : Instant.now();
+        this.decidedByUserId = decidedByUserId;
+        this.decidedAt = decidedAt;
+        this.decisionNotes = decisionNotes;
+    }
+
+    public static PlaceMediaReportJpaEntity fromDomain(com.rewit.domain.model.PlaceMediaReport domain) {
+        if (domain == null) return null;
+        return new PlaceMediaReportJpaEntity(
+                domain.getId(),
+                domain.getPlaceMediaId(),
+                domain.getReporterUserId(),
+                domain.getReason(),
+                domain.getDetail(),
+                domain.getStatus(),
+                domain.getCreatedAt(),
+                domain.getUpdatedAt(),
+                domain.getDecidedByUserId(),
+                domain.getDecidedAt(),
+                domain.getDecisionNotes()
+        );
+    }
+
+    public com.rewit.domain.model.PlaceMediaReport toDomain() {
+        return new com.rewit.domain.model.PlaceMediaReport(
+                this.id,
+                this.placeMediaId,
+                this.reporterUserId,
+                this.reason,
+                this.detail,
+                this.status,
+                this.createdAt,
+                this.updatedAt,
+                this.decidedByUserId,
+                this.decidedAt,
+                this.decisionNotes
+        );
     }
 
     public UUID getId() {
@@ -119,6 +171,30 @@ public class PlaceMediaReportJpaEntity {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public UUID getDecidedByUserId() {
+        return decidedByUserId;
+    }
+
+    public void setDecidedByUserId(UUID decidedByUserId) {
+        this.decidedByUserId = decidedByUserId;
+    }
+
+    public Instant getDecidedAt() {
+        return decidedAt;
+    }
+
+    public void setDecidedAt(Instant decidedAt) {
+        this.decidedAt = decidedAt;
+    }
+
+    public String getDecisionNotes() {
+        return decisionNotes;
+    }
+
+    public void setDecisionNotes(String decisionNotes) {
+        this.decisionNotes = decisionNotes;
     }
 
     @Override
