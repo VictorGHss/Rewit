@@ -14,13 +14,32 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integração de Storage: SeaweedFS Real (Step 21.0 - Requisito 28)")
 class SeaweedStorageIntegrationTest {
 
+    private static final String STORAGE_ENDPOINT = System.getProperty("rewit.storage.endpoint",
+            System.getenv().getOrDefault("STORAGE_ENDPOINT", "http://localhost:8333"));
+    private static final String STORAGE_BUCKET = System.getProperty("rewit.storage.bucket",
+            System.getenv().getOrDefault("STORAGE_BUCKET", "rewit-local"));
+    private static final String ACCESS_KEY = System.getProperty("rewit.storage.access-key",
+            System.getenv().getOrDefault("STORAGE_ACCESS_KEY", "change-me"));
+    private static final String SECRET_KEY = System.getProperty("rewit.storage.secret-key",
+            System.getenv().getOrDefault("STORAGE_SECRET_KEY", "change-me"));
+
     // JUnit cria uma instância por teste, então o adaptador continua isolado por método
     private final MinioStorageAdapter storageAdapter = new MinioStorageAdapter(
             MinioClient.builder()
-                    .endpoint("http://localhost:8333")
-                    .credentials("change-me", "change-me")
+                    .endpoint(STORAGE_ENDPOINT)
+                    .credentials(ACCESS_KEY, SECRET_KEY)
                     .build(),
-            "rewit-local");
+            STORAGE_BUCKET);
+
+    @org.junit.jupiter.api.BeforeEach
+    void checkStorageAvailability() {
+        try {
+            storageAdapter.exists("health-check-" + UUID.randomUUID());
+        } catch (Exception e) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false,
+                    "SeaweedFS/S3 storage não acessível em " + STORAGE_ENDPOINT + ": " + e.getMessage());
+        }
+    }
 
     @Test
     @DisplayName("Ciclo completo de put, get, exists e delete contra SeaweedFS local")

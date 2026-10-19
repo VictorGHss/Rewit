@@ -181,13 +181,17 @@ class DatabaseDomainIntegrityTest {
 
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) " +
-                            "VALUES (?, 'Local A', ?, 'CAFE', 'Rua A', 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))")) {
+                            "VALUES (?, ?, ?, 'CAFE', ?, 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))")) {
                 ps.setObject(1, placeTargetId);
-                ps.setString(2, "slug-" + placeTargetId);
+                ps.setString(2, "Local A " + placeTargetId);
+                ps.setString(3, "slug-" + placeTargetId);
+                ps.setString(4, "Rua A " + placeTargetId);
                 ps.executeUpdate();
 
                 ps.setObject(1, anotherPlaceTargetId);
-                ps.setString(2, "slug-" + anotherPlaceTargetId);
+                ps.setString(2, "Local B " + anotherPlaceTargetId);
+                ps.setString(3, "slug-" + anotherPlaceTargetId);
+                ps.setString(4, "Rua B " + anotherPlaceTargetId);
                 ps.executeUpdate();
             }
 
@@ -293,9 +297,11 @@ class DatabaseDomainIntegrityTest {
             }
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) " +
-                            "VALUES (?, 'Local V', ?, 'CAFE', 'Rua V', 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))")) {
+                            "VALUES (?, ?, ?, 'CAFE', ?, 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))")) {
                 ps.setObject(1, placeTargetId);
-                ps.setString(2, "slug-" + placeTargetId);
+                ps.setString(2, "Local V " + placeTargetId);
+                ps.setString(3, "slug-" + placeTargetId);
+                ps.setString(4, "Rua V " + placeTargetId);
                 ps.executeUpdate();
             }
 

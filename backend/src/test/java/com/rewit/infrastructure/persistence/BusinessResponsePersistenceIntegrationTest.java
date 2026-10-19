@@ -1354,8 +1354,8 @@ class BusinessResponsePersistenceIntegrationTest {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update("INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", id);
         jdbcTemplate.update("INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) "
-                + "VALUES (?, 'Local C11', ?, 'CAFE', 'Rua A', 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))",
-                id, "c11-" + id);
+                + "VALUES (?, ?, ?, 'CAFE', ?, 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))",
+                id, "Local C11 " + id, "c11-" + id, "Rua A, " + id.toString().substring(0, 8));
         return id;
     }
 

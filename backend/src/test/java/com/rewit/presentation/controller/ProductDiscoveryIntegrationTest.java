@@ -385,8 +385,9 @@ class ProductDiscoveryIntegrationTest {
     }
 
     private UUID place(String status) {
-        UUID id = placeRepository.save(new Place(null, "Mercado " + status + " " + suffix, "mercado-" + UUID.randomUUID(),
-                "MERCADO", "Descrição", "Rua Produto, 1", "Curitiba", "PR", "BR", -25.43, -49.27, 50, "USER", false,
+        String slug = "mercado-" + UUID.randomUUID();
+        UUID id = placeRepository.save(new Place(null, "Mercado " + status + " " + suffix, slug,
+                "MERCADO", "Descrição", "Rua Produto, " + slug, "Curitiba", "PR", "BR", -25.43, -49.27, 50, "USER", false,
                 null, status)).getId();
         createdTargets.add(id);
         return id;
