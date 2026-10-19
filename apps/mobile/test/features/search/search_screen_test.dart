@@ -48,6 +48,7 @@ class StubPlaceRepository implements PlaceRepository {
     required String placeId,
     required Uint8List fileBytes,
     required String filename,
+    String? idempotencyKey,
   }) async {
     uploadedPlacePhotos.add(filename);
     return '/api/v1/places/$placeId/media/media-${uploadedPlacePhotos.length}';

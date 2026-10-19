@@ -424,6 +424,36 @@ void main() {
 
       expect(innerClient.capturedRequest?.method, 'POST');
       expect(innerClient.capturedRequest?.url.path, '/api/v1/places/$canonicalUuid/media');
+      expect(innerClient.capturedRequest?.headers.containsKey('Idempotency-Key'), isFalse);
+      expect(url, '/api/v1/places/$canonicalUuid/media/media-1');
+    });
+
+    test('uploadPlacePhoto envia header Idempotency-Key para o backend quando fornecido', () async {
+      const canonicalUuid = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': 'media-1',
+          'placeId': canonicalUuid,
+          'url': '/api/v1/places/$canonicalUuid/media/media-1',
+          'mediaType': 'IMAGE',
+          'mimeType': 'image/jpeg',
+          'sizeBytes': 1024,
+          'status': 'ACTIVE',
+          'createdAt': '2026-10-19T12:00:00Z',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      final url = await repository.uploadPlacePhoto(
+        placeId: canonicalUuid,
+        fileBytes: Uint8List.fromList([1, 2, 3, 4]),
+        filename: 'fachada.jpg',
+        idempotencyKey: 'idem-test-key-42',
+      );
+
+      expect(innerClient.capturedRequest?.method, 'POST');
+      expect(innerClient.capturedRequest?.headers['Idempotency-Key'], 'idem-test-key-42');
       expect(url, '/api/v1/places/$canonicalUuid/media/media-1');
     });
   });

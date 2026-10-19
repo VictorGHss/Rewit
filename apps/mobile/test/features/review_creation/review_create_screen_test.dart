@@ -62,6 +62,7 @@ class MockPlaceRepositoryForReview implements PlaceRepository {
     required String placeId,
     required Uint8List fileBytes,
     required String filename,
+    String? idempotencyKey,
   }) async {
     uploadPhotoCallCount++;
     if (uploadPhotoExceptionToThrow != null) {
