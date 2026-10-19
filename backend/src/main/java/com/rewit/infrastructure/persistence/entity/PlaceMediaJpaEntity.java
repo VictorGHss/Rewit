@@ -71,6 +71,9 @@ public class PlaceMediaJpaEntity {
     @Column(name = "removed_at")
     private Instant removedAt;
 
+    @Column(name = "removal_source", length = 32)
+    private String removalSource;
+
     public PlaceMediaJpaEntity() {
     }
 
@@ -80,7 +83,7 @@ public class PlaceMediaJpaEntity {
                                Boolean isPrimary, String idempotencyKey, String contentSha256,
                                Instant createdAt, Instant updatedAt) {
         this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
-                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, null, null);
+                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, null, null, null);
     }
 
     public PlaceMediaJpaEntity(UUID id, UUID placeId, UUID userId, String objectKey,
@@ -89,7 +92,7 @@ public class PlaceMediaJpaEntity {
                                Boolean isPrimary, String idempotencyKey, String contentSha256,
                                Instant createdAt, Instant updatedAt, Instant purgedAt) {
         this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
-                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, purgedAt, null);
+                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, purgedAt, null, null);
     }
 
     public PlaceMediaJpaEntity(UUID id, UUID placeId, UUID userId, String objectKey,
@@ -97,6 +100,16 @@ public class PlaceMediaJpaEntity {
                                Integer width, Integer height, String status,
                                Boolean isPrimary, String idempotencyKey, String contentSha256,
                                Instant createdAt, Instant updatedAt, Instant purgedAt, Instant removedAt) {
+        this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
+                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, purgedAt, removedAt, null);
+    }
+
+    public PlaceMediaJpaEntity(UUID id, UUID placeId, UUID userId, String objectKey,
+                               String mediaType, String mimeType, Long sizeBytes,
+                               Integer width, Integer height, String status,
+                               Boolean isPrimary, String idempotencyKey, String contentSha256,
+                               Instant createdAt, Instant updatedAt, Instant purgedAt, Instant removedAt,
+                               String removalSource) {
         this.id = id;
         this.placeId = placeId;
         this.userId = userId;
@@ -114,6 +127,7 @@ public class PlaceMediaJpaEntity {
         this.updatedAt = updatedAt;
         this.purgedAt = purgedAt;
         this.removedAt = removedAt;
+        this.removalSource = removalSource;
     }
 
     public static PlaceMediaJpaEntity fromDomain(PlaceMedia domain) {
@@ -134,7 +148,8 @@ public class PlaceMediaJpaEntity {
                 domain.getCreatedAt(),
                 domain.getUpdatedAt(),
                 domain.getPurgedAt(),
-                domain.getRemovedAt()
+                domain.getRemovedAt(),
+                domain.getRemovalSource() != null ? domain.getRemovalSource().name() : null
         );
     }
 
@@ -160,7 +175,8 @@ public class PlaceMediaJpaEntity {
                 this.createdAt,
                 this.updatedAt,
                 this.purgedAt,
-                this.removedAt
+                this.removedAt,
+                this.removalSource != null ? com.rewit.domain.enums.RemovalSource.valueOf(this.removalSource) : null
         );
     }
 
@@ -298,6 +314,14 @@ public class PlaceMediaJpaEntity {
 
     public void setRemovedAt(Instant removedAt) {
         this.removedAt = removedAt;
+    }
+
+    public String getRemovalSource() {
+        return removalSource;
+    }
+
+    public void setRemovalSource(String removalSource) {
+        this.removalSource = removalSource;
     }
 
     @Override

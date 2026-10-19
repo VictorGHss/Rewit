@@ -7,6 +7,7 @@ public enum PlaceMediaModerationAction {
     REMOVE,
     RESTORE,
     ACCEPT_REPORT,
-    REJECT_REPORT
+    REJECT_REPORT,
+    AUTHOR_REMOVE
 }
 

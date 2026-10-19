@@ -2,6 +2,7 @@ package com.rewit.domain.model;
 
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.PlaceMediaStatus;
+import com.rewit.domain.enums.RemovalSource;
 import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.enums.ReviewMediaType;
 import org.springframework.http.HttpStatus;
@@ -36,6 +37,7 @@ public class PlaceMedia {
     private Instant updatedAt;
     private Instant purgedAt;
     private Instant removedAt;
+    private RemovalSource removalSource;
 
     public PlaceMedia(UUID id, UUID placeId, UUID userId, String objectKey,
                       ReviewMediaType mediaType, String mimeType, long sizeBytes,
@@ -92,6 +94,16 @@ public class PlaceMedia {
                       Integer width, Integer height, PlaceMediaStatus status,
                       boolean isPrimary, String idempotencyKey, String contentSha256,
                       Instant createdAt, Instant updatedAt, Instant purgedAt, Instant removedAt) {
+        this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
+                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, purgedAt, removedAt, null);
+    }
+
+    public PlaceMedia(UUID id, UUID placeId, UUID userId, String objectKey,
+                      ReviewMediaType mediaType, String mimeType, long sizeBytes,
+                      Integer width, Integer height, PlaceMediaStatus status,
+                      boolean isPrimary, String idempotencyKey, String contentSha256,
+                      Instant createdAt, Instant updatedAt, Instant purgedAt, Instant removedAt,
+                      RemovalSource removalSource) {
         if (placeId == null) {
             throw new BusinessException("O local é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_PLACE_ID");
         }
@@ -149,6 +161,7 @@ public class PlaceMedia {
         this.updatedAt = updatedAt != null ? updatedAt : Instant.now();
         this.purgedAt = purgedAt;
         this.removedAt = removedAt;
+        this.removalSource = removalSource;
     }
 
     private static PlaceMediaStatus fromLegacyStatus(ReviewMediaStatus legacy) {
@@ -167,13 +180,34 @@ public class PlaceMedia {
     }
 
     public void markRemoved() {
-        markRemoved(Instant.now());
+        markRemovedByModerator(Instant.now());
     }
 
     public void markRemoved(Instant when) {
+        markRemovedByModerator(when);
+    }
+
+    public void markRemovedByAuthor() {
+        markRemovedByAuthor(Instant.now());
+    }
+
+    public void markRemovedByAuthor(Instant when) {
         this.status = PlaceMediaStatus.REMOVED;
         this.isPrimary = false;
         this.removedAt = when != null ? when : Instant.now();
+        this.removalSource = RemovalSource.AUTHOR;
+        this.updatedAt = this.removedAt;
+    }
+
+    public void markRemovedByModerator() {
+        markRemovedByModerator(Instant.now());
+    }
+
+    public void markRemovedByModerator(Instant when) {
+        this.status = PlaceMediaStatus.REMOVED;
+        this.isPrimary = false;
+        this.removedAt = when != null ? when : Instant.now();
+        this.removalSource = RemovalSource.MODERATOR;
         this.updatedAt = this.removedAt;
     }
 
@@ -186,6 +220,7 @@ public class PlaceMedia {
     public void markActive() {
         this.status = PlaceMediaStatus.ACTIVE;
         this.removedAt = null;
+        this.removalSource = null;
         this.updatedAt = Instant.now();
     }
 
@@ -291,6 +326,10 @@ public class PlaceMedia {
 
     public Instant getRemovedAt() {
         return removedAt;
+    }
+
+    public RemovalSource getRemovalSource() {
+        return removalSource;
     }
 
     @Override
