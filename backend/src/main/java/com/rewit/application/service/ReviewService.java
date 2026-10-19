@@ -282,7 +282,7 @@ public class ReviewService {
         }
 
         // 8. Atualização determinística e consistente de reputação do autor (Step 23.1)
-        if (reputationService != null) {
+        if (!savedReview.isAnonymous() && reputationService != null) {
             reputationService.recalculateAndSave(author.getId());
         }
 

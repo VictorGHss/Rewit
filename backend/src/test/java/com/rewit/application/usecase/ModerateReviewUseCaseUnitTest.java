@@ -520,7 +520,7 @@ class ModerateReviewUseCaseUnitTest {
     }
 
     @Test
-    @DisplayName("20. Recálculo factual de reputação é executado para o autor da avaliação")
+    @DisplayName("20. Recálculo factual de reputação é executado para o autor da avaliação identificada")
     void shouldRecalculateUserReputation() {
         Review review = createReview(ReviewStatus.ACTIVE);
         when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
@@ -533,6 +533,40 @@ class ModerateReviewUseCaseUnitTest {
         moderateReviewUseCase.execute(command);
 
         verify(reputationService).recalculateAndSave(authorUserId);
+    }
+
+    @Test
+    @DisplayName("20.1 Moderar avaliação anônima (REMOVE ou RESTORE) não recalcula reputação do autor")
+    void shouldNotRecalculateUserReputationWhenModeratingAnonymousReview() {
+        Review anonReview = new Review(
+                reviewId,
+                authorUserId,
+                null,
+                "Texto de avaliação anônima",
+                true,
+                false,
+                ReviewStatus.UNDER_REVIEW,
+                "PUBLIC",
+                null,
+                null,
+                null,
+                now.minusSeconds(3600),
+                now.minusSeconds(3600)
+        );
+        anonReview.addTarget(new ReviewTarget(UUID.randomUUID(), reviewId, targetAId, new BigDecimal("4.0"), "Target A", now.minusSeconds(3600)));
+
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(anonReview));
+        when(reportRepository.findPendingByReviewId(reviewId)).thenReturn(List.of());
+
+        ModerateReviewCommand restoreCommand = new ModerateReviewCommand(
+                reviewId, moderatorUserId, ModerationAction.RESTORE_REVIEW, "FALSE_POSITIVE", "Justificativa válida com mais de quinze caracteres.", now
+        );
+
+        moderateReviewUseCase.execute(restoreCommand);
+
+        assertEquals(ReviewStatus.ACTIVE, anonReview.getStatus());
+        verify(rateableTargetStatsRepository).recalculateAndSave(targetAId);
+        verifyNoInteractions(reputationService);
     }
 
     @Test

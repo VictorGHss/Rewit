@@ -74,7 +74,7 @@ public class ReviewHelpfulService {
         if (added && notificationService != null) {
             notificationService.notifyReviewHelpful(review.getId(), review.getUserId());
         }
-        if (reputationService != null) {
+        if (added && !review.isAnonymous() && reputationService != null) {
             reputationService.recalculateAndSave(review.getUserId());
         }
         long count = reviewReactionRepository.countHelpful(review.getId());
@@ -87,8 +87,8 @@ public class ReviewHelpfulService {
     @Transactional
     public HelpfulResult removeHelpful(UUID reviewId, UUID requesterUserId) {
         Review review = validateAndGetReview(reviewId, requesterUserId);
-        reviewReactionRepository.removeHelpful(review.getId(), requesterUserId);
-        if (reputationService != null) {
+        boolean removed = reviewReactionRepository.removeHelpful(review.getId(), requesterUserId);
+        if (removed && !review.isAnonymous() && reputationService != null) {
             reputationService.recalculateAndSave(review.getUserId());
         }
         long count = reviewReactionRepository.countHelpful(review.getId());

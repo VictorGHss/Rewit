@@ -55,7 +55,9 @@ class ReviewServiceTest {
     @Mock
     private RateableTargetStatsRepository rateableTargetStatsRepository;
 
-    @InjectMocks
+    @Mock
+    private ReputationService reputationService;
+
     private ReviewService reviewService;
 
     private User activeUser;
@@ -65,6 +67,19 @@ class ReviewServiceTest {
     void setUp() {
         authorUserId = UUID.randomUUID();
         activeUser = new User(authorUserId, "user@rewit.com", "hash123", AuthProvider.LOCAL, null);
+        reviewService = new ReviewService(
+                reviewRepository,
+                reviewTargetRepository,
+                userRepository,
+                rateableTargetRepository,
+                placeRepository,
+                null,
+                null,
+                rateableTargetStatsRepository,
+                null,
+                null,
+                reputationService
+        );
     }
 
     @Test
@@ -166,6 +181,7 @@ class ReviewServiceTest {
 
         verify(reviewRepository, times(1)).save(any(Review.class));
         verify(reviewTargetRepository, times(1)).saveAll(anyList());
+        verify(reputationService).recalculateAndSave(authorUserId);
     }
 
     @Test
@@ -276,7 +292,7 @@ class ReviewServiceTest {
     }
 
     @Test
-    @DisplayName("9. Propagação correta de anonymous preservando autor")
+    @DisplayName("9. Propagação correta de anonymous preservando autor sem recalcular reputação pública")
     void shouldPropagateAnonymousPreservingInternalAuthor() {
         when(userRepository.findById(authorUserId)).thenReturn(Optional.of(activeUser));
 
@@ -303,6 +319,7 @@ class ReviewServiceTest {
         verify(reviewRepository).save(captor.capture());
         assertTrue(captor.getValue().isAnonymous());
         assertEquals(authorUserId, captor.getValue().getUserId());
+        verifyNoInteractions(reputationService);
     }
 
     @Test

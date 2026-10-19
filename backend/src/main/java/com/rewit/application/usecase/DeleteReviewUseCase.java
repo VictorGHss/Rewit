@@ -106,8 +106,10 @@ public class DeleteReviewUseCase {
                 .sorted()
                 .forEach(rateableTargetStatsRepository::recalculateAndSave);
 
-        // 7. Recálculo da reputação do autor (expurga a review e votos úteis do saldo ativo)
-        reputationService.recalculateAndSave(review.getUserId());
+        // 7. Recálculo da reputação do autor (expurga a review e votos úteis do saldo ativo quando não anônima)
+        if (!review.isAnonymous()) {
+            reputationService.recalculateAndSave(review.getUserId());
+        }
 
         // 8. Marcação lógica de mídia associada como REMOVED (sem hard delete de blobs no storage)
         if (reviewMediaRepository != null) {

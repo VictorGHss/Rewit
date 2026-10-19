@@ -130,7 +130,7 @@ public class ReportService {
         if (pendingCount >= REPORT_THRESHOLD_FOR_UNDER_REVIEW && review.getStatus() == ReviewStatus.ACTIVE) {
             review.markUnderReview();
             reviewRepository.save(review);
-            if (reputationService != null) {
+            if (!review.isAnonymous() && reputationService != null) {
                 reputationService.recalculateAndSave(review.getUserId());
             }
         }
