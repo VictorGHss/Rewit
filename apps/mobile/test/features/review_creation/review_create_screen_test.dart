@@ -26,9 +26,14 @@ class MockPlaceRepositoryForReview implements PlaceRepository {
   CreatePlaceInput? capturedInput;
   PlaceDetail? placeToReturn;
   Exception? exceptionToThrow;
+  Exception? uploadPhotoExceptionToThrow;
+  int createPlaceCallCount = 0;
+  int uploadPhotoCallCount = 0;
+  final List<String> uploadedPlacePhotos = [];
 
   @override
   Future<PlaceDetail> createPlace(CreatePlaceInput input) async {
+    createPlaceCallCount++;
     capturedInput = input;
     if (exceptionToThrow != null) {
       throw exceptionToThrow!;
@@ -40,16 +45,30 @@ class MockPlaceRepositoryForReview implements PlaceRepository {
           slug: 'pastel-da-dona-ana',
           category: 'GERAL',
           addressText: input.addressText,
-          city: 'Não informada',
-          state: 'BR',
+          city: null,
+          state: null,
           country: 'BR',
-          latitude: 0.0,
-          longitude: 0.0,
+          latitude: null,
+          longitude: null,
           validationRadiusMeters: 100,
           origin: 'MANUAL',
           isVerified: false,
           status: 'ACTIVE',
         );
+  }
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+  }) async {
+    uploadPhotoCallCount++;
+    if (uploadPhotoExceptionToThrow != null) {
+      throw uploadPhotoExceptionToThrow!;
+    }
+    uploadedPlacePhotos.add(filename);
+    return '/api/v1/places/$placeId/media/media-${uploadedPlacePhotos.length}';
   }
 
   @override
@@ -1167,9 +1186,10 @@ void main() {
           await tester.tap(modalSubmitBtn);
           await tester.pumpAndSettle();
 
-          // Verifica que o local foi criado no backend com nome e endereço
+          // Verifica que o local foi criado no backend com nome e endereço e que a foto foi enviada para a mídia do local
           expect(placeRepo.capturedInput?.name, 'Pastel da Dona Ana');
           expect(placeRepo.capturedInput?.addressText, 'Av. Brasil, 500 - Centro');
+          expect(placeRepo.uploadedPlacePhotos, ['pastel_dona_ana.jpg']);
 
           // 6. Verifica que na tela de criação o nome legível é exibido e que o UUID NÃO aparece como nome
           const canonicalUuid = 'd4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70';
@@ -1186,12 +1206,12 @@ void main() {
           await tester.tap(publishBtn);
           await tester.pumpAndSettle();
 
-          // 8. Verifica que o payload enviado ao backend contém o UUID canônico e que a foto foi enviada
+          // 8. Verifica que o payload enviado ao backend contém o UUID canônico e que a foto do local não foi duplicada como mídia da avaliação
           expect(repository.callCount, 1);
           expect(repository.capturedInput?.targets.first.rateableTargetId, canonicalUuid);
           expect(repository.capturedInput?.contextPlaceId, canonicalUuid);
-          expect(mediaRepo.uploadedFilenames, ['pastel_dona_ana.jpg']);
-          expect(find.text('Avaliação publicada com 1 foto(s) anexada(s)!'), findsOneWidget);
+          expect(mediaRepo.uploadedFilenames, isEmpty);
+          expect(find.text('Avaliação publicada com sucesso!'), findsOneWidget);
         },
       );
 
@@ -1251,6 +1271,81 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(find.text('Este local já está cadastrado no catálogo.'), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        '3. trata falha parcial no upload da foto do local: preserva local criado e permite reenviar apenas a foto sem recriar o local',
+        (tester) async {
+          tester.view.physicalSize = const Size(800, 2400);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+
+          final tempDir = Directory.systemTemp.createTempSync('rewit_s3a_retry_');
+          final fakePhoto = File('${tempDir.path}/pastel_retry.jpg');
+          fakePhoto.writeAsBytesSync(List<int>.filled(1024, 9));
+          addTearDown(() {
+            if (tempDir.existsSync()) {
+              tempDir.deleteSync(recursive: true);
+            }
+          });
+
+          final searchRepo = MockSearchRepository()..itemsToReturn = [];
+          final placeRepo = MockPlaceRepositoryForReview()
+            ..uploadPhotoExceptionToThrow = const ApiException(
+              ProblemDetail(
+                type: 'https://api.rewit.com/errors/internal',
+                title: 'Erro temporário no upload',
+                status: 500,
+                detail: 'Falha temporária ao salvar a foto do local.',
+                code: 'MEDIA_UPLOAD_ERROR',
+              ),
+            );
+
+          await tester.pumpWidget(buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+            placeRepository: placeRepo,
+            onPickManualPlacePhoto: (ImageSource source) async => fakePhoto,
+          ));
+
+          await tester.enterText(find.widgetWithText(TextFormField, 'O que você quer avaliar? *'), 'Pastel da Dona Ana');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pumpAndSettle();
+
+          await tester.tap(find.byKey(const Key('register_manual_place_button')));
+          await tester.pumpAndSettle();
+
+          await tester.enterText(
+            find.byKey(const Key('manual_place_address_field')),
+            'Av. Brasil, 500 - Centro',
+          );
+          await tester.tap(find.byKey(const Key('manual_place_camera_button')));
+          await tester.pumpAndSettle();
+
+          final modalSubmitBtn = find.byKey(const Key('manual_place_submit_button'));
+          await tester.ensureVisible(modalSubmitBtn);
+          await tester.tap(modalSubmitBtn);
+          await tester.pumpAndSettle();
+
+          // Na primeira tentativa: local criado (1x), upload da foto falhou (1x), modal continua aberto com aviso de recuperação
+          expect(placeRepo.createPlaceCallCount, 1);
+          expect(placeRepo.uploadPhotoCallCount, 1);
+          expect(find.text('Falha temporária ao salvar a foto do local.'), findsOneWidget);
+          expect(find.text('Reenviar Fotografia e Concluir'), findsOneWidget);
+
+          // Corrige a falha de rede e clica em "Reenviar Fotografia e Concluir"
+          placeRepo.uploadPhotoExceptionToThrow = null;
+          await tester.ensureVisible(modalSubmitBtn);
+          await tester.tap(modalSubmitBtn);
+          await tester.pumpAndSettle();
+
+          // O local NÃO foi recriado (continua 1), apenas o upload da foto foi reexecutado (2) e o modal fechou vinculando o local
+          expect(placeRepo.createPlaceCallCount, 1);
+          expect(placeRepo.uploadPhotoCallCount, 2);
+          expect(placeRepo.uploadedPlacePhotos, ['pastel_retry.jpg']);
+          expect(find.text('Estabelecimento vinculado: Pastel da Dona Ana'), findsOneWidget);
         },
       );
     });

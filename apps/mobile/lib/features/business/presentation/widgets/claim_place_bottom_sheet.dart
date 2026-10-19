@@ -7,8 +7,8 @@ import '../../domain/repositories/business_repository.dart';
 class ClaimPlaceBottomSheet extends StatefulWidget {
   final String placeId;
   final String placeName;
-  final String city;
-  final String state;
+  final String? city;
+  final String? state;
   final BusinessRepository repository;
   final VoidCallback? onClaimSubmitted;
 
@@ -16,8 +16,8 @@ class ClaimPlaceBottomSheet extends StatefulWidget {
     super.key,
     required this.placeId,
     required this.placeName,
-    required this.city,
-    required this.state,
+    this.city,
+    this.state,
     required this.repository,
     this.onClaimSubmitted,
   });
@@ -26,8 +26,8 @@ class ClaimPlaceBottomSheet extends StatefulWidget {
     BuildContext context, {
     required String placeId,
     required String placeName,
-    required String city,
-    required String state,
+    String? city,
+    String? state,
     required BusinessRepository repository,
   }) {
     return showModalBottomSheet<bool>(
@@ -195,12 +195,26 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                           ),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          '${widget.placeName} (${widget.city}/${widget.state})',
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurface.withAlpha(160),
-                            fontSize: 13,
-                          ),
+                        Builder(
+                          builder: (_) {
+                            final cleanCity = widget.city?.trim() ?? '';
+                            final cleanState = widget.state?.trim() ?? '';
+                            final locationSuffix =
+                                cleanCity.isNotEmpty && cleanState.isNotEmpty
+                                ? ' ($cleanCity/$cleanState)'
+                                : cleanCity.isNotEmpty
+                                ? ' ($cleanCity)'
+                                : cleanState.isNotEmpty
+                                ? ' ($cleanState)'
+                                : '';
+                            return Text(
+                              '${widget.placeName}$locationSuffix',
+                              style: TextStyle(
+                                color: theme.colorScheme.onSurface.withAlpha(160),
+                                fontSize: 13,
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ),

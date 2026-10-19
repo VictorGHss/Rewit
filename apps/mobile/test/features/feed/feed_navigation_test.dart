@@ -192,6 +192,14 @@ class MockPlaceRepo implements PlaceRepository {
       throw UnimplementedError();
 
   @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
   Future<PlaceDetail> getPlaceById(String id) async => const PlaceDetail(
         id: 'place-burgers',
         name: 'Burger Place',

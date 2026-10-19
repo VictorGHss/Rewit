@@ -8,15 +8,16 @@ class PlaceDetail {
   final String addressText;
   final String? streetNumber;
   final String? neighborhood;
-  final String city;
-  final String state;
+  final String? city;
+  final String? state;
   final String? country;
-  final double latitude;
-  final double longitude;
+  final double? latitude;
+  final double? longitude;
   final int validationRadiusMeters;
   final String origin;
   final bool isVerified;
   final String status;
+  final String? photoUrl;
 
   const PlaceDetail({
     required this.id,
@@ -27,29 +28,63 @@ class PlaceDetail {
     required this.addressText,
     this.streetNumber,
     this.neighborhood,
-    required this.city,
-    required this.state,
+    this.city,
+    this.state,
     this.country,
-    required this.latitude,
-    required this.longitude,
+    this.latitude,
+    this.longitude,
     required this.validationRadiusMeters,
     required this.origin,
     required this.isVerified,
     required this.status,
+    this.photoUrl,
   });
+
+  bool get hasCoordinates => latitude != null && longitude != null;
+
+  PlaceDetail copyWith({String? photoUrl}) {
+    return PlaceDetail(
+      id: id,
+      name: name,
+      slug: slug,
+      category: category,
+      description: description,
+      addressText: addressText,
+      streetNumber: streetNumber,
+      neighborhood: neighborhood,
+      city: city,
+      state: state,
+      country: country,
+      latitude: latitude,
+      longitude: longitude,
+      validationRadiusMeters: validationRadiusMeters,
+      origin: origin,
+      isVerified: isVerified,
+      status: status,
+      photoUrl: photoUrl ?? this.photoUrl,
+    );
+  }
 
   /// Endereço formatado e legível para exibição ao usuário.
   String get formattedAddress {
     final buffer = StringBuffer(addressText);
     if (streetNumber != null && streetNumber!.trim().isNotEmpty) {
-      buffer.write(', $streetNumber');
+      buffer.write(', ${streetNumber!.trim()}');
     }
     if (neighborhood != null && neighborhood!.trim().isNotEmpty) {
-      buffer.write(' - $neighborhood');
+      buffer.write(' - ${neighborhood!.trim()}');
     }
-    buffer.write(' - $city, $state');
+    final cleanCity = city?.trim() ?? '';
+    final cleanState = state?.trim() ?? '';
+    if (cleanCity.isNotEmpty && cleanState.isNotEmpty) {
+      buffer.write(' - $cleanCity, $cleanState');
+    } else if (cleanCity.isNotEmpty) {
+      buffer.write(' - $cleanCity');
+    } else if (cleanState.isNotEmpty) {
+      buffer.write(' - $cleanState');
+    }
     if (country != null && country!.trim().isNotEmpty && country != 'BR') {
-      buffer.write(' ($country)');
+      buffer.write(' (${country!.trim()})');
     }
     return buffer.toString();
   }

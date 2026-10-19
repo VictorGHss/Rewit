@@ -22,8 +22,8 @@ public class Place extends RateableTarget {
     private final String city;
     private final String state;
     private final String country;
-    private final double latitude;
-    private final double longitude;
+    private final Double latitude;
+    private final Double longitude;
     private final int validationRadiusMeters;
     private final String origin;
     private boolean isVerified;
@@ -34,7 +34,7 @@ public class Place extends RateableTarget {
     public Place(UUID id, String name, String slug, String category, String description,
                  String addressText, String streetNumber, String neighborhood,
                  String city, String state, String country,
-                 double latitude, double longitude, int validationRadiusMeters,
+                 Double latitude, Double longitude, int validationRadiusMeters,
                  String origin, boolean isVerified, UUID claimedByBusinessId, String status) {
         super(id, TargetType.PLACE);
 
@@ -44,7 +44,10 @@ public class Place extends RateableTarget {
         if (slug == null || slug.isBlank()) {
             throw new BusinessException("O slug do local é obrigatório", "INVALID_PLACE_SLUG");
         }
-        if (latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+        if ((latitude == null) != (longitude == null)) {
+            throw new BusinessException("Latitude e longitude devem ser ambas informadas ou ambas nulas", "INVALID_COORDINATES");
+        }
+        if (latitude != null && (latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0)) {
             throw new BusinessException("Coordenadas geográficas fora do elipsoide WGS 84", "INVALID_COORDINATES");
         }
         if (validationRadiusMeters <= 0) {
@@ -58,9 +61,9 @@ public class Place extends RateableTarget {
         this.addressText = addressText != null ? addressText.trim() : "";
         this.streetNumber = streetNumber != null ? streetNumber.trim() : null;
         this.neighborhood = neighborhood != null ? neighborhood.trim() : null;
-        this.city = city != null ? city.trim() : "";
-        this.state = state != null ? state.trim() : "";
-        this.country = country != null ? country.trim() : "BR";
+        this.city = (city != null && !city.isBlank()) ? city.trim() : null;
+        this.state = (state != null && !state.isBlank()) ? state.trim() : null;
+        this.country = (country != null && !country.isBlank()) ? country.trim() : "BR";
         this.latitude = latitude;
         this.longitude = longitude;
         this.validationRadiusMeters = validationRadiusMeters;
@@ -76,11 +79,15 @@ public class Place extends RateableTarget {
      */
     public Place(UUID id, String name, String slug, String category, String description,
                  String addressText, String city, String state, String country,
-                 double latitude, double longitude, int validationRadiusMeters,
+                 Double latitude, Double longitude, int validationRadiusMeters,
                  String origin, boolean isVerified, UUID claimedByBusinessId, String status) {
         this(id, name, slug, category, description, addressText, null, null,
                 city, state, country, latitude, longitude, validationRadiusMeters,
                 origin, isVerified, claimedByBusinessId, status);
+    }
+
+    public boolean hasCoordinates() {
+        return latitude != null && longitude != null;
     }
 
     public String getName() {
@@ -123,11 +130,11 @@ public class Place extends RateableTarget {
         return country;
     }
 
-    public double getLatitude() {
+    public Double getLatitude() {
         return latitude;
     }
 
-    public double getLongitude() {
+    public Double getLongitude() {
         return longitude;
     }
 

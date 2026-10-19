@@ -20,8 +20,10 @@ class ManualPlaceRegistrationResult {
 /// Modal para cadastro manual de um estabelecimento quando ele não é encontrado na busca.
 ///
 /// Coleta nome, endereço e fotografia obrigatória, registra o local no backend
-/// (`POST /api/v1/places`) e retorna o [PlaceDetail] com seu UUID canônico e a fotografia
-/// para início imediato da avaliação.
+/// (`POST /api/v1/places`), vincula a fotografia diretamente ao local
+/// (`POST /api/v1/places/{placeId}/media`) e retorna o [PlaceDetail] com seu UUID canônico.
+/// Se a criação do local funcionar e o upload da fotografia falhar, preserva o local
+/// criado em memória para permitir o reenvio apenas da fotografia sem criar duplicatas.
 class ManualPlaceRegistrationSheet extends StatefulWidget {
   final PlaceRepository placeRepository;
   final String initialName;
@@ -83,6 +85,7 @@ class _ManualPlaceRegistrationSheetState
 
   File? _selectedPhoto;
   Uint8List? _selectedPhotoBytes;
+  PlaceDetail? _pendingCreatedPlace;
   bool _isSubmitting = false;
   bool _isPickingPhoto = false;
   String? _errorMessage;
@@ -199,30 +202,33 @@ class _ManualPlaceRegistrationSheetState
     final name = _nameController.text.trim();
     final address = _addressController.text.trim();
 
-    if (name.isEmpty) {
-      setState(() {
-        _errorMessage = 'Informe o nome do local.';
-      });
-      return;
+    if (_pendingCreatedPlace == null) {
+      if (name.isEmpty) {
+        setState(() {
+          _errorMessage = 'Informe o nome do local.';
+        });
+        return;
+      }
+      if (name.length > 255) {
+        setState(() {
+          _errorMessage = 'O nome do local deve ter no máximo 255 caracteres.';
+        });
+        return;
+      }
+      if (address.isEmpty) {
+        setState(() {
+          _errorMessage = 'Informe o endereço do local.';
+        });
+        return;
+      }
+      if (address.length > 500) {
+        setState(() {
+          _errorMessage = 'O endereço deve ter no máximo 500 caracteres.';
+        });
+        return;
+      }
     }
-    if (name.length > 255) {
-      setState(() {
-        _errorMessage = 'O nome do local deve ter no máximo 255 caracteres.';
-      });
-      return;
-    }
-    if (address.isEmpty) {
-      setState(() {
-        _errorMessage = 'Informe o endereço do local.';
-      });
-      return;
-    }
-    if (address.length > 500) {
-      setState(() {
-        _errorMessage = 'O endereço deve ter no máximo 500 caracteres.';
-      });
-      return;
-    }
+
     if (_selectedPhoto == null) {
       setState(() {
         _errorMessage =
@@ -239,32 +245,53 @@ class _ManualPlaceRegistrationSheetState
       return;
     }
 
+    Uint8List photoBytes;
+    try {
+      photoBytes = _selectedPhotoBytes ?? _selectedPhoto!.readAsBytesSync();
+      _selectedPhotoBytes = photoBytes;
+    } on FileSystemException {
+      setState(() {
+        _errorMessage = 'Não foi possível ler o arquivo de fotografia selecionado.';
+      });
+      return;
+    }
+
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
     });
 
     try {
-      final createdPlace = await widget.placeRepository.createPlace(
-        CreatePlaceInput(
-          name: name,
-          addressText: address,
-          latitude: widget.initialLatitude,
-          longitude: widget.initialLongitude,
-        ),
+      PlaceDetail place = _pendingCreatedPlace ??
+          await widget.placeRepository.createPlace(
+            CreatePlaceInput(
+              name: name,
+              addressText: address,
+              latitude: widget.initialLatitude,
+              longitude: widget.initialLongitude,
+            ),
+          );
+      _pendingCreatedPlace = place;
+
+      final filename = _selectedPhoto!.path.split(RegExp(r'[/\\]')).last;
+      final uploadedPhotoUrl = await widget.placeRepository.uploadPlacePhoto(
+        placeId: place.id,
+        fileBytes: photoBytes,
+        filename: filename.isNotEmpty ? filename : 'place.jpg',
       );
+      final completedPlace = place.copyWith(photoUrl: uploadedPhotoUrl);
 
       if (!mounted) return;
       Navigator.of(context).pop(
         ManualPlaceRegistrationResult(
-          place: createdPlace,
+          place: completedPlace,
           photoFile: _selectedPhoto!,
         ),
       );
     } on ApiException catch (e) {
       if (!mounted) return;
       String message;
-      if (e.isConflict) {
+      if (e.isConflict && _pendingCreatedPlace == null) {
         message = e.detail.isNotEmpty
             ? e.detail
             : 'Este local já está cadastrado com este nome e endereço.';
@@ -272,6 +299,10 @@ class _ManualPlaceRegistrationSheetState
         message = 'Sua sessão expirou. Faça login novamente.';
       } else if (e.isValidationError && e.hasFieldErrors) {
         message = e.allFieldErrors.values.join(' ');
+      } else if (_pendingCreatedPlace != null) {
+        message = e.detail.isNotEmpty
+            ? e.detail
+            : 'O local foi registrado, mas não foi possível enviar a fotografia. Tente reenviar a foto.';
       } else {
         message = e.detail.isNotEmpty
             ? e.detail
@@ -286,7 +317,9 @@ class _ManualPlaceRegistrationSheetState
       setState(() {
         _errorMessage = e.message.isNotEmpty
             ? e.message
-            : 'Falha de conexão ao cadastrar o local. Verifique sua internet e tente novamente.';
+            : (_pendingCreatedPlace != null
+                ? 'O local foi registrado, mas houve falha de conexão ao enviar a fotografia. Tente reenviar.'
+                : 'Falha de conexão ao cadastrar o local. Verifique sua internet e tente novamente.');
         _isSubmitting = false;
       });
     } on FormatException catch (e) {
@@ -300,8 +333,9 @@ class _ManualPlaceRegistrationSheetState
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _errorMessage =
-            'Falha de conexão ao cadastrar o local. Verifique sua internet e tente novamente.';
+        _errorMessage = _pendingCreatedPlace != null
+            ? 'O local foi registrado, mas não foi possível enviar a fotografia. Tente reenviar.'
+            : 'Falha de conexão ao cadastrar o local. Verifique sua internet e tente novamente.';
         _isSubmitting = false;
       });
     }
@@ -311,6 +345,7 @@ class _ManualPlaceRegistrationSheetState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final isPlaceAlreadyCreated = _pendingCreatedPlace != null;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -355,11 +390,41 @@ class _ManualPlaceRegistrationSheetState
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            if (isPlaceAlreadyCreated) ...[
+              const SizedBox(height: 12),
+              Container(
+                key: const Key('manual_place_partial_created_banner'),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: theme.colorScheme.onSecondaryContainer,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Local "${_pendingCreatedPlace!.name}" registrado. Envie a fotografia para concluir.',
+                        style: TextStyle(
+                          color: theme.colorScheme.onSecondaryContainer,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             TextFormField(
               key: const Key('manual_place_name_field'),
               controller: _nameController,
-              enabled: !_isSubmitting,
+              enabled: !_isSubmitting && !isPlaceAlreadyCreated,
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
                 labelText: 'Nome do estabelecimento *',
@@ -377,7 +442,7 @@ class _ManualPlaceRegistrationSheetState
             TextFormField(
               key: const Key('manual_place_address_field'),
               controller: _addressController,
-              enabled: !_isSubmitting,
+              enabled: !_isSubmitting && !isPlaceAlreadyCreated,
               textCapitalization: TextCapitalization.sentences,
               maxLines: 2,
               minLines: 1,
@@ -546,8 +611,12 @@ class _ManualPlaceRegistrationSheetState
                   : const Icon(Icons.check_circle_outline),
               label: Text(
                 _isSubmitting
-                    ? 'Cadastrando local...'
-                    : 'Cadastrar e Avaliar Local',
+                    ? (isPlaceAlreadyCreated
+                        ? 'Enviando fotografia...'
+                        : 'Cadastrando local...')
+                    : (isPlaceAlreadyCreated
+                        ? 'Reenviar Fotografia e Concluir'
+                        : 'Cadastrar e Avaliar Local'),
               ),
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),

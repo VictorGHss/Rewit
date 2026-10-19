@@ -570,8 +570,8 @@ class CatalogServiceUnitTest {
     void shouldRejectManualPlaceCreationWhenActivePlaceWithSameNormalizedNameAndAddressExists() {
         CreatePlaceCommand cmd = new CreatePlaceCommand(
                 "Pastel da Dona Ana", null, "GERAL", null,
-                "Av. Brasil, 500 - Centro", null, null, "Não informada", "BR", "BR",
-                0.0, 0.0, 100, "USER", null
+                "Av. Brasil, 500 - Centro", null, null, null, null, "BR",
+                null, null, 100, "USER", null
         );
 
         when(placeRepository.existsActiveByNormalizedNameAndAddress("Pastel da Dona Ana", "Av. Brasil, 500 - Centro"))
@@ -581,5 +581,66 @@ class CatalogServiceUnitTest {
         assertEquals("PLACE_ALREADY_EXISTS", ex.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         verify(placeRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("createPlace: Deve criar local manual sem coordenadas (latitude=null, longitude=null) nem cidade/estado quando não informados")
+    void shouldCreateManualPlaceWithoutCoordinatesAndCityState() {
+        CreatePlaceCommand cmd = new CreatePlaceCommand(
+                "Pastel da Dona Ana", null, "GERAL", null,
+                "Av. Brasil, 500 - Centro", null, null, null, null, "BR",
+                null, null, 50, "USER", null
+        );
+
+        when(placeRepository.existsActiveByNormalizedNameAndAddress("Pastel da Dona Ana", "Av. Brasil, 500 - Centro"))
+                .thenReturn(false);
+        when(placeRepository.existsBySlug("pastel-da-dona-ana")).thenReturn(false);
+        when(placeRepository.save(any(Place.class))).thenAnswer(i -> i.getArgument(0));
+
+        Place created = catalogService.createPlace(cmd);
+
+        assertNotNull(created);
+        assertFalse(created.hasCoordinates());
+        assertNull(created.getLatitude());
+        assertNull(created.getLongitude());
+        assertNull(created.getCity());
+        assertNull(created.getState());
+        assertEquals("BR", created.getCountry());
+    }
+
+    @Test
+    @DisplayName("createPlace: Deve rejeitar coordenada parcial (apenas latitude ou apenas longitude) com INVALID_COORDINATES")
+    void shouldRejectPartialCoordinatesWhenOnlyOneIsProvided() {
+        CreatePlaceCommand cmdLatOnly = new CreatePlaceCommand(
+                "Pastel da Dona Ana", null, "GERAL", null,
+                "Av. Brasil, 500", null, null, null, null, "BR",
+                -25.42, null, 50, "USER", null
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> catalogService.createPlace(cmdLatOnly));
+        assertEquals("INVALID_COORDINATES", ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("createPlace Concorrência Duplicidade Manual: Colisão concorrente em uq_places_slug para mesmo nome e endereço retorna 409 PLACE_ALREADY_EXISTS sem criar sufixo -2")
+    void shouldReturnConflictWhenConcurrentManualPlaceCreationCollidesOnSlugForSameNameAndAddress() {
+        CreatePlaceCommand cmd = new CreatePlaceCommand(
+                "Pastel da Dona Ana", null, "GERAL", null,
+                "Av. Brasil, 500 - Centro", null, null, null, null, "BR",
+                null, null, 50, "USER", null
+        );
+
+        // Na checagem preliminar ainda não existia; após a colisão de uq_places_slug, a outra transação já comitou o local
+        when(placeRepository.existsActiveByNormalizedNameAndAddress("Pastel da Dona Ana", "Av. Brasil, 500 - Centro"))
+                .thenReturn(false)
+                .thenReturn(true);
+        when(placeRepository.existsBySlug("pastel-da-dona-ana")).thenReturn(false);
+        when(placeRepository.save(any(Place.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key value violates unique constraint \"uq_places_slug\""));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> catalogService.createPlace(cmd));
+        assertEquals("PLACE_ALREADY_EXISTS", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(placeRepository, times(1)).save(any(Place.class));
     }
 }

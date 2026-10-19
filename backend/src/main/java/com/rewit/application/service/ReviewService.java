@@ -229,42 +229,43 @@ public class ReviewService {
         List<ReviewTarget> savedTargets = reviewTargetRepository.saveAll(review.getTargets());
 
         // 6. Avaliação de presença física e registro de CheckIn (Step 12.0)
+        // Locais cadastrados sem coordenadas geográficas retornam Optional.empty() em validateProximity
+        // e a avaliação é publicada normalmente sem check-in verificado no local.
         if (checkInRepository != null && cmd.contextPlaceId() != null && cmd.userLatitude() != null && cmd.userLongitude() != null) {
-            CatalogDtos.SpatialValidationResult spatialResult = placeRepository
-                    .validateProximity(cmd.contextPlaceId(), cmd.userLatitude(), cmd.userLongitude())
-                    .orElseThrow(() -> new BusinessException("Local de contexto não encontrado para validação espacial", HttpStatus.NOT_FOUND, "PLACE_NOT_FOUND"));
+            placeRepository.validateProximity(cmd.contextPlaceId(), cmd.userLatitude(), cmd.userLongitude())
+                    .ifPresent(spatialResult -> {
+                        CheckIn checkIn;
+                        if (spatialResult.isWithinRadius()) {
+                            checkIn = new CheckIn(
+                                    UUID.randomUUID(),
+                                    savedReview.getId(),
+                                    author.getId(),
+                                    cmd.contextPlaceId(),
+                                    cmd.userLatitude(),
+                                    cmd.userLongitude(),
+                                    spatialResult.distanceMeters(),
+                                    CheckInStatus.VERIFIED,
+                                    VerificationMethod.GPS,
+                                    Instant.now()
+                            );
+                        } else {
+                            checkIn = new CheckIn(
+                                    UUID.randomUUID(),
+                                    savedReview.getId(),
+                                    author.getId(),
+                                    cmd.contextPlaceId(),
+                                    cmd.userLatitude(),
+                                    cmd.userLongitude(),
+                                    spatialResult.distanceMeters(),
+                                    CheckInStatus.REJECTED,
+                                    VerificationMethod.GPS,
+                                    null
+                            );
+                        }
 
-            CheckIn checkIn;
-            if (spatialResult.isWithinRadius()) {
-                checkIn = new CheckIn(
-                        UUID.randomUUID(),
-                        savedReview.getId(),
-                        author.getId(),
-                        cmd.contextPlaceId(),
-                        cmd.userLatitude(),
-                        cmd.userLongitude(),
-                        spatialResult.distanceMeters(),
-                        CheckInStatus.VERIFIED,
-                        VerificationMethod.GPS,
-                        Instant.now()
-                );
-            } else {
-                checkIn = new CheckIn(
-                        UUID.randomUUID(),
-                        savedReview.getId(),
-                        author.getId(),
-                        cmd.contextPlaceId(),
-                        cmd.userLatitude(),
-                        cmd.userLongitude(),
-                        spatialResult.distanceMeters(),
-                        CheckInStatus.REJECTED,
-                        VerificationMethod.GPS,
-                        null
-                );
-            }
-
-            CheckIn savedCheckIn = checkInRepository.save(checkIn);
-            savedReview.attachCheckIn(savedCheckIn);
+                        CheckIn savedCheckIn = checkInRepository.save(checkIn);
+                        savedReview.attachCheckIn(savedCheckIn);
+                    });
         }
 
         // 7. Atualização determinística e consistente de estatísticas por alvo (Step 13.0)

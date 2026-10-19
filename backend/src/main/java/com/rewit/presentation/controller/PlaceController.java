@@ -5,24 +5,35 @@ import com.rewit.application.dto.catalog.CatalogDtos.ExternalReferenceInput;
 import com.rewit.application.dto.catalog.CatalogDtos.NearbyPlaceResult;
 import com.rewit.application.dto.catalog.CatalogDtos.PlaceAdoptionResult;
 import com.rewit.application.dto.common.PageResult;
+import com.rewit.application.dto.media.MediaDtos.MediaDownloadResult;
+import com.rewit.application.dto.media.MediaDtos.PlaceMediaView;
+import com.rewit.application.dto.media.MediaDtos.UploadPlaceMediaCommand;
 import com.rewit.application.service.CatalogService;
+import com.rewit.application.service.PlaceMediaService;
 import com.rewit.application.service.ProductDiscoveryService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.Product;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.AdoptPlaceRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.CreatePlaceRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.NearbyPlaceItemResponse;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.NearbyPlacesResponse;
+import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.PlaceMediaResponse;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.PlaceResponse;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.ProductResponse;
 import com.rewit.presentation.dto.common.PagedResponse;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Objects;
@@ -37,11 +48,20 @@ public class PlaceController {
 
     private final CatalogService catalogService;
     private final ProductDiscoveryService productDiscoveryService;
+    private final PlaceMediaService placeMediaService;
 
     public PlaceController(CatalogService catalogService, ProductDiscoveryService productDiscoveryService) {
+        this(catalogService, productDiscoveryService, null);
+    }
+
+    @Autowired
+    public PlaceController(CatalogService catalogService,
+                           ProductDiscoveryService productDiscoveryService,
+                           PlaceMediaService placeMediaService) {
         this.catalogService = Objects.requireNonNull(catalogService, "CatalogService must not be null");
         this.productDiscoveryService = Objects.requireNonNull(productDiscoveryService,
                 "ProductDiscoveryService must not be null");
+        this.placeMediaService = placeMediaService;
     }
 
     @PostMapping
@@ -58,11 +78,11 @@ public class PlaceController {
                 request.addressText(),
                 request.streetNumber(),
                 request.neighborhood(),
-                request.city() != null && !request.city().isBlank() ? request.city().trim() : "Não informada",
-                request.state() != null && !request.state().isBlank() ? request.state().trim() : "BR",
+                request.city() != null && !request.city().isBlank() ? request.city().trim() : null,
+                request.state() != null && !request.state().isBlank() ? request.state().trim() : null,
                 request.country() != null && !request.country().isBlank() ? request.country().trim() : "BR",
-                request.latitude() != null ? request.latitude() : 0.0,
-                request.longitude() != null ? request.longitude() : 0.0,
+                request.latitude(),
+                request.longitude(),
                 request.validationRadiusMeters(),
                 "USER",
                 null
@@ -164,6 +184,73 @@ public class PlaceController {
         return ResponseEntity.ok(toResponse(place));
     }
 
+    @PostMapping(value = "/{id}/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<PlaceMediaResponse> uploadPlaceMedia(
+            @PathVariable("id") UUID placeId,
+            @RequestParam("file") MultipartFile file,
+            Authentication authentication
+    ) {
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
+        if (placeMediaService == null) {
+            throw new BusinessException("Serviço de mídia de local indisponível", HttpStatus.INTERNAL_SERVER_ERROR, "SERVICE_UNAVAILABLE");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("O arquivo de mídia não pode ser vazio", HttpStatus.BAD_REQUEST, "EMPTY_MEDIA_FILE");
+        }
+        if (file.getSize() > PlaceMedia.MAX_FILE_SIZE_BYTES) {
+            throw new BusinessException(
+                    "O tamanho do arquivo excede o limite máximo permitido de 10 MB",
+                    HttpStatus.CONTENT_TOO_LARGE,
+                    "MEDIA_SIZE_EXCEEDED"
+            );
+        }
+
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            throw new BusinessException("Falha ao ler os bytes do arquivo enviado", HttpStatus.BAD_REQUEST, "FILE_READ_ERROR");
+        }
+
+        UploadPlaceMediaCommand command = new UploadPlaceMediaCommand(
+                placeId,
+                actorUserId,
+                bytes,
+                file.getOriginalFilename()
+        );
+
+        PlaceMediaView view = placeMediaService.uploadMedia(command);
+        return ResponseEntity.status(HttpStatus.CREATED).body(PlaceMediaResponse.fromView(view));
+    }
+
+    @GetMapping("/{id}/media")
+    public ResponseEntity<List<PlaceMediaResponse>> getPlaceMedia(@PathVariable("id") UUID placeId) {
+        if (placeMediaService == null) {
+            return ResponseEntity.ok(List.of());
+        }
+        List<PlaceMediaResponse> responses = placeMediaService.getMediaByPlaceId(placeId)
+                .stream()
+                .map(PlaceMediaResponse::fromView)
+                .toList();
+        return ResponseEntity.ok(responses);
+    }
+
+    @GetMapping("/{id}/media/{mediaId}")
+    public ResponseEntity<byte[]> downloadPlaceMedia(
+            @PathVariable("id") UUID placeId,
+            @PathVariable("mediaId") UUID mediaId
+    ) {
+        if (placeMediaService == null) {
+            throw new BusinessException("Fotografia não encontrada", HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND");
+        }
+        MediaDownloadResult result = placeMediaService.downloadMedia(placeId, mediaId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(result.mimeType()))
+                .contentLength(result.bytes().length)
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=86400")
+                .body(result.bytes());
+    }
+
     @GetMapping("/{id}/products")
     public ResponseEntity<PagedResponse<ProductResponse>> getProductsInPlace(
             @PathVariable UUID id,
@@ -191,6 +278,7 @@ public class PlaceController {
     }
 
     private PlaceResponse toResponse(Place place) {
+        String photoUrl = placeMediaService != null ? placeMediaService.findPrimaryPhotoUrl(place.getId()) : null;
         return new PlaceResponse(
                 place.getId(),
                 place.getName(),
@@ -208,14 +296,19 @@ public class PlaceController {
                 place.getValidationRadiusMeters(),
                 place.getOrigin(),
                 place.isVerified(),
-                place.getStatus()
+                place.getStatus(),
+                photoUrl
         );
     }
 
     private UUID extractAuthenticatedUserId(Authentication authentication) {
-        if (authentication == null || authentication.getName() == null) {
+        if (authentication == null || authentication.getName() == null || "anonymousUser".equalsIgnoreCase(authentication.getName())) {
             throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
         }
-        return UUID.fromString(authentication.getName());
+        try {
+            return UUID.fromString(authentication.getName());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException("Identificador de usuário inválido", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+        }
     }
 }

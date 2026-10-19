@@ -49,16 +49,16 @@ public class PlaceJpaEntity {
     @Column(name = "neighborhood", length = 128)
     private String neighborhood;
 
-    @Column(name = "city", nullable = false, length = 100)
+    @Column(name = "city", length = 100)
     private String city;
 
-    @Column(name = "state", nullable = false, length = 50)
+    @Column(name = "state", length = 50)
     private String state;
 
     @Column(name = "country", nullable = false, length = 10)
     private String country;
 
-    @Column(name = "coordinates", columnDefinition = "geography(Point, 4326)", nullable = false)
+    @Column(name = "coordinates", columnDefinition = "geography(Point, 4326)")
     private Point coordinates;
 
     @Column(name = "validation_radius_meters", nullable = false)
@@ -85,14 +85,17 @@ public class PlaceJpaEntity {
     public PlaceJpaEntity() {
     }
 
-    public static Point toPoint(double latitude, double longitude) {
+    public static Point toPoint(Double latitude, Double longitude) {
+        if (latitude == null || longitude == null) {
+            return null;
+        }
         // WGS 84 / PostGIS: Coordinate(x, y) = Coordinate(longitude, latitude)
         return GEOMETRY_FACTORY.createPoint(new Coordinate(longitude, latitude));
     }
 
     public Place toDomain() {
-        double lat = coordinates != null ? coordinates.getY() : 0.0;
-        double lon = coordinates != null ? coordinates.getX() : 0.0;
+        Double lat = coordinates != null ? coordinates.getY() : null;
+        Double lon = coordinates != null ? coordinates.getX() : null;
 
         return new Place(
                 id,

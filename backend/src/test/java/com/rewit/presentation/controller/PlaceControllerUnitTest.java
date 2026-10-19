@@ -552,7 +552,7 @@ class PlaceControllerUnitTest {
     }
 
     @Test
-    @DisplayName("19. POST /api/v1/places: Criação manual simplificada apenas com name e addressText aplica defaults seguros e retorna 201 Created com UUID canônico")
+    @DisplayName("19. POST /api/v1/places: Criação manual simplificada apenas com name e addressText preserva coordenadas e cidade/estado nulos (sem inventar 0.0) e retorna 201 Created com UUID canônico")
     void shouldCreatePlaceWithSimplifiedPayloadAndReturnCanonicalUuid() throws Exception {
         UUID placeId = UUID.randomUUID();
         Place createdPlace = new Place(
@@ -564,11 +564,11 @@ class PlaceControllerUnitTest {
                 "Av. Brasil, 500 - Centro",
                 null,
                 null,
-                "Não informada",
+                null,
+                null,
                 "BR",
-                "BR",
-                0.0,
-                0.0,
+                null,
+                null,
                 100,
                 "USER",
                 false,
@@ -592,6 +592,10 @@ class PlaceControllerUnitTest {
                 .andExpect(jsonPath("$.name").value("Pastel da Dona Ana"))
                 .andExpect(jsonPath("$.slug").value("pastel-da-dona-ana"))
                 .andExpect(jsonPath("$.addressText").value("Av. Brasil, 500 - Centro"))
+                .andExpect(jsonPath("$.latitude").doesNotExist())
+                .andExpect(jsonPath("$.longitude").doesNotExist())
+                .andExpect(jsonPath("$.city").doesNotExist())
+                .andExpect(jsonPath("$.state").doesNotExist())
                 .andExpect(jsonPath("$.status").value("ACTIVE"));
 
         ArgumentCaptor<CreatePlaceCommand> captor = ArgumentCaptor.forClass(CreatePlaceCommand.class);
@@ -601,11 +605,11 @@ class PlaceControllerUnitTest {
         assertNull(cmd.slug());
         assertEquals("GERAL", cmd.category());
         assertEquals("Av. Brasil, 500 - Centro", cmd.addressText());
-        assertEquals("Não informada", cmd.city());
-        assertEquals("BR", cmd.state());
+        assertNull(cmd.city());
+        assertNull(cmd.state());
         assertEquals("BR", cmd.country());
-        assertEquals(0.0, cmd.latitude());
-        assertEquals(0.0, cmd.longitude());
+        assertNull(cmd.latitude());
+        assertNull(cmd.longitude());
     }
 
     @Test

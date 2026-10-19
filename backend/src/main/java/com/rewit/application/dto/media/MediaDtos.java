@@ -1,12 +1,13 @@
 package com.rewit.application.dto.media;
 
+import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.ReviewMedia;
 
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Contratos de transferência de dados (DTOs) da camada de aplicação para gerenciamento de mídias de avaliação.
+ * Contratos de transferência de dados (DTOs) da camada de aplicação para gerenciamento de mídias de avaliação e locais.
  */
 public final class MediaDtos {
 
@@ -14,6 +15,13 @@ public final class MediaDtos {
 
     public record UploadMediaCommand(
             UUID reviewId,
+            UUID authenticatedUserId,
+            byte[] fileBytes,
+            String originalFilename
+    ) {}
+
+    public record UploadPlaceMediaCommand(
+            UUID placeId,
             UUID authenticatedUserId,
             byte[] fileBytes,
             String originalFilename
@@ -36,6 +44,35 @@ public final class MediaDtos {
             return new ReviewMediaView(
                     media.getId(),
                     media.getReviewId(),
+                    publicUrl,
+                    media.getMediaType().name(),
+                    media.getMimeType(),
+                    media.getSizeBytes(),
+                    media.getWidth(),
+                    media.getHeight(),
+                    media.getStatus().name(),
+                    media.getCreatedAt()
+            );
+        }
+    }
+
+    public record PlaceMediaView(
+            UUID id,
+            UUID placeId,
+            String url,
+            String mediaType,
+            String mimeType,
+            long sizeBytes,
+            Integer width,
+            Integer height,
+            String status,
+            Instant createdAt
+    ) {
+        public static PlaceMediaView fromDomain(PlaceMedia media) {
+            String publicUrl = "/api/v1/places/" + media.getPlaceId() + "/media/" + media.getId();
+            return new PlaceMediaView(
+                    media.getId(),
+                    media.getPlaceId(),
                     publicUrl,
                     media.getMediaType().name(),
                     media.getMimeType(),

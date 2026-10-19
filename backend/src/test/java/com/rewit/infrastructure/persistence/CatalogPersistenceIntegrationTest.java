@@ -8,6 +8,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.DisplayName;
@@ -18,18 +19,25 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.rewit.application.dto.catalog.CatalogDtos.NearbyPlaceResult;
+import com.rewit.application.dto.catalog.CatalogDtos.SpatialValidationResult;
+import com.rewit.application.port.PlaceMediaRepository;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProductIdentifierRepository;
 import com.rewit.application.port.ProductPresenceRepository;
 import com.rewit.application.port.ProductRepository;
 import com.rewit.application.port.RateableTargetRepository;
+import com.rewit.application.port.UserRepository;
+import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.Product;
 import com.rewit.domain.model.ProductIdentifier;
 import com.rewit.domain.model.ProductPresence;
 import com.rewit.domain.model.RateableTarget;
+import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.entity.PlaceJpaEntity;
 import com.rewit.infrastructure.persistence.repository.PlaceJpaRepository;
 
@@ -55,6 +63,12 @@ class CatalogPersistenceIntegrationTest {
 
     @Autowired
     private PlaceJpaRepository placeJpaRepository;
+
+    @Autowired
+    private PlaceMediaRepository placeMediaRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Test
     @DisplayName("1. Place: Salvar Place deve criar automaticamente RateableTarget raiz e persistir no PostgreSQL com PostGIS")
@@ -383,5 +397,80 @@ class CatalogPersistenceIntegrationTest {
             ));
         });
         assertNotNull(orphanPlaceEx);
+    }
+
+    @Test
+    @DisplayName("7. Place: Persistir local manual sem GPS (null coordinates, null city, null state) e verificar consultas geográficas")
+    void shouldPersistPlaceWithoutCoordinatesAndIgnoreInProximityQueries() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Place manualPlace = new Place(
+                null, "Pastel da Dona Ana " + suffix, "pastel-dona-ana-" + suffix, "ALIMENTACAO", "Pastel artesanal",
+                "Rua das Palmeiras, 45", null, null, null, null, "BR",
+                null, null, 100, "MANUAL", false, null, "ACTIVE"
+        );
+
+        Place saved = placeRepository.save(manualPlace);
+        assertNotNull(saved.getId());
+        assertNull(saved.getLatitude());
+        assertNull(saved.getLongitude());
+        assertNull(saved.getCity());
+        assertNull(saved.getState());
+        assertFalse(saved.hasCoordinates());
+
+        // Consulta de persistência direta
+        Optional<Place> retrieved = placeRepository.findById(saved.getId());
+        assertTrue(retrieved.isPresent());
+        assertNull(retrieved.get().getLatitude());
+        assertNull(retrieved.get().getLongitude());
+        assertNull(retrieved.get().getCity());
+        assertNull(retrieved.get().getState());
+
+        // Consulta nearby geográfica: não deve incluir o local sem coordenadas
+        List<Place> nearby = placeRepository.findNearby(-25.4284, -49.2733, 5000.0);
+        assertFalse(nearby.stream().anyMatch(p -> p.getId().equals(saved.getId())));
+
+        // Validação de proximidade deve retornar vazio sem lançar erro PostGIS
+        Optional<SpatialValidationResult> proximityResult = placeRepository.validateProximity(saved.getId(), -25.4284, -49.2733);
+        assertTrue(proximityResult.isEmpty());
+    }
+
+    @Test
+    @DisplayName("8. PlaceMedia: Persistir mídia diretamente vinculada ao local e verificar integridade referencial")
+    void shouldPersistPlaceMediaAndEnforceReferentialIntegrity() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        User user = userRepository.save(new User(
+                null, "uploader_" + suffix + "@rewit.com", "hash", AuthProvider.LOCAL, null
+        ));
+
+        Place place = placeRepository.save(new Place(
+                null, "Café do Ponto " + suffix, "cafe-do-ponto-" + suffix, "CAFE", null,
+                "Rua das Flores, 10", null, null, null, null, "BR",
+                null, null, 100, "MANUAL", false, null, "ACTIVE"
+        ));
+
+        PlaceMedia media = new PlaceMedia(
+                null, place.getId(), user.getId(), "places/" + place.getId() + "/fachada.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 4096L, 1024, 768
+        );
+
+        PlaceMedia savedMedia = placeMediaRepository.save(media);
+        assertNotNull(savedMedia.getId());
+        assertEquals(place.getId(), savedMedia.getPlaceId());
+        assertEquals(user.getId(), savedMedia.getUserId());
+        assertEquals("places/" + place.getId() + "/fachada.jpg", savedMedia.getObjectKey());
+        assertEquals(1024, savedMedia.getWidth());
+        assertEquals(768, savedMedia.getHeight());
+
+        List<PlaceMedia> placeMediaList = placeMediaRepository.findActiveByPlaceId(place.getId());
+        assertEquals(1, placeMediaList.size());
+        assertEquals(savedMedia.getId(), placeMediaList.get(0).getId());
+
+        // Violação de FK ao salvar mídia para local inexistente
+        UUID nonExistentPlaceId = UUID.randomUUID();
+        PlaceMedia orphanMedia = new PlaceMedia(
+                null, nonExistentPlaceId, user.getId(), "places/orphan/foto.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600
+        );
+        assertThrows(Exception.class, () -> placeMediaRepository.save(orphanMedia));
     }
 }

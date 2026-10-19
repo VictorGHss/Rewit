@@ -447,4 +447,71 @@ class ReviewServiceTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> reviewService.getTargetStats(missingId));
         assertEquals("RATEABLE_TARGET_NOT_FOUND", ex.getErrorCode());
     }
+
+    @Test
+    @DisplayName("15. Avaliação para local sem coordenadas geográficas (validateProximity vazio) é criada com sucesso sem check-in")
+    void shouldCreateReviewWithoutCheckInWhenContextPlaceHasNoCoordinates() {
+        com.rewit.application.port.CheckInRepository checkInRepository = mock(com.rewit.application.port.CheckInRepository.class);
+        ReviewService serviceWithCheckIn = new ReviewService(
+                reviewRepository,
+                reviewTargetRepository,
+                userRepository,
+                rateableTargetRepository,
+                placeRepository,
+                null,
+                checkInRepository,
+                rateableTargetStatsRepository,
+                null,
+                null,
+                reputationService
+        );
+
+        UUID manualPlaceId = UUID.randomUUID();
+        com.rewit.domain.model.Place manualPlaceWithoutCoords = new com.rewit.domain.model.Place(
+                manualPlaceId,
+                "Pastel da Dona Ana",
+                "pastel-da-dona-ana",
+                "GERAL",
+                null,
+                "Av. Brasil, 500 - Centro",
+                null,
+                null,
+                null,
+                null,
+                "BR",
+                null,
+                null,
+                50,
+                "USER",
+                false,
+                null,
+                "ACTIVE"
+        );
+
+        when(userRepository.findById(authorUserId)).thenReturn(Optional.of(activeUser));
+        when(placeRepository.findById(manualPlaceId)).thenReturn(Optional.of(manualPlaceWithoutCoords));
+        when(rateableTargetRepository.existsPubliclyVisibleById(manualPlaceId)).thenReturn(true);
+        when(placeRepository.validateProximity(manualPlaceId, -25.4284, -49.2733)).thenReturn(Optional.empty());
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reviewTargetRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        CreateReviewCommand cmd = new CreateReviewCommand(
+                authorUserId,
+                manualPlaceId,
+                "Pastel excelente!",
+                false,
+                "PUBLIC",
+                -25.4284,
+                -49.2733,
+                12.0,
+                List.of(new CreateReviewTargetCommand(manualPlaceId, new BigDecimal("5.0"), "Nota 10"))
+        );
+
+        ReviewDetailView result = serviceWithCheckIn.createReview(cmd);
+
+        assertNotNull(result);
+        assertEquals(manualPlaceId, result.contextPlaceId());
+        assertFalse(result.isVerifiedOnSite());
+        verifyNoInteractions(checkInRepository);
+    }
 }

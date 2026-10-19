@@ -121,13 +121,66 @@ public final class CatalogPresentationDtos {
             String city,
             String state,
             String country,
-            double latitude,
-            double longitude,
+            Double latitude,
+            Double longitude,
             int validationRadiusMeters,
             String origin,
             boolean isVerified,
-            String status
-    ) {}
+            String status,
+            String photoUrl
+    ) {
+        public PlaceResponse(
+                UUID id,
+                String name,
+                String slug,
+                String category,
+                String description,
+                String addressText,
+                String streetNumber,
+                String neighborhood,
+                String city,
+                String state,
+                String country,
+                Double latitude,
+                Double longitude,
+                int validationRadiusMeters,
+                String origin,
+                boolean isVerified,
+                String status
+        ) {
+            this(id, name, slug, category, description, addressText, streetNumber, neighborhood,
+                    city, state, country, latitude, longitude, validationRadiusMeters, origin,
+                    isVerified, status, null);
+        }
+    }
+
+    public record PlaceMediaResponse(
+            UUID id,
+            UUID placeId,
+            String url,
+            String mediaType,
+            String mimeType,
+            long sizeBytes,
+            Integer width,
+            Integer height,
+            String status,
+            java.time.Instant createdAt
+    ) {
+        public static PlaceMediaResponse fromView(com.rewit.application.dto.media.MediaDtos.PlaceMediaView view) {
+            return new PlaceMediaResponse(
+                    view.id(),
+                    view.placeId(),
+                    view.url(),
+                    view.mediaType(),
+                    view.mimeType(),
+                    view.sizeBytes(),
+                    view.width(),
+                    view.height(),
+                    view.status(),
+                    view.createdAt()
+            );
+        }
+    }
 
     public record NearbyPlaceItemResponse(
             UUID id,

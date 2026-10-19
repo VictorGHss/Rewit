@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:rewit_mobile/core/network/api_endpoints.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import '../../domain/entities/place_detail.dart';
@@ -33,6 +34,29 @@ class PlaceRepositoryImpl implements PlaceRepository {
       throw const FormatException('O servidor retornou um identificador de local inválido.');
     }
     return entity;
+  }
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+  }) async {
+    final response = await httpClient.postMultipart(
+      ApiEndpoints.placeMedia(placeId),
+      fieldName: 'file',
+      fileBytes: fileBytes,
+      filename: filename,
+    );
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao enviar fotografia do local.');
+    }
+    final rawUrl = decoded['url'];
+    if (rawUrl is! String || rawUrl.trim().isEmpty) {
+      throw const FormatException('O servidor não retornou a URL da fotografia do local.');
+    }
+    return rawUrl.trim();
   }
 
   @override

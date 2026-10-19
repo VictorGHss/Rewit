@@ -367,9 +367,6 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     onRemove: () {
                       _notifier.removeTarget(index);
                     },
-                    onManualPlacePhotoSelected: (file) {
-                      _notifier.addPhotoFile(file);
-                    },
                     onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
                   );
                 }),

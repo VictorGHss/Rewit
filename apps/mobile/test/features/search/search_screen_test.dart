@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
@@ -18,6 +19,7 @@ import 'package:rewit_mobile/features/search/presentation/state/search_notifier.
 class StubPlaceRepository implements PlaceRepository {
   CreatePlaceInput? lastInput;
   PlaceDetail? placeToReturn;
+  final List<String> uploadedPlacePhotos = [];
 
   @override
   Future<PlaceDetail> createPlace(CreatePlaceInput input) async {
@@ -29,16 +31,26 @@ class StubPlaceRepository implements PlaceRepository {
           slug: 'pastel-da-dona-ana',
           category: 'GERAL',
           addressText: input.addressText,
-          city: 'Não informada',
-          state: 'BR',
+          city: null,
+          state: null,
           country: 'BR',
-          latitude: 0.0,
-          longitude: 0.0,
+          latitude: null,
+          longitude: null,
           validationRadiusMeters: 100,
           origin: 'MANUAL',
           isVerified: false,
           status: 'ACTIVE',
         );
+  }
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+  }) async {
+    uploadedPlacePhotos.add(filename);
+    return '/api/v1/places/$placeId/media/media-${uploadedPlacePhotos.length}';
   }
 
   @override
@@ -530,9 +542,11 @@ void main() {
 
         expect(placeRepository.lastInput?.name, 'Pastel da Dona Ana');
         expect(placeRepository.lastInput?.addressText, 'Rua das Palmeiras, 45 - Centro');
+        expect(placeRepository.uploadedPlacePhotos, ['pastel_fachada.jpg']);
         expect(registeredResult, isNotNull);
         expect(registeredResult!.place.id, 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d');
         expect(registeredResult!.place.name, 'Pastel da Dona Ana');
+        expect(registeredResult!.place.photoUrl, '/api/v1/places/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d/media/media-1');
         expect(registeredResult!.photoFile.path, fakePhoto.path);
       },
     );

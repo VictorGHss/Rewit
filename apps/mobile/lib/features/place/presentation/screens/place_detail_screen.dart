@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/widgets/review_card.dart';
+import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
+import 'package:rewit_mobile/features/review_detail/presentation/widgets/authenticated_image.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
@@ -30,6 +32,7 @@ class PlaceDetailScreen extends StatefulWidget {
   final BusinessRepository? businessRepository;
   final PlaceCommercialRepository? commercialRepository;
   final PlaceCommercialNotifier? commercialNotifier;
+  final ReviewMediaRepository? reviewMediaRepository;
 
   const PlaceDetailScreen({
     super.key,
@@ -40,6 +43,7 @@ class PlaceDetailScreen extends StatefulWidget {
     this.businessRepository,
     this.commercialRepository,
     this.commercialNotifier,
+    this.reviewMediaRepository,
   });
 
   @override
@@ -407,6 +411,36 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
 
           const SizedBox(height: 20),
 
+          if (place.photoUrl != null && place.photoUrl!.trim().isNotEmpty) ...[
+            ClipRRect(
+              key: const Key('place_detail_photo'),
+              borderRadius: BorderRadius.circular(12),
+              child: widget.reviewMediaRepository != null
+                  ? AuthenticatedImage(
+                      url: place.photoUrl!,
+                      mediaRepository: widget.reviewMediaRepository!,
+                      height: 200,
+                      width: double.infinity,
+                    )
+                  : Container(
+                      height: 200,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          Icons.storefront,
+                          size: 48,
+                          color: theme.colorScheme.primary.withAlpha(120),
+                        ),
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // 4. Detalhes Físicos e Geográficos do Local
           Card(
             elevation: 0,
@@ -456,24 +490,26 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.radar_outlined,
-                        size: 20,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Raio de validação presencial: ${place.validationRadiusMeters} metros',
-                        style: TextStyle(
-                          color: theme.colorScheme.onSurface.withAlpha(160),
-                          fontSize: 13,
+                  if (place.hasCoordinates) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.radar_outlined,
+                          size: 20,
+                          color: theme.colorScheme.primary,
                         ),
-                      ),
-                    ],
-                  ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Raio de validação presencial: ${place.validationRadiusMeters} metros',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface.withAlpha(160),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),

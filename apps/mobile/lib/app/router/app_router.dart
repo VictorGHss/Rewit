@@ -249,6 +249,7 @@ class AppRouter {
             productRepository: productRepository,
             businessRepository: businessRepository,
             commercialRepository: placeCommercialRepository,
+            reviewMediaRepository: reviewMediaRepository,
           ),
           settings: settings,
         );

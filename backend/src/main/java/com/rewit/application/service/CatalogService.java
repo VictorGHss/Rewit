@@ -312,9 +312,17 @@ public class CatalogService {
                 }
 
                 // 2.2 Concorrência no slug gerado (uq_places_slug):
-                // Outra transação comitou o mesmo slug simultaneamente para um local diferente.
-                // Avança deterministamente para o próximo sufixo (-2, -3, etc.) e tenta em nova transação física.
+                // Se outra transação concorrente acabou de criar o mesmo local (mesmo nome + endereço),
+                // retorna 409 Conflict em vez de criar duplicata com sufixo -2.
                 if (isConstraintViolation(ex, "uq_places_slug")) {
+                    if (!hasExternalRef && cmd.addressText() != null && !cmd.addressText().isBlank()
+                            && placeRepository.existsActiveByNormalizedNameAndAddress(cmd.name(), cmd.addressText())) {
+                        throw new BusinessException(
+                                "Já existe um local ativo cadastrado com este nome e endereço",
+                                HttpStatus.CONFLICT,
+                                "PLACE_ALREADY_EXISTS"
+                        );
+                    }
                     suffixCounter++;
                     currentCandidateSlug = baseSlug + "-" + suffixCounter;
                     while (placeRepository.existsBySlug(currentCandidateSlug)) {

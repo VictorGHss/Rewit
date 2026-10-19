@@ -127,7 +127,6 @@ class _SearchScreenState extends State<SearchScreen>
         'targetName': result.place.name,
         'targetType': 'PLACE',
         'category': result.place.category,
-        'initialPhoto': result.photoFile,
       },
     );
   }
