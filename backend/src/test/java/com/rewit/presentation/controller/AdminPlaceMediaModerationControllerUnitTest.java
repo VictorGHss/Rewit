@@ -311,4 +311,43 @@ class AdminPlaceMediaModerationControllerUnitTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
     }
+
+    @Test
+    @DisplayName("GET /under-review e /queue - Lista fila de mídias sob revisão com paginação e agregação de denúncias")
+    void shouldListUnderReviewQueuePaged() throws Exception {
+        UUID placeId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, UUID.randomUUID(), "places/" + placeId + "/" + mediaId + "/img.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 1024, 800, 600,
+                com.rewit.domain.enums.PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+        PlaceMediaReport report1 = new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", "Spam 1");
+        PlaceMediaReport report2 = new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "OFENSIVO", "Ofensivo 2");
+
+        var view = new com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaUnderReviewView(
+                media, 2, List.of(report1, report2)
+        );
+        PageResult<com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaUnderReviewView> pageResult =
+                PageResult.of(List.of(view), 0, 20, 1);
+
+        when(placeMediaService.listUnderReviewQueue(eq(moderatorId), eq(0), eq(20))).thenReturn(pageResult);
+
+        mockMvc.perform(get("/api/v1/admin/place-media/under-review")
+                        .param("page", "0")
+                        .param("size", "20")
+                        .principal(authentication))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].media.id").value(mediaId.toString()))
+                .andExpect(jsonPath("$.content[0].pendingReportsCount").value(2))
+                .andExpect(jsonPath("$.content[0].reports.length()").value(2))
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        mockMvc.perform(get("/api/v1/admin/place-media/queue")
+                        .param("page", "0")
+                        .param("size", "20")
+                        .principal(authentication))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].media.id").value(mediaId.toString()));
+    }
 }

@@ -29,5 +29,7 @@ public interface PlaceMediaJpaRepository extends JpaRepository<PlaceMediaJpaEnti
 
     @org.springframework.data.jpa.repository.Query("SELECT m FROM PlaceMediaJpaEntity m WHERE m.status = 'REMOVED' AND m.removedAt <= :cutoff AND m.purgedAt IS NULL ORDER BY m.removedAt ASC, m.id ASC")
     List<PlaceMediaJpaEntity> findRemovalsOlderThan(@org.springframework.data.repository.query.Param("cutoff") java.time.Instant cutoff, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<PlaceMediaJpaEntity> findByStatusOrderByCreatedAtAscIdAsc(String status, org.springframework.data.domain.Pageable pageable);
 }
 

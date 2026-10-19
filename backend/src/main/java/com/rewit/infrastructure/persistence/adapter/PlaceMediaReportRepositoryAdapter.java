@@ -25,8 +25,18 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
 
     private final PlaceMediaReportJpaRepository placeMediaReportJpaRepository;
 
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
+
+    @org.springframework.beans.factory.annotation.Autowired
     public PlaceMediaReportRepositoryAdapter(PlaceMediaReportJpaRepository placeMediaReportJpaRepository) {
         this.placeMediaReportJpaRepository = Objects.requireNonNull(placeMediaReportJpaRepository, "PlaceMediaReportJpaRepository must not be null");
+    }
+
+    public PlaceMediaReportRepositoryAdapter(PlaceMediaReportJpaRepository placeMediaReportJpaRepository,
+                                             jakarta.persistence.EntityManager entityManager) {
+        this.placeMediaReportJpaRepository = Objects.requireNonNull(placeMediaReportJpaRepository, "PlaceMediaReportJpaRepository must not be null");
+        this.entityManager = entityManager;
     }
 
     @Override
@@ -57,8 +67,15 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
         if (id == null) {
             return Optional.empty();
         }
-        return placeMediaReportJpaRepository.findByIdForUpdate(id)
-                .map(PlaceMediaReportJpaEntity::toDomain);
+        Optional<PlaceMediaReportJpaEntity> entityOpt = placeMediaReportJpaRepository.findByIdForUpdate(id);
+        if (entityOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        PlaceMediaReportJpaEntity entity = entityOpt.get();
+        if (entityManager != null) {
+            entityManager.refresh(entity);
+        }
+        return Optional.of(entity.toDomain());
     }
 
     @Override
@@ -97,8 +114,13 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
         if (placeMediaId == null) {
             return List.of();
         }
-        return placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(placeMediaId)
-                .stream()
+        List<PlaceMediaReportJpaEntity> entities = placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(placeMediaId);
+        if (entityManager != null) {
+            for (PlaceMediaReportJpaEntity entity : entities) {
+                entityManager.refresh(entity);
+            }
+        }
+        return entities.stream()
                 .map(PlaceMediaReportJpaEntity::toDomain)
                 .toList();
     }

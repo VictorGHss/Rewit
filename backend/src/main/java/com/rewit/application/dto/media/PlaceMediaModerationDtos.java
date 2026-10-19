@@ -54,5 +54,11 @@ public final class PlaceMediaModerationDtos {
             boolean isPrimary,
             String message
     ) {}
+
+    public record PlaceMediaUnderReviewView(
+            PlaceMedia media,
+            long pendingReportsCount,
+            java.util.List<PlaceMediaReport> reports
+    ) {}
 }
 

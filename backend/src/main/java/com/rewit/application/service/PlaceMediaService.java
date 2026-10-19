@@ -6,6 +6,7 @@ import com.rewit.application.dto.media.MediaDtos.PlaceMediaView;
 import com.rewit.application.dto.media.MediaDtos.UploadPlaceMediaCommand;
 import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaModerationResult;
 import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaReportView;
+import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaUnderReviewView;
 import com.rewit.application.port.BusinessAccountRepository;
 import com.rewit.application.port.ObjectStoragePort;
 import com.rewit.application.port.PlaceMediaModerationAuditLogRepository;
@@ -431,6 +432,29 @@ public class PlaceMediaService {
                 .toList();
 
         return PageResult.of(dtoList, reportsPage.pageNumber(), reportsPage.pageSize(), reportsPage.totalElements());
+    }
+
+    @Transactional(readOnly = true)
+    public PageResult<PlaceMediaUnderReviewView> listUnderReviewQueue(UUID moderatorUserId, int page, int size) {
+        requireModerator(moderatorUserId);
+
+        int safePage = Math.max(page, 0);
+        int safeSize = (size <= 0 || size > 100) ? 20 : size;
+
+        PageResult<PlaceMedia> mediaPage = placeMediaRepository.findByStatus(PlaceMediaStatus.UNDER_REVIEW, safePage, safeSize);
+        List<PlaceMediaUnderReviewView> items = mediaPage.content().stream()
+                .map(media -> {
+                    long pendingCount = placeMediaReportRepository != null
+                            ? placeMediaReportRepository.countByPlaceMediaIdAndStatus(media.getId(), PlaceMediaReport.STATUS_PENDING)
+                            : 0;
+                    List<PlaceMediaReport> reports = placeMediaReportRepository != null
+                            ? placeMediaReportRepository.findByPlaceMediaId(media.getId())
+                            : List.of();
+                    return new PlaceMediaUnderReviewView(media, pendingCount, reports);
+                })
+                .toList();
+
+        return PageResult.of(items, mediaPage.pageNumber(), mediaPage.pageSize(), mediaPage.totalElements());
     }
 
     @Transactional(readOnly = true)

@@ -1,5 +1,6 @@
 package com.rewit.application.service;
 
+import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.media.MediaDtos.MediaDownloadResult;
 import com.rewit.application.dto.media.MediaDtos.PlaceMediaView;
 import com.rewit.application.dto.media.MediaDtos.UploadPlaceMediaCommand;
@@ -845,5 +846,37 @@ class PlaceMediaServiceTest {
         assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () ->
                 placeMediaService.removeMediaByModerator(modId, placeId, mediaId, "MOTIVO", "Notas")
         );
+    }
+
+    @Test
+    @DisplayName("26. listUnderReviewQueue lista mídias sob revisão com contagem de denúncias")
+    void shouldListUnderReviewQueueWithReportsAggregation() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeMediaRepository.findByStatus(eq(PlaceMediaStatus.UNDER_REVIEW), eq(0), eq(20)))
+                .thenReturn(PageResult.of(List.of(media), 0, 20, 1));
+        when(placeMediaReportRepository.countByPlaceMediaIdAndStatus(eq(mediaId), eq("PENDING"))).thenReturn(3L);
+        when(placeMediaReportRepository.findByPlaceMediaId(eq(mediaId))).thenReturn(List.of(
+                new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", "Detail 1"),
+                new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", "Detail 2"),
+                new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", "Detail 3")
+        ));
+
+        PageResult<com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaUnderReviewView> queue =
+                placeMediaService.listUnderReviewQueue(modId, 0, 20);
+
+        assertNotNull(queue);
+        assertEquals(1, queue.content().size());
+        assertEquals(mediaId, queue.content().get(0).media().getId());
+        assertEquals(3L, queue.content().get(0).pendingReportsCount());
+        assertEquals(3, queue.content().get(0).reports().size());
     }
 }

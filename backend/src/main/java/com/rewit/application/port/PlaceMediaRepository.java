@@ -34,5 +34,9 @@ public interface PlaceMediaRepository {
     default List<PlaceMedia> findRemovalsOlderThan(java.time.Instant cutoff, int limit) {
         return java.util.List.of();
     }
+
+    default com.rewit.application.dto.common.PageResult<PlaceMedia> findByStatus(com.rewit.domain.enums.PlaceMediaStatus status, int page, int size) {
+        return com.rewit.application.dto.common.PageResult.of(java.util.List.of(), page, size, 0);
+    }
 }
 

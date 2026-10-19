@@ -8,6 +8,7 @@ import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.application.service.PlaceMediaService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.presentation.dto.admin.AdminPlaceMediaModerationDtos.AdminPlaceMediaReportResponse;
+import com.rewit.presentation.dto.admin.AdminPlaceMediaModerationDtos.AdminPlaceMediaUnderReviewResponse;
 import com.rewit.presentation.dto.admin.AdminPlaceMediaModerationDtos.DecidePlaceMediaReportRequest;
 import com.rewit.presentation.dto.admin.AdminPlaceMediaModerationDtos.PlaceMediaModerationActionResponse;
 import com.rewit.presentation.dto.admin.AdminPlaceMediaModerationDtos.RemovePlaceMediaRequest;
@@ -78,6 +79,32 @@ public class AdminPlaceMediaModerationController {
         PageResult<PlaceMediaReportView> result = placeMediaService.listReports(moderatorUserId, status, page, size);
         List<AdminPlaceMediaReportResponse> content = result.content().stream()
                 .map(AdminPlaceMediaReportResponse::fromView)
+                .toList();
+
+        return ResponseEntity.ok(PagedResponse.of(
+                content,
+                result.pageNumber(),
+                result.pageSize(),
+                result.totalElements()
+        ));
+    }
+
+    @GetMapping(value = {"/under-review", "/queue"})
+    @PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")
+    @Operation(summary = "Fila operacional de fotografias sob revisão (UNDER_REVIEW)", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<PagedResponse<AdminPlaceMediaUnderReviewResponse>> listUnderReview(
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size,
+            Authentication authentication
+    ) {
+        UUID moderatorUserId = requireAuthenticatedUser(authentication);
+        if (moderatorRolePolicy != null) {
+            moderatorRolePolicy.requireCurrentModerator(moderatorUserId);
+        }
+
+        var result = placeMediaService.listUnderReviewQueue(moderatorUserId, page, size);
+        List<AdminPlaceMediaUnderReviewResponse> content = result.content().stream()
+                .map(AdminPlaceMediaUnderReviewResponse::fromView)
                 .toList();
 
         return ResponseEntity.ok(PagedResponse.of(

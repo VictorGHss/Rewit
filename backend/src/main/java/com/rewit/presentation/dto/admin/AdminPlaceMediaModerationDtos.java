@@ -111,6 +111,24 @@ public final class AdminPlaceMediaModerationDtos {
         }
     }
 
+    public record AdminPlaceMediaUnderReviewResponse(
+            PlaceMediaSummaryResponse media,
+            long pendingReportsCount,
+            java.util.List<AdminPlaceMediaReportResponse> reports
+    ) {
+        public static AdminPlaceMediaUnderReviewResponse fromView(com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaUnderReviewView view) {
+            if (view == null) return null;
+            java.util.List<AdminPlaceMediaReportResponse> reportResponses = view.reports() != null
+                    ? view.reports().stream().map(r -> AdminPlaceMediaReportResponse.of(r, view.media())).toList()
+                    : java.util.List.of();
+            return new AdminPlaceMediaUnderReviewResponse(
+                    PlaceMediaSummaryResponse.fromDomain(view.media()),
+                    view.pendingReportsCount(),
+                    reportResponses
+            );
+        }
+    }
+
     public record DecidePlaceMediaReportRequest(
             @NotBlank(message = "A decisão é obrigatória (ACCEPT ou REJECT)")
             String decision,

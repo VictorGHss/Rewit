@@ -22,8 +22,18 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
 
     private final PlaceMediaJpaRepository placeMediaJpaRepository;
 
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
+
+    @org.springframework.beans.factory.annotation.Autowired
     public PlaceMediaRepositoryAdapter(PlaceMediaJpaRepository placeMediaJpaRepository) {
         this.placeMediaJpaRepository = Objects.requireNonNull(placeMediaJpaRepository, "PlaceMediaJpaRepository must not be null");
+    }
+
+    public PlaceMediaRepositoryAdapter(PlaceMediaJpaRepository placeMediaJpaRepository,
+                                       jakarta.persistence.EntityManager entityManager) {
+        this.placeMediaJpaRepository = Objects.requireNonNull(placeMediaJpaRepository, "PlaceMediaJpaRepository must not be null");
+        this.entityManager = entityManager;
     }
 
     @Override
@@ -48,8 +58,15 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
         if (id == null) {
             return Optional.empty();
         }
-        return placeMediaJpaRepository.findByIdForUpdate(id)
-                .map(PlaceMediaJpaEntity::toDomain);
+        Optional<PlaceMediaJpaEntity> entityOpt = placeMediaJpaRepository.findByIdForUpdate(id);
+        if (entityOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        PlaceMediaJpaEntity entity = entityOpt.get();
+        if (entityManager != null) {
+            entityManager.refresh(entity);
+        }
+        return Optional.of(entity.toDomain());
     }
 
     @Override
@@ -118,6 +135,20 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
                 .stream()
                 .map(PlaceMediaJpaEntity::toDomain)
                 .toList();
+    }
+
+    @Override
+    public com.rewit.application.dto.common.PageResult<PlaceMedia> findByStatus(PlaceMediaStatus status, int page, int size) {
+        if (status == null) {
+            return com.rewit.application.dto.common.PageResult.of(List.of(), page, size, 0);
+        }
+        org.springframework.data.domain.Pageable pageable = PageRequest.of(page, size);
+        org.springframework.data.domain.Page<PlaceMediaJpaEntity> jpaPage =
+                placeMediaJpaRepository.findByStatusOrderByCreatedAtAscIdAsc(status.name(), pageable);
+        List<PlaceMedia> content = jpaPage.getContent().stream()
+                .map(PlaceMediaJpaEntity::toDomain)
+                .toList();
+        return com.rewit.application.dto.common.PageResult.of(content, jpaPage.getNumber(), jpaPage.getSize(), jpaPage.getTotalElements());
     }
 }
 
