@@ -21,9 +21,10 @@ import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceMedia;
+import com.rewit.domain.model.PlaceMediaReport;
 import com.rewit.domain.model.User;
-import com.rewit.infrastructure.persistence.entity.PlaceMediaReportJpaEntity;
-import com.rewit.infrastructure.persistence.repository.PlaceMediaReportJpaRepository;
+import com.rewit.application.port.PlaceMediaModerationAuditLogRepository;
+import com.rewit.application.port.PlaceMediaReportRepository;
 import com.rewit.infrastructure.storage.ImageSanitizer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -71,7 +72,10 @@ class PlaceMediaServiceTest {
     private UserRepository userRepository;
 
     @Mock
-    private PlaceMediaReportJpaRepository placeMediaReportJpaRepository;
+    private PlaceMediaReportRepository placeMediaReportRepository;
+
+    @Mock
+    private PlaceMediaModerationAuditLogRepository placeMediaModerationAuditLogRepository;
 
     private PlaceMediaService placeMediaService;
     private UUID userId;
@@ -121,7 +125,8 @@ class PlaceMediaServiceTest {
                 rateLimiter,
                 businessAccountRepository,
                 userRepository,
-                placeMediaReportJpaRepository
+                placeMediaReportRepository,
+                placeMediaModerationAuditLogRepository
         );
     }
 
@@ -473,20 +478,20 @@ class PlaceMediaServiceTest {
                 AccountStatus.ACTIVE, true, Role.MODERATOR, null, Instant.now(), Instant.now()
         );
 
-        PlaceMediaReportJpaEntity report = new PlaceMediaReportJpaEntity(
-                UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", "Foto irrelevante", "PENDING", Instant.now(), Instant.now()
+        PlaceMediaReport report = new PlaceMediaReport(
+                UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", "Foto irrelevante"
         );
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
         when(userRepository.findById(moderatorId)).thenReturn(Optional.of(moderatorUser));
-        when(placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(report));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(report));
 
         placeMediaService.deleteMedia(moderatorId, placeId, mediaId);
 
         assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
-        var captor = org.mockito.ArgumentCaptor.forClass(PlaceMediaReportJpaEntity.class);
-        verify(placeMediaReportJpaRepository).save(captor.capture());
+        var captor = org.mockito.ArgumentCaptor.forClass(PlaceMediaReport.class);
+        verify(placeMediaReportRepository).save(captor.capture());
         assertEquals("ACCEPTED", captor.getValue().getStatus());
     }
 
@@ -504,15 +509,15 @@ class PlaceMediaServiceTest {
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
-        when(placeMediaReportJpaRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporterId)).thenReturn(false);
-        when(placeMediaReportJpaRepository.countByPlaceMediaIdAndStatus(mediaId, "PENDING")).thenReturn(1L);
+        when(placeMediaReportRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporterId)).thenReturn(false);
+        when(placeMediaReportRepository.countByPlaceMediaIdAndStatus(mediaId, "PENDING")).thenReturn(1L);
 
         placeMediaService.reportMedia(reporterId, placeId, mediaId, "INAPPROPRIATE", "Conteúdo ofensivo");
 
-        verify(placeMediaReportJpaRepository).save(any(PlaceMediaReportJpaEntity.class));
+        verify(placeMediaReportRepository).save(any(PlaceMediaReport.class));
 
         // Segunda tentativa pelo mesmo usuário
-        when(placeMediaReportJpaRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporterId)).thenReturn(true);
+        when(placeMediaReportRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporterId)).thenReturn(true);
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 placeMediaService.reportMedia(reporterId, placeId, mediaId, "INAPPROPRIATE", "Novamente")
@@ -542,8 +547,8 @@ class PlaceMediaServiceTest {
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
-        when(placeMediaReportJpaRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporterId)).thenReturn(false);
-        when(placeMediaReportJpaRepository.countByPlaceMediaIdAndStatus(mediaId, "PENDING")).thenReturn(3L);
+        when(placeMediaReportRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporterId)).thenReturn(false);
+        when(placeMediaReportRepository.countByPlaceMediaIdAndStatus(mediaId, PlaceMediaReport.STATUS_PENDING)).thenReturn(3L);
         when(placeMediaRepository.findFirstActiveByPlaceId(placeId)).thenReturn(Optional.of(nextActive));
 
         placeMediaService.reportMedia(reporterId, placeId, mediaId, "INAPPROPRIATE", "Terceira denúncia");
@@ -594,17 +599,18 @@ class PlaceMediaServiceTest {
                 PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
-        var reportEntity = new com.rewit.infrastructure.persistence.entity.PlaceMediaReportJpaEntity(
-                reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda", "PENDING", Instant.now(), Instant.now()
+        var reportEntity = new PlaceMediaReport(
+                reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda",
+                PlaceMediaReport.STATUS_PENDING, Instant.now(), Instant.now(), null, null, null
         );
 
-        when(placeMediaReportJpaRepository.findById(reportId)).thenReturn(Optional.of(reportEntity));
+        when(placeMediaReportRepository.findById(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
-        when(placeMediaReportJpaRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
+        when(placeMediaReportRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
         when(placeMediaRepository.findFirstActiveByPlaceId(placeId)).thenReturn(Optional.of(nextActive));
-        when(placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
 
         var res = placeMediaService.decideReport(modId, reportId, "ACCEPT", "Conteúdo comercial inadequado");
 
@@ -628,14 +634,15 @@ class PlaceMediaServiceTest {
                 PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
         );
 
-        var reportEntity = new com.rewit.infrastructure.persistence.entity.PlaceMediaReportJpaEntity(
-                reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda", "PENDING", Instant.now(), Instant.now()
+        var reportEntity = new PlaceMediaReport(
+                reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda",
+                PlaceMediaReport.STATUS_PENDING, Instant.now(), Instant.now(), null, null, null
         );
 
-        when(placeMediaReportJpaRepository.findById(reportId)).thenReturn(Optional.of(reportEntity));
+        when(placeMediaReportRepository.findById(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
-        when(placeMediaReportJpaRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
+        when(placeMediaReportRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
 
         var res = placeMediaService.decideReport(modId, reportId, "REJECT", "Denúncia infundada");

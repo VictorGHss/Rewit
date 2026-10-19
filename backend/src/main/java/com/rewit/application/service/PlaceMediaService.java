@@ -100,11 +100,10 @@ public class PlaceMediaService {
                              RateLimiter rateLimiter,
                              BusinessAccountRepository businessAccountRepository,
                              UserRepository userRepository,
-                             com.rewit.infrastructure.persistence.repository.PlaceMediaReportJpaRepository placeMediaReportJpaRepository) {
+                             PlaceMediaReportRepository placeMediaReportRepository,
+                             PlaceMediaModerationAuditLogRepository placeMediaModerationAuditLogRepository) {
         this(placeRepository, placeMediaRepository, accountStatusPolicy, objectStoragePort, imageSanitizer, rateLimiter,
-                businessAccountRepository, userRepository,
-                placeMediaReportJpaRepository != null ? new com.rewit.infrastructure.persistence.adapter.PlaceMediaReportRepositoryAdapter(placeMediaReportJpaRepository) : null,
-                null, null);
+                businessAccountRepository, userRepository, placeMediaReportRepository, placeMediaModerationAuditLogRepository, null);
     }
 
     @Autowired
