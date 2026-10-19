@@ -156,9 +156,14 @@ public class PlaceMediaService {
         requireAuthorizedToUpload(cmd.authenticatedUserId(), place);
 
         // Idempotência baseada em chave de idempotência e hash SHA-256 (A-07)
+        String idempotencyKey = null;
         if (cmd.idempotencyKey() != null && !cmd.idempotencyKey().isBlank()) {
+            idempotencyKey = cmd.idempotencyKey().trim();
+            if (idempotencyKey.length() > 128) {
+                throw new BusinessException("Chave de idempotência excede o limite de 128 caracteres", HttpStatus.BAD_REQUEST, "INVALID_IDEMPOTENCY_KEY");
+            }
             Optional<PlaceMedia> existing = placeMediaRepository.findByIdempotencyKey(
-                    cmd.authenticatedUserId(), place.getId(), cmd.idempotencyKey().trim());
+                    cmd.authenticatedUserId(), place.getId(), idempotencyKey);
             if (existing.isPresent()) {
                 PlaceMedia existingMedia = existing.get();
                 if (contentSha256.equalsIgnoreCase(existingMedia.getContentSha256())) {
@@ -195,9 +200,9 @@ public class PlaceMediaService {
                 sanitized.sizeBytes(),
                 sanitized.width(),
                 sanitized.height(),
-                ReviewMediaStatus.ACTIVE,
+                com.rewit.domain.enums.PlaceMediaStatus.ACTIVE,
                 isPrimary,
-                cmd.idempotencyKey(),
+                idempotencyKey,
                 contentSha256,
                 Instant.now(),
                 Instant.now()

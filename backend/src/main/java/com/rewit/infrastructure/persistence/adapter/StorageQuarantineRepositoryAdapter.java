@@ -121,14 +121,18 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
             return new QuarantineResolution(QuarantineResolution.Kind.ENTRY_CHANGED, null);
         }
 
-        // 3. Segunda consulta: qualquer linha em place_media ou review_media, inclusive REMOVED, é referência
+        // 3. Segunda consulta: qualquer linha em place_media ou review_media (não purgada) protege
         if (objectKey.startsWith("places/")) {
             List<com.rewit.infrastructure.persistence.entity.PlaceMediaJpaEntity> references =
                     placeMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
             if (!references.isEmpty()) {
-                quarantineJpaRepository.releaseEntry(entryId.get());
-                return new QuarantineResolution(QuarantineResolution.Kind.REFERENCE_FOUND,
-                        ReviewMediaStatus.valueOf(references.get(0).getStatus()));
+                var ref = references.get(0);
+                if (ref.getPurgedAt() == null) {
+                    quarantineJpaRepository.releaseEntry(entryId.get());
+                    ReviewMediaStatus refStatus = "REMOVED".equalsIgnoreCase(ref.getStatus())
+                            ? ReviewMediaStatus.REMOVED : ReviewMediaStatus.ACTIVE;
+                    return new QuarantineResolution(QuarantineResolution.Kind.REFERENCE_FOUND, refStatus);
+                }
             }
         } else {
             List<ReviewMediaJpaEntity> references = reviewMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
@@ -166,14 +170,18 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
             return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.ENTRY_CHANGED, null, null);
         }
 
-        // 3. A consulta sob o lock é a autoridade: ACTIVE ou REMOVED protegem o objeto
+        // 3. A consulta sob o lock é a autoridade: ACTIVE ou REMOVED (não purgado) protegem o objeto
         if (objectKey.startsWith("places/")) {
             List<com.rewit.infrastructure.persistence.entity.PlaceMediaJpaEntity> references =
                     placeMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
             if (!references.isEmpty()) {
-                quarantineJpaRepository.releaseEntry(entryId.get());
-                return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND,
-                        ReviewMediaStatus.valueOf(references.get(0).getStatus()), null);
+                var ref = references.get(0);
+                if (ref.getPurgedAt() == null) {
+                    quarantineJpaRepository.releaseEntry(entryId.get());
+                    ReviewMediaStatus refStatus = "REMOVED".equalsIgnoreCase(ref.getStatus())
+                            ? ReviewMediaStatus.REMOVED : ReviewMediaStatus.ACTIVE;
+                    return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND, refStatus, null);
+                }
             }
         } else {
             List<ReviewMediaJpaEntity> references = reviewMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
@@ -191,6 +199,15 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
         // 5. A linha só sai depois do storage: se o commit falhar, a próxima execução obtém NOT_FOUND
         if (deletionResult.isAbsentAfterwards()) {
             quarantineJpaRepository.releaseEntry(entryId.get());
+            if (objectKey.startsWith("places/")) {
+                List<com.rewit.infrastructure.persistence.entity.PlaceMediaJpaEntity> references =
+                        placeMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
+                for (var ref : references) {
+                    ref.setPurgedAt(Instant.now());
+                    ref.setUpdatedAt(Instant.now());
+                    placeMediaJpaRepository.save(ref);
+                }
+            }
         }
         return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.STORAGE_ATTEMPTED, null, deletionResult);
     }

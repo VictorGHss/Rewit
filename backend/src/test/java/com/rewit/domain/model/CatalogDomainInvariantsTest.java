@@ -196,7 +196,7 @@ class CatalogDomainInvariantsTest {
         assertEquals(2048L, media.getSizeBytes());
         assertEquals(1024, media.getWidth());
         assertEquals(768, media.getHeight());
-        assertEquals(ReviewMediaStatus.ACTIVE, media.getStatus());
+        assertEquals(com.rewit.domain.enums.PlaceMediaStatus.ACTIVE, media.getStatus());
         assertNotNull(media.getCreatedAt());
     }
 }

@@ -114,10 +114,11 @@ public class ReconcilePlaceMediaStorageUseCase {
                 PlaceMedia media = references.get(object.key());
                 if (media == null) {
                     pageCandidates.add(new OrphanCandidate(object.key(), object.sizeBytes(), object.lastModified(), now));
-                } else if (media.getStatus() == ReviewMediaStatus.ACTIVE) {
+                } else if (media.isActive() || media.isUnderReview()) {
                     activeReferences++;
                 } else {
-                    removedReferences.add(new ReviewMediaReference(media.getId(), media.getPlaceId(), media.getObjectKey(), media.getStatus(),
+                    ReviewMediaStatus refStatus = media.isRemoved() ? ReviewMediaStatus.REMOVED : ReviewMediaStatus.ACTIVE;
+                    removedReferences.add(new ReviewMediaReference(media.getId(), media.getPlaceId(), media.getObjectKey(), refStatus,
                             media.getCreatedAt(), media.getUpdatedAt()));
                 }
             }

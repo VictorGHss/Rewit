@@ -13,6 +13,7 @@ import com.rewit.common.exception.BusinessException;
 import org.springframework.http.HttpStatus;
 import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.enums.PlaceMediaStatus;
 import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.Role;
@@ -326,7 +327,7 @@ class PlaceMediaServiceTest {
         PlaceMedia existingMedia = new PlaceMedia(
                 existingMediaId, placeId, userId, "places/" + placeId + "/" + existingMediaId + "/image.png",
                 ReviewMediaType.IMAGE, "image/png", (long) sanitizedBytes.length, 32, 24,
-                ReviewMediaStatus.ACTIVE, true, idempotencyKey, expectedHash, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, true, idempotencyKey, expectedHash, Instant.now(), Instant.now()
         );
 
         when(placeMediaRepository.findByIdempotencyKey(userId, placeId, idempotencyKey))
@@ -353,7 +354,7 @@ class PlaceMediaServiceTest {
         PlaceMedia existingMedia = new PlaceMedia(
                 existingMediaId, placeId, userId, "places/" + placeId + "/" + existingMediaId + "/image.png",
                 ReviewMediaType.IMAGE, "image/png", 1024L, 32, 24,
-                ReviewMediaStatus.ACTIVE, true, idempotencyKey, "different_sha256_hash", Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, true, idempotencyKey, "different_sha256_hash", Instant.now(), Instant.now()
         );
 
         when(placeMediaRepository.findByIdempotencyKey(userId, placeId, idempotencyKey))
@@ -368,6 +369,23 @@ class PlaceMediaServiceTest {
     }
 
     @Test
+    @DisplayName("10.1. Rejeita upload com chave de idempotência superior a 128 caracteres")
+    void shouldRejectIdempotencyKeyLongerThan128Chars() throws IOException {
+        byte[] pngBytes = createValidPngBytes();
+        String oversizedKey = "A".repeat(129);
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.uploadMedia(new UploadPlaceMediaCommand(placeId, userId, pngBytes, "foto.png", oversizedKey))
+        );
+
+        assertEquals("INVALID_IDEMPOTENCY_KEY", ex.getErrorCode());
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verifyNoInteractions(objectStoragePort);
+    }
+
+    @Test
     @DisplayName("11. setPrimaryMedia altera capa do local e desmarca a capa anterior")
     void shouldSetPrimaryMediaSuccessfully() {
         UUID oldPrimaryId = UUID.randomUUID();
@@ -376,13 +394,13 @@ class PlaceMediaServiceTest {
         PlaceMedia oldPrimary = new PlaceMedia(
                 oldPrimaryId, placeId, userId, "places/" + placeId + "/" + oldPrimaryId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
         );
 
         PlaceMedia newPrimary = new PlaceMedia(
                 newPrimaryId, placeId, userId, "places/" + placeId + "/" + newPrimaryId + "/image.png",
                 ReviewMediaType.IMAGE, "image/png", 1024L, 640, 480,
-                ReviewMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
@@ -408,13 +426,13 @@ class PlaceMediaServiceTest {
         PlaceMedia primaryMedia = new PlaceMedia(
                 primaryId, placeId, userId, "places/" + placeId + "/" + primaryId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
         );
 
         PlaceMedia nextOldestMedia = new PlaceMedia(
                 nextOldestId, placeId, userId, "places/" + placeId + "/" + nextOldestId + "/image.png",
                 ReviewMediaType.IMAGE, "image/png", 1024L, 640, 480,
-                ReviewMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
@@ -424,7 +442,7 @@ class PlaceMediaServiceTest {
 
         placeMediaService.deleteMedia(userId, placeId, primaryId);
 
-        assertEquals(ReviewMediaStatus.REMOVED, primaryMedia.getStatus());
+        assertEquals(PlaceMediaStatus.REMOVED, primaryMedia.getStatus());
         assertTrue(nextOldestMedia.isPrimary());
         verify(placeMediaRepository).save(primaryMedia);
         verify(placeMediaRepository).save(nextOldestMedia);
@@ -439,7 +457,7 @@ class PlaceMediaServiceTest {
         PlaceMedia media = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
         User moderator = User.rehydrate(
@@ -458,7 +476,7 @@ class PlaceMediaServiceTest {
 
         placeMediaService.deleteMedia(modUserId, placeId, mediaId);
 
-        assertEquals(ReviewMediaStatus.REMOVED, media.getStatus());
+        assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
         assertEquals("ACCEPTED", report.getStatus());
         verify(placeMediaReportJpaRepository).save(report);
     }
@@ -472,7 +490,7 @@ class PlaceMediaServiceTest {
         PlaceMedia media = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
         when(placeRepository.findById(placeId)).thenReturn(Optional.of(activePlace));
@@ -503,14 +521,14 @@ class PlaceMediaServiceTest {
         PlaceMedia media = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
         );
 
         UUID nextActiveId = UUID.randomUUID();
         PlaceMedia nextActive = new PlaceMedia(
                 nextActiveId, placeId, userId, "places/" + placeId + "/" + nextActiveId + "/image.png",
                 ReviewMediaType.IMAGE, "image/png", 1024L, 640, 480,
-                ReviewMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
         when(placeRepository.findById(placeId)).thenReturn(Optional.of(activePlace));
@@ -521,7 +539,7 @@ class PlaceMediaServiceTest {
 
         placeMediaService.reportMedia(reporterId, placeId, mediaId, "INAPPROPRIATE", "Terceira denúncia");
 
-        assertEquals(ReviewMediaStatus.UNDER_REVIEW, media.getStatus());
+        assertEquals(PlaceMediaStatus.UNDER_REVIEW, media.getStatus());
         assertTrue(nextActive.isPrimary());
         verify(placeMediaRepository).save(media);
         verify(placeMediaRepository).save(nextActive);
@@ -534,7 +552,7 @@ class PlaceMediaServiceTest {
         PlaceMedia media = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
@@ -558,13 +576,13 @@ class PlaceMediaServiceTest {
         PlaceMedia media = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
         );
 
         PlaceMedia nextActive = new PlaceMedia(
                 UUID.randomUUID(), placeId, userId, "places/" + placeId + "/next/image.png",
                 ReviewMediaType.IMAGE, "image/png", 1024L, 640, 480,
-                ReviewMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
         when(placeMediaReportJpaRepository.findById(reportId)).thenReturn(Optional.of(
@@ -579,7 +597,7 @@ class PlaceMediaServiceTest {
         var res = placeMediaService.decideReport(modId, reportId, "ACCEPT", "Conteúdo comercial inadequado");
 
         assertEquals("ACCEPTED", res.status());
-        assertEquals(ReviewMediaStatus.REMOVED, media.getStatus());
+        assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
         assertTrue(nextActive.isPrimary());
         verify(placeMediaRepository).save(media);
         verify(placeMediaRepository).save(nextActive);
@@ -595,7 +613,7 @@ class PlaceMediaServiceTest {
         PlaceMedia media = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
         );
 
         when(placeMediaReportJpaRepository.findById(reportId)).thenReturn(Optional.of(
@@ -611,7 +629,7 @@ class PlaceMediaServiceTest {
         var res = placeMediaService.decideReport(modId, reportId, "REJECT", "Denúncia infundada");
 
         assertEquals("REJECTED", res.status());
-        assertEquals(ReviewMediaStatus.ACTIVE, media.getStatus());
+        assertEquals(PlaceMediaStatus.ACTIVE, media.getStatus());
         assertTrue(media.isPrimary());
         verify(placeMediaRepository).save(media);
     }
@@ -625,7 +643,7 @@ class PlaceMediaServiceTest {
         PlaceMedia media = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                ReviewMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now()
         );
 
         when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));

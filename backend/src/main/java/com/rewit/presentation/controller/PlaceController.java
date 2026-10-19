@@ -295,7 +295,7 @@ public class PlaceController {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(result.mimeType()))
                 .contentLength(result.bytes().length)
-                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=86400")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-cache, no-store, must-revalidate")
                 .body(result.bytes());
     }
 

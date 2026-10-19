@@ -1,6 +1,6 @@
 package com.rewit.infrastructure.persistence.entity;
 
-import com.rewit.domain.enums.ReviewMediaStatus;
+import com.rewit.domain.enums.PlaceMediaStatus;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.model.PlaceMedia;
 import jakarta.persistence.Column;
@@ -13,7 +13,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Entidade JPA mapeando a tabela place_media (V30).
+ * Entidade JPA mapeando a tabela place_media (V30 / V31).
  */
 @Entity
 @Table(name = "place_media")
@@ -65,6 +65,9 @@ public class PlaceMediaJpaEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "purged_at")
+    private Instant purgedAt;
+
     public PlaceMediaJpaEntity() {
     }
 
@@ -73,6 +76,15 @@ public class PlaceMediaJpaEntity {
                                Integer width, Integer height, String status,
                                Boolean isPrimary, String idempotencyKey, String contentSha256,
                                Instant createdAt, Instant updatedAt) {
+        this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
+                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, null);
+    }
+
+    public PlaceMediaJpaEntity(UUID id, UUID placeId, UUID userId, String objectKey,
+                               String mediaType, String mimeType, Long sizeBytes,
+                               Integer width, Integer height, String status,
+                               Boolean isPrimary, String idempotencyKey, String contentSha256,
+                               Instant createdAt, Instant updatedAt, Instant purgedAt) {
         this.id = id;
         this.placeId = placeId;
         this.userId = userId;
@@ -88,6 +100,7 @@ public class PlaceMediaJpaEntity {
         this.contentSha256 = contentSha256;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.purgedAt = purgedAt;
     }
 
     public static PlaceMediaJpaEntity fromDomain(PlaceMedia domain) {
@@ -106,7 +119,8 @@ public class PlaceMediaJpaEntity {
                 domain.getIdempotencyKey(),
                 domain.getContentSha256(),
                 domain.getCreatedAt(),
-                domain.getUpdatedAt()
+                domain.getUpdatedAt(),
+                domain.getPurgedAt()
         );
     }
 
@@ -125,12 +139,13 @@ public class PlaceMediaJpaEntity {
                 persistedSizeBytes,
                 this.width,
                 this.height,
-                ReviewMediaStatus.valueOf(this.status),
+                PlaceMediaStatus.valueOf(this.status),
                 this.isPrimary != null && this.isPrimary,
                 this.idempotencyKey,
                 this.contentSha256,
                 this.createdAt,
-                this.updatedAt
+                this.updatedAt,
+                this.purgedAt
         );
     }
 
@@ -252,6 +267,14 @@ public class PlaceMediaJpaEntity {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public Instant getPurgedAt() {
+        return purgedAt;
+    }
+
+    public void setPurgedAt(Instant purgedAt) {
+        this.purgedAt = purgedAt;
     }
 
     @Override

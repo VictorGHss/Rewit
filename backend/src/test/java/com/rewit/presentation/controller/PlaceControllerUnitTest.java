@@ -48,6 +48,9 @@ class PlaceControllerUnitTest {
     private ProductDiscoveryService productDiscoveryService;
 
     @Mock
+    private com.rewit.application.service.PlaceMediaService placeMediaService;
+
+    @Mock
     private Authentication authentication;
 
     @InjectMocks
@@ -630,5 +633,24 @@ class PlaceControllerUnitTest {
                         .content(objectMapper.writeValueAsString(duplicateRequest)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PLACE_ALREADY_EXISTS"));
+    }
+
+    @Test
+    @DisplayName("21. GET /api/v1/places/{id}/media/{mediaId}: Download de foto retorna 200 com bytes e header Cache-Control no-cache private")
+    void shouldDownloadPlaceMediaWithPrivateNoCacheHeader() throws Exception {
+        UUID placeId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        byte[] imageBytes = new byte[]{1, 2, 3, 4};
+
+        when(placeMediaService.downloadMedia(placeId, mediaId))
+                .thenReturn(new com.rewit.application.dto.media.MediaDtos.MediaDownloadResult(imageBytes, "image/jpeg", true));
+
+        mockMvc.perform(get("/api/v1/places/{id}/media/{mediaId}", placeId, mediaId))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "private, no-cache, no-store, must-revalidate"))
+                .andExpect(content().contentType(MediaType.IMAGE_JPEG))
+                .andExpect(content().bytes(imageBytes));
+
+        verify(placeMediaService).downloadMedia(placeId, mediaId);
     }
 }
