@@ -45,17 +45,20 @@ public class RunStorageGcCycleUseCase {
     private static final Logger log = LoggerFactory.getLogger(RunStorageGcCycleUseCase.class);
 
     private final StorageGcExecutionLock executionLock;
-    private final ReconcileReviewMediaStorageUseCase reconcileUseCase;
+    private final ReconcileReviewMediaStorageUseCase reconcileReviewUseCase;
+    private final ReconcilePlaceMediaStorageUseCase reconcilePlaceUseCase;
     private final StorageQuarantineRepository quarantineRepository;
     private final RecheckQuarantinedStorageObjectUseCase recheckUseCase;
     private final PurgeConfirmedOrphanStorageObjectUseCase purgeUseCase;
     private final StorageGcCycleObserver observer;
     private final Clock clock;
     private final StorageGcLimits limits;
-    private final AtomicReference<String> resumeMarker = new AtomicReference<>();
+    private final AtomicReference<String> reviewResumeMarker = new AtomicReference<>();
+    private final AtomicReference<String> placeResumeMarker = new AtomicReference<>();
 
     private RunStorageGcCycleUseCase(StorageGcExecutionLock executionLock,
-                                     ReconcileReviewMediaStorageUseCase reconcileUseCase,
+                                     ReconcileReviewMediaStorageUseCase reconcileReviewUseCase,
+                                     ReconcilePlaceMediaStorageUseCase reconcilePlaceUseCase,
                                      StorageQuarantineRepository quarantineRepository,
                                      RecheckQuarantinedStorageObjectUseCase recheckUseCase,
                                      PurgeConfirmedOrphanStorageObjectUseCase purgeUseCase,
@@ -63,7 +66,8 @@ public class RunStorageGcCycleUseCase {
                                      Clock clock,
                                      StorageGcLimits limits) {
         this.executionLock = Objects.requireNonNull(executionLock, "executionLock must not be null");
-        this.reconcileUseCase = Objects.requireNonNull(reconcileUseCase, "reconcileUseCase must not be null");
+        this.reconcileReviewUseCase = Objects.requireNonNull(reconcileReviewUseCase, "reconcileReviewUseCase must not be null");
+        this.reconcilePlaceUseCase = reconcilePlaceUseCase;
         this.quarantineRepository = Objects.requireNonNull(quarantineRepository, "quarantineRepository must not be null");
         this.recheckUseCase = Objects.requireNonNull(recheckUseCase, "recheckUseCase must not be null");
         this.purgeUseCase = purgeUseCase;
@@ -73,35 +77,69 @@ public class RunStorageGcCycleUseCase {
     }
 
     /**
-     * Ciclo sem exclusão física: lista, registra observações e recheca, mas não recebe o use case de exclusão.
-     * O reconciliador deve listar uma página por chamada: o limite de páginas e o timeout são aplicados aqui.
+     * Ciclo sem exclusão física: lista reviews e places, registra observações e recheca, mas não recebe o use case de exclusão.
      */
     public static RunStorageGcCycleUseCase dryRun(StorageGcExecutionLock executionLock,
-                                                  ReconcileReviewMediaStorageUseCase reconcileUseCase,
+                                                  ReconcileReviewMediaStorageUseCase reconcileReviewUseCase,
+                                                  ReconcilePlaceMediaStorageUseCase reconcilePlaceUseCase,
                                                   StorageQuarantineRepository quarantineRepository,
                                                   RecheckQuarantinedStorageObjectUseCase recheckUseCase,
                                                   StorageGcCycleObserver observer,
                                                   Clock clock,
                                                   StorageGcLimits limits) {
-        return new RunStorageGcCycleUseCase(executionLock, reconcileUseCase, quarantineRepository, recheckUseCase,
-                null, observer, clock, limits);
+        return new RunStorageGcCycleUseCase(executionLock, reconcileReviewUseCase, reconcilePlaceUseCase,
+                quarantineRepository, recheckUseCase, null, observer, clock, limits);
+    }
+
+    /** Sobrecarga para compatibilidade com ciclos que operam apenas sobre reviews. */
+    public static RunStorageGcCycleUseCase dryRun(StorageGcExecutionLock executionLock,
+                                                  ReconcileReviewMediaStorageUseCase reconcileReviewUseCase,
+                                                  StorageQuarantineRepository quarantineRepository,
+                                                  RecheckQuarantinedStorageObjectUseCase recheckUseCase,
+                                                  StorageGcCycleObserver observer,
+                                                  Clock clock,
+                                                  StorageGcLimits limits) {
+        return dryRun(executionLock, reconcileReviewUseCase, null, quarantineRepository, recheckUseCase, observer, clock, limits);
     }
 
     /** Ciclo com exclusão física de CONFIRMED_ORPHAN, sempre via {@link PurgeConfirmedOrphanStorageObjectUseCase}. */
     public static RunStorageGcCycleUseCase destructive(StorageGcExecutionLock executionLock,
-                                                       ReconcileReviewMediaStorageUseCase reconcileUseCase,
+                                                       ReconcileReviewMediaStorageUseCase reconcileReviewUseCase,
+                                                       ReconcilePlaceMediaStorageUseCase reconcilePlaceUseCase,
                                                        StorageQuarantineRepository quarantineRepository,
                                                        RecheckQuarantinedStorageObjectUseCase recheckUseCase,
                                                        PurgeConfirmedOrphanStorageObjectUseCase purgeUseCase,
                                                        StorageGcCycleObserver observer,
                                                        Clock clock,
                                                        StorageGcLimits limits) {
-        return new RunStorageGcCycleUseCase(executionLock, reconcileUseCase, quarantineRepository, recheckUseCase,
+        return new RunStorageGcCycleUseCase(executionLock, reconcileReviewUseCase, reconcilePlaceUseCase,
+                quarantineRepository, recheckUseCase,
                 Objects.requireNonNull(purgeUseCase, "purgeUseCase must not be null"), observer, clock, limits);
+    }
+
+    /** Sobrecarga para compatibilidade com ciclos que operam apenas sobre reviews. */
+    public static RunStorageGcCycleUseCase destructive(StorageGcExecutionLock executionLock,
+                                                       ReconcileReviewMediaStorageUseCase reconcileReviewUseCase,
+                                                       StorageQuarantineRepository quarantineRepository,
+                                                       RecheckQuarantinedStorageObjectUseCase recheckUseCase,
+                                                       PurgeConfirmedOrphanStorageObjectUseCase purgeUseCase,
+                                                       StorageGcCycleObserver observer,
+                                                       Clock clock,
+                                                       StorageGcLimits limits) {
+        return destructive(executionLock, reconcileReviewUseCase, null, quarantineRepository, recheckUseCase,
+                purgeUseCase, observer, clock, limits);
     }
 
     public boolean isDryRun() {
         return purgeUseCase == null;
+    }
+
+    String reviewResumeMarker() {
+        return reviewResumeMarker.get();
+    }
+
+    String placeResumeMarker() {
+        return placeResumeMarker.get();
     }
 
     /** Executa um ciclo completo; usado pelo scheduler e por disparos internos de teste. */
@@ -141,27 +179,68 @@ public class RunStorageGcCycleUseCase {
                 ? StorageGcRunStatus.PARTIAL : StorageGcRunStatus.COMPLETED);
     }
 
-    // Fase 1: uma página por chamada ao reconciliador, com o marcador do Step 28.1
+    // Fase 1: paginação independente para reviews/ e places/, com marcadores individuais
     private StorageGcRunStatus listPages(Cycle cycle) {
-        String marker = resumeMarker.get();
+        boolean reviewComplete = true;
+        if (reconcileReviewUseCase != null) {
+            StorageGcRunStatus status = listNamespacePages(
+                    cycle,
+                    reconcileReviewUseCase::reconcile,
+                    reviewResumeMarker,
+                    "reviews/");
+            if (status != null) {
+                return status;
+            }
+            reviewComplete = (reviewResumeMarker.get() == null);
+        }
+
+        boolean placeComplete = true;
+        if (reconcilePlaceUseCase != null) {
+            StorageGcRunStatus status = listNamespacePages(
+                    cycle,
+                    reconcilePlaceUseCase::reconcile,
+                    placeResumeMarker,
+                    "places/");
+            if (status != null) {
+                return status;
+            }
+            placeComplete = (placeResumeMarker.get() == null);
+        }
+
+        cycle.listingComplete = reviewComplete && placeComplete;
+        return null;
+    }
+
+    @FunctionalInterface
+    private interface NamespaceReconciler {
+        StorageReconciliationReport reconcile(String marker, Instant now);
+    }
+
+    private StorageGcRunStatus listNamespacePages(
+            Cycle cycle,
+            NamespaceReconciler reconciler,
+            AtomicReference<String> markerRef,
+            String namespaceName) {
+        String marker = markerRef.get();
         for (int page = 0; page < limits.maxPages(); page++) {
             if (deadlineReached(cycle)) {
-                resumeMarker.set(marker);
+                markerRef.set(marker);
                 return StorageGcRunStatus.TIMED_OUT;
             }
             StorageReconciliationReport report;
             try {
-                report = reconcileUseCase.reconcile(marker, clock.instant());
+                report = reconciler.reconcile(marker, clock.instant());
             } catch (IllegalArgumentException | IllegalStateException e) {
                 // Marcador recusado ou listagem que não avança: recomeça do início no próximo ciclo, sem inferir nada
-                resumeMarker.set(null);
-                log.error("Storage GC: paginação inconsistente; a próxima listagem recomeça do início (erro={})",
-                        e.getClass().getSimpleName());
+                markerRef.set(null);
+                log.error("Storage GC: paginação inconsistente em {}; a próxima listagem recomeça do início (erro={})",
+                        namespaceName, e.getClass().getSimpleName());
                 return StorageGcRunStatus.FAILED;
             } catch (RuntimeException e) {
                 // Storage ou banco indisponível: sem rechecagem nem exclusão neste ciclo
-                resumeMarker.set(marker);
-                log.error("Storage GC: listagem/reconciliação falhou; ciclo interrompido (erro={})", e.getClass().getSimpleName());
+                markerRef.set(marker);
+                log.error("Storage GC: listagem/reconciliação de {} falhou; ciclo interrompido (erro={})",
+                        namespaceName, e.getClass().getSimpleName());
                 return StorageGcRunStatus.FAILED;
             }
             cycle.pagesScanned += report.pagesScanned();
@@ -169,13 +248,12 @@ public class RunStorageGcCycleUseCase {
             cycle.objectsIgnored += report.outOfNamespaceIgnored() + report.unrecognizedKeys() + report.duplicatesIgnored();
             cycle.candidatesObserved += report.orphanCandidates().size();
             if (report.complete()) {
-                cycle.listingComplete = true;
-                resumeMarker.set(null);
+                markerRef.set(null);
                 return null;
             }
             marker = report.nextStartAfter();
         }
-        resumeMarker.set(marker);
+        markerRef.set(marker);
         return null;
     }
 

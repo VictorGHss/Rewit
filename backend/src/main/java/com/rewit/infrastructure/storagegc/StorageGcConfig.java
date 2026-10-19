@@ -49,7 +49,7 @@ public class StorageGcConfig {
             StorageGcProperties properties
     ) {
         return new com.rewit.application.usecase.ReconcilePlaceMediaStorageUseCase(
-                listingPort, placeMediaRepository, quarantineRepository, properties.getPageSize(), 1);
+                listingPort, placeMediaRepository, quarantineRepository, properties.getPageSize(), properties.getMaxPages());
     }
 
     @Bean
@@ -57,6 +57,7 @@ public class StorageGcConfig {
             StorageGcProperties properties,
             ObjectStorageListingPort listingPort,
             ReviewMediaRepository reviewMediaRepository,
+            com.rewit.application.port.PlaceMediaRepository placeMediaRepository,
             StorageQuarantineRepository quarantineRepository,
             StorageGcExecutionLock executionLock,
             StorageGcMetrics metrics,
@@ -65,8 +66,10 @@ public class StorageGcConfig {
         properties.validateForExecution();
 
         // Uma página por chamada: o orquestrador aplica max-pages e o timeout entre páginas
-        ReconcileReviewMediaStorageUseCase reconcile = new ReconcileReviewMediaStorageUseCase(
+        ReconcileReviewMediaStorageUseCase reconcileReviews = new ReconcileReviewMediaStorageUseCase(
                 listingPort, reviewMediaRepository, quarantineRepository, properties.getPageSize(), 1);
+        com.rewit.application.usecase.ReconcilePlaceMediaStorageUseCase reconcilePlaces = new com.rewit.application.usecase.ReconcilePlaceMediaStorageUseCase(
+                listingPort, placeMediaRepository, quarantineRepository, properties.getPageSize(), 1);
         RecheckQuarantinedStorageObjectUseCase recheck = new RecheckQuarantinedStorageObjectUseCase(
                 quarantineRepository, new FixedStorageQuarantineGracePolicy(properties.getGracePeriod()));
         StorageGcLimits limits = new StorageGcLimits(
@@ -78,12 +81,12 @@ public class StorageGcConfig {
         Clock clock = Clock.systemUTC();
 
         if (properties.getDryRun()) {
-            return RunStorageGcCycleUseCase.dryRun(executionLock, reconcile, quarantineRepository, recheck,
+            return RunStorageGcCycleUseCase.dryRun(executionLock, reconcileReviews, reconcilePlaces, quarantineRepository, recheck,
                     metrics, clock, limits);
         }
         PurgeConfirmedOrphanStorageObjectUseCase purge = new PurgeConfirmedOrphanStorageObjectUseCase(
                 quarantineRepository, deletionPort.getObject());
-        return RunStorageGcCycleUseCase.destructive(executionLock, reconcile, quarantineRepository, recheck, purge,
+        return RunStorageGcCycleUseCase.destructive(executionLock, reconcileReviews, reconcilePlaces, quarantineRepository, recheck, purge,
                 metrics, clock, limits);
     }
 }

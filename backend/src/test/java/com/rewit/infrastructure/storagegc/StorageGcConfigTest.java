@@ -6,6 +6,7 @@ import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinedStorag
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
 import com.rewit.application.port.ObjectStorageDeletionPort;
 import com.rewit.application.port.ObjectStorageListingPort;
+import com.rewit.application.port.PlaceMediaRepository;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.StorageGcExecutionLock;
 import com.rewit.application.port.StorageQuarantineRepository;
@@ -57,6 +58,7 @@ class StorageGcConfigTest {
             .withBean(DataSource.class, () -> mock(DataSource.class))
             .withBean(ObjectStorageListingPort.class, () -> mock(ObjectStorageListingPort.class))
             .withBean(ReviewMediaRepository.class, () -> mock(ReviewMediaRepository.class))
+            .withBean(PlaceMediaRepository.class, () -> mock(PlaceMediaRepository.class))
             .withBean(StorageQuarantineRepository.class, () -> mock(StorageQuarantineRepository.class))
             .withBean(ObjectStorageDeletionPort.class, () -> deletionPort);
 
@@ -158,7 +160,7 @@ class StorageGcConfigTest {
         properties.setMaxDuration(Duration.ofMinutes(5));
 
         RunStorageGcCycleUseCase gc = new StorageGcConfig().runStorageGcCycleUseCase(properties, listing,
-                mock(ReviewMediaRepository.class), quarantine, new DirectLock(),
+                mock(ReviewMediaRepository.class), mock(PlaceMediaRepository.class), quarantine, new DirectLock(),
                 new StorageGcMetrics(new SimpleMeterRegistry(), quarantine), new ForbiddenDeletionProvider());
         return gc.runCycle();
     }
