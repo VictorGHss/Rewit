@@ -19,6 +19,7 @@ import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.PlaceMediaModerationAction;
 import com.rewit.domain.enums.PlaceMediaStatus;
+import com.rewit.domain.enums.RemovalSource;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.Role;
 import com.rewit.domain.model.Place;
@@ -315,7 +316,13 @@ public class PlaceMediaService {
         }
 
         boolean wasPrimary = media.isPrimary();
-        media.markRemoved();
+        if (isAuthor) {
+            media.markRemovedByAuthor();
+            saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.AUTHOR_REMOVE, "Remoção pelo próprio autor", null, null);
+        } else {
+            media.markRemovedByModerator();
+            saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.REMOVE, "Remoção pelo responsável do local", null, null);
+        }
         placeMediaRepository.save(media);
 
         // Se a capa foi removida, elege deterministamente a foto ativa mais antiga como nova capa
@@ -489,7 +496,7 @@ public class PlaceMediaService {
 
             if (lockedMedia.isActive() || lockedMedia.isUnderReview()) {
                 boolean wasPrimary = lockedMedia.isPrimary();
-                lockedMedia.markRemoved();
+                lockedMedia.markRemovedByModerator();
                 placeMediaRepository.save(lockedMedia);
 
                 if (wasPrimary) {
@@ -510,7 +517,7 @@ public class PlaceMediaService {
             }
 
             saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), moderatorUserId,
-                    PlaceMediaModerationAction.ACCEPT_REPORT, "REPORT", notes);
+                    PlaceMediaModerationAction.ACCEPT_REPORT, lockedReport.getReason(), notes, lockedReport.getId());
         } else {
             // Decisão REJECT: marca a denúncia individual como rejeitada e registra auditoria.
             // A-2: Rejeição de denúncia individual NUNCA reativa a fotografia automaticamente.
@@ -518,7 +525,7 @@ public class PlaceMediaService {
             placeMediaReportRepository.save(lockedReport);
 
             saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), moderatorUserId,
-                    PlaceMediaModerationAction.REJECT_REPORT, "REPORT", notes);
+                    PlaceMediaModerationAction.REJECT_REPORT, lockedReport.getReason(), notes, lockedReport.getId());
         }
 
         return PlaceMediaReportView.of(lockedReport, lockedMedia);
@@ -544,7 +551,7 @@ public class PlaceMediaService {
 
         if (!lockedMedia.isRemoved()) {
             boolean wasPrimary = lockedMedia.isPrimary();
-            lockedMedia.markRemoved();
+            lockedMedia.markRemovedByModerator();
             placeMediaRepository.save(lockedMedia);
 
             if (wasPrimary) {
@@ -564,7 +571,7 @@ public class PlaceMediaService {
                 }
             }
 
-            saveAuditLog(mediaId, placeId, moderatorUserId, PlaceMediaModerationAction.REMOVE, reason, notes);
+            saveAuditLog(mediaId, placeId, moderatorUserId, PlaceMediaModerationAction.REMOVE, reason, notes, null);
         }
 
         return new PlaceMediaModerationResult(
@@ -594,6 +601,11 @@ public class PlaceMediaService {
             throw new BusinessException("Fotografia não pertence ao local informado", HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND");
         }
 
+        if (lockedMedia.getRemovalSource() == RemovalSource.AUTHOR) {
+            throw new BusinessException("Fotografia removida pelo próprio autor não pode ser restaurada por moderação",
+                    HttpStatus.CONFLICT, "CANNOT_RESTORE_AUTHOR_REMOVED_MEDIA");
+        }
+
         if (lockedMedia.isPurged() || !objectStoragePort.exists(lockedMedia.getObjectKey())) {
             throw new BusinessException("Não é possível restaurar a fotografia pois o arquivo já foi excluído do storage", HttpStatus.CONFLICT, "STORAGE_OBJECT_PURGED");
         }
@@ -616,7 +628,7 @@ public class PlaceMediaService {
         }
         placeMediaRepository.save(lockedMedia);
 
-        saveAuditLog(mediaId, placeId, moderatorUserId, PlaceMediaModerationAction.RESTORE, null, notes);
+        saveAuditLog(mediaId, placeId, moderatorUserId, PlaceMediaModerationAction.RESTORE, null, notes, null);
 
         return new PlaceMediaModerationResult(
                 mediaId,
@@ -713,24 +725,25 @@ public class PlaceMediaService {
         }
     }
 
-    private void saveAuditLog(UUID mediaId, UUID placeId, UUID moderatorUserId,
+    private void saveAuditLog(UUID mediaId, UUID placeId, UUID actorUserId,
                               PlaceMediaModerationAction action, String reason, String notes) {
+        saveAuditLog(mediaId, placeId, actorUserId, action, reason, notes, null);
+    }
+
+    private void saveAuditLog(UUID mediaId, UUID placeId, UUID actorUserId,
+                              PlaceMediaModerationAction action, String reason, String notes, UUID reportId) {
         if (placeMediaModerationAuditLogRepository != null) {
-            try {
-                placeMediaModerationAuditLogRepository.save(new PlaceMediaModerationAuditLog(
-                        UUID.randomUUID(),
-                        mediaId,
-                        placeId,
-                        moderatorUserId,
-                        action,
-                        reason,
-                        notes,
-                        Instant.now()
-                ));
-            } catch (RuntimeException e) {
-                log.warn("Falha ao registrar auditoria de moderação de mídia (mediaId={}, erro={})",
-                        mediaId, e.getClass().getSimpleName());
-            }
+            placeMediaModerationAuditLogRepository.save(new PlaceMediaModerationAuditLog(
+                    UUID.randomUUID(),
+                    mediaId,
+                    placeId,
+                    actorUserId,
+                    action,
+                    reason,
+                    notes,
+                    reportId,
+                    Instant.now()
+            ));
         }
     }
 

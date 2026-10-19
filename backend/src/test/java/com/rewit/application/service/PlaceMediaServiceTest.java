@@ -734,4 +734,116 @@ class PlaceMediaServiceTest {
         assertEquals("image/jpeg", result.mimeType());
         assertFalse(result.publiclyCacheable());
     }
+
+    @Test
+    @DisplayName("22. restoreMediaByModerator rejeita restauração de foto removida pelo próprio autor com CANNOT_RESTORE_AUTHOR_REMOVED_MEDIA")
+    void shouldRejectRestorationWhenMediaRemovedByAuthor() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+        media.markRemovedByAuthor();
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.restoreMediaByModerator(modId, placeId, mediaId, "Tentativa de restaurar")
+        );
+
+        assertEquals("CANNOT_RESTORE_AUTHOR_REMOVED_MEDIA", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        assertTrue(media.isRemoved());
+    }
+
+    @Test
+    @DisplayName("23. deleteMedia registra AUTHOR_REMOVE na auditoria quando excluída pelo próprio autor")
+    void shouldRecordAuthorRemoveAuditLogWhenAuthorDeletesMedia() {
+        UUID mediaId = UUID.randomUUID();
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
+        );
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaRepository.findFirstActiveByPlaceId(placeId)).thenReturn(Optional.empty());
+
+        placeMediaService.deleteMedia(userId, placeId, mediaId);
+
+        assertTrue(media.isRemoved());
+        assertEquals(com.rewit.domain.enums.RemovalSource.AUTHOR, media.getRemovalSource());
+
+        org.mockito.ArgumentCaptor<com.rewit.domain.model.PlaceMediaModerationAuditLog> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rewit.domain.model.PlaceMediaModerationAuditLog.class);
+        org.mockito.Mockito.verify(placeMediaModerationAuditLogRepository).save(captor.capture());
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.AUTHOR_REMOVE, captor.getValue().getAction());
+        assertEquals(mediaId, captor.getValue().getPlaceMediaId());
+        assertEquals(userId, captor.getValue().getActorUserId());
+    }
+
+    @Test
+    @DisplayName("24. decideReport registra o motivo real da denúncia e o reportId na auditoria")
+    void shouldRecordReasonAndReportIdInAuditLogOnDecideReport() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+        UUID reportId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+        PlaceMediaReport report = new PlaceMediaReport(
+                reportId, mediaId, UUID.randomUUID(), "SPAM_OU_PROPAGANDA", "Foto de anúncio sem relação"
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeMediaReportRepository.findById(reportId)).thenReturn(Optional.of(report));
+        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(report));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(report));
+
+        placeMediaService.decideReport(modId, reportId, "ACCEPT", "Foto confirmada como imprópria");
+
+        org.mockito.ArgumentCaptor<com.rewit.domain.model.PlaceMediaModerationAuditLog> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rewit.domain.model.PlaceMediaModerationAuditLog.class);
+        org.mockito.Mockito.verify(placeMediaModerationAuditLogRepository).save(captor.capture());
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.ACCEPT_REPORT, captor.getValue().getAction());
+        assertEquals("SPAM_OU_PROPAGANDA", captor.getValue().getReason());
+        assertEquals(reportId, captor.getValue().getReportId());
+    }
+
+    @Test
+    @DisplayName("25. Falha na gravação de auditoria propaga exceção sem silenciar (atômica e obrigatória)")
+    void shouldPropagateExceptionWhenAuditLogSaveFails() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
+
+        org.mockito.Mockito.doThrow(new org.springframework.dao.DataIntegrityViolationException("Violação de integridade na auditoria"))
+                .when(placeMediaModerationAuditLogRepository).save(any());
+
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () ->
+                placeMediaService.removeMediaByModerator(modId, placeId, mediaId, "MOTIVO", "Notas")
+        );
+    }
 }
