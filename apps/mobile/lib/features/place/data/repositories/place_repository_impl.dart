@@ -41,12 +41,18 @@ class PlaceRepositoryImpl implements PlaceRepository {
     required String placeId,
     required Uint8List fileBytes,
     required String filename,
+    String? idempotencyKey,
   }) async {
+    final Map<String, String>? headers = (idempotencyKey != null && idempotencyKey.trim().isNotEmpty)
+        ? {'Idempotency-Key': idempotencyKey.trim()}
+        : null;
+
     final response = await httpClient.postMultipart(
       ApiEndpoints.placeMedia(placeId),
       fieldName: 'file',
       fileBytes: fileBytes,
       filename: filename,
+      headers: headers,
     );
     final dynamic decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {

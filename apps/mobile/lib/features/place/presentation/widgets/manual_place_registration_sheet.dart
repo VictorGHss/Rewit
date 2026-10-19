@@ -86,6 +86,7 @@ class _ManualPlaceRegistrationSheetState
   File? _selectedPhoto;
   Uint8List? _selectedPhotoBytes;
   PlaceDetail? _pendingCreatedPlace;
+  String? _uploadIdempotencyKey;
   bool _isSubmitting = false;
   bool _isPickingPhoto = false;
   String? _errorMessage;
@@ -142,6 +143,7 @@ class _ManualPlaceRegistrationSheetState
       setState(() {
         _selectedPhoto = file;
         _selectedPhotoBytes = bytes;
+        _uploadIdempotencyKey = null;
         _errorMessage = null;
       });
     } on PlatformException {
@@ -273,11 +275,13 @@ class _ManualPlaceRegistrationSheetState
           );
       _pendingCreatedPlace = place;
 
+      _uploadIdempotencyKey ??= 'm-${DateTime.now().microsecondsSinceEpoch}-${place.id.length >= 8 ? place.id.substring(0, 8) : place.id}';
       final filename = _selectedPhoto!.path.split(RegExp(r'[/\\]')).last;
       final uploadedPhotoUrl = await widget.placeRepository.uploadPlacePhoto(
         placeId: place.id,
         fileBytes: photoBytes,
         filename: filename.isNotEmpty ? filename : 'place.jpg',
+        idempotencyKey: _uploadIdempotencyKey,
       );
       final completedPlace = place.copyWith(photoUrl: uploadedPhotoUrl);
 

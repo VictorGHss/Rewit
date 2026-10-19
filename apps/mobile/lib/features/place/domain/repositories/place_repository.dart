@@ -14,6 +14,7 @@ abstract class PlaceRepository {
     required String placeId,
     required Uint8List fileBytes,
     required String filename,
+    String? idempotencyKey,
   });
 
   /// Obtém os detalhes completos de um local pelo seu identificador único.
