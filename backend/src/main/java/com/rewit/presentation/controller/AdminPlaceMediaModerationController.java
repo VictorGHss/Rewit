@@ -136,4 +136,3 @@ public class AdminPlaceMediaModerationController {
         return UUID.fromString(authentication.getName());
     }
 }
-

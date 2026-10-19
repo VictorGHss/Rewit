@@ -99,4 +99,3 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
         return PageResult.of(content, jpaPage.getNumber(), jpaPage.getSize(), jpaPage.getTotalElements());
     }
 }
-

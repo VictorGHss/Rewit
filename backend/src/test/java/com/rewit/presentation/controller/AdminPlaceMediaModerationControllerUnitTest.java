@@ -232,4 +232,3 @@ class AdminPlaceMediaModerationControllerUnitTest {
                 .andExpect(jsonPath("$.code").value("STORAGE_OBJECT_PURGED"));
     }
 }
-

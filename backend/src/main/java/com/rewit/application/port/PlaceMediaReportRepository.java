@@ -24,4 +24,3 @@ public interface PlaceMediaReportRepository {
 
     PageResult<PlaceMediaReport> findByStatus(String status, int page, int size);
 }
-

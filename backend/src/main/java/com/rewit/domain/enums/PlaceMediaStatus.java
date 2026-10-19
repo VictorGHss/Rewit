@@ -9,4 +9,3 @@ public enum PlaceMediaStatus {
     UNDER_REVIEW,
     REMOVED
 }
-
