@@ -54,3 +54,32 @@ class PlaceDetail {
     return buffer.toString();
   }
 }
+
+/// Dados de entrada para cadastro manual de um novo local físico (Place) no catálogo.
+class CreatePlaceInput {
+  final String name;
+  final String addressText;
+  final String? category;
+  final String? description;
+  final String? streetNumber;
+  final String? neighborhood;
+  final String? city;
+  final String? state;
+  final String? country;
+  final double? latitude;
+  final double? longitude;
+
+  const CreatePlaceInput({
+    required this.name,
+    required this.addressText,
+    this.category,
+    this.description,
+    this.streetNumber,
+    this.neighborhood,
+    this.city,
+    this.state,
+    this.country,
+    this.latitude,
+    this.longitude,
+  });
+}

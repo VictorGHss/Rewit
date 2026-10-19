@@ -20,6 +20,10 @@ class _FakePlaceRepository implements PlaceRepository {
   int? lastPageRequested;
 
   @override
+  Future<PlaceDetail> createPlace(CreatePlaceInput input) async =>
+      throw UnimplementedError();
+
+  @override
   Future<PlaceDetail> getPlaceById(String id) async {
     if (placeException != null) throw placeException!;
     return placeToReturn ??

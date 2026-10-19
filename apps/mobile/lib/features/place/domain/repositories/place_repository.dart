@@ -4,6 +4,9 @@ import '../entities/target_stats.dart';
 
 /// Contrato de repositório para acesso e consulta a locais físicos (Place) e seus alvos avaliáveis associados.
 abstract class PlaceRepository {
+  /// Cadastra manualmente um novo local no catálogo e retorna a entidade com o UUID canônico do backend.
+  Future<PlaceDetail> createPlace(CreatePlaceInput input);
+
   /// Obtém os detalhes completos de um local pelo seu identificador único.
   Future<PlaceDetail> getPlaceById(String id);
 

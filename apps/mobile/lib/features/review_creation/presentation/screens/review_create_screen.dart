@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
@@ -18,6 +21,7 @@ class ReviewCreateScreen extends StatefulWidget {
   final ReviewMediaRepository? mediaRepository;
   final MediaPickerService? mediaPickerService;
   final SearchRepository? searchRepository;
+  final PlaceRepository? placeRepository;
   final LocationService? locationService;
   final ReviewCreateNotifier? notifier;
   final ValueChanged<FeedReview>? onReviewCreated;
@@ -25,6 +29,8 @@ class ReviewCreateScreen extends StatefulWidget {
   final String? initialTargetName;
   final String? initialTargetType;
   final String? initialCategory;
+  final File? initialPhoto;
+  final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
   const ReviewCreateScreen({
     super.key,
@@ -32,6 +38,7 @@ class ReviewCreateScreen extends StatefulWidget {
     this.mediaRepository,
     this.mediaPickerService,
     this.searchRepository,
+    this.placeRepository,
     this.locationService,
     this.notifier,
     this.onReviewCreated,
@@ -39,6 +46,8 @@ class ReviewCreateScreen extends StatefulWidget {
     this.initialTargetName,
     this.initialTargetType,
     this.initialCategory,
+    this.initialPhoto,
+    this.onPickManualPlacePhoto,
   });
 
   @override
@@ -67,6 +76,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
         initialTargetName: widget.initialTargetName,
         initialTargetType: widget.initialTargetType,
         initialCategory: widget.initialCategory,
+        initialPhoto: widget.initialPhoto,
       );
       _ownsNotifier = true;
     }
@@ -336,6 +346,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     canRemove: _notifier.targets.length > 1,
                     enabled: !isSubmitting,
                     searchRepository: widget.searchRepository,
+                    placeRepository: widget.placeRepository,
                     isTargetSelectedElsewhere: (targetId) =>
                         _notifier.isTargetAlreadySelected(targetId, excludeIndex: index),
                     onTargetSelected: (item) {
@@ -356,6 +367,10 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     onRemove: () {
                       _notifier.removeTarget(index);
                     },
+                    onManualPlacePhotoSelected: (file) {
+                      _notifier.addPhotoFile(file);
+                    },
+                    onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
                   );
                 }),
 
@@ -383,20 +398,53 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                TextFormField(
-                  controller: _contextPlaceIdController,
-                  enabled: !isSubmitting,
-                  decoration: const InputDecoration(
-                    labelText: 'Identificador do Local (UUID)',
-                    hintText: 'ex: 00000000-0000-0000-0000-000000000002',
-                    prefixIcon: Icon(Icons.place_outlined, size: 20),
-                    isDense: true,
-                    border: OutlineInputBorder(),
+                if (_notifier.contextPlaceName != null &&
+                    _notifier.contextPlaceName!.isNotEmpty)
+                  Container(
+                    key: const Key('selected_context_place_banner'),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest.withAlpha(60),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: theme.colorScheme.primary.withAlpha(70),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.place_outlined,
+                          size: 20,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Estabelecimento vinculado: ${_notifier.contextPlaceName!}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  TextFormField(
+                    controller: _contextPlaceIdController,
+                    enabled: !isSubmitting,
+                    decoration: const InputDecoration(
+                      labelText: 'Identificador do Local (UUID)',
+                      hintText: 'ex: 00000000-0000-0000-0000-000000000002',
+                      prefixIcon: Icon(Icons.place_outlined, size: 20),
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (val) {
+                      _notifier.setContextPlaceId(val);
+                    },
                   ),
-                  onChanged: (val) {
-                    _notifier.setContextPlaceId(val);
-                  },
-                ),
                 const SizedBox(height: 20),
 
                 // Seção: Relato Geral da Experiência

@@ -5,6 +5,7 @@ import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/features/place/data/models/place_dtos.dart';
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 
 class _MockHttpBaseClient extends http.BaseClient {
   http.Request? capturedRequest;
@@ -265,6 +266,98 @@ void main() {
       expect(page.pageNumber, 1);
       expect(page.totalElements, 15);
       expect(page.isLast, isTrue);
+    });
+
+    test('createPlace realiza POST /api/v1/places e retorna PlaceDetail com UUID canônico', () async {
+      const canonicalUuid = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': canonicalUuid,
+          'name': 'Pastel da Dona Ana',
+          'slug': 'pastel-da-dona-ana',
+          'category': 'GERAL',
+          'addressText': 'Rua das Palmeiras, 45 - Centro',
+          'city': 'Não informada',
+          'state': 'BR',
+          'country': 'BR',
+          'latitude': 0.0,
+          'longitude': 0.0,
+          'validationRadiusMeters': 100,
+          'origin': 'MANUAL',
+          'isVerified': false,
+          'status': 'ACTIVE',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      final created = await repository.createPlace(
+        const CreatePlaceInput(
+          name: 'Pastel da Dona Ana',
+          addressText: 'Rua das Palmeiras, 45 - Centro',
+        ),
+      );
+
+      expect(innerClient.capturedRequest?.method, 'POST');
+      expect(innerClient.capturedRequest?.url.path, '/api/v1/places');
+      final sentBody = jsonDecode(innerClient.capturedRequest!.body) as Map<String, dynamic>;
+      expect(sentBody['name'], 'Pastel da Dona Ana');
+      expect(sentBody['addressText'], 'Rua das Palmeiras, 45 - Centro');
+      expect(created.id, canonicalUuid);
+      expect(created.name, 'Pastel da Dona Ana');
+      expect(created.addressText, 'Rua das Palmeiras, 45 - Centro');
+    });
+
+    test('createPlace lança ApiException quando recebe 409 Conflict (PLACE_ALREADY_EXISTS)', () async {
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'type': 'https://api.rewit.com/errors/place-already-exists',
+          'title': 'Conflict',
+          'status': 409,
+          'detail': 'Place already exists',
+          'code': 'PLACE_ALREADY_EXISTS',
+        }),
+        409,
+        headers: {'content-type': 'application/problem+json'},
+      );
+
+      expect(
+        () => repository.createPlace(
+          const CreatePlaceInput(
+            name: 'Pastel da Dona Ana',
+            addressText: 'Rua das Palmeiras, 45 - Centro',
+          ),
+        ),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 409)
+              .having((e) => e.errorCode, 'errorCode', 'PLACE_ALREADY_EXISTS'),
+        ),
+      );
+    });
+
+    test('createPlace rejeita resposta cujo id não seja um UUID canônico', () async {
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': 'id-invalido-nao-uuid',
+          'name': 'Pastel da Dona Ana',
+          'slug': 'pastel-da-dona-ana',
+          'category': 'GERAL',
+          'addressText': 'Rua das Palmeiras, 45',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      expect(
+        () => repository.createPlace(
+          const CreatePlaceInput(
+            name: 'Pastel da Dona Ana',
+            addressText: 'Rua das Palmeiras, 45',
+          ),
+        ),
+        throwsA(isA<FormatException>()),
+      );
     });
   });
 }

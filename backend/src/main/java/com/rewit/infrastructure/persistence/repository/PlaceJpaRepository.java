@@ -21,6 +21,19 @@ public interface PlaceJpaRepository extends JpaRepository<PlaceJpaEntity, UUID> 
     boolean existsBySlug(String slug);
 
     @Query(value = """
+        SELECT EXISTS (
+            SELECT 1 FROM places p
+            WHERE p.status = 'ACTIVE'
+              AND rewit_search_normalize(p.name) = rewit_search_normalize(:name)
+              AND rewit_search_normalize(p.address_text) = rewit_search_normalize(:addressText)
+        )
+    """, nativeQuery = true)
+    boolean existsActiveByNormalizedNameAndAddress(
+            @Param("name") String name,
+            @Param("addressText") String addressText
+    );
+
+    @Query(value = """
         SELECT p.* FROM places p
         WHERE ST_DWithin(p.coordinates, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography, :radiusMeters)
         ORDER BY ST_Distance(p.coordinates, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography) ASC

@@ -1,5 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import '../../domain/entities/search_entities.dart';
 import '../../domain/entities/search_filter.dart';
 import '../../domain/repositories/search_repository.dart';
@@ -25,14 +29,20 @@ class _FallbackSearchRepository implements SearchRepository {
 /// Tela de Busca Global unificada de locais e produtos no catálogo Rewit (C5.1).
 class SearchScreen extends StatefulWidget {
   final SearchRepository? searchRepository;
+  final PlaceRepository? placeRepository;
   final SearchNotifier? searchNotifier;
   final void Function(SearchResultItem item)? onTargetTap;
+  final void Function(ManualPlaceRegistrationResult result)? onManualPlaceRegistered;
+  final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
   const SearchScreen({
     super.key,
     this.searchRepository,
+    this.placeRepository,
     this.searchNotifier,
     this.onTargetTap,
+    this.onManualPlaceRegistered,
+    this.onPickManualPlacePhoto,
   });
 
   @override
@@ -91,6 +101,35 @@ class _SearchScreenState extends State<SearchScreen>
   void _clearSearch() {
     _searchController.clear();
     _notifier.clear();
+  }
+
+  Future<void> _openManualPlaceRegistration(String initialQuery) async {
+    if (widget.placeRepository == null) return;
+
+    final result = await ManualPlaceRegistrationSheet.show(
+      context,
+      placeRepository: widget.placeRepository!,
+      initialName: initialQuery.trim(),
+      onPickPhoto: widget.onPickManualPlacePhoto,
+    );
+
+    if (!mounted || result == null) return;
+
+    if (widget.onManualPlaceRegistered != null) {
+      widget.onManualPlaceRegistered!(result);
+      return;
+    }
+
+    await Navigator.of(context).pushNamed(
+      AppRouter.reviewCreate,
+      arguments: {
+        'targetId': result.place.id,
+        'targetName': result.place.name,
+        'targetType': 'PLACE',
+        'category': result.place.category,
+        'initialPhoto': result.photoFile,
+      },
+    );
   }
 
   void _handleItemTap(SearchResultItem item) {
@@ -343,6 +382,15 @@ class _SearchScreenState extends State<SearchScreen>
               textAlign: TextAlign.center,
               style: TextStyle(color: theme.colorScheme.onSurface.withAlpha(150)),
             ),
+            if (widget.placeRepository != null) ...[
+              const SizedBox(height: 16),
+              FilledButton.tonalIcon(
+                key: const Key('search_register_manual_place_button'),
+                onPressed: () => _openManualPlaceRegistration(query),
+                icon: const Icon(Icons.add_location_alt_outlined),
+                label: const Text('Cadastrar local manualmente'),
+              ),
+            ],
           ],
         ),
       ),

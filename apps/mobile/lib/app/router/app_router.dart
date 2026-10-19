@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
@@ -115,6 +116,7 @@ class AppRouter {
                   mediaPickerService: mediaPickerService,
                   locationService: locationService,
                   searchRepository: searchRepository,
+                  placeRepository: placeRepository,
                   userProfileRepository: userProfileRepository,
                   notificationRepository: notificationRepository,
                   notificationsNotifier: notificationsNotifier,
@@ -140,7 +142,9 @@ class AppRouter {
             reviewCreationRepository: reviewCreationRepository,
             mediaRepository: reviewMediaRepository,
             mediaPickerService: mediaPickerService,
+            locationService: locationService,
             searchRepository: searchRepository,
+            placeRepository: placeRepository,
             userProfileRepository: userProfileRepository,
             notificationRepository: notificationRepository,
             notificationsNotifier: notificationsNotifier,
@@ -223,6 +227,7 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => SearchScreen(
             searchRepository: searchRepository,
+            placeRepository: placeRepository,
           ),
           settings: settings,
         );
@@ -284,11 +289,13 @@ class AppRouter {
         String? initialTargetName;
         String? initialTargetType;
         String? initialCategory;
+        File? initialPhoto;
         if (args is Map<String, dynamic>) {
           initialTargetId = args['targetId'] as String?;
           initialTargetName = args['targetName'] as String?;
           initialTargetType = args['targetType'] as String?;
           initialCategory = args['category'] as String?;
+          initialPhoto = args['initialPhoto'] as File?;
         }
 
         return MaterialPageRoute(
@@ -298,10 +305,12 @@ class AppRouter {
             mediaPickerService: mediaPickerService,
             locationService: locationService,
             searchRepository: searchRepository,
+            placeRepository: placeRepository,
             initialTargetId: initialTargetId,
             initialTargetName: initialTargetName,
             initialTargetType: initialTargetType,
             initialCategory: initialCategory,
+            initialPhoto: initialPhoto,
             onReviewCreated: (createdReview) {
               feedNotifier?.refresh();
               Navigator.of(context).pushReplacementNamed(

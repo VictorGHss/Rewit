@@ -802,7 +802,11 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Alvo: ${target.targetId}',
+                                (target.targetName != null && target.targetName!.trim().isNotEmpty)
+                                    ? target.targetName!.trim()
+                                    : (target.targetType?.toUpperCase() == 'PRODUCT'
+                                        ? 'Produto avaliado'
+                                        : 'Local avaliado'),
                                 style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
                                 overflow: TextOverflow.ellipsis,
                               ),

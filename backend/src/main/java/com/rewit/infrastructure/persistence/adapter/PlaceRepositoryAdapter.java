@@ -121,6 +121,14 @@ public class PlaceRepositoryAdapter implements PlaceRepository {
     }
 
     @Override
+    public boolean existsActiveByNormalizedNameAndAddress(String name, String addressText) {
+        if (name == null || name.isBlank() || addressText == null || addressText.isBlank()) {
+            return false;
+        }
+        return placeJpaRepository.existsActiveByNormalizedNameAndAddress(name.trim(), addressText.trim());
+    }
+
+    @Override
     public List<Place> findNearby(double latitude, double longitude, double radiusMeters) {
         if (radiusMeters <= 0) {
             return List.of();

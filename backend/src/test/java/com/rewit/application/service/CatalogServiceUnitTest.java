@@ -564,4 +564,22 @@ class CatalogServiceUnitTest {
         assertThrows(BusinessException.class, () -> catalogService.findNearbyPlaces(-25.4, Double.POSITIVE_INFINITY, 1000.0, 20));
         assertThrows(BusinessException.class, () -> catalogService.findNearbyPlaces(-25.4, -49.2, Double.NaN, 20));
     }
+
+    @Test
+    @DisplayName("createPlace: Deve lançar PLACE_ALREADY_EXISTS (409) se local ativo com mesmo nome e endereço normalizados já existir")
+    void shouldRejectManualPlaceCreationWhenActivePlaceWithSameNormalizedNameAndAddressExists() {
+        CreatePlaceCommand cmd = new CreatePlaceCommand(
+                "Pastel da Dona Ana", null, "GERAL", null,
+                "Av. Brasil, 500 - Centro", null, null, "Não informada", "BR", "BR",
+                0.0, 0.0, 100, "USER", null
+        );
+
+        when(placeRepository.existsActiveByNormalizedNameAndAddress("Pastel da Dona Ana", "Av. Brasil, 500 - Centro"))
+                .thenReturn(true);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> catalogService.createPlace(cmd));
+        assertEquals("PLACE_ALREADY_EXISTS", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(placeRepository, never()).save(any());
+    }
 }

@@ -70,10 +70,23 @@ public final class ReviewDto {
             UUID id,
             UUID reviewId,
             UUID targetId,
+            String targetType,
+            String targetName,
             BigDecimal rating,
             String specificComment,
             Instant createdAt
-    ) {}
+    ) {
+        public ReviewTargetView(
+                UUID id,
+                UUID reviewId,
+                UUID targetId,
+                BigDecimal rating,
+                String specificComment,
+                Instant createdAt
+        ) {
+            this(id, reviewId, targetId, null, null, rating, specificComment, createdAt);
+        }
+    }
 
     public record ReviewDetailView(
             UUID id,

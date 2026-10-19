@@ -23,36 +23,34 @@ public final class CatalogPresentationDtos {
             @Size(max = 255, message = "O nome deve conter até 255 caracteres")
             String name,
 
-            @NotBlank(message = "O slug é obrigatório")
-            @Pattern(regexp = "^[a-z0-9]+(?:-[a-z0-9]+)*$", message = "Slug deve conter apenas letras minúsculas, números e hífens")
+            @Size(max = 255, message = "O slug deve conter até 255 caracteres")
+            @Pattern(regexp = "^$|^[a-z0-9]+(?:-[a-z0-9]+)*$", message = "Slug deve conter apenas letras minúsculas, números e hífens")
             String slug,
 
-            @NotBlank(message = "A categoria é obrigatória")
             @Size(max = 64, message = "A categoria deve conter até 64 caracteres")
             String category,
 
             String description,
 
             @NotBlank(message = "O endereço é obrigatório")
+            @Size(max = 500, message = "O endereço deve conter até 500 caracteres")
             String addressText,
 
             String streetNumber,
             String neighborhood,
 
-            @NotBlank(message = "A cidade é obrigatória")
+            @Size(max = 100, message = "A cidade deve conter até 100 caracteres")
             String city,
 
-            @NotBlank(message = "O estado (UF) é obrigatório")
+            @Size(max = 50, message = "O estado (UF) deve conter até 50 caracteres")
             String state,
 
             String country,
 
-            @NotNull(message = "A latitude é obrigatória")
             @DecimalMin(value = "-90.0", message = "Latitude mínima é -90.0")
             @DecimalMax(value = "90.0", message = "Latitude máxima é 90.0")
             Double latitude,
 
-            @NotNull(message = "A longitude é obrigatória")
             @DecimalMin(value = "-180.0", message = "Longitude mínima é -180.0")
             @DecimalMax(value = "180.0", message = "Longitude máxima é 180.0")
             Double longitude,

@@ -29,6 +29,10 @@ public interface PlaceRepository {
 
     boolean existsBySlug(String slug);
 
+    default boolean existsActiveByNormalizedNameAndAddress(String name, String addressText) {
+        return false;
+    }
+
     List<Place> findNearby(double latitude, double longitude, double radiusMeters);
 
     List<com.rewit.application.dto.catalog.CatalogDtos.NearbyPlaceResult> findNearbyWithDistance(

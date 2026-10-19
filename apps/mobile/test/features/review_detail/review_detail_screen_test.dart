@@ -47,6 +47,7 @@ class FakeFullFeedRepo implements FeedRepository {
       FeedTarget(
         id: 'tgt-1',
         targetId: 'bistro-place',
+        targetName: 'Bistrô Place',
         rating: 4.8,
         specificComment: 'Atendimento excepcional e ambiente aconchegante',
         createdAt: DateTime.now().subtract(const Duration(hours: 1)),
@@ -233,7 +234,8 @@ void main() {
       expect(find.text('@gourmet'), findsOneWidget);
       expect(find.text('Presença confirmada no estabelecimento (Check-in validado)'), findsOneWidget);
       expect(find.text('Alvos da Avaliação'), findsOneWidget);
-      expect(find.text('Alvo: bistro-place'), findsOneWidget);
+      expect(find.text('Bistrô Place'), findsOneWidget);
+      expect(find.text('Alvo: bistro-place'), findsNothing);
       expect(find.text('Atendimento excepcional e ambiente aconchegante'), findsOneWidget);
       expect(find.text('4.8'), findsOneWidget);
       expect(find.text('O risoto de cogumelos estava perfeito e a sobremesa foi memorável.'), findsOneWidget);

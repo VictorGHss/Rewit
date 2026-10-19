@@ -230,6 +230,15 @@ public class CatalogService {
                 throw new BusinessException("Slug do local já está em uso", HttpStatus.CONFLICT, "PLACE_SLUG_ALREADY_EXISTS");
             }
 
+            if (!hasExternalRef && cmd.addressText() != null && !cmd.addressText().isBlank()
+                    && placeRepository.existsActiveByNormalizedNameAndAddress(cmd.name(), cmd.addressText())) {
+                throw new BusinessException(
+                        "Já existe um local ativo cadastrado com este nome e endereço",
+                        HttpStatus.CONFLICT,
+                        "PLACE_ALREADY_EXISTS"
+                );
+            }
+
             try {
                 Place saved = transactionOperations.execute(status ->
                         executePersistPlace(cmd, normalizedRequestedSlug, finalProvider, finalExternalId));
@@ -262,6 +271,15 @@ public class CatalogService {
         }
 
         // 2. Caso com Slug Automático (slug omitido ou vazio)
+        if (!hasExternalRef && cmd.addressText() != null && !cmd.addressText().isBlank()
+                && placeRepository.existsActiveByNormalizedNameAndAddress(cmd.name(), cmd.addressText())) {
+            throw new BusinessException(
+                    "Já existe um local ativo cadastrado com este nome e endereço",
+                    HttpStatus.CONFLICT,
+                    "PLACE_ALREADY_EXISTS"
+            );
+        }
+
         String baseSlug = generateSlug(cmd.name());
         String currentCandidateSlug = baseSlug;
         int suffixCounter = 1;

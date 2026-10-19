@@ -319,11 +319,14 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'ID: ${target.targetId}',
+                                  (target.targetName != null && target.targetName!.trim().isNotEmpty)
+                                      ? target.targetName!.trim()
+                                      : (target.targetType?.toUpperCase() == 'PRODUCT'
+                                          ? 'Produto avaliado'
+                                          : 'Local avaliado'),
                                   style: const TextStyle(
-                                    fontSize: 12,
-                                    fontFamily: 'monospace',
-                                    color: Colors.grey,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),

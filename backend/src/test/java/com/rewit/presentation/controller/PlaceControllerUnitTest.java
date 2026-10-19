@@ -550,4 +550,81 @@ class PlaceControllerUnitTest {
                 .andExpect(jsonPath("$.code").value("INVALID_NEARBY_LIMIT"))
                 .andExpect(jsonPath("$.detail").value("O limite de resultados deve ser entre 1 e 100"));
     }
+
+    @Test
+    @DisplayName("19. POST /api/v1/places: Criação manual simplificada apenas com name e addressText aplica defaults seguros e retorna 201 Created com UUID canônico")
+    void shouldCreatePlaceWithSimplifiedPayloadAndReturnCanonicalUuid() throws Exception {
+        UUID placeId = UUID.randomUUID();
+        Place createdPlace = new Place(
+                placeId,
+                "Pastel da Dona Ana",
+                "pastel-da-dona-ana",
+                "GERAL",
+                null,
+                "Av. Brasil, 500 - Centro",
+                null,
+                null,
+                "Não informada",
+                "BR",
+                "BR",
+                0.0,
+                0.0,
+                100,
+                "USER",
+                false,
+                authenticatedUserId,
+                "ACTIVE"
+        );
+
+        when(catalogService.createPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(createdPlace);
+
+        Map<String, Object> simplifiedRequest = Map.of(
+                "name", "Pastel da Dona Ana",
+                "addressText", "Av. Brasil, 500 - Centro"
+        );
+
+        mockMvc.perform(post("/api/v1/places")
+                        .principal(createAuth())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(simplifiedRequest)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(placeId.toString()))
+                .andExpect(jsonPath("$.name").value("Pastel da Dona Ana"))
+                .andExpect(jsonPath("$.slug").value("pastel-da-dona-ana"))
+                .andExpect(jsonPath("$.addressText").value("Av. Brasil, 500 - Centro"))
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        ArgumentCaptor<CreatePlaceCommand> captor = ArgumentCaptor.forClass(CreatePlaceCommand.class);
+        verify(catalogService).createPlace(eq(authenticatedUserId), captor.capture());
+        CreatePlaceCommand cmd = captor.getValue();
+        assertEquals("Pastel da Dona Ana", cmd.name());
+        assertNull(cmd.slug());
+        assertEquals("GERAL", cmd.category());
+        assertEquals("Av. Brasil, 500 - Centro", cmd.addressText());
+        assertEquals("Não informada", cmd.city());
+        assertEquals("BR", cmd.state());
+        assertEquals("BR", cmd.country());
+        assertEquals(0.0, cmd.latitude());
+        assertEquals(0.0, cmd.longitude());
+    }
+
+    @Test
+    @DisplayName("20. POST /api/v1/places: Retorna 409 Conflict (PLACE_ALREADY_EXISTS) quando local com mesmo nome e endereço já existir")
+    void shouldReturnConflictWhenManualPlaceAlreadyExists() throws Exception {
+        when(catalogService.createPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class)))
+                .thenThrow(new BusinessException("Este local já está cadastrado no catálogo.",
+                        HttpStatus.CONFLICT, "PLACE_ALREADY_EXISTS"));
+
+        Map<String, Object> duplicateRequest = Map.of(
+                "name", "Pastel da Dona Ana",
+                "addressText", "Av. Brasil, 500 - Centro"
+        );
+
+        mockMvc.perform(post("/api/v1/places")
+                        .principal(createAuth())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(duplicateRequest)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PLACE_ALREADY_EXISTS"));
+    }
 }

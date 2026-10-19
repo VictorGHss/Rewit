@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 
@@ -36,6 +37,21 @@ class SelectedMediaItem {
     this.retryAfterSeconds,
     this.uploadedMedia,
   });
+
+  /// Cria um [SelectedMediaItem] a partir de um arquivo de imagem local.
+  factory SelectedMediaItem.fromFile(File file) {
+    final bytes = file.readAsBytesSync();
+    final rawName = file.path.split(RegExp(r'[/\\]')).last.trim();
+    final name = rawName.isNotEmpty ? rawName : 'place_photo.jpg';
+    final mime = name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+    return SelectedMediaItem(
+      id: '${DateTime.now().microsecondsSinceEpoch}_place_photo',
+      name: name,
+      sizeBytes: bytes.length,
+      mimeType: mime,
+      bytes: bytes,
+    );
+  }
 
   /// 10 MB em bytes
   static const int maxSizeBytes = 10 * 1024 * 1024;

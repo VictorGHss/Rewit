@@ -56,6 +56,7 @@ class FeedTargetDto {
   final String? specificComment;
   final DateTime? createdAt;
   final String? targetType;
+  final String? targetName;
 
   const FeedTargetDto({
     required this.id,
@@ -65,6 +66,7 @@ class FeedTargetDto {
     this.specificComment,
     this.createdAt,
     this.targetType,
+    this.targetName,
   });
 
   factory FeedTargetDto.fromJson(Map<String, dynamic> json) {
@@ -84,6 +86,7 @@ class FeedTargetDto {
       specificComment: json['specificComment'] as String?,
       createdAt: parsedDate,
       targetType: (json['targetType'] ?? json['type']) as String?,
+      targetName: (json['targetName'] ?? json['name']) as String?,
     );
   }
 
@@ -96,6 +99,7 @@ class FeedTargetDto {
       if (specificComment != null) 'specificComment': specificComment,
       if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
       if (targetType != null) 'targetType': targetType,
+      if (targetName != null) 'targetName': targetName,
     };
   }
 
@@ -108,6 +112,7 @@ class FeedTargetDto {
       specificComment: specificComment,
       createdAt: createdAt,
       targetType: targetType,
+      targetName: targetName,
     );
   }
 }

@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
@@ -9,20 +13,26 @@ import 'package:rewit_mobile/features/search/domain/repositories/search_reposito
 /// e distinção visual entre Local (Place) e Produto (Product).
 class TargetSearchSelectorWidget extends StatefulWidget {
   final SearchRepository searchRepository;
+  final PlaceRepository? placeRepository;
   final int targetIndex;
   final bool enabled;
   final ValueChanged<SearchResultItem> onTargetSelected;
   final bool Function(String targetId)? isTargetSelectedElsewhere;
   final ValueChanged<String>? onManualTargetIdEntered;
+  final ValueChanged<File>? onManualPlacePhotoSelected;
+  final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
   const TargetSearchSelectorWidget({
     super.key,
     required this.searchRepository,
+    this.placeRepository,
     required this.targetIndex,
     this.enabled = true,
     required this.onTargetSelected,
     this.isTargetSelectedElsewhere,
     this.onManualTargetIdEntered,
+    this.onManualPlacePhotoSelected,
+    this.onPickManualPlacePhoto,
   });
 
   @override
@@ -143,6 +153,41 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
       _retryAfterSeconds = null;
       _results = null;
     });
+  }
+
+  Future<void> _openManualPlaceRegistration() async {
+    if (!widget.enabled || widget.placeRepository == null) return;
+
+    final result = await ManualPlaceRegistrationSheet.show(
+      context,
+      placeRepository: widget.placeRepository!,
+      initialName: _searchController.text.trim(),
+      onPickPhoto: widget.onPickManualPlacePhoto,
+    );
+
+    if (!mounted || result == null) return;
+
+    final createdItem = SearchResultItem(
+      id: result.place.id,
+      name: result.place.name,
+      slug: result.place.slug,
+      category: result.place.category,
+      targetType: TargetType.place,
+      rawTargetType: 'PLACE',
+      status: result.place.status,
+    );
+
+    final normalizedQuery = _searchController.text.trim().toLowerCase();
+    if (normalizedQuery.isNotEmpty) {
+      final existing = _queryCache[normalizedQuery] ?? const [];
+      _queryCache[normalizedQuery] = [
+        createdItem,
+        ...existing.where((e) => e.id != createdItem.id),
+      ];
+    }
+
+    widget.onTargetSelected(createdItem);
+    widget.onManualPlacePhotoSelected?.call(result.photoFile);
   }
 
   @override
@@ -373,36 +418,50 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  Icons.search_off_rounded,
-                  size: 20,
-                  color: theme.colorScheme.onSurface.withAlpha(150),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.search_off_rounded,
+                      size: 20,
+                      color: theme.colorScheme.onSurface.withAlpha(150),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Nenhum resultado para "${_searchController.text.trim()}".',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Verifique a digitação ou tente outro nome.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: theme.colorScheme.onSurface.withAlpha(150),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Nenhum resultado para "${_searchController.text.trim()}".',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Verifique a digitação ou tente outro nome.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: theme.colorScheme.onSurface.withAlpha(150),
-                        ),
-                      ),
-                    ],
+                if (widget.placeRepository != null) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    key: const Key('register_manual_place_button'),
+                    onPressed: widget.enabled ? _openManualPlaceRegistration : null,
+                    icon: const Icon(Icons.add_location_alt_outlined, size: 18),
+                    label: const Text('Cadastrar local manualmente'),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -442,6 +501,21 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               ),
             ),
           ),
+          if (widget.placeRepository != null) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('register_manual_place_footer_button'),
+                onPressed: widget.enabled ? _openManualPlaceRegistration : null,
+                icon: const Icon(Icons.add_location_alt_outlined, size: 16),
+                label: const Text(
+                  'Não encontrou o local? Cadastrar manualmente',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+          ],
         ],
       ],
     );

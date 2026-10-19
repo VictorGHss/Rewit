@@ -7,6 +7,7 @@ import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
 import 'package:rewit_mobile/features/notifications/presentation/state/notifications_notifier.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
@@ -26,6 +27,7 @@ class HomeScreen extends StatefulWidget {
   final MediaPickerService? mediaPickerService;
   final LocationService? locationService;
   final SearchRepository? searchRepository;
+  final PlaceRepository? placeRepository;
   final UserProfileRepository? userProfileRepository;
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
@@ -39,6 +41,7 @@ class HomeScreen extends StatefulWidget {
     this.mediaPickerService,
     this.locationService,
     this.searchRepository,
+    this.placeRepository,
     this.userProfileRepository,
     this.notificationRepository,
     this.notificationsNotifier,
@@ -304,13 +307,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final pages = [
           _buildFeedView(context, state),
-          SearchScreen(searchRepository: widget.searchRepository),
+          SearchScreen(
+            searchRepository: widget.searchRepository,
+            placeRepository: widget.placeRepository,
+          ),
           ReviewCreateScreen(
             repository: widget.reviewCreationRepository,
             mediaRepository: widget.mediaRepository,
             mediaPickerService: widget.mediaPickerService,
             locationService: widget.locationService,
             searchRepository: widget.searchRepository,
+            placeRepository: widget.placeRepository,
             onReviewCreated: (createdReview) async {
               widget.feedNotifier?.refresh();
               final result = await Navigator.of(context).pushNamed(

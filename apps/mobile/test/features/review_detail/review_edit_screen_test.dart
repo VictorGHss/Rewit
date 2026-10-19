@@ -95,6 +95,7 @@ void main() {
         id: 't-1',
         targetId: 'target-uuid-1',
         targetType: 'PLACE',
+        targetName: 'Pastel da Dona Ana',
         rating: 4.0,
         specificComment: 'Ambiente agradável',
       ),
@@ -140,7 +141,8 @@ void main() {
       expect(find.text('Texto inicial antes da edição.'), findsOneWidget);
       expect(find.text('Pública (visível a todos)'), findsOneWidget);
       expect(find.text('Publicar como anônimo'), findsOneWidget);
-      expect(find.text('ID: target-uuid-1'), findsOneWidget);
+      expect(find.text('Pastel da Dona Ana'), findsOneWidget);
+      expect(find.text('ID: target-uuid-1'), findsNothing);
       expect(find.text('Comentário específico: "Ambiente agradável"'), findsOneWidget);
 
       // Sem alerta de helpfulCount > 0 porque helpfulCount é 0
