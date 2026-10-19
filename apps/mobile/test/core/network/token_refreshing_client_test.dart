@@ -174,6 +174,169 @@ void main() {
     });
   });
 
+  group('TokenRefreshingClient: limite do corpo 401 e repetição única', () {
+    http.Request authorized(String path) =>
+        http.Request('GET', Uri.parse('https://api.rewit.test$path'))..headers['Authorization'] = 'Bearer token-velho';
+
+    test('corpo 401 dentro de 16 KiB com AUTHENTICATION_REQUIRED ainda renova', () async {
+      var refreshCalls = 0;
+      final refresher = SessionRefresher(refreshAccessToken: () async {
+        refreshCalls++;
+        return 'token-novo';
+      });
+      // ProblemDetail válido acolchoado até perto do limite
+      final padded = jsonEncode({
+        'status': 401,
+        'code': 'AUTHENTICATION_REQUIRED',
+        'detail': 'x' * (TokenRefreshingClient.maxUnauthorizedBodyBytes - 200),
+      });
+      expect(utf8.encode(padded).length, lessThanOrEqualTo(TokenRefreshingClient.maxUnauthorizedBodyBytes));
+      final inner = _RecordingClient((request) async => request.headers['authorization'] == 'Bearer token-novo'
+          ? _json(200, {'ok': true})
+          : http.StreamedResponse(Stream.value(utf8.encode(padded)), 401));
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      final response = await client.send(authorized('/a'));
+
+      expect(response.statusCode, 200);
+      expect(refreshCalls, 1);
+    });
+
+    test('corpo 401 acima de 16 KiB (sem Content-Length) não é lido inteiro, cancela o stream e não renova', () async {
+      var refreshCalls = 0;
+      final refresher = SessionRefresher(refreshAccessToken: () async {
+        refreshCalls++;
+        return 'token-novo';
+      });
+      var cancelled = false;
+      var emittedBytes = 0;
+      final controller = StreamController<List<int>>(onCancel: () => cancelled = true);
+      final inner = _RecordingClient((_) async {
+        // Começa como a recusa de token, mas o corpo não termina: só o limite impede a leitura sem fim
+        final start = utf8.encode('{"status":401,"code":"AUTHENTICATION_REQUIRED","detail":"');
+        controller.add(start);
+        emittedBytes += start.length;
+        for (var i = 0; i < 8; i++) {
+          final chunk = List<int>.filled(4096, 0x61);
+          controller.add(chunk);
+          emittedBytes += chunk.length;
+        }
+        return http.StreamedResponse(controller.stream, 401);
+      });
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      final response = await client.send(authorized('/grande'));
+      final body = await response.stream.toBytes();
+
+      expect(response.statusCode, 401);
+      expect(refreshCalls, 0, reason: 'corpo truncado não comprova a recusa de token');
+      expect(body.length, TokenRefreshingClient.maxUnauthorizedBodyBytes);
+      expect(emittedBytes, greaterThan(TokenRefreshingClient.maxUnauthorizedBodyBytes));
+      expect(cancelled, isTrue, reason: 'a assinatura precisa ser cancelada para liberar a conexão');
+      expect(response.headers.containsKey('content-length'), isFalse);
+      await controller.close();
+    });
+
+    test('corpo 401 malformado não renova e é devolvido como está', () async {
+      var refreshCalls = 0;
+      final refresher = SessionRefresher(refreshAccessToken: () async {
+        refreshCalls++;
+        return 'token-novo';
+      });
+      final inner =
+          _RecordingClient((_) async => http.StreamedResponse(Stream.value(utf8.encode('<html>401</html>')), 401));
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      final response = await http.Response.fromStream(await client.send(authorized('/a')));
+
+      expect(response.statusCode, 401);
+      expect(response.body, '<html>401</html>');
+      expect(refreshCalls, 0);
+    });
+
+    test('falha de rede durante a leitura do corpo 401 propaga o erro sem renovar', () async {
+      var refreshCalls = 0;
+      final refresher = SessionRefresher(refreshAccessToken: () async {
+        refreshCalls++;
+        return 'token-novo';
+      });
+      final inner = _RecordingClient((request) async => http.StreamedResponse(
+            Stream<List<int>>.error(http.ClientException('conexão perdida', request.url)),
+            401,
+          ));
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      await expectLater(client.send(authorized('/a')), throwsA(isA<http.ClientException>()));
+      expect(refreshCalls, 0);
+    });
+
+    test('novo 401 na repetição é devolvido sem segunda renovação nem segunda repetição', () async {
+      var refreshCalls = 0;
+      final refresher = SessionRefresher(refreshAccessToken: () async {
+        refreshCalls++;
+        return 'token-novo';
+      });
+      final inner = _RecordingClient((_) async => _tokenRejected());
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      final response = await client.send(authorized('/a'));
+
+      expect(response.statusCode, 401);
+      expect(refreshCalls, 1);
+      expect(inner.requests, hasLength(2));
+    });
+
+    test('a repetição mantém o abortTrigger da requisição original (cancelamento do hotfix S1.2)', () async {
+      final abort = Completer<void>();
+      final refresher = SessionRefresher(refreshAccessToken: () async => 'token-novo');
+      final inner = _RecordingClient((request) async =>
+          request.headers['authorization'] == 'Bearer token-novo' ? _json(200, {'ok': true}) : _tokenRejected());
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      final request = http.AbortableRequest('GET', Uri.parse('https://api.rewit.test/a'), abortTrigger: abort.future)
+        ..headers['Authorization'] = 'Bearer token-velho'
+        ..followRedirects = false;
+      await client.send(request);
+
+      final replay = inner.requests[1];
+      expect(replay, isA<http.Abortable>());
+      expect((replay as http.Abortable).abortTrigger, same(abort.future));
+      expect(replay.followRedirects, isFalse);
+    });
+  });
+
+  group('TokenRefreshingClient com o cliente endurecido (S1.2)', () {
+    test('prazo esgotado durante a renovação vira timeout, sem expirar a sessão', () async {
+      final storage = InMemoryTokenStorage();
+      await storage.saveTokens(accessToken: 'token-velho', refreshToken: 'refresh-1');
+      final refresher = SessionRefresher(refreshAccessToken: () async {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await storage.saveTokens(accessToken: 'token-novo', refreshToken: 'refresh-2');
+        return 'token-novo';
+      });
+      var sessionExpired = false;
+      final client = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        timeout: const Duration(milliseconds: 100),
+        client: TokenRefreshingClient(
+          inner: _RecordingClient((request) async => request.headers['authorization'] == 'Bearer token-novo'
+              ? _json(200, {'ok': true})
+              : _tokenRejected()),
+          sessionRefresher: refresher,
+        ),
+        tokenStorage: storage,
+        onSessionExpired: () => sessionExpired = true,
+      );
+
+      await expectLater(client.get('/api/v1/auth/me'), throwsA(isA<NetworkException>()));
+      expect(sessionExpired, isFalse);
+
+      // A renovação em curso termina por conta própria e deixa os tokens novos para a próxima chamada
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(await storage.getAccessToken(), 'token-novo');
+    });
+  });
+
   group('SessionRefresher', () {
     test('classifica recusa do servidor, indisponibilidade e sucesso', () async {
       expect((await SessionRefresher(refreshAccessToken: () async => 't').refresh()).outcome,

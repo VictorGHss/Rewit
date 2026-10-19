@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/core/network/session_refresher.dart';
@@ -16,9 +18,15 @@ import 'package:rewit_mobile/core/network/session_refresher.dart';
 /// - 401 de negócio (credenciais inválidas, conta desativada) não renova nada;
 /// - recusa do refresh token devolve o 401 original, e o app encerra a sessão;
 /// - falha de rede na renovação vira erro de conexão, sem descartar uma sessão que pode continuar válida;
-/// - só [http.Request] é repetida, porque o corpo fica em memória; upload multipart segue sem repetição.
+/// - só [http.Request] é repetida, porque o corpo fica em memória; upload multipart segue sem repetição;
+/// - no máximo uma renovação e uma repetição por requisição: um novo 401 na repetição é devolvido como está;
+/// - o corpo do 401 é lido até [maxUnauthorizedBodyBytes]; acima disso a leitura é cancelada (liberando a
+///   conexão) e a resposta não é tratada como recusa de token.
 class TokenRefreshingClient extends http.BaseClient {
   static const String tokenRejectedCode = 'AUTHENTICATION_REQUIRED';
+
+  /// Um ProblemDetail de 401 tem poucas centenas de bytes; 16 KiB dão folga sem ler corpos arbitrários.
+  static const int maxUnauthorizedBodyBytes = 16 * 1024;
 
   final http.Client _inner;
   final SessionRefresher _sessionRefresher;
@@ -43,9 +51,9 @@ class TokenRefreshingClient extends http.BaseClient {
       return response;
     }
 
-    final body = await response.stream.toBytes();
-    final original = _rebuild(response, body);
-    if (_problemCode(body) != tokenRejectedCode) {
+    final body = await _readLimited(response.stream, maxUnauthorizedBodyBytes);
+    final original = _rebuild(response, body.bytes);
+    if (body.exceededLimit || _problemCode(body.bytes) != tokenRejectedCode) {
       return original;
     }
 
@@ -79,13 +87,50 @@ class TokenRefreshingClient extends http.BaseClient {
     return copy;
   }
 
+  /// Lê o corpo até [maxBytes]. Ao passar do limite, cancela a assinatura (o transporte fecha a conexão) e
+  /// devolve só os bytes dentro do limite; erros do stream cancelam a assinatura e são propagados.
+  static Future<({List<int> bytes, bool exceededLimit})> _readLimited(
+    Stream<List<int>> stream,
+    int maxBytes,
+  ) {
+    final completer = Completer<({List<int> bytes, bool exceededLimit})>();
+    final buffer = BytesBuilder(copy: false);
+    late final StreamSubscription<List<int>> subscription;
+    subscription = stream.listen(
+      (chunk) {
+        final remaining = maxBytes - buffer.length;
+        if (chunk.length > remaining) {
+          if (remaining > 0) buffer.add(chunk.sublist(0, remaining));
+          unawaited(subscription.cancel());
+          if (!completer.isCompleted) {
+            completer.complete((bytes: buffer.takeBytes(), exceededLimit: true));
+          }
+          return;
+        }
+        buffer.add(chunk);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!completer.isCompleted) completer.completeError(error, stackTrace);
+      },
+      onDone: () {
+        if (!completer.isCompleted) {
+          completer.complete((bytes: buffer.takeBytes(), exceededLimit: false));
+        }
+      },
+      cancelOnError: true,
+    );
+    return completer.future;
+  }
+
   static http.StreamedResponse _rebuild(http.StreamedResponse response, List<int> body) {
+    // O corpo pode ter sido truncado pelo limite: o Content-Length original não vale mais
+    final headers = Map<String, String>.of(response.headers)..remove('content-length');
     return http.StreamedResponse(
       Stream.value(body),
       response.statusCode,
       contentLength: body.length,
       request: response.request,
-      headers: response.headers,
+      headers: headers,
       isRedirect: response.isRedirect,
       persistentConnection: response.persistentConnection,
       reasonPhrase: response.reasonPhrase,
