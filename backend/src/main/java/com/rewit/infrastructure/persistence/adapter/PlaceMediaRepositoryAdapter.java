@@ -64,7 +64,11 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
         }
         PlaceMediaJpaEntity entity = entityOpt.get();
         if (entityManager != null) {
-            entityManager.refresh(entity);
+            try {
+                entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+            } catch (jakarta.persistence.EntityNotFoundException e) {
+                return Optional.empty();
+            }
         }
         return Optional.of(entity.toDomain());
     }

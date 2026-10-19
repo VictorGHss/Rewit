@@ -73,7 +73,11 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
         }
         PlaceMediaReportJpaEntity entity = entityOpt.get();
         if (entityManager != null) {
-            entityManager.refresh(entity);
+            try {
+                entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+            } catch (jakarta.persistence.EntityNotFoundException e) {
+                return Optional.empty();
+            }
         }
         return Optional.of(entity.toDomain());
     }
@@ -117,7 +121,10 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
         List<PlaceMediaReportJpaEntity> entities = placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(placeMediaId);
         if (entityManager != null) {
             for (PlaceMediaReportJpaEntity entity : entities) {
-                entityManager.refresh(entity);
+                try {
+                    entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+                } catch (jakarta.persistence.EntityNotFoundException ignored) {
+                }
             }
         }
         return entities.stream()

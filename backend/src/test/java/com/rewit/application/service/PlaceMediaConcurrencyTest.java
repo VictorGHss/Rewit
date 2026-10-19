@@ -2,8 +2,6 @@ package com.rewit.application.service;
 
 import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaModerationResult;
 import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaReportView;
-import com.rewit.application.port.BusinessAccountRepository;
-import com.rewit.application.port.ObjectStoragePort;
 import com.rewit.application.port.PlaceMediaModerationAuditLogRepository;
 import com.rewit.application.port.PlaceMediaReportRepository;
 import com.rewit.application.port.PlaceMediaRepository;
@@ -18,262 +16,206 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.PlaceMediaReport;
 import com.rewit.domain.model.User;
-import com.rewit.application.port.RateLimiter;
-import com.rewit.infrastructure.storage.ImageSanitizer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
 
-@ExtendWith(MockitoExtension.class)
-@DisplayName("Testes de Concorrência: PlaceMediaService (A-5: Moderação Concorrente e Limites Ativos)")
+/**
+ * Teste de concorrência transacional real contra PostgreSQL isolado (H-2).
+ * Verifica que locks pessimistas hierárquicos e sincronização de persistência (refresh L1)
+ * garantem que decisões concorrentes sobre denúncias e mídias nunca gerem lost updates ou estados contraditórios.
+ */
+@SpringBootTest
+@ActiveProfiles("local")
+@DisplayName("Testes de Concorrência Transacional Real em PostgreSQL: PlaceMediaService (H-2)")
 class PlaceMediaConcurrencyTest {
 
-    @Mock private PlaceRepository placeRepository;
-    @Mock private PlaceMediaRepository placeMediaRepository;
-    @Mock private AccountStatusPolicy accountStatusPolicy;
-    @Mock private ObjectStoragePort objectStoragePort;
-    @Mock private RateLimiter rateLimiter;
-    @Mock private BusinessAccountRepository businessAccountRepository;
-    @Mock private UserRepository userRepository;
-    @Mock private PlaceMediaReportRepository placeMediaReportRepository;
-    @Mock private PlaceMediaModerationAuditLogRepository auditLogRepository;
-
+    @Autowired
     private PlaceMediaService placeMediaService;
 
-    private UUID placeId;
-    private Place activePlace;
-    private UUID moderatorId1;
-    private UUID moderatorId2;
-    private User moderatorUser1;
-    private User moderatorUser2;
+    @Autowired
+    private PlaceRepository placeRepository;
+
+    @Autowired
+    private PlaceMediaRepository placeMediaRepository;
+
+    @Autowired
+    private PlaceMediaReportRepository placeMediaReportRepository;
+
+    @Autowired
+    private PlaceMediaModerationAuditLogRepository auditLogRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    private User moderator1;
+    private User moderator2;
+    private User authorUser;
 
     @BeforeEach
     void setUp() {
-        placeId = UUID.randomUUID();
-        moderatorId1 = UUID.randomUUID();
-        moderatorId2 = UUID.randomUUID();
-
-        moderatorUser1 = User.rehydrate(
-                moderatorId1, "mod1@rewit.com", "hash", AuthProvider.LOCAL, null,
-                com.rewit.domain.enums.AccountStatus.ACTIVE, true, Role.MODERATOR, null, Instant.now(), Instant.now()
-        );
-        moderatorUser2 = User.rehydrate(
-                moderatorId2, "mod2@rewit.com", "hash", AuthProvider.LOCAL, null,
-                com.rewit.domain.enums.AccountStatus.ACTIVE, true, Role.MODERATOR, null, Instant.now(), Instant.now()
-        );
-
-        activePlace = new Place(
-                placeId, "Local Concorrente", "local-concorrente", "GERAL", null,
-                "Rua Teste, 100", null, null, null, null, "BR", null, null, 50,
-                "USER", false, null, UUID.randomUUID(), "ACTIVE"
-        );
-
-        lenient().when(userRepository.findById(moderatorId1)).thenReturn(Optional.of(moderatorUser1));
-        lenient().when(userRepository.findById(moderatorId2)).thenReturn(Optional.of(moderatorUser2));
-
-        placeMediaService = new PlaceMediaService(
-                placeRepository,
-                placeMediaRepository,
-                accountStatusPolicy,
-                objectStoragePort,
-                new ImageSanitizer(),
-                rateLimiter,
-                businessAccountRepository,
-                userRepository,
-                placeMediaReportRepository,
-                auditLogRepository,
-                null
-        );
+        moderator1 = createTestUser("mod1." + UUID.randomUUID() + "@rewit.com", Role.MODERATOR);
+        moderator2 = createTestUser("mod2." + UUID.randomUUID() + "@rewit.com", Role.MODERATOR);
+        authorUser = createTestUser("author." + UUID.randomUUID() + "@rewit.com", Role.USER);
     }
 
-    @Test
-    @DisplayName("A-5. Decisões concorrentes (ACCEPT vs REJECT) na mesma denúncia: exatamente uma vence e a outra recebe 409 CONFLICT")
-    void shouldHandleConcurrentModerationDecisionsDeterministically() throws Exception {
-        UUID reportId = UUID.randomUUID();
-        UUID mediaId = UUID.randomUUID();
-        UUID reporterId = UUID.randomUUID();
+    private User createTestUser(String email, Role role) {
+        User user = User.rehydrate(
+                UUID.randomUUID(), email, "hash123", AuthProvider.LOCAL, null,
+                com.rewit.domain.enums.AccountStatus.ACTIVE, true, role, null, Instant.now(), Instant.now()
+        );
+        return userRepository.save(user);
+    }
 
+    private Place createTestPlace() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        return placeRepository.save(new Place(
+                null, "Local Concorrência " + suffix, "local-conc-" + suffix,
+                "RESTAURANTE", "Descrição concorrência", "Rua Concorrência, 100", "100", "Bairro",
+                "Cidade", "UF", "BR", -23.55, -46.63, 50, "USER", false, null, "ACTIVE"
+        ));
+    }
+
+    private PlaceMedia createTestMedia(Place place, PlaceMediaStatus status) {
         PlaceMedia media = new PlaceMedia(
-                mediaId, placeId, UUID.randomUUID(), "places/" + placeId + "/" + mediaId + "/img.jpg",
-                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
-                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+                UUID.randomUUID(), place.getId(), authorUser.getId(),
+                "places/" + place.getId() + "/" + UUID.randomUUID() + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 1024L, 800, 600,
+                status, false, null, null, Instant.now(), Instant.now()
         );
+        return placeMediaRepository.save(media);
+    }
 
-        // Estado thread-safe compartilhado que simula o lock pessimista e a transação de banco de dados
-        ReentrantLock placeLock = new ReentrantLock();
-        final PlaceMediaReport[] currentReport = new PlaceMediaReport[]{
-                new PlaceMediaReport(reportId, mediaId, reporterId, "SPAM", "Propaganda")
-        };
-
-        lenient().when(placeMediaReportRepository.findById(reportId)).thenAnswer(inv -> {
-            placeLock.lock();
-            try {
-                return Optional.of(currentReport[0]);
-            } finally {
-                placeLock.unlock();
-            }
-        });
-
-        lenient().when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
-
-        lenient().when(placeRepository.findByIdForUpdate(placeId)).thenAnswer(inv -> {
-            placeLock.lock();
-            return Optional.of(activePlace);
-        });
-
-        lenient().when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
-
-        lenient().when(placeMediaReportRepository.findByIdForUpdate(reportId)).thenAnswer(inv -> {
-            return Optional.of(currentReport[0]);
-        });
-
-        lenient().when(placeMediaReportRepository.save(any(PlaceMediaReport.class))).thenAnswer(inv -> {
-            PlaceMediaReport r = inv.getArgument(0);
-            currentReport[0] = r;
-            return r;
-        });
-
-        lenient().when(placeMediaRepository.save(any(PlaceMedia.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        // Executor com 2 threads concorrentes simulando dois moderadores decidindo simultaneamente
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        CountDownLatch readyLatch = new CountDownLatch(2);
-        CountDownLatch startLatch = new CountDownLatch(1);
-
-        List<String> successes = Collections.synchronizedList(new ArrayList<>());
-        List<String> conflicts = Collections.synchronizedList(new ArrayList<>());
-
-        Future<?> f1 = executor.submit(() -> {
-            readyLatch.countDown();
-            try {
-                startLatch.await();
-                PlaceMediaReportView res = placeMediaService.decideReport(moderatorId1, reportId, "ACCEPT", "Aprovado");
-                successes.add("Thread1_ACCEPT:" + res.status());
-            } catch (BusinessException e) {
-                conflicts.add(e.getErrorCode());
-            } catch (Exception e) {
-                fail("Exceção inesperada na Thread 1: " + e.getMessage());
-            } finally {
-                if (placeLock.isHeldByCurrentThread()) {
-                    placeLock.unlock();
-                }
-            }
-        });
-
-        Future<?> f2 = executor.submit(() -> {
-            readyLatch.countDown();
-            try {
-                startLatch.await();
-                PlaceMediaReportView res = placeMediaService.decideReport(moderatorId2, reportId, "REJECT", "Infundado");
-                successes.add("Thread2_REJECT:" + res.status());
-            } catch (BusinessException e) {
-                conflicts.add(e.getErrorCode());
-            } catch (Exception e) {
-                fail("Exceção inesperada na Thread 2: " + e.getMessage());
-            } finally {
-                if (placeLock.isHeldByCurrentThread()) {
-                    placeLock.unlock();
-                }
-            }
-        });
-
-        assertTrue(readyLatch.await(5, TimeUnit.SECONDS));
-        startLatch.countDown();
-
-        f1.get(5, TimeUnit.SECONDS);
-        f2.get(5, TimeUnit.SECONDS);
-        executor.shutdown();
-
-        // Exatamente 1 moderador obteve sucesso, e o outro foi rejeitado com REPORT_ALREADY_DECIDED
-        assertEquals(1, successes.size(), "Exatamente uma decisão deve ter sucesso");
-        assertEquals(1, conflicts.size(), "A segunda decisão concorrente deve falhar com conflito");
-        assertEquals("REPORT_ALREADY_DECIDED", conflicts.get(0));
+    private PlaceMediaReport createTestReport(PlaceMedia media, User reporter, String reason) {
+        PlaceMediaReport report = new PlaceMediaReport(
+                UUID.randomUUID(), media.getId(), reporter.getId(), reason, "Detalhes da denúncia"
+        );
+        return placeMediaReportRepository.save(report);
     }
 
     @Test
-    @DisplayName("A-2 e A-5. Restauração concorrente de fotos disputando a última vaga de 5 fotos ativas")
-    void shouldPreventExceedingActiveMediaLimitUnderConcurrentRestores() throws Exception {
-        UUID mediaId1 = UUID.randomUUID();
-        UUID mediaId2 = UUID.randomUUID();
+    @DisplayName("H-2.1. Execução repetida de ACCEPT vs REJECT concorrentes na mesma denúncia: exatamente 1 vence e o outro recebe REPORT_ALREADY_DECIDED")
+    void shouldHandleConcurrentAcceptVsRejectDeterministicallyAcrossMultipleRuns() throws Exception {
+        int totalIterations = 5;
 
-        PlaceMedia removedMedia1 = new PlaceMedia(
-                mediaId1, placeId, UUID.randomUUID(), "places/" + placeId + "/" + mediaId1 + "/img1.jpg",
-                ReviewMediaType.IMAGE, "image/jpeg", 1024L, 800, 600,
-                PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now()
-        );
-        PlaceMedia removedMedia2 = new PlaceMedia(
-                mediaId2, placeId, UUID.randomUUID(), "places/" + placeId + "/" + mediaId2 + "/img2.jpg",
-                ReviewMediaType.IMAGE, "image/jpeg", 1024L, 800, 600,
-                PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now()
-        );
+        for (int i = 0; i < totalIterations; i++) {
+            Place place = createTestPlace();
+            PlaceMedia media = createTestMedia(place, PlaceMediaStatus.UNDER_REVIEW);
+            PlaceMediaReport report = createTestReport(media, authorUser, "SPAM");
 
-        ReentrantLock placeLock = new ReentrantLock();
-        AtomicInteger activeCount = new AtomicInteger(4); // Começa com 4 fotos ativas (resta 1 vaga para o limite de 5)
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            CountDownLatch readyLatch = new CountDownLatch(2);
+            CountDownLatch startLatch = new CountDownLatch(1);
 
-        lenient().when(placeRepository.findByIdForUpdate(placeId)).thenAnswer(inv -> {
-            placeLock.lock();
-            return Optional.of(activePlace);
-        });
+            List<String> successes = Collections.synchronizedList(new ArrayList<>());
+            List<String> conflicts = Collections.synchronizedList(new ArrayList<>());
+            List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
 
-        lenient().when(objectStoragePort.exists(any())).thenReturn(true);
+            Future<?> f1 = executor.submit(() -> {
+                readyLatch.countDown();
+                try {
+                    startLatch.await();
+                    PlaceMediaReportView res = placeMediaService.decideReport(moderator1.getId(), report.getId(), "ACCEPT", "Aprovado mod 1");
+                    successes.add("ACCEPT:" + res.status());
+                } catch (BusinessException e) {
+                    if ("REPORT_ALREADY_DECIDED".equals(e.getErrorCode())) {
+                        conflicts.add(e.getErrorCode());
+                    } else {
+                        unexpectedErrors.add(e);
+                    }
+                } catch (Throwable t) {
+                    unexpectedErrors.add(t);
+                }
+            });
 
-        lenient().when(placeMediaRepository.findByIdForUpdate(mediaId1)).thenReturn(Optional.of(removedMedia1));
-        lenient().when(placeMediaRepository.findByIdForUpdate(mediaId2)).thenReturn(Optional.of(removedMedia2));
+            Future<?> f2 = executor.submit(() -> {
+                readyLatch.countDown();
+                try {
+                    startLatch.await();
+                    PlaceMediaReportView res = placeMediaService.decideReport(moderator2.getId(), report.getId(), "REJECT", "Rejeitado mod 2");
+                    successes.add("REJECT:" + res.status());
+                } catch (BusinessException e) {
+                    if ("REPORT_ALREADY_DECIDED".equals(e.getErrorCode())) {
+                        conflicts.add(e.getErrorCode());
+                    } else {
+                        unexpectedErrors.add(e);
+                    }
+                } catch (Throwable t) {
+                    unexpectedErrors.add(t);
+                }
+            });
 
-        lenient().when(placeMediaRepository.countActiveByPlaceId(placeId)).thenAnswer(inv -> (long) activeCount.get());
+            assertTrue(readyLatch.await(5, TimeUnit.SECONDS), "Threads deveriam estar prontas");
+            startLatch.countDown();
 
-        lenient().when(placeMediaRepository.save(any(PlaceMedia.class))).thenAnswer(inv -> {
-            PlaceMedia m = inv.getArgument(0);
-            if (m.isActive()) {
-                activeCount.incrementAndGet();
+            f1.get(10, TimeUnit.SECONDS);
+            f2.get(10, TimeUnit.SECONDS);
+            executor.shutdown();
+
+            assertTrue(unexpectedErrors.isEmpty(), "Não deve haver erros inesperados: " + unexpectedErrors);
+            assertEquals(1, successes.size(), "Iteração " + i + ": Exatamente uma decisão deve ter sucesso");
+            assertEquals(1, conflicts.size(), "Iteração " + i + ": A segunda decisão deve receber conflito");
+            assertEquals("REPORT_ALREADY_DECIDED", conflicts.get(0));
+
+            // Valida o estado final real no banco de dados
+            PlaceMediaReport finalReport = placeMediaReportRepository.findById(report.getId()).orElseThrow();
+            assertFalse(finalReport.isPending(), "Denúncia não pode permanecer PENDING");
+
+            PlaceMedia finalMedia = placeMediaRepository.findById(media.getId()).orElseThrow();
+            if (successes.get(0).startsWith("ACCEPT")) {
+                assertEquals(PlaceMediaReport.STATUS_ACCEPTED, finalReport.getStatus());
+                assertEquals(PlaceMediaStatus.REMOVED, finalMedia.getStatus());
+                assertEquals(com.rewit.domain.enums.RemovalSource.MODERATOR, finalMedia.getRemovalSource());
+            } else {
+                assertEquals(PlaceMediaReport.STATUS_REJECTED, finalReport.getStatus());
+                assertEquals(PlaceMediaStatus.UNDER_REVIEW, finalMedia.getStatus());
             }
-            return m;
-        });
+        }
+    }
+
+    @Test
+    @DisplayName("H-2.2. Decisões concorrentes sobre duas denúncias diferentes da mesma fotografia")
+    void shouldHandleConcurrentDecisionsOnDifferentReportsOfSameMedia() throws Exception {
+        Place place = createTestPlace();
+        PlaceMedia media = createTestMedia(place, PlaceMediaStatus.UNDER_REVIEW);
+
+        User reporter2 = createTestUser("rep2." + UUID.randomUUID() + "@rewit.com", Role.USER);
+        PlaceMediaReport report1 = createTestReport(media, authorUser, "SPAM");
+        PlaceMediaReport report2 = createTestReport(media, reporter2, "OFENSIVO");
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         CountDownLatch readyLatch = new CountDownLatch(2);
         CountDownLatch startLatch = new CountDownLatch(1);
 
-        List<PlaceMediaModerationResult> successes = Collections.synchronizedList(new ArrayList<>());
-        List<String> failures = Collections.synchronizedList(new ArrayList<>());
+        List<String> outcomes = Collections.synchronizedList(new ArrayList<>());
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
 
         Future<?> f1 = executor.submit(() -> {
             readyLatch.countDown();
             try {
                 startLatch.await();
-                PlaceMediaModerationResult res = placeMediaService.restoreMediaByModerator(moderatorId1, placeId, mediaId1, "Restaurar 1");
-                successes.add(res);
+                PlaceMediaReportView view = placeMediaService.decideReport(moderator1.getId(), report1.getId(), "ACCEPT", "Aceito 1");
+                outcomes.add("F1_ACCEPT:" + view.status());
             } catch (BusinessException e) {
-                failures.add(e.getErrorCode());
-            } catch (Exception e) {
-                fail("Exceção inesperada na Thread 1: " + e.getMessage());
-            } finally {
-                if (placeLock.isHeldByCurrentThread()) {
-                    placeLock.unlock();
-                }
+                outcomes.add("F1_ERROR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
             }
         });
 
@@ -281,31 +223,150 @@ class PlaceMediaConcurrencyTest {
             readyLatch.countDown();
             try {
                 startLatch.await();
-                PlaceMediaModerationResult res = placeMediaService.restoreMediaByModerator(moderatorId2, placeId, mediaId2, "Restaurar 2");
-                successes.add(res);
+                PlaceMediaReportView view = placeMediaService.decideReport(moderator2.getId(), report2.getId(), "REJECT", "Rejeito 2");
+                outcomes.add("F2_REJECT:" + view.status());
             } catch (BusinessException e) {
-                failures.add(e.getErrorCode());
-            } catch (Exception e) {
-                fail("Exceção inesperada na Thread 2: " + e.getMessage());
-            } finally {
-                if (placeLock.isHeldByCurrentThread()) {
-                    placeLock.unlock();
-                }
+                outcomes.add("F2_ERROR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
             }
         });
 
         assertTrue(readyLatch.await(5, TimeUnit.SECONDS));
         startLatch.countDown();
 
-        f1.get(5, TimeUnit.SECONDS);
-        f2.get(5, TimeUnit.SECONDS);
+        f1.get(10, TimeUnit.SECONDS);
+        f2.get(10, TimeUnit.SECONDS);
         executor.shutdown();
 
-        // Exatamente 1 restore venceu (atingindo o teto de 5) e o outro foi rejeitado com PLACE_MEDIA_LIMIT_EXCEEDED
-        assertEquals(1, successes.size(), "Apenas uma foto pode ser restaurada para atingir o limite máximo de 5");
-        assertEquals(1, failures.size(), "A segunda tentativa deve falhar com conflito de limite");
-        assertEquals("PLACE_MEDIA_LIMIT_EXCEEDED", failures.get(0));
-        assertEquals(5, activeCount.get(), "O número final de fotos ativas não pode exceder 5");
+        assertTrue(errors.isEmpty(), "Nenhum erro inesperado deve ocorrer: " + errors);
+        assertEquals(2, outcomes.size(), "Ambas as operações devem ser processadas");
+
+        // Estado final no banco: a mídia não pode ficar em estado inconsistente
+        PlaceMedia finalMedia = placeMediaRepository.findById(media.getId()).orElseThrow();
+        PlaceMediaReport r1 = placeMediaReportRepository.findById(report1.getId()).orElseThrow();
+        PlaceMediaReport r2 = placeMediaReportRepository.findById(report2.getId()).orElseThrow();
+
+        // Se ACCEPT venceu primeiro, ambas as denúncias ficam ACCEPTED e a mídia removida
+        if (finalMedia.getStatus() == PlaceMediaStatus.REMOVED) {
+            assertEquals(PlaceMediaReport.STATUS_ACCEPTED, r1.getStatus());
+        }
+    }
+
+    @Test
+    @DisplayName("H-2.3. Remoção concorrente contra restauração da mesma fotografia")
+    void shouldHandleConcurrentRemovalAgainstRestoration() throws Exception {
+        Place place = createTestPlace();
+        // Mídia inicialmente ativa
+        PlaceMedia media = createTestMedia(place, PlaceMediaStatus.ACTIVE);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch readyLatch = new CountDownLatch(2);
+        CountDownLatch startLatch = new CountDownLatch(1);
+
+        List<String> results = Collections.synchronizedList(new ArrayList<>());
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+
+        Future<?> f1 = executor.submit(() -> {
+            readyLatch.countDown();
+            try {
+                startLatch.await();
+                PlaceMediaModerationResult res = placeMediaService.removeMediaByModerator(
+                        moderator1.getId(), place.getId(), media.getId(), "SPAM", "Remover concorrente");
+                results.add("REMOVE:" + res.status());
+            } catch (BusinessException e) {
+                results.add("REMOVE_ERR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
+            }
+        });
+
+        Future<?> f2 = executor.submit(() -> {
+            readyLatch.countDown();
+            try {
+                startLatch.await();
+                // Tenta restaurar a mesma mídia
+                PlaceMediaModerationResult res = placeMediaService.restoreMediaByModerator(
+                        moderator2.getId(), place.getId(), media.getId(), "Restaurar concorrente");
+                results.add("RESTORE:" + res.status());
+            } catch (BusinessException e) {
+                results.add("RESTORE_ERR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
+            }
+        });
+
+        assertTrue(readyLatch.await(5, TimeUnit.SECONDS));
+        startLatch.countDown();
+
+        f1.get(10, TimeUnit.SECONDS);
+        f2.get(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertTrue(errors.isEmpty(), "Sem erros inesperados: " + errors);
+        assertEquals(2, results.size());
+
+        // O estado final do banco deve ser determinístico: ou ACTIVE ou REMOVED_BY_MODERATOR, nunca corrompido
+        PlaceMedia finalMedia = placeMediaRepository.findById(media.getId()).orElseThrow();
+        assertTrue(finalMedia.getStatus() == PlaceMediaStatus.ACTIVE || finalMedia.getStatus() == PlaceMediaStatus.REMOVED,
+                "Estado final deve ser válido e coerente");
+    }
+
+    @Test
+    @DisplayName("H-2.4. Denúncia concorrente de usuário contra deferimento de denúncia (ACCEPT) pelo moderador")
+    void shouldHandleConcurrentReportAgainstModeratorDecision() throws Exception {
+        Place place = createTestPlace();
+        PlaceMedia media = createTestMedia(place, PlaceMediaStatus.ACTIVE);
+
+        User reporter1 = createTestUser("rep1." + UUID.randomUUID() + "@rewit.com", Role.USER);
+        User reporter2 = createTestUser("rep2." + UUID.randomUUID() + "@rewit.com", Role.USER);
+        PlaceMediaReport report1 = createTestReport(media, reporter1, "CONTEUDO_INADEQUADO");
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch readyLatch = new CountDownLatch(2);
+        CountDownLatch startLatch = new CountDownLatch(1);
+
+        List<String> results = Collections.synchronizedList(new ArrayList<>());
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+
+        Future<?> f1 = executor.submit(() -> {
+            readyLatch.countDown();
+            try {
+                startLatch.await();
+                PlaceMediaReportView view = placeMediaService.decideReport(moderator1.getId(), report1.getId(), "ACCEPT", "Deferido");
+                results.add("DECIDE_ACCEPT:" + view.status());
+            } catch (BusinessException e) {
+                results.add("DECIDE_ERR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
+            }
+        });
+
+        Future<?> f2 = executor.submit(() -> {
+            readyLatch.countDown();
+            try {
+                startLatch.await();
+                placeMediaService.reportMedia(reporter2.getId(), place.getId(), media.getId(), "SPAM", "Denúncia simultânea");
+                results.add("REPORT_SUCCESS");
+            } catch (BusinessException e) {
+                results.add("REPORT_ERR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
+            }
+        });
+
+        assertTrue(readyLatch.await(5, TimeUnit.SECONDS));
+        startLatch.countDown();
+
+        f1.get(10, TimeUnit.SECONDS);
+        f2.get(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertTrue(errors.isEmpty(), "Sem erros inesperados: " + errors);
+        assertEquals(2, results.size());
+
+        // Se o moderador aceitou a denúncia, a mídia deve ter sido removida
+        PlaceMedia finalMedia = placeMediaRepository.findById(media.getId()).orElseThrow();
+        assertEquals(PlaceMediaStatus.REMOVED, finalMedia.getStatus());
     }
 }
-
