@@ -253,10 +253,11 @@ SELECT p.id,
        p.created_at,
        p.claimed_by_business_id,
        p.is_verified,
-       (SELECT COUNT(*) FROM reviews r WHERE r.place_id = p.id) AS total_reviews,
-       (SELECT COUNT(*) FROM place_opening_hours oh WHERE oh.place_id = p.id) AS total_hours,
-       (SELECT COUNT(*) FROM place_amenities pa WHERE pa.place_id = p.id) AS total_amenities,
-       (SELECT COUNT(*) FROM place_product_offers po WHERE po.place_id = p.id) AS total_offers
+       (SELECT COUNT(DISTINCT rt.review_id) FROM review_targets rt WHERE rt.target_id = p.id) AS total_reviews,
+       (SELECT COUNT(*) FROM place_opening_hours_schedules oh WHERE oh.place_id = p.id) AS total_hours,
+       (SELECT COUNT(*) FROM place_amenity_configurations pa WHERE pa.place_id = p.id) AS total_amenities,
+       (SELECT COUNT(*) FROM place_product_offers po WHERE po.place_id = p.id) AS total_offers,
+       (SELECT COUNT(*) FROM place_media pm WHERE pm.place_id = p.id) AS total_media
 FROM places p
 WHERE p.status = 'ACTIVE'
   AND (regexp_replace(btrim(rewit_search_normalize(p.name)), '\s+', ' ', 'g'),

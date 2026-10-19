@@ -45,9 +45,9 @@ BEGIN
                             p.created_at,
                             COALESCE(p.claimed_by_business_id::text, 'NULL'),
                             p.is_verified,
-                            (SELECT COUNT(*) FROM reviews r WHERE r.place_id = p.id),
-                            (SELECT COUNT(*) FROM place_opening_hours oh WHERE oh.place_id = p.id),
-                            (SELECT COUNT(*) FROM place_amenities pa WHERE pa.place_id = p.id),
+                            (SELECT COUNT(DISTINCT rt.review_id) FROM review_targets rt WHERE rt.target_id = p.id),
+                            (SELECT COUNT(*) FROM place_opening_hours_schedules oh WHERE oh.place_id = p.id),
+                            (SELECT COUNT(*) FROM place_amenity_configurations pa WHERE pa.place_id = p.id),
                             (SELECT COUNT(*) FROM place_product_offers po WHERE po.place_id = p.id),
                             (SELECT COUNT(*) FROM place_media pm WHERE pm.place_id = p.id)
                         ),
