@@ -52,6 +52,16 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
     }
 
     @Override
+    @Transactional
+    public Optional<PlaceMediaReport> findByIdForUpdate(UUID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return placeMediaReportJpaRepository.findByIdForUpdate(id)
+                .map(PlaceMediaReportJpaEntity::toDomain);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public boolean existsByPlaceMediaIdAndReporterUserId(UUID placeMediaId, UUID reporterUserId) {
         if (placeMediaId == null || reporterUserId == null) {
@@ -82,15 +92,39 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
     }
 
     @Override
+    @Transactional
+    public List<PlaceMediaReport> findByPlaceMediaIdForUpdate(UUID placeMediaId) {
+        if (placeMediaId == null) {
+            return List.of();
+        }
+        return placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(placeMediaId)
+                .stream()
+                .map(PlaceMediaReportJpaEntity::toDomain)
+                .toList();
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public PageResult<PlaceMediaReport> findByStatus(String status, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "createdAt"));
-        Page<PlaceMediaReportJpaEntity> jpaPage;
+        String normalizedStatus = null;
         if (status != null && !status.isBlank()) {
-            jpaPage = placeMediaReportJpaRepository.findByStatusOrderByCreatedAtAsc(status.trim().toUpperCase(), pageable);
-        } else {
-            jpaPage = placeMediaReportJpaRepository.findAll(pageable);
+            String trimmed = status.trim().toUpperCase();
+            normalizedStatus = switch (trimmed) {
+                case "PENDING", "OPEN" -> "PENDING";
+                case "ACCEPTED", "RESOLVED" -> "ACCEPTED";
+                case "REJECTED", "DISMISSED" -> "REJECTED";
+                default -> throw new com.rewit.common.exception.BusinessException(
+                        "Status de filtro de denúncia inválido: " + status,
+                        org.springframework.http.HttpStatus.BAD_REQUEST,
+                        "INVALID_REPORT_STATUS"
+                );
+            };
         }
+
+        Pageable pageable = PageRequest.of(page, size);
+        Page<PlaceMediaReportJpaEntity> jpaPage = (normalizedStatus != null)
+                ? placeMediaReportJpaRepository.findByStatusOrderByCreatedAtDescIdAsc(normalizedStatus, pageable)
+                : placeMediaReportJpaRepository.findAllByOrderByCreatedAtDescIdAsc(pageable);
 
         List<PlaceMediaReport> content = jpaPage.getContent().stream()
                 .map(PlaceMediaReportJpaEntity::toDomain)

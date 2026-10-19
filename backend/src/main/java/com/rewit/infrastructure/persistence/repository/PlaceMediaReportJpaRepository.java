@@ -17,10 +17,18 @@ public interface PlaceMediaReportJpaRepository extends JpaRepository<PlaceMediaR
 
     long countByPlaceMediaIdAndStatus(UUID placeMediaId, String status);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT r FROM PlaceMediaReportJpaEntity r WHERE r.id = :id")
+    java.util.Optional<PlaceMediaReportJpaEntity> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT r FROM PlaceMediaReportJpaEntity r WHERE r.placeMediaId = :placeMediaId")
+    List<PlaceMediaReportJpaEntity> findByPlaceMediaIdForUpdate(@org.springframework.data.repository.query.Param("placeMediaId") UUID placeMediaId);
+
     List<PlaceMediaReportJpaEntity> findByPlaceMediaId(UUID placeMediaId);
 
-    List<PlaceMediaReportJpaEntity> findByStatusOrderByCreatedAtAsc(String status);
+    Page<PlaceMediaReportJpaEntity> findByStatusOrderByCreatedAtDescIdAsc(String status, Pageable pageable);
 
-    Page<PlaceMediaReportJpaEntity> findByStatusOrderByCreatedAtAsc(String status, Pageable pageable);
+    Page<PlaceMediaReportJpaEntity> findAllByOrderByCreatedAtDescIdAsc(Pageable pageable);
 }
 

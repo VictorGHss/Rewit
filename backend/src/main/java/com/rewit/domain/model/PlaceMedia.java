@@ -35,6 +35,7 @@ public class PlaceMedia {
     private final Instant createdAt;
     private Instant updatedAt;
     private Instant purgedAt;
+    private Instant removedAt;
 
     public PlaceMedia(UUID id, UUID placeId, UUID userId, String objectKey,
                       ReviewMediaType mediaType, String mimeType, long sizeBytes,
@@ -82,6 +83,15 @@ public class PlaceMedia {
                       Integer width, Integer height, PlaceMediaStatus status,
                       boolean isPrimary, String idempotencyKey, String contentSha256,
                       Instant createdAt, Instant updatedAt, Instant purgedAt) {
+        this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
+                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, purgedAt, null);
+    }
+
+    public PlaceMedia(UUID id, UUID placeId, UUID userId, String objectKey,
+                      ReviewMediaType mediaType, String mimeType, long sizeBytes,
+                      Integer width, Integer height, PlaceMediaStatus status,
+                      boolean isPrimary, String idempotencyKey, String contentSha256,
+                      Instant createdAt, Instant updatedAt, Instant purgedAt, Instant removedAt) {
         if (placeId == null) {
             throw new BusinessException("O local é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_PLACE_ID");
         }
@@ -138,6 +148,7 @@ public class PlaceMedia {
         this.createdAt = createdAt != null ? createdAt : Instant.now();
         this.updatedAt = updatedAt != null ? updatedAt : Instant.now();
         this.purgedAt = purgedAt;
+        this.removedAt = removedAt;
     }
 
     private static PlaceMediaStatus fromLegacyStatus(ReviewMediaStatus legacy) {
@@ -156,9 +167,14 @@ public class PlaceMedia {
     }
 
     public void markRemoved() {
+        markRemoved(Instant.now());
+    }
+
+    public void markRemoved(Instant when) {
         this.status = PlaceMediaStatus.REMOVED;
         this.isPrimary = false;
-        this.updatedAt = Instant.now();
+        this.removedAt = when != null ? when : Instant.now();
+        this.updatedAt = this.removedAt;
     }
 
     public void markUnderReview() {
@@ -169,6 +185,7 @@ public class PlaceMedia {
 
     public void markActive() {
         this.status = PlaceMediaStatus.ACTIVE;
+        this.removedAt = null;
         this.updatedAt = Instant.now();
     }
 
@@ -270,6 +287,10 @@ public class PlaceMedia {
 
     public Instant getPurgedAt() {
         return purgedAt;
+    }
+
+    public Instant getRemovedAt() {
+        return removedAt;
     }
 
     @Override

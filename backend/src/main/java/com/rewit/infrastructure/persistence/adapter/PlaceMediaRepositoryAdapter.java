@@ -1,12 +1,14 @@
 package com.rewit.infrastructure.persistence.adapter;
 
 import com.rewit.application.port.PlaceMediaRepository;
-import com.rewit.domain.enums.ReviewMediaStatus;
+import com.rewit.domain.enums.PlaceMediaStatus;
 import com.rewit.domain.model.PlaceMedia;
 import com.rewit.infrastructure.persistence.entity.PlaceMediaJpaEntity;
 import com.rewit.infrastructure.persistence.repository.PlaceMediaJpaRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -42,11 +44,20 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
     }
 
     @Override
+    public Optional<PlaceMedia> findByIdForUpdate(UUID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return placeMediaJpaRepository.findByIdForUpdate(id)
+                .map(PlaceMediaJpaEntity::toDomain);
+    }
+
+    @Override
     public List<PlaceMedia> findActiveByPlaceId(UUID placeId) {
         if (placeId == null) {
             return List.of();
         }
-        return placeMediaJpaRepository.findByPlaceIdAndStatusOrderByCreatedAtAscIdAsc(placeId, ReviewMediaStatus.ACTIVE.name())
+        return placeMediaJpaRepository.findByPlaceIdAndStatusOrderByCreatedAtAscIdAsc(placeId, PlaceMediaStatus.ACTIVE.name())
                 .stream()
                 .map(PlaceMediaJpaEntity::toDomain)
                 .toList();
@@ -57,7 +68,7 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
         if (placeId == null) {
             return 0;
         }
-        return placeMediaJpaRepository.countByPlaceIdAndStatus(placeId, ReviewMediaStatus.ACTIVE.name());
+        return placeMediaJpaRepository.countByPlaceIdAndStatus(placeId, PlaceMediaStatus.ACTIVE.name());
     }
 
     @Override
@@ -65,7 +76,7 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
         if (placeId == null) {
             return Optional.empty();
         }
-        return placeMediaJpaRepository.findByPlaceIdAndIsPrimaryTrueAndStatus(placeId, ReviewMediaStatus.ACTIVE.name())
+        return placeMediaJpaRepository.findByPlaceIdAndIsPrimaryTrueAndStatus(placeId, PlaceMediaStatus.ACTIVE.name())
                 .map(PlaceMediaJpaEntity::toDomain);
     }
 
@@ -74,7 +85,7 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
         if (placeId == null) {
             return Optional.empty();
         }
-        return placeMediaJpaRepository.findFirstByPlaceIdAndStatusOrderByCreatedAtAscIdAsc(placeId, ReviewMediaStatus.ACTIVE.name())
+        return placeMediaJpaRepository.findFirstByPlaceIdAndStatusOrderByCreatedAtAscIdAsc(placeId, PlaceMediaStatus.ACTIVE.name())
                 .map(PlaceMediaJpaEntity::toDomain);
     }
 
@@ -93,6 +104,17 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
             return List.of();
         }
         return placeMediaJpaRepository.findByObjectKeyIn(objectKeys)
+                .stream()
+                .map(PlaceMediaJpaEntity::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<PlaceMedia> findRemovalsOlderThan(Instant cutoff, int limit) {
+        if (cutoff == null || limit <= 0) {
+            return List.of();
+        }
+        return placeMediaJpaRepository.findRemovalsOlderThan(cutoff, PageRequest.of(0, limit))
                 .stream()
                 .map(PlaceMediaJpaEntity::toDomain)
                 .toList();

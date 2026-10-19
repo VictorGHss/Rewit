@@ -68,6 +68,9 @@ public class PlaceMediaJpaEntity {
     @Column(name = "purged_at")
     private Instant purgedAt;
 
+    @Column(name = "removed_at")
+    private Instant removedAt;
+
     public PlaceMediaJpaEntity() {
     }
 
@@ -77,7 +80,7 @@ public class PlaceMediaJpaEntity {
                                Boolean isPrimary, String idempotencyKey, String contentSha256,
                                Instant createdAt, Instant updatedAt) {
         this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
-                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, null);
+                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, null, null);
     }
 
     public PlaceMediaJpaEntity(UUID id, UUID placeId, UUID userId, String objectKey,
@@ -85,6 +88,15 @@ public class PlaceMediaJpaEntity {
                                Integer width, Integer height, String status,
                                Boolean isPrimary, String idempotencyKey, String contentSha256,
                                Instant createdAt, Instant updatedAt, Instant purgedAt) {
+        this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
+                status, isPrimary, idempotencyKey, contentSha256, createdAt, updatedAt, purgedAt, null);
+    }
+
+    public PlaceMediaJpaEntity(UUID id, UUID placeId, UUID userId, String objectKey,
+                               String mediaType, String mimeType, Long sizeBytes,
+                               Integer width, Integer height, String status,
+                               Boolean isPrimary, String idempotencyKey, String contentSha256,
+                               Instant createdAt, Instant updatedAt, Instant purgedAt, Instant removedAt) {
         this.id = id;
         this.placeId = placeId;
         this.userId = userId;
@@ -101,6 +113,7 @@ public class PlaceMediaJpaEntity {
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.purgedAt = purgedAt;
+        this.removedAt = removedAt;
     }
 
     public static PlaceMediaJpaEntity fromDomain(PlaceMedia domain) {
@@ -120,7 +133,8 @@ public class PlaceMediaJpaEntity {
                 domain.getContentSha256(),
                 domain.getCreatedAt(),
                 domain.getUpdatedAt(),
-                domain.getPurgedAt()
+                domain.getPurgedAt(),
+                domain.getRemovedAt()
         );
     }
 
@@ -145,7 +159,8 @@ public class PlaceMediaJpaEntity {
                 this.contentSha256,
                 this.createdAt,
                 this.updatedAt,
-                this.purgedAt
+                this.purgedAt,
+                this.removedAt
         );
     }
 
@@ -275,6 +290,14 @@ public class PlaceMediaJpaEntity {
 
     public void setPurgedAt(Instant purgedAt) {
         this.purgedAt = purgedAt;
+    }
+
+    public Instant getRemovedAt() {
+        return removedAt;
+    }
+
+    public void setRemovedAt(Instant removedAt) {
+        this.removedAt = removedAt;
     }
 
     @Override

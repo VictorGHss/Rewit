@@ -77,11 +77,20 @@ class PlaceMediaServiceTest {
     private UUID userId;
     private UUID placeId;
     private Place activePlace;
+    private UUID moderatorId;
+    private User moderatorUser;
 
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
         placeId = UUID.randomUUID();
+        moderatorId = UUID.randomUUID();
+        moderatorUser = User.rehydrate(
+                moderatorId, "moderator@rewit.com", "hash", AuthProvider.LOCAL, null,
+                AccountStatus.ACTIVE, true, Role.MODERATOR, null, Instant.now(), Instant.now()
+        );
+        lenient().when(userRepository.findById(moderatorId)).thenReturn(Optional.of(moderatorUser));
+
         activePlace = new Place(
                 placeId,
                 "Pastel da Dona Ana",
@@ -404,7 +413,7 @@ class PlaceMediaServiceTest {
         );
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
-        when(placeMediaRepository.findById(newPrimaryId)).thenReturn(Optional.of(newPrimary));
+        when(placeMediaRepository.findByIdForUpdate(newPrimaryId)).thenReturn(Optional.of(newPrimary));
         when(placeMediaRepository.findPrimaryByPlaceId(placeId)).thenReturn(Optional.of(oldPrimary));
         when(placeMediaRepository.save(any(PlaceMedia.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -436,8 +445,7 @@ class PlaceMediaServiceTest {
         );
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
-        when(placeMediaRepository.findById(primaryId)).thenReturn(Optional.of(primaryMedia));
-        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+        when(placeMediaRepository.findByIdForUpdate(primaryId)).thenReturn(Optional.of(primaryMedia));
         when(placeMediaRepository.findFirstActiveByPlaceId(placeId)).thenReturn(Optional.of(nextOldestMedia));
 
         placeMediaService.deleteMedia(userId, placeId, primaryId);
@@ -470,15 +478,16 @@ class PlaceMediaServiceTest {
         );
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
-        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
-        when(userRepository.findById(modUserId)).thenReturn(Optional.of(moderator));
-        when(placeMediaReportJpaRepository.findByPlaceMediaId(mediaId)).thenReturn(List.of(report));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(userRepository.findById(moderatorId)).thenReturn(Optional.of(moderatorUser));
+        when(placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(report));
 
-        placeMediaService.deleteMedia(modUserId, placeId, mediaId);
+        placeMediaService.deleteMedia(moderatorId, placeId, mediaId);
 
         assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
-        assertEquals("ACCEPTED", report.getStatus());
-        verify(placeMediaReportJpaRepository).save(report);
+        var captor = org.mockito.ArgumentCaptor.forClass(PlaceMediaReportJpaEntity.class);
+        verify(placeMediaReportJpaRepository).save(captor.capture());
+        assertEquals("ACCEPTED", captor.getValue().getStatus());
     }
 
     @Test
@@ -493,8 +502,8 @@ class PlaceMediaServiceTest {
                 PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
-        when(placeRepository.findById(placeId)).thenReturn(Optional.of(activePlace));
-        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
         when(placeMediaReportJpaRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporterId)).thenReturn(false);
         when(placeMediaReportJpaRepository.countByPlaceMediaIdAndStatus(mediaId, "PENDING")).thenReturn(1L);
 
@@ -531,8 +540,8 @@ class PlaceMediaServiceTest {
                 PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
-        when(placeRepository.findById(placeId)).thenReturn(Optional.of(activePlace));
-        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
         when(placeMediaReportJpaRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporterId)).thenReturn(false);
         when(placeMediaReportJpaRepository.countByPlaceMediaIdAndStatus(mediaId, "PENDING")).thenReturn(3L);
         when(placeMediaRepository.findFirstActiveByPlaceId(placeId)).thenReturn(Optional.of(nextActive));
@@ -556,7 +565,7 @@ class PlaceMediaServiceTest {
         );
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
-        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 placeMediaService.reportMedia(userId, placeId, mediaId, "SPAM", "Auto denúncia")
@@ -569,7 +578,7 @@ class PlaceMediaServiceTest {
     @Test
     @DisplayName("17. decideReport com ACCEPT remove foto, marca relatório ACCEPTED e elege nova capa")
     void shouldAcceptReportAndRemoveMedia() {
-        UUID modId = UUID.randomUUID();
+        UUID modId = moderatorId;
         UUID reportId = UUID.randomUUID();
         UUID mediaId = UUID.randomUUID();
 
@@ -585,14 +594,17 @@ class PlaceMediaServiceTest {
                 PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
 
-        when(placeMediaReportJpaRepository.findById(reportId)).thenReturn(Optional.of(
-                new com.rewit.infrastructure.persistence.entity.PlaceMediaReportJpaEntity(
-                        reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda", "PENDING", Instant.now(), Instant.now()
-                )
-        ));
+        var reportEntity = new com.rewit.infrastructure.persistence.entity.PlaceMediaReportJpaEntity(
+                reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda", "PENDING", Instant.now(), Instant.now()
+        );
+
+        when(placeMediaReportJpaRepository.findById(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaReportJpaRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
         when(placeMediaRepository.findFirstActiveByPlaceId(placeId)).thenReturn(Optional.of(nextActive));
-        when(placeMediaReportJpaRepository.findByPlaceMediaId(mediaId)).thenReturn(List.of());
+        when(placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
 
         var res = placeMediaService.decideReport(modId, reportId, "ACCEPT", "Conteúdo comercial inadequado");
 
@@ -604,9 +616,9 @@ class PlaceMediaServiceTest {
     }
 
     @Test
-    @DisplayName("18. decideReport com REJECT restaura foto em UNDER_REVIEW para ACTIVE se contagem < 3")
-    void shouldRejectReportAndRestoreMediaFromUnderReview() {
-        UUID modId = UUID.randomUUID();
+    @DisplayName("18. decideReport com REJECT rejeita denúncia e NÃO reativa foto (permanece em UNDER_REVIEW)")
+    void shouldRejectReportAndKeepMediaInUnderReview() {
+        UUID modId = moderatorId;
         UUID reportId = UUID.randomUUID();
         UUID mediaId = UUID.randomUUID();
 
@@ -616,28 +628,28 @@ class PlaceMediaServiceTest {
                 PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
         );
 
-        when(placeMediaReportJpaRepository.findById(reportId)).thenReturn(Optional.of(
-                new com.rewit.infrastructure.persistence.entity.PlaceMediaReportJpaEntity(
-                        reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda", "PENDING", Instant.now(), Instant.now()
-                )
-        ));
+        var reportEntity = new com.rewit.infrastructure.persistence.entity.PlaceMediaReportJpaEntity(
+                reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda", "PENDING", Instant.now(), Instant.now()
+        );
+
+        when(placeMediaReportJpaRepository.findById(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
-        when(placeMediaReportJpaRepository.countByPlaceMediaIdAndStatus(mediaId, "PENDING")).thenReturn(1L);
-        when(placeMediaRepository.findPrimaryByPlaceId(placeId)).thenReturn(Optional.empty());
-        when(placeMediaRepository.findFirstActiveByPlaceId(placeId)).thenReturn(Optional.of(media));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaReportJpaRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
 
         var res = placeMediaService.decideReport(modId, reportId, "REJECT", "Denúncia infundada");
 
         assertEquals("REJECTED", res.status());
-        assertEquals(PlaceMediaStatus.ACTIVE, media.getStatus());
-        assertTrue(media.isPrimary());
-        verify(placeMediaRepository).save(media);
+        assertEquals(PlaceMediaStatus.UNDER_REVIEW, media.getStatus());
+        assertFalse(media.isActive());
+        verify(placeMediaRepository, never()).save(media);
     }
 
     @Test
     @DisplayName("19. restoreMediaByModerator restaura foto se objeto existir no storage e falha se purgado")
     void shouldRestoreMediaWhenStorageExistsAndFailWhenPurged() {
-        UUID modId = UUID.randomUUID();
+        UUID modId = moderatorId;
         UUID mediaId = UUID.randomUUID();
 
         PlaceMedia media = new PlaceMedia(
@@ -646,7 +658,9 @@ class PlaceMediaServiceTest {
                 PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now()
         );
 
-        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaRepository.countActiveByPlaceId(placeId)).thenReturn(2L);
         when(objectStoragePort.exists(media.getObjectKey())).thenReturn(true);
         when(placeMediaRepository.findPrimaryByPlaceId(placeId)).thenReturn(Optional.empty());
         when(placeMediaRepository.findFirstActiveByPlaceId(placeId)).thenReturn(Optional.of(media));
@@ -662,5 +676,55 @@ class PlaceMediaServiceTest {
         );
         assertEquals("STORAGE_OBJECT_PURGED", ex.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    }
+
+    @Test
+    @DisplayName("20. restoreMediaByModerator falha com 409 quando local já atingiu o limite de 5 fotos ativas")
+    void shouldFailRestoreWhenActiveMediaLimitReached() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(objectStoragePort.exists(media.getObjectKey())).thenReturn(true);
+        when(placeMediaRepository.countActiveByPlaceId(placeId)).thenReturn(5L);
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.restoreMediaByModerator(modId, placeId, mediaId, "Tentativa de exceder limite")
+        );
+
+        assertEquals("PLACE_MEDIA_LIMIT_EXCEEDED", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        assertFalse(media.isActive());
+    }
+
+    @Test
+    @DisplayName("21. downloadMediaForModerator permite download privado de fotos em UNDER_REVIEW e REMOVED")
+    void shouldAllowModeratorToDownloadUnderReviewOrRemovedMedia() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+
+        byte[] fakeData = new byte[]{1, 2, 3, 4};
+        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(objectStoragePort.get(media.getObjectKey())).thenReturn(fakeData);
+
+        var result = placeMediaService.downloadMediaForModerator(modId, placeId, mediaId);
+
+        assertNotNull(result);
+        assertArrayEquals(fakeData, result.bytes());
+        assertEquals("image/jpeg", result.mimeType());
+        assertFalse(result.publiclyCacheable());
     }
 }

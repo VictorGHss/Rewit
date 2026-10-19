@@ -16,11 +16,19 @@ public interface PlaceMediaReportRepository {
 
     Optional<PlaceMediaReport> findById(UUID id);
 
+    default Optional<PlaceMediaReport> findByIdForUpdate(UUID id) {
+        return findById(id);
+    }
+
     boolean existsByPlaceMediaIdAndReporterUserId(UUID placeMediaId, UUID reporterUserId);
 
     long countByPlaceMediaIdAndStatus(UUID placeMediaId, String status);
 
     List<PlaceMediaReport> findByPlaceMediaId(UUID placeMediaId);
+
+    default List<PlaceMediaReport> findByPlaceMediaIdForUpdate(UUID placeMediaId) {
+        return findByPlaceMediaId(placeMediaId);
+    }
 
     PageResult<PlaceMediaReport> findByStatus(String status, int page, int size);
 }

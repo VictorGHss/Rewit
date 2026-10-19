@@ -1,0 +1,12 @@
+package com.rewit.domain.enums;
+
+/**
+ * Ações administrativas registradas na trilha de auditoria de fotografias de locais.
+ */
+public enum PlaceMediaModerationAction {
+    REMOVE,
+    RESTORE,
+    ACCEPT_REPORT,
+    REJECT_REPORT
+}
+

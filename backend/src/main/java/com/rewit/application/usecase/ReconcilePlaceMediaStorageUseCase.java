@@ -14,6 +14,7 @@ import com.rewit.domain.model.PlaceMediaObjectKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -116,8 +117,17 @@ public class ReconcilePlaceMediaStorageUseCase {
                     pageCandidates.add(new OrphanCandidate(object.key(), object.sizeBytes(), object.lastModified(), now));
                 } else if (media.isActive() || media.isUnderReview()) {
                     activeReferences++;
+                } else if (media.isRemoved()) {
+                    boolean graceElapsed = media.getRemovedAt() != null
+                            && !media.getRemovedAt().plus(Duration.ofHours(24)).isAfter(now);
+                    if (media.getPurgedAt() == null && graceElapsed) {
+                        pageCandidates.add(new OrphanCandidate(object.key(), object.sizeBytes(), object.lastModified(), now));
+                    } else {
+                        removedReferences.add(new ReviewMediaReference(media.getId(), media.getPlaceId(), media.getObjectKey(),
+                                ReviewMediaStatus.REMOVED, media.getCreatedAt(), media.getUpdatedAt()));
+                    }
                 } else {
-                    ReviewMediaStatus refStatus = media.isRemoved() ? ReviewMediaStatus.REMOVED : ReviewMediaStatus.ACTIVE;
+                    ReviewMediaStatus refStatus = ReviewMediaStatus.ACTIVE;
                     removedReferences.add(new ReviewMediaReference(media.getId(), media.getPlaceId(), media.getObjectKey(), refStatus,
                             media.getCreatedAt(), media.getUpdatedAt()));
                 }

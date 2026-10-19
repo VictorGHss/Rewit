@@ -1,5 +1,8 @@
 package com.rewit.presentation.dto.admin;
 
+import com.rewit.application.dto.media.MediaDtos.PlaceMediaView;
+import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaModerationResult;
+import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaReportView;
 import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.PlaceMediaReport;
 import jakarta.validation.constraints.NotBlank;
@@ -33,12 +36,27 @@ public final class AdminPlaceMediaModerationDtos {
                     media.getId(),
                     media.getPlaceId(),
                     media.getUserId(),
-                    "/api/v1/places/" + media.getPlaceId() + "/media/" + media.getId() + "/download",
+                    "/api/v1/admin/place-media/" + media.getPlaceId() + "/" + media.getId() + "/content",
                     media.getMimeType(),
                     media.getSizeBytes(),
                     media.isPrimary(),
                     media.getStatus() != null ? media.getStatus().name() : "ACTIVE",
                     media.getCreatedAt()
+            );
+        }
+
+        public static PlaceMediaSummaryResponse fromView(PlaceMediaView view) {
+            if (view == null) return null;
+            return new PlaceMediaSummaryResponse(
+                    view.id(),
+                    view.placeId(),
+                    null,
+                    "/api/v1/admin/place-media/" + view.placeId() + "/" + view.id() + "/content",
+                    view.mimeType(),
+                    view.sizeBytes(),
+                    view.isPrimary(),
+                    view.status(),
+                    view.createdAt()
             );
         }
     }
@@ -73,6 +91,24 @@ public final class AdminPlaceMediaModerationDtos {
                     PlaceMediaSummaryResponse.fromDomain(media)
             );
         }
+
+        public static AdminPlaceMediaReportResponse fromView(PlaceMediaReportView view) {
+            if (view == null) return null;
+            return new AdminPlaceMediaReportResponse(
+                    view.id(),
+                    view.placeMediaId(),
+                    view.reporterUserId(),
+                    view.reason(),
+                    view.detail(),
+                    view.status(),
+                    view.createdAt(),
+                    view.updatedAt(),
+                    view.decidedByUserId(),
+                    view.decidedAt(),
+                    view.decisionNotes(),
+                    PlaceMediaSummaryResponse.fromView(view.media())
+            );
+        }
     }
 
     public record DecidePlaceMediaReportRequest(
@@ -102,5 +138,16 @@ public final class AdminPlaceMediaModerationDtos {
             String status,
             boolean isPrimary,
             String message
-    ) {}
+    ) {
+        public static PlaceMediaModerationActionResponse fromResult(PlaceMediaModerationResult result) {
+            if (result == null) return null;
+            return new PlaceMediaModerationActionResponse(
+                    result.mediaId(),
+                    result.placeId(),
+                    result.status(),
+                    result.isPrimary(),
+                    result.message()
+            );
+        }
+    }
 }

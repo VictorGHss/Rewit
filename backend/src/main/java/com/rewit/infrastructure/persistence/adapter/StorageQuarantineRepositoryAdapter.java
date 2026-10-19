@@ -16,6 +16,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -127,7 +128,10 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
                     placeMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
             if (!references.isEmpty()) {
                 var ref = references.get(0);
-                if (ref.getPurgedAt() == null) {
+                boolean isRemovedGraceElapsed = "REMOVED".equalsIgnoreCase(ref.getStatus())
+                        && ref.getRemovedAt() != null
+                        && !ref.getRemovedAt().plus(Duration.ofHours(24)).isAfter(now);
+                if (ref.getPurgedAt() == null && !isRemovedGraceElapsed) {
                     quarantineJpaRepository.releaseEntry(entryId.get());
                     ReviewMediaStatus refStatus = "REMOVED".equalsIgnoreCase(ref.getStatus())
                             ? ReviewMediaStatus.REMOVED : ReviewMediaStatus.ACTIVE;
@@ -176,7 +180,10 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
                     placeMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
             if (!references.isEmpty()) {
                 var ref = references.get(0);
-                if (ref.getPurgedAt() == null) {
+                boolean isRemovedGraceElapsed = "REMOVED".equalsIgnoreCase(ref.getStatus())
+                        && ref.getRemovedAt() != null
+                        && !ref.getRemovedAt().plus(Duration.ofHours(24)).isAfter(Instant.now());
+                if (ref.getPurgedAt() == null && !isRemovedGraceElapsed) {
                     quarantineJpaRepository.releaseEntry(entryId.get());
                     ReviewMediaStatus refStatus = "REMOVED".equalsIgnoreCase(ref.getStatus())
                             ? ReviewMediaStatus.REMOVED : ReviewMediaStatus.ACTIVE;

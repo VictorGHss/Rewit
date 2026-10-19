@@ -15,6 +15,10 @@ public interface PlaceMediaRepository {
 
     Optional<PlaceMedia> findById(UUID id);
 
+    default Optional<PlaceMedia> findByIdForUpdate(UUID id) {
+        return findById(id);
+    }
+
     List<PlaceMedia> findActiveByPlaceId(UUID placeId);
 
     long countActiveByPlaceId(UUID placeId);
@@ -26,5 +30,9 @@ public interface PlaceMediaRepository {
     Optional<PlaceMedia> findByIdempotencyKey(UUID userId, UUID placeId, String idempotencyKey);
 
     List<PlaceMedia> findByObjectKeyIn(List<String> objectKeys);
+
+    default List<PlaceMedia> findRemovalsOlderThan(java.time.Instant cutoff, int limit) {
+        return java.util.List.of();
+    }
 }
 
