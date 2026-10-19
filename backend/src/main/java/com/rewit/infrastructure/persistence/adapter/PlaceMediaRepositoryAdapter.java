@@ -59,5 +59,43 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
         }
         return placeMediaJpaRepository.countByPlaceIdAndStatus(placeId, ReviewMediaStatus.ACTIVE.name());
     }
+
+    @Override
+    public Optional<PlaceMedia> findPrimaryByPlaceId(UUID placeId) {
+        if (placeId == null) {
+            return Optional.empty();
+        }
+        return placeMediaJpaRepository.findByPlaceIdAndIsPrimaryTrueAndStatus(placeId, ReviewMediaStatus.ACTIVE.name())
+                .map(PlaceMediaJpaEntity::toDomain);
+    }
+
+    @Override
+    public Optional<PlaceMedia> findFirstActiveByPlaceId(UUID placeId) {
+        if (placeId == null) {
+            return Optional.empty();
+        }
+        return placeMediaJpaRepository.findFirstByPlaceIdAndStatusOrderByCreatedAtAscIdAsc(placeId, ReviewMediaStatus.ACTIVE.name())
+                .map(PlaceMediaJpaEntity::toDomain);
+    }
+
+    @Override
+    public Optional<PlaceMedia> findByIdempotencyKey(UUID userId, UUID placeId, String idempotencyKey) {
+        if (userId == null || placeId == null || idempotencyKey == null || idempotencyKey.isBlank()) {
+            return Optional.empty();
+        }
+        return placeMediaJpaRepository.findByUserIdAndPlaceIdAndIdempotencyKey(userId, placeId, idempotencyKey.trim())
+                .map(PlaceMediaJpaEntity::toDomain);
+    }
+
+    @Override
+    public List<PlaceMedia> findByObjectKeyIn(List<String> objectKeys) {
+        if (objectKeys == null || objectKeys.isEmpty()) {
+            return List.of();
+        }
+        return placeMediaJpaRepository.findByObjectKeyIn(objectKeys)
+                .stream()
+                .map(PlaceMediaJpaEntity::toDomain)
+                .toList();
+    }
 }
 

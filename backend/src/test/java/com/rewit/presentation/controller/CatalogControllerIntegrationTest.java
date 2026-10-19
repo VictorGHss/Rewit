@@ -156,7 +156,7 @@ class CatalogControllerIntegrationTest {
         String slug = "slug-duplicado-" + UUID.randomUUID().toString().substring(0, 8);
 
         CreatePlaceRequest reqA = new CreatePlaceRequest(
-                "Lugar A", slug, "BAR", null, "Rua A", null, null, "Curitiba", "PR", "BR", -25.4, -49.2, 50
+                "Lugar A " + slug, slug, "BAR", null, "Rua A " + slug, null, null, "Curitiba", "PR", "BR", -25.4, -49.2, 50
         );
         mockMvc.perform(post("/api/v1/places")
                         .header("Authorization", "Bearer " + user.accessToken())
@@ -165,7 +165,7 @@ class CatalogControllerIntegrationTest {
                 .andExpect(status().isCreated());
 
         CreatePlaceRequest reqB = new CreatePlaceRequest(
-                "Lugar B", slug, "CAFE", null, "Rua B", null, null, "Curitiba", "PR", "BR", -25.5, -49.3, 50
+                "Lugar B " + slug, slug, "CAFE", null, "Rua B " + slug, null, null, "Curitiba", "PR", "BR", -25.5, -49.3, 50
         );
         MvcResult conflictResult = mockMvc.perform(post("/api/v1/places")
                         .header("Authorization", "Bearer " + user.accessToken())

@@ -42,6 +42,17 @@ public class StorageGcConfig {
     }
 
     @Bean
+    public com.rewit.application.usecase.ReconcilePlaceMediaStorageUseCase reconcilePlaceMediaStorageUseCase(
+            ObjectStorageListingPort listingPort,
+            com.rewit.application.port.PlaceMediaRepository placeMediaRepository,
+            StorageQuarantineRepository quarantineRepository,
+            StorageGcProperties properties
+    ) {
+        return new com.rewit.application.usecase.ReconcilePlaceMediaStorageUseCase(
+                listingPort, placeMediaRepository, quarantineRepository, properties.getPageSize(), 1);
+    }
+
+    @Bean
     public RunStorageGcCycleUseCase runStorageGcCycleUseCase(
             StorageGcProperties properties,
             ObjectStorageListingPort listingPort,

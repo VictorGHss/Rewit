@@ -28,6 +28,7 @@ public class Place extends RateableTarget {
     private final String origin;
     private boolean isVerified;
     private UUID claimedByBusinessId;
+    private final UUID createdByUserId;
     private String status;
     private final Instant updatedAt;
 
@@ -35,14 +36,44 @@ public class Place extends RateableTarget {
                  String addressText, String streetNumber, String neighborhood,
                  String city, String state, String country,
                  Double latitude, Double longitude, int validationRadiusMeters,
-                 String origin, boolean isVerified, UUID claimedByBusinessId, String status) {
+                 String origin, boolean isVerified, UUID claimedByBusinessId, UUID createdByUserId, String status) {
         super(id, TargetType.PLACE);
 
         if (name == null || name.isBlank()) {
             throw new BusinessException("O nome do local é obrigatório", "INVALID_PLACE_NAME");
         }
+        if (name.length() > 255) {
+            throw new BusinessException("O nome do local deve ter até 255 caracteres", "INVALID_PLACE_NAME");
+        }
         if (slug == null || slug.isBlank()) {
             throw new BusinessException("O slug do local é obrigatório", "INVALID_PLACE_SLUG");
+        }
+        if (slug.length() > 255) {
+            throw new BusinessException("O slug do local deve ter até 255 caracteres", "INVALID_PLACE_SLUG");
+        }
+        if (category != null && category.length() > 64) {
+            throw new BusinessException("A categoria do local deve ter até 64 caracteres", "INVALID_CATEGORY");
+        }
+        if (addressText != null && addressText.length() > 500) {
+            throw new BusinessException("O endereço do local deve ter até 500 caracteres", "INVALID_ADDRESS");
+        }
+        if (streetNumber != null && streetNumber.length() > 32) {
+            throw new BusinessException("O número do endereço deve ter até 32 caracteres", "INVALID_STREET_NUMBER");
+        }
+        if (neighborhood != null && neighborhood.length() > 128) {
+            throw new BusinessException("O bairro deve ter até 128 caracteres", "INVALID_NEIGHBORHOOD");
+        }
+        if (city != null && city.length() > 100) {
+            throw new BusinessException("A cidade deve ter até 100 caracteres", "INVALID_CITY");
+        }
+        if (state != null && state.length() > 50) {
+            throw new BusinessException("O estado (UF) deve ter até 50 caracteres", "INVALID_STATE");
+        }
+        if (country != null && country.length() > 10) {
+            throw new BusinessException("O código do país deve ter até 10 caracteres", "INVALID_COUNTRY");
+        }
+        if (description != null && description.length() > 2000) {
+            throw new BusinessException("A descrição deve ter até 2000 caracteres", "INVALID_DESCRIPTION");
         }
         if ((latitude == null) != (longitude == null)) {
             throw new BusinessException("Latitude e longitude devem ser ambas informadas ou ambas nulas", "INVALID_COORDINATES");
@@ -70,8 +101,19 @@ public class Place extends RateableTarget {
         this.origin = origin != null ? origin : "USER";
         this.isVerified = isVerified;
         this.claimedByBusinessId = claimedByBusinessId;
+        this.createdByUserId = createdByUserId;
         this.status = status != null ? status : "ACTIVE";
         this.updatedAt = Instant.now();
+    }
+
+    public Place(UUID id, String name, String slug, String category, String description,
+                 String addressText, String streetNumber, String neighborhood,
+                 String city, String state, String country,
+                 Double latitude, Double longitude, int validationRadiusMeters,
+                 String origin, boolean isVerified, UUID claimedByBusinessId, String status) {
+        this(id, name, slug, category, description, addressText, streetNumber, neighborhood,
+                city, state, country, latitude, longitude, validationRadiusMeters,
+                origin, isVerified, claimedByBusinessId, null, status);
     }
 
     /**
@@ -83,7 +125,7 @@ public class Place extends RateableTarget {
                  String origin, boolean isVerified, UUID claimedByBusinessId, String status) {
         this(id, name, slug, category, description, addressText, null, null,
                 city, state, country, latitude, longitude, validationRadiusMeters,
-                origin, isVerified, claimedByBusinessId, status);
+                origin, isVerified, claimedByBusinessId, null, status);
     }
 
     public boolean hasCoordinates() {
@@ -152,6 +194,10 @@ public class Place extends RateableTarget {
 
     public UUID getClaimedByBusinessId() {
         return claimedByBusinessId;
+    }
+
+    public UUID getCreatedByUserId() {
+        return createdByUserId;
     }
 
     public String getStatus() {

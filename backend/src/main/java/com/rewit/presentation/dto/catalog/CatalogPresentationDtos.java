@@ -30,13 +30,17 @@ public final class CatalogPresentationDtos {
             @Size(max = 64, message = "A categoria deve conter até 64 caracteres")
             String category,
 
+            @Size(max = 2000, message = "A descrição deve conter até 2000 caracteres")
             String description,
 
             @NotBlank(message = "O endereço é obrigatório")
             @Size(max = 500, message = "O endereço deve conter até 500 caracteres")
             String addressText,
 
+            @Size(max = 32, message = "O número deve conter até 32 caracteres")
             String streetNumber,
+
+            @Size(max = 128, message = "O bairro deve conter até 128 caracteres")
             String neighborhood,
 
             @Size(max = 100, message = "A cidade deve conter até 100 caracteres")
@@ -45,6 +49,7 @@ public final class CatalogPresentationDtos {
             @Size(max = 50, message = "O estado (UF) deve conter até 50 caracteres")
             String state,
 
+            @Size(max = 10, message = "O país deve conter até 10 caracteres")
             String country,
 
             @DecimalMin(value = "-90.0", message = "Latitude mínima é -90.0")
@@ -64,24 +69,35 @@ public final class CatalogPresentationDtos {
             @Size(max = 255, message = "O nome deve conter até 255 caracteres")
             String name,
 
+            @Size(max = 255, message = "O slug deve conter até 255 caracteres")
+            @Pattern(regexp = "^$|^[a-z0-9]+(?:-[a-z0-9]+)*$", message = "Slug deve conter apenas letras minúsculas, números e hífens")
             String slug,
 
+            @Size(max = 64, message = "A categoria deve conter até 64 caracteres")
             String category,
 
+            @Size(max = 2000, message = "A descrição deve conter até 2000 caracteres")
             String description,
 
             @NotBlank(message = "O endereço é obrigatório")
+            @Size(max = 500, message = "O endereço deve conter até 500 caracteres")
             String addressText,
 
+            @Size(max = 32, message = "O número deve conter até 32 caracteres")
             String streetNumber,
+
+            @Size(max = 128, message = "O bairro deve conter até 128 caracteres")
             String neighborhood,
 
             @NotBlank(message = "A cidade é obrigatória")
+            @Size(max = 100, message = "A cidade deve conter até 100 caracteres")
             String city,
 
             @NotBlank(message = "O estado (UF) é obrigatório")
+            @Size(max = 50, message = "O estado (UF) deve conter até 50 caracteres")
             String state,
 
+            @Size(max = 10, message = "O país deve conter até 10 caracteres")
             String country,
 
             @NotNull(message = "A latitude é obrigatória")
@@ -102,9 +118,11 @@ public final class CatalogPresentationDtos {
     ) {
         public record ExternalReferenceRequest(
                 @NotBlank(message = "O provedor é obrigatório")
+                @Size(max = 64, message = "O provedor deve conter até 64 caracteres")
                 String provider,
 
                 @NotBlank(message = "O identificador externo é obrigatório")
+                @Size(max = 255, message = "O identificador externo deve conter até 255 caracteres")
                 String externalId
         ) {}
     }
@@ -164,6 +182,7 @@ public final class CatalogPresentationDtos {
             Integer width,
             Integer height,
             String status,
+            boolean isPrimary,
             java.time.Instant createdAt
     ) {
         public static PlaceMediaResponse fromView(com.rewit.application.dto.media.MediaDtos.PlaceMediaView view) {
@@ -177,10 +196,20 @@ public final class CatalogPresentationDtos {
                     view.width(),
                     view.height(),
                     view.status(),
+                    view.isPrimary(),
                     view.createdAt()
             );
         }
     }
+
+    public record CreatePlaceMediaReportRequest(
+            @NotBlank(message = "O motivo da denúncia é obrigatório")
+            @Size(max = 64, message = "O motivo deve conter até 64 caracteres")
+            String reason,
+
+            @Size(max = 500, message = "O detalhe da denúncia deve conter até 500 caracteres")
+            String detail
+    ) {}
 
     public record NearbyPlaceItemResponse(
             UUID id,

@@ -14,5 +14,13 @@ public interface PlaceMediaJpaRepository extends JpaRepository<PlaceMediaJpaEnti
     List<PlaceMediaJpaEntity> findByPlaceIdAndStatusOrderByCreatedAtAscIdAsc(UUID placeId, String status);
 
     long countByPlaceIdAndStatus(UUID placeId, String status);
+
+    List<PlaceMediaJpaEntity> findByObjectKeyIn(List<String> objectKeys);
+
+    java.util.Optional<PlaceMediaJpaEntity> findByPlaceIdAndIsPrimaryTrueAndStatus(UUID placeId, String status);
+
+    java.util.Optional<PlaceMediaJpaEntity> findByUserIdAndPlaceIdAndIdempotencyKey(UUID userId, UUID placeId, String idempotencyKey);
+
+    java.util.Optional<PlaceMediaJpaEntity> findFirstByPlaceIdAndStatusOrderByCreatedAtAscIdAsc(UUID placeId, String status);
 }
 

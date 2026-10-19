@@ -16,6 +16,10 @@ import com.rewit.infrastructure.persistence.entity.PlaceJpaEntity;
  */
 public interface PlaceJpaRepository extends JpaRepository<PlaceJpaEntity, UUID> {
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM PlaceJpaEntity p WHERE p.id = :id")
+    Optional<PlaceJpaEntity> findByIdForUpdate(@Param("id") UUID id);
+
     Optional<PlaceJpaEntity> findBySlug(String slug);
 
     boolean existsBySlug(String slug);

@@ -11,7 +11,10 @@ import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProductIdentifierRepository;
 import com.rewit.application.port.ProductPresenceRepository;
 import com.rewit.application.port.ProductRepository;
+import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.UserRepository;
+import com.rewit.application.ratelimit.RateLimitSubject;
+import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
@@ -28,6 +31,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -61,6 +65,9 @@ class CatalogServiceUnitTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private RateLimiter rateLimiter;
+
     private CatalogService catalogService;
 
     @BeforeEach
@@ -71,8 +78,10 @@ class CatalogServiceUnitTest {
                 productIdentifierRepository,
                 productPresenceRepository,
                 placeExternalReferenceRepository,
+                TransactionOperations.withoutTransaction(),
                 accountStatusPolicy,
-                userRepository
+                userRepository,
+                rateLimiter
         );
     }
 
@@ -642,5 +651,45 @@ class CatalogServiceUnitTest {
         assertEquals("PLACE_ALREADY_EXISTS", ex.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         verify(placeRepository, times(1)).save(any(Place.class));
+    }
+
+    @Test
+    @DisplayName("createPlace Concorrência Duplicidade Normalizada: Colisão concorrente em uq_places_active_normalized_name_address lança 409 PLACE_ALREADY_EXISTS")
+    void shouldReturnConflictWhenConcurrentPlaceCreationCollidesOnNormalizedNameAddressUniqueIndex() {
+        CreatePlaceCommand cmd = new CreatePlaceCommand(
+                "Pastel da Dona Ana", null, "GERAL", null,
+                "Av. Brasil, 500 - Centro", null, null, null, null, "BR",
+                null, null, 50, "USER", null
+        );
+
+        when(placeRepository.existsActiveByNormalizedNameAndAddress("Pastel da Dona Ana", "Av. Brasil, 500 - Centro"))
+                .thenReturn(false);
+        when(placeRepository.existsBySlug("pastel-da-dona-ana")).thenReturn(false);
+        when(placeRepository.save(any(Place.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key value violates unique constraint \"uq_places_active_normalized_name_address\""));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> catalogService.createPlace(cmd));
+        assertEquals("PLACE_ALREADY_EXISTS", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(placeRepository, times(1)).save(any(Place.class));
+    }
+
+    @Test
+    @DisplayName("createPlace Rate Limiting: Deve acionar rateLimiter para PLACE_CREATION e bloquear quando limite excedido")
+    void shouldEnforceRateLimitOnPlaceCreation() {
+        UUID actorUserId = UUID.randomUUID();
+        CreatePlaceCommand cmd = new CreatePlaceCommand(
+                "Pastel da Dona Ana", null, "GERAL", null,
+                "Av. Brasil, 500 - Centro", null, null, null, null, "BR",
+                null, null, 50, "USER", null
+        );
+
+        doThrow(new BusinessException(RateLimitedAction.PLACE_CREATION.exceededMessage(), HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMIT_EXCEEDED"))
+                .when(rateLimiter).acquireOrThrow(eq(RateLimitedAction.PLACE_CREATION), any(RateLimitSubject.class));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> catalogService.createPlace(actorUserId, cmd));
+        assertEquals("RATE_LIMIT_EXCEEDED", ex.getErrorCode());
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatus());
+        verify(placeRepository, never()).save(any(Place.class));
     }
 }

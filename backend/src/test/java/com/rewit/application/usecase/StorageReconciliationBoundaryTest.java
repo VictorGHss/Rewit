@@ -37,6 +37,7 @@ class StorageReconciliationBoundaryTest {
     void reconciliationSourcesNeverDelete() {
         for (Path file : List.of(
                 MAIN_SOURCES.resolve("application/usecase/ReconcileReviewMediaStorageUseCase.java"),
+                MAIN_SOURCES.resolve("application/usecase/ReconcilePlaceMediaStorageUseCase.java"),
                 MAIN_SOURCES.resolve("application/port/ObjectStorageListingPort.java"),
                 MAIN_SOURCES.resolve("application/usecase/RecheckQuarantinedStorageObjectUseCase.java"),
                 MAIN_SOURCES.resolve("application/port/StorageQuarantineRepository.java"),
@@ -54,7 +55,11 @@ class StorageReconciliationBoundaryTest {
                 .filter(file -> storageDelete.matcher(read(file)).find())
                 .map(file -> file.getFileName().toString())
                 .collect(Collectors.toSet());
-        assertEquals(Set.of("ReviewMediaService.java", "PurgeConfirmedOrphanStorageObjectUseCase.java"), deletingFiles);
+        // Fluxos autorizados:
+        // - ReviewMediaService: compensação de upload e soft-delete de mídias de avaliação
+        // - PlaceMediaService: compensação de upload de fotografias de locais
+        // - PurgeConfirmedOrphanStorageObjectUseCase: remoção física de objetos confirmados órfãos no ciclo de GC
+        assertEquals(Set.of("ReviewMediaService.java", "PlaceMediaService.java", "PurgeConfirmedOrphanStorageObjectUseCase.java"), deletingFiles);
 
         Set<String> sdkRemovals = javaFilesUnder(MAIN_SOURCES)
                 .filter(file -> read(file).contains("removeObject("))

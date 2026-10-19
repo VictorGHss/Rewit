@@ -16,6 +16,7 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.Product;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.AdoptPlaceRequest;
+import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.CreatePlaceMediaReportRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.CreatePlaceRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.NearbyPlaceItemResponse;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.NearbyPlacesResponse;
@@ -85,6 +86,8 @@ public class PlaceController {
                 request.longitude(),
                 request.validationRadiusMeters(),
                 "USER",
+                null,
+                actorUserId,
                 null
         );
 
@@ -188,6 +191,7 @@ public class PlaceController {
     public ResponseEntity<PlaceMediaResponse> uploadPlaceMedia(
             @PathVariable("id") UUID placeId,
             @RequestParam("file") MultipartFile file,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             Authentication authentication
     ) {
         UUID actorUserId = extractAuthenticatedUserId(authentication);
@@ -216,11 +220,55 @@ public class PlaceController {
                 placeId,
                 actorUserId,
                 bytes,
-                file.getOriginalFilename()
+                file.getOriginalFilename(),
+                idempotencyKey
         );
 
         PlaceMediaView view = placeMediaService.uploadMedia(command);
         return ResponseEntity.status(HttpStatus.CREATED).body(PlaceMediaResponse.fromView(view));
+    }
+
+    @PutMapping("/{id}/media/{mediaId}/primary")
+    public ResponseEntity<PlaceMediaResponse> setPrimaryPlaceMedia(
+            @PathVariable("id") UUID placeId,
+            @PathVariable("mediaId") UUID mediaId,
+            Authentication authentication
+    ) {
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
+        if (placeMediaService == null) {
+            throw new BusinessException("Serviço de mídia de local indisponível", HttpStatus.INTERNAL_SERVER_ERROR, "SERVICE_UNAVAILABLE");
+        }
+        PlaceMediaView view = placeMediaService.setPrimaryMedia(actorUserId, placeId, mediaId);
+        return ResponseEntity.ok(PlaceMediaResponse.fromView(view));
+    }
+
+    @DeleteMapping("/{id}/media/{mediaId}")
+    public ResponseEntity<Void> deletePlaceMedia(
+            @PathVariable("id") UUID placeId,
+            @PathVariable("mediaId") UUID mediaId,
+            Authentication authentication
+    ) {
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
+        if (placeMediaService == null) {
+            throw new BusinessException("Serviço de mídia de local indisponível", HttpStatus.INTERNAL_SERVER_ERROR, "SERVICE_UNAVAILABLE");
+        }
+        placeMediaService.deleteMedia(actorUserId, placeId, mediaId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{id}/media/{mediaId}/reports")
+    public ResponseEntity<Void> reportPlaceMedia(
+            @PathVariable("id") UUID placeId,
+            @PathVariable("mediaId") UUID mediaId,
+            @Valid @RequestBody CreatePlaceMediaReportRequest request,
+            Authentication authentication
+    ) {
+        UUID actorUserId = extractAuthenticatedUserId(authentication);
+        if (placeMediaService == null) {
+            throw new BusinessException("Serviço de mídia de local indisponível", HttpStatus.INTERNAL_SERVER_ERROR, "SERVICE_UNAVAILABLE");
+        }
+        placeMediaService.reportMedia(actorUserId, placeId, mediaId, request.reason(), request.detail());
+        return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
     @GetMapping("/{id}/media")

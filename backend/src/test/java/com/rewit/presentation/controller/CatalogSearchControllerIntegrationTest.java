@@ -63,11 +63,11 @@ class CatalogSearchControllerIntegrationTest {
     private String createPlace(String token, String name) throws Exception {
         String suffix = java.util.UUID.randomUUID().toString().substring(0, 8);
         CreatePlaceRequest request = new CreatePlaceRequest(
-                name,
+                name + " " + suffix,
                 "cafe-search-" + suffix,
                 "CAFÉ",
                 "Café para trabalho",
-                "Rua das Flores, 123",
+                "Rua das Flores, 123 - " + suffix,
                 "123",
                 "Centro",
                 "São Paulo",

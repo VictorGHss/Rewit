@@ -37,6 +37,10 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceExternalReference;
 import com.rewit.domain.model.Product;
 import com.rewit.domain.model.ProductIdentifier;
+import com.rewit.application.port.RateLimiter;
+import com.rewit.application.ratelimit.RateLimitPermit;
+import com.rewit.application.ratelimit.RateLimitSubject;
+import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.domain.model.ProductPresence;
 
 /**
@@ -48,6 +52,17 @@ public class CatalogService {
     /** Único status de place/product exposto em leituras públicas (busca e detalhe). */
     public static final String PUBLIC_CATALOG_STATUS = "ACTIVE";
 
+    private static final RateLimiter UNLIMITED_RATE_LIMITER = new RateLimiter() {
+        @Override
+        public Optional<RateLimitPermit> tryAcquire(RateLimitedAction action, RateLimitSubject subject) {
+            return Optional.of(new RateLimitPermit() {});
+        }
+
+        @Override
+        public void release(RateLimitPermit permit) {
+        }
+    };
+
     private final PlaceRepository placeRepository;
     private final ProductRepository productRepository;
     private final ProductIdentifierRepository productIdentifierRepository;
@@ -56,8 +71,31 @@ public class CatalogService {
     private final TransactionOperations transactionOperations;
     private final AccountStatusPolicy accountStatusPolicy;
     private final UserRepository userRepository;
+    private final RateLimiter rateLimiter;
 
     @Autowired
+    public CatalogService(PlaceRepository placeRepository,
+                          ProductRepository productRepository,
+                          ProductIdentifierRepository productIdentifierRepository,
+                          ProductPresenceRepository productPresenceRepository,
+                          PlaceExternalReferenceRepository placeExternalReferenceRepository,
+                          PlatformTransactionManager transactionManager,
+                          AccountStatusPolicy accountStatusPolicy,
+                          UserRepository userRepository,
+                          RateLimiter rateLimiter) {
+        this(
+                placeRepository,
+                productRepository,
+                productIdentifierRepository,
+                productPresenceRepository,
+                placeExternalReferenceRepository,
+                createTransactionOperations(transactionManager),
+                accountStatusPolicy,
+                userRepository,
+                rateLimiter
+        );
+    }
+
     public CatalogService(PlaceRepository placeRepository,
                           ProductRepository productRepository,
                           ProductIdentifierRepository productIdentifierRepository,
@@ -74,7 +112,8 @@ public class CatalogService {
                 placeExternalReferenceRepository,
                 createTransactionOperations(transactionManager),
                 accountStatusPolicy,
-                userRepository
+                userRepository,
+                UNLIMITED_RATE_LIMITER
         );
     }
 
@@ -94,7 +133,8 @@ public class CatalogService {
                           PlaceExternalReferenceRepository placeExternalReferenceRepository,
                           TransactionOperations transactionOperations,
                           AccountStatusPolicy accountStatusPolicy,
-                          UserRepository userRepository) {
+                          UserRepository userRepository,
+                          RateLimiter rateLimiter) {
         this.placeRepository = Objects.requireNonNull(placeRepository, "placeRepository must not be null");
         this.productRepository = Objects.requireNonNull(productRepository, "productRepository must not be null");
         this.productIdentifierRepository = Objects.requireNonNull(productIdentifierRepository, "productIdentifierRepository must not be null");
@@ -103,6 +143,28 @@ public class CatalogService {
         this.transactionOperations = transactionOperations != null ? transactionOperations : TransactionOperations.withoutTransaction();
         this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "accountStatusPolicy must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
+        this.rateLimiter = rateLimiter != null ? rateLimiter : UNLIMITED_RATE_LIMITER;
+    }
+
+    public CatalogService(PlaceRepository placeRepository,
+                          ProductRepository productRepository,
+                          ProductIdentifierRepository productIdentifierRepository,
+                          ProductPresenceRepository productPresenceRepository,
+                          PlaceExternalReferenceRepository placeExternalReferenceRepository,
+                          TransactionOperations transactionOperations,
+                          AccountStatusPolicy accountStatusPolicy,
+                          UserRepository userRepository) {
+        this(
+                placeRepository,
+                productRepository,
+                productIdentifierRepository,
+                productPresenceRepository,
+                placeExternalReferenceRepository,
+                transactionOperations,
+                accountStatusPolicy,
+                userRepository,
+                UNLIMITED_RATE_LIMITER
+        );
     }
 
     public CatalogService(PlaceRepository placeRepository,
@@ -120,7 +182,8 @@ public class CatalogService {
                 placeExternalReferenceRepository,
                 TransactionOperations.withoutTransaction(),
                 accountStatusPolicy,
-                userRepository
+                userRepository,
+                UNLIMITED_RATE_LIMITER
         );
     }
 
@@ -132,7 +195,9 @@ public class CatalogService {
 
     public Place createPlace(UUID actorUserId, CreatePlaceCommand cmd) {
         requireOperationalActor(actorUserId);
-        return createPlace(cmd);
+        rateLimiter.acquireOrThrow(RateLimitedAction.PLACE_CREATION, RateLimitSubject.ofUser(actorUserId));
+        CreatePlaceCommand cmdWithCreator = cmd.createdByUserId() != null ? cmd : cmd.withCreatedByUserId(actorUserId);
+        return createPlace(cmdWithCreator);
     }
 
     /** A adoção controla as próprias transações (REQUIRES_NEW por tentativa); a verificação vem antes de todas. */
@@ -259,13 +324,23 @@ public class CatalogService {
                 }
 
                 // 1.2 Concorrência no slug explícito (uq_places_slug):
+                // 1.2 Concorrência no slug explícito (uq_places_slug):
                 // Duas requisições simultâneas com o mesmo slug explícito para locais diferentes.
                 // A perdedora não deve auto-gerar sufixo, mas retornar 409 Conflict (PLACE_SLUG_ALREADY_EXISTS).
                 if (isConstraintViolation(ex, "uq_places_slug")) {
                     throw new BusinessException("Slug do local já está em uso", HttpStatus.CONFLICT, "PLACE_SLUG_ALREADY_EXISTS");
                 }
 
-                // 1.3 Qualquer outra violação de integridade não deve ser mascarada
+                // 1.3 Concorrência na unicidade normalizada de nome + endereço (A-04):
+                if (isConstraintViolation(ex, "uq_places_active_normalized_name_address")) {
+                    throw new BusinessException(
+                            "Já existe um local ativo cadastrado com este nome e endereço",
+                            HttpStatus.CONFLICT,
+                            "PLACE_ALREADY_EXISTS"
+                    );
+                }
+
+                // 1.4 Qualquer outra violação de integridade não deve ser mascarada
                 throw ex;
             }
         }
@@ -311,7 +386,17 @@ public class CatalogService {
                     }
                 }
 
-                // 2.2 Concorrência no slug gerado (uq_places_slug):
+                // 2.2 Concorrência na unicidade normalizada de nome + endereço (A-04):
+                // Duas requisições simultâneas com nomes e endereços equivalentes (mesmo com slugs diferentes).
+                if (isConstraintViolation(ex, "uq_places_active_normalized_name_address")) {
+                    throw new BusinessException(
+                            "Já existe um local ativo cadastrado com este nome e endereço",
+                            HttpStatus.CONFLICT,
+                            "PLACE_ALREADY_EXISTS"
+                    );
+                }
+
+                // 2.3 Concorrência no slug gerado (uq_places_slug):
                 // Se outra transação concorrente acabou de criar o mesmo local (mesmo nome + endereço),
                 // retorna 409 Conflict em vez de criar duplicata com sufixo -2.
                 if (isConstraintViolation(ex, "uq_places_slug")) {
@@ -332,7 +417,7 @@ public class CatalogService {
                     continue;
                 }
 
-                // 2.3 Qualquer outra violação de integridade não deve ser mascarada
+                // 2.4 Qualquer outra violação de integridade não deve ser mascarada
                 throw ex;
             }
         }
@@ -396,6 +481,7 @@ public class CatalogService {
                 "USER",
                 false,
                 cmd.claimedByBusinessId(),
+                cmd.createdByUserId(),
                 "ACTIVE"
         );
 

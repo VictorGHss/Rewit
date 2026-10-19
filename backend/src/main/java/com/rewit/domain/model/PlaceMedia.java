@@ -28,6 +28,9 @@ public class PlaceMedia {
     private final Integer width;
     private final Integer height;
     private ReviewMediaStatus status;
+    private boolean isPrimary;
+    private final String idempotencyKey;
+    private final String contentSha256;
     private final Instant createdAt;
     private Instant updatedAt;
 
@@ -35,12 +38,21 @@ public class PlaceMedia {
                       ReviewMediaType mediaType, String mimeType, long sizeBytes,
                       Integer width, Integer height) {
         this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
-                ReviewMediaStatus.ACTIVE, Instant.now(), Instant.now());
+                ReviewMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now());
     }
 
     public PlaceMedia(UUID id, UUID placeId, UUID userId, String objectKey,
                       ReviewMediaType mediaType, String mimeType, long sizeBytes,
                       Integer width, Integer height, ReviewMediaStatus status,
+                      Instant createdAt, Instant updatedAt) {
+        this(id, placeId, userId, objectKey, mediaType, mimeType, sizeBytes, width, height,
+                status, false, null, null, createdAt, updatedAt);
+    }
+
+    public PlaceMedia(UUID id, UUID placeId, UUID userId, String objectKey,
+                      ReviewMediaType mediaType, String mimeType, long sizeBytes,
+                      Integer width, Integer height, ReviewMediaStatus status,
+                      boolean isPrimary, String idempotencyKey, String contentSha256,
                       Instant createdAt, Instant updatedAt) {
         if (placeId == null) {
             throw new BusinessException("O local é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_PLACE_ID");
@@ -92,6 +104,9 @@ public class PlaceMedia {
         this.width = width;
         this.height = height;
         this.status = status != null ? status : ReviewMediaStatus.ACTIVE;
+        this.isPrimary = isPrimary;
+        this.idempotencyKey = idempotencyKey != null && !idempotencyKey.isBlank() ? idempotencyKey.trim() : null;
+        this.contentSha256 = contentSha256 != null && !contentSha256.isBlank() ? contentSha256.trim().toLowerCase() : null;
         this.createdAt = createdAt != null ? createdAt : Instant.now();
         this.updatedAt = updatedAt != null ? updatedAt : Instant.now();
     }
@@ -105,11 +120,40 @@ public class PlaceMedia {
 
     public void markRemoved() {
         this.status = ReviewMediaStatus.REMOVED;
+        this.isPrimary = false;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markUnderReview() {
+        this.status = ReviewMediaStatus.UNDER_REVIEW;
+        this.isPrimary = false;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markFlagged() {
+        this.status = ReviewMediaStatus.FLAGGED;
         this.updatedAt = Instant.now();
     }
 
     public boolean isActive() {
         return this.status == ReviewMediaStatus.ACTIVE;
+    }
+
+    public boolean isPrimary() {
+        return this.isPrimary;
+    }
+
+    public void setPrimary(boolean isPrimary) {
+        this.isPrimary = isPrimary;
+        this.updatedAt = Instant.now();
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public String getContentSha256() {
+        return contentSha256;
     }
 
     public UUID getId() {

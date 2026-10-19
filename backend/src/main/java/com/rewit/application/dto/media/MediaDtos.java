@@ -24,8 +24,13 @@ public final class MediaDtos {
             UUID placeId,
             UUID authenticatedUserId,
             byte[] fileBytes,
-            String originalFilename
-    ) {}
+            String originalFilename,
+            String idempotencyKey
+    ) {
+        public UploadPlaceMediaCommand(UUID placeId, UUID authenticatedUserId, byte[] fileBytes, String originalFilename) {
+            this(placeId, authenticatedUserId, fileBytes, originalFilename, null);
+        }
+    }
 
     public record ReviewMediaView(
             UUID id,
@@ -66,6 +71,7 @@ public final class MediaDtos {
             Integer width,
             Integer height,
             String status,
+            boolean isPrimary,
             Instant createdAt
     ) {
         public static PlaceMediaView fromDomain(PlaceMedia media) {
@@ -80,6 +86,7 @@ public final class MediaDtos {
                     media.getWidth(),
                     media.getHeight(),
                     media.getStatus().name(),
+                    media.isPrimary(),
                     media.getCreatedAt()
             );
         }

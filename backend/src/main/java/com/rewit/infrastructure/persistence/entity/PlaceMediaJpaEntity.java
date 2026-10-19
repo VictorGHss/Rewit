@@ -50,6 +50,15 @@ public class PlaceMediaJpaEntity {
     @Column(name = "status", nullable = false, length = 20)
     private String status;
 
+    @Column(name = "is_primary", nullable = false)
+    private Boolean isPrimary = false;
+
+    @Column(name = "idempotency_key", length = 128)
+    private String idempotencyKey;
+
+    @Column(name = "content_sha256", length = 64)
+    private String contentSha256;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -62,6 +71,7 @@ public class PlaceMediaJpaEntity {
     public PlaceMediaJpaEntity(UUID id, UUID placeId, UUID userId, String objectKey,
                                String mediaType, String mimeType, Long sizeBytes,
                                Integer width, Integer height, String status,
+                               Boolean isPrimary, String idempotencyKey, String contentSha256,
                                Instant createdAt, Instant updatedAt) {
         this.id = id;
         this.placeId = placeId;
@@ -73,6 +83,9 @@ public class PlaceMediaJpaEntity {
         this.width = width;
         this.height = height;
         this.status = status;
+        this.isPrimary = isPrimary != null ? isPrimary : false;
+        this.idempotencyKey = idempotencyKey;
+        this.contentSha256 = contentSha256;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -89,6 +102,9 @@ public class PlaceMediaJpaEntity {
                 domain.getWidth(),
                 domain.getHeight(),
                 domain.getStatus().name(),
+                domain.isPrimary(),
+                domain.getIdempotencyKey(),
+                domain.getContentSha256(),
                 domain.getCreatedAt(),
                 domain.getUpdatedAt()
         );
@@ -110,6 +126,9 @@ public class PlaceMediaJpaEntity {
                 this.width,
                 this.height,
                 ReviewMediaStatus.valueOf(this.status),
+                this.isPrimary != null && this.isPrimary,
+                this.idempotencyKey,
+                this.contentSha256,
                 this.createdAt,
                 this.updatedAt
         );
@@ -201,6 +220,30 @@ public class PlaceMediaJpaEntity {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Boolean getIsPrimary() {
+        return isPrimary;
+    }
+
+    public void setIsPrimary(Boolean primary) {
+        isPrimary = primary != null ? primary : false;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
+    }
+
+    public String getContentSha256() {
+        return contentSha256;
+    }
+
+    public void setContentSha256(String contentSha256) {
+        this.contentSha256 = contentSha256;
     }
 
     public Instant getUpdatedAt() {

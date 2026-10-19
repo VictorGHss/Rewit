@@ -43,13 +43,19 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
     private final StorageObjectQuarantineJpaRepository quarantineJpaRepository;
     private final ReviewMediaJpaRepository reviewMediaJpaRepository;
     private final ReviewJpaRepository reviewJpaRepository;
+    private final com.rewit.infrastructure.persistence.repository.PlaceMediaJpaRepository placeMediaJpaRepository;
+    private final com.rewit.infrastructure.persistence.repository.PlaceJpaRepository placeJpaRepository;
 
     public StorageQuarantineRepositoryAdapter(StorageObjectQuarantineJpaRepository quarantineJpaRepository,
                                               ReviewMediaJpaRepository reviewMediaJpaRepository,
-                                              ReviewJpaRepository reviewJpaRepository) {
+                                              ReviewJpaRepository reviewJpaRepository,
+                                              com.rewit.infrastructure.persistence.repository.PlaceMediaJpaRepository placeMediaJpaRepository,
+                                              com.rewit.infrastructure.persistence.repository.PlaceJpaRepository placeJpaRepository) {
         this.quarantineJpaRepository = Objects.requireNonNull(quarantineJpaRepository, "quarantineJpaRepository must not be null");
         this.reviewMediaJpaRepository = Objects.requireNonNull(reviewMediaJpaRepository, "reviewMediaJpaRepository must not be null");
         this.reviewJpaRepository = Objects.requireNonNull(reviewJpaRepository, "reviewJpaRepository must not be null");
+        this.placeMediaJpaRepository = Objects.requireNonNull(placeMediaJpaRepository, "placeMediaJpaRepository must not be null");
+        this.placeJpaRepository = Objects.requireNonNull(placeJpaRepository, "placeJpaRepository must not be null");
     }
 
     @Override
@@ -95,15 +101,19 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
 
     @Override
     @Transactional
-    public QuarantineResolution resolveUnderCreationLock(String objectKey, UUID reviewId,
+    public QuarantineResolution resolveUnderCreationLock(String objectKey, UUID entityId,
                                                          Instant expectedFirstObservedAt, Instant now) {
         Objects.requireNonNull(objectKey, "objectKey must not be null");
-        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(entityId, "entityId must not be null");
         Objects.requireNonNull(expectedFirstObservedAt, "expectedFirstObservedAt must not be null");
         Objects.requireNonNull(now, "now must not be null");
 
-        // 1. Mesmo lock do upload; ordem fixa (review → quarentena) em todos os caminhos que travam ambos
-        reviewJpaRepository.findByIdForUpdate(reviewId);
+        // 1. Mesmo lock do upload; ordem fixa (entidade dona → quarentena) em todos os caminhos que travam ambos
+        if (objectKey.startsWith("places/")) {
+            placeJpaRepository.findByIdForUpdate(entityId);
+        } else {
+            reviewJpaRepository.findByIdForUpdate(entityId);
+        }
 
         // 2. A decisão vale somente para a observação avaliada pelo chamador
         Optional<UUID> entryId = quarantineJpaRepository.lockEntry(objectKey, expectedFirstObservedAt);
@@ -111,12 +121,22 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
             return new QuarantineResolution(QuarantineResolution.Kind.ENTRY_CHANGED, null);
         }
 
-        // 3. Segunda consulta: qualquer linha em review_media, inclusive REMOVED, é referência
-        List<ReviewMediaJpaEntity> references = reviewMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
-        if (!references.isEmpty()) {
-            quarantineJpaRepository.releaseEntry(entryId.get());
-            return new QuarantineResolution(QuarantineResolution.Kind.REFERENCE_FOUND,
-                    ReviewMediaStatus.valueOf(references.get(0).getStatus()));
+        // 3. Segunda consulta: qualquer linha em place_media ou review_media, inclusive REMOVED, é referência
+        if (objectKey.startsWith("places/")) {
+            List<com.rewit.infrastructure.persistence.entity.PlaceMediaJpaEntity> references =
+                    placeMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
+            if (!references.isEmpty()) {
+                quarantineJpaRepository.releaseEntry(entryId.get());
+                return new QuarantineResolution(QuarantineResolution.Kind.REFERENCE_FOUND,
+                        ReviewMediaStatus.valueOf(references.get(0).getStatus()));
+            }
+        } else {
+            List<ReviewMediaJpaEntity> references = reviewMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
+            if (!references.isEmpty()) {
+                quarantineJpaRepository.releaseEntry(entryId.get());
+                return new QuarantineResolution(QuarantineResolution.Kind.REFERENCE_FOUND,
+                        ReviewMediaStatus.valueOf(references.get(0).getStatus()));
+            }
         }
 
         quarantineJpaRepository.markConfirmedOrphan(entryId.get(), now);
@@ -125,16 +145,20 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
 
     @Override
     @Transactional
-    public QuarantinePurgeResolution purgeConfirmedOrphanUnderCreationLock(String objectKey, UUID reviewId,
+    public QuarantinePurgeResolution purgeConfirmedOrphanUnderCreationLock(String objectKey, UUID entityId,
                                                                            Instant expectedFirstObservedAt,
                                                                            Function<String, ObjectDeletionResult> physicalDeletion) {
         Objects.requireNonNull(objectKey, "objectKey must not be null");
-        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(entityId, "entityId must not be null");
         Objects.requireNonNull(expectedFirstObservedAt, "expectedFirstObservedAt must not be null");
         Objects.requireNonNull(physicalDeletion, "physicalDeletion must not be null");
 
-        // 1. Mesmo lock do upload e da rechecagem, na mesma ordem (review → quarentena)
-        reviewJpaRepository.findByIdForUpdate(reviewId);
+        // 1. Mesmo lock do upload e da rechecagem, na mesma ordem (entidade dona → quarentena)
+        if (objectKey.startsWith("places/")) {
+            placeJpaRepository.findByIdForUpdate(entityId);
+        } else {
+            reviewJpaRepository.findByIdForUpdate(entityId);
+        }
 
         // 2. Somente a observação avaliada, e somente se ainda estiver CONFIRMED_ORPHAN
         Optional<UUID> entryId = quarantineJpaRepository.lockConfirmedEntry(objectKey, expectedFirstObservedAt);
@@ -143,11 +167,21 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
         }
 
         // 3. A consulta sob o lock é a autoridade: ACTIVE ou REMOVED protegem o objeto
-        List<ReviewMediaJpaEntity> references = reviewMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
-        if (!references.isEmpty()) {
-            quarantineJpaRepository.releaseEntry(entryId.get());
-            return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND,
-                    ReviewMediaStatus.valueOf(references.get(0).getStatus()), null);
+        if (objectKey.startsWith("places/")) {
+            List<com.rewit.infrastructure.persistence.entity.PlaceMediaJpaEntity> references =
+                    placeMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
+            if (!references.isEmpty()) {
+                quarantineJpaRepository.releaseEntry(entryId.get());
+                return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND,
+                        ReviewMediaStatus.valueOf(references.get(0).getStatus()), null);
+            }
+        } else {
+            List<ReviewMediaJpaEntity> references = reviewMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
+            if (!references.isEmpty()) {
+                quarantineJpaRepository.releaseEntry(entryId.get());
+                return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND,
+                        ReviewMediaStatus.valueOf(references.get(0).getStatus()), null);
+            }
         }
 
         // 4. Operação externa, com os locks mantidos; não é revertida por rollback

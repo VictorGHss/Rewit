@@ -5,5 +5,7 @@ package com.rewit.domain.enums;
  */
 public enum ReviewMediaStatus {
     ACTIVE,
-    REMOVED
+    REMOVED,
+    FLAGGED,
+    UNDER_REVIEW
 }

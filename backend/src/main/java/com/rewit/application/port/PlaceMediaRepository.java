@@ -18,5 +18,13 @@ public interface PlaceMediaRepository {
     List<PlaceMedia> findActiveByPlaceId(UUID placeId);
 
     long countActiveByPlaceId(UUID placeId);
+
+    Optional<PlaceMedia> findPrimaryByPlaceId(UUID placeId);
+
+    Optional<PlaceMedia> findFirstActiveByPlaceId(UUID placeId);
+
+    Optional<PlaceMedia> findByIdempotencyKey(UUID userId, UUID placeId, String idempotencyKey);
+
+    List<PlaceMedia> findByObjectKeyIn(List<String> objectKeys);
 }
 
