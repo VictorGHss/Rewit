@@ -482,7 +482,7 @@ class BusinessResponsePersistenceIntegrationTest {
         assertEquals(f.business(), view.businessAccountId());
         assertEquals("Empresa C11", view.corporateName());
         assertEquals(f.place(), view.placeId());
-        assertEquals("Local C11", view.placeName());
+        assertEquals("Local C11 " + f.place(), view.placeName());
         assertEquals("Primeira", view.content());
         assertEquals(now, view.createdAt());
 
@@ -771,7 +771,7 @@ class BusinessResponsePersistenceIntegrationTest {
         Fixture f = fixture();
         BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Obrigado pela visita!"), now);
         assertEquals("Empresa C11", published.corporateName());
-        assertEquals("Local C11", published.placeName());
+        assertEquals("Local C11 " + f.place(), published.placeName());
         assertEquals(f.businessAdmin(), responseRepository.findById(published.id()).orElseThrow().getAuthorUserId());
 
         BusinessException duplicate = assertThrows(BusinessException.class,
@@ -1211,7 +1211,7 @@ class BusinessResponsePersistenceIntegrationTest {
         assertEquals(now.plusSeconds(3), m.moderatedAt());
         assertEquals("Empresa C11", m.corporateName());
         assertEquals(f.place(), m.placeId());
-        assertEquals("Local C11", m.placeName());
+        assertEquals("Local C11 " + f.place(), m.placeName());
         assertEquals("Moderada", m.content());
         assertEquals(now.plusSeconds(2), m.createdAt());
         AdminRemovedBusinessResponseView r = views.get(replaced);
