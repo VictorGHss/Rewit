@@ -349,8 +349,8 @@ class FeedV2ControllerIntegrationTest {
     // =========================================================================
 
     @Test
-    @DisplayName("3.1. Anonimato: Review anônima oculta estritamente autor e perfil")
-    void shouldPreserveStrictPrivacyForAnonymousReviews() throws Exception {
+    @DisplayName("3.1. Anonimato: anônimas do autor seguido não entram pelo grafo social; a identificada entra")
+    void shouldNotComposeSocialFeedWithAnonymousReviewsOfFollowedAuthors() throws Exception {
         TestUser requester = registerUser("v2AnonReq");
         TestUser author = registerUser("v2AnonAuthor");
 
@@ -358,19 +358,22 @@ class FeedV2ControllerIntegrationTest {
         RateableTarget target = createTarget(TargetType.PLACE);
         userFollowRepository.follow(requester.userId(), author.userId());
 
-        Review anonReview = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, true, Instant.now());
+        Instant now = Instant.now();
+        Review identified = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(30));
+        Review anonymousPublic = createReview(author.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, true, now);
+        // Linha anterior à validação do domínio (reconstituição não valida a combinação)
+        Review anonymousFollowers = createReview(author.userId(), place, target, "FOLLOWERS", ReviewStatus.ACTIVE, true, now);
 
+        // Seguindo uma única conta, qualquer anônima vinda do grafo social seria atribuível a ela
         mockMvc.perform(get("/api/v2/feed")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items", hasSize(1)))
-                .andExpect(jsonPath("$.items[0].id").value(anonReview.getId().toString()))
-                .andExpect(jsonPath("$.items[0].isAnonymous").value(true))
-                .andExpect(jsonPath("$.items[0].author.id").doesNotExist())
-                .andExpect(jsonPath("$.items[0].author.handle").doesNotExist())
-                .andExpect(jsonPath("$.items[0].author.displayName").value("Anônimo"))
-                .andExpect(jsonPath("$.items[0].author.avatarUrl").doesNotExist())
-                .andExpect(jsonPath("$.items[0].author.isAnonymous").value(true));
+                .andExpect(jsonPath("$.items[0].id").value(identified.getId().toString()))
+                .andExpect(jsonPath("$.items[0].isAnonymous").value(false))
+                .andExpect(jsonPath("$.items[0].author.id").value(author.userId().toString()))
+                .andExpect(jsonPath("$.items[*].id", not(hasItem(anonymousPublic.getId().toString()))))
+                .andExpect(jsonPath("$.items[*].id", not(hasItem(anonymousFollowers.getId().toString()))));
     }
 
     @Test

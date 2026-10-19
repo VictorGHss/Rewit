@@ -74,13 +74,18 @@ public class ReputationService {
         reputationRepository.insertInitialRowIfNotExists(targetUserId);
 
         // 2. Adquire lock pessimista exclusivo (SELECT ... FOR UPDATE) na linha do usuário
-        reputationRepository.findByUserIdForUpdate(targetUserId)
+        UserReputation existing = reputationRepository.findByUserIdForUpdate(targetUserId)
             .orElseThrow(() -> new IllegalStateException("Falha ao adquirir lock para reputacao do usuario: " + targetUserId));
 
         // 3. Recalcula os sinais determinísticos a partir dos fatos confirmados
         UserReputation calculated = calculator.calculate(targetUserId);
 
-        // 4. Persiste o snapshot atualizado
+        // 4. Se os sinais e a versão não mudaram, preserva o snapshot e seu calculatedAt original
+        if (existing.hasSameSignals(calculated)) {
+            return existing;
+        }
+
+        // 5. Persiste o snapshot atualizado quando há mudança factual nos sinais
         return reputationRepository.save(calculated);
     }
 

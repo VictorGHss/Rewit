@@ -84,4 +84,19 @@ public class UserReputation {
     public int getHelpfulVotesReceived() { return helpfulVotesReceived; }
     public int getDistinctTargetsReviewed() { return distinctTargetsReviewed; }
     public Instant getCalculatedAt() { return calculatedAt; }
+
+    /**
+     * Verifica se outro snapshot possui exatamente a mesma versão de regra e os mesmos sinais determinísticos,
+     * independentemente de {@code calculatedAt}.
+     */
+    public boolean hasSameSignals(UserReputation other) {
+        if (other == null) {
+            return false;
+        }
+        return this.version == other.version
+            && this.activeReviews == other.activeReviews
+            && this.verifiedReviews == other.verifiedReviews
+            && this.helpfulVotesReceived == other.helpfulVotesReceived
+            && this.distinctTargetsReviewed == other.distinctTargetsReviewed;
+    }
 }

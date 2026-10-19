@@ -130,7 +130,7 @@ public class ReportService {
         if (pendingCount >= REPORT_THRESHOLD_FOR_UNDER_REVIEW && review.getStatus() == ReviewStatus.ACTIVE) {
             review.markUnderReview();
             reviewRepository.save(review);
-            if (reputationService != null) {
+            if (!review.isAnonymous() && reputationService != null) {
                 reputationService.recalculateAndSave(review.getUserId());
             }
         }
@@ -139,8 +139,7 @@ public class ReportService {
     }
 
     private void validateVisibility(Review review, java.util.UUID requesterUserId) {
-        String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";
-        switch (visibility) {
+        switch (ReviewVisibilityPolicy.effectiveVisibility(review)) {
             case "PUBLIC" -> {
                 // Público: qualquer usuário autenticado pode visualizar e denunciar
             }

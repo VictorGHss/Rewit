@@ -74,7 +74,7 @@ public class ReviewHelpfulService {
         if (added && notificationService != null) {
             notificationService.notifyReviewHelpful(review.getId(), review.getUserId());
         }
-        if (reputationService != null) {
+        if (added && !review.isAnonymous() && reputationService != null) {
             reputationService.recalculateAndSave(review.getUserId());
         }
         long count = reviewReactionRepository.countHelpful(review.getId());
@@ -87,8 +87,8 @@ public class ReviewHelpfulService {
     @Transactional
     public HelpfulResult removeHelpful(UUID reviewId, UUID requesterUserId) {
         Review review = validateAndGetReview(reviewId, requesterUserId);
-        reviewReactionRepository.removeHelpful(review.getId(), requesterUserId);
-        if (reputationService != null) {
+        boolean removed = reviewReactionRepository.removeHelpful(review.getId(), requesterUserId);
+        if (removed && !review.isAnonymous() && reputationService != null) {
             reputationService.recalculateAndSave(review.getUserId());
         }
         long count = reviewReactionRepository.countHelpful(review.getId());
@@ -116,7 +116,7 @@ public class ReviewHelpfulService {
             throw new BusinessException("O autor não pode marcar sua própria avaliação como útil", HttpStatus.BAD_REQUEST, "SELF_HELPFUL_FORBIDDEN");
         }
 
-        String visibility = review.getVisibility() != null ? review.getVisibility() : "PUBLIC";
+        String visibility = ReviewVisibilityPolicy.effectiveVisibility(review);
         if ("PRIVATE".equalsIgnoreCase(visibility)) {
             throw new BusinessException("Acesso negado a esta avaliação privada", HttpStatus.FORBIDDEN, "FORBIDDEN");
         } else if ("FOLLOWERS".equalsIgnoreCase(visibility)) {

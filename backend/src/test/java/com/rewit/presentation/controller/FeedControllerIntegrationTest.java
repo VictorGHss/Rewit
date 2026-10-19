@@ -251,8 +251,8 @@ class FeedControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("6. Preserva anonimização e metadados de Helpful no Feed")
-    void shouldPreserveAnonymizationAndHelpfulInFeed() throws Exception {
+    @DisplayName("6. Anônimas do seguido ficam fora do Feed; a identificada mantém autor e metadados de Helpful")
+    void shouldExcludeAnonymousReviewsAndPreserveHelpfulInFeed() throws Exception {
         TestUser requester = registerUser("feedAnonReq");
         TestUser followed = registerUser("feedAnonFol");
 
@@ -261,16 +261,23 @@ class FeedControllerIntegrationTest {
 
         userFollowRepository.follow(requester.userId(), followed.userId());
 
-        Review reviewAnon = createReview(followed.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, true);
-        reviewReactionRepository.addHelpful(reviewAnon.getId(), requester.userId());
+        Review identified = createReview(followed.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, false);
+        reviewReactionRepository.addHelpful(identified.getId(), requester.userId());
+        Review anonymousPublic = createReview(followed.userId(), place, target, "PUBLIC", ReviewStatus.ACTIVE, true);
+        // Linha anterior à validação do domínio (reconstituição não valida a combinação)
+        Review anonymousFollowers = createReview(followed.userId(), place, target, "FOLLOWERS", ReviewStatus.ACTIVE, true);
 
+        // Seguindo uma única conta, qualquer anônima no feed seria atribuível a ela
         mockMvc.perform(get("/api/v1/feed")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(1)))
-                .andExpect(jsonPath("$.content[0].isAnonymous").value(true))
-                .andExpect(jsonPath("$.content[0].author.displayName").value("Anônimo"))
-                .andExpect(jsonPath("$.content[0].author.handle").doesNotExist())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[*].id", not(hasItem(anonymousPublic.getId().toString()))))
+                .andExpect(jsonPath("$.content[*].id", not(hasItem(anonymousFollowers.getId().toString()))))
+                .andExpect(jsonPath("$.content[0].id").value(identified.getId().toString()))
+                .andExpect(jsonPath("$.content[0].isAnonymous").value(false))
+                .andExpect(jsonPath("$.content[0].author.id").value(followed.userId().toString()))
                 .andExpect(jsonPath("$.content[0].helpfulCount").value(1))
                 .andExpect(jsonPath("$.content[0].isHelpfulByMe").value(true));
     }

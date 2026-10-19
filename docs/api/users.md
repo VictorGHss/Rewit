@@ -10,8 +10,9 @@ Este documento especifica o contrato da API RESTful para a consulta do **perfil 
 * **Autenticação Padrão**: O endpoint segue o padrão autenticado da plataforma, exigindo cabeçalho `Authorization: Bearer <jwt>`. Isso permite resolver com segurança o estado contextual social (`isFollowing`) para o solicitante autenticado.
 * **Proteção Estrita contra IDOR e PII**: O `{id}` na URL identifica estritamente o perfil consultado. Não são expostos dados sensíveis como e-mail, hash de senhas, credenciais, provedor OAuth, tokens, sessões ativas ou coordenadas geográficas.
 * **Privacidade dos Contadores**:
-  * `totalReviews` contabiliza avaliações ativas criadas pelo autor (incluindo `PUBLIC`, `FOLLOWERS` e `PRIVATE`) sem expor nenhuma lista, conteúdo textual ou metadata individual de avaliações privadas.
-  * `helpfulVotesReceived` contabiliza o número agregado de marcações de utilidade sem expor a lista de votantes.
+  * `totalReviews` contabiliza avaliações ativas e não anônimas criadas pelo autor (incluindo `PUBLIC`, `FOLLOWERS` e `PRIVATE`) sem expor nenhuma lista, conteúdo textual ou metadata individual de avaliações privadas. `verifiedReviewsCount` segue a mesma regra.
+  * `helpfulVotesReceived` contabiliza o número agregado de marcações de utilidade em avaliações ativas e não anônimas, sem expor a lista de votantes.
+  * Avaliações anônimas ficam fora dos três contadores: se contassem, publicar uma anônima ou votar numa anônima mudaria o perfil do autor e revelaria a autoria.
 * **Source of Truth no PostgreSQL**: As estatísticas são agregações determinísticas calculadas via SQL indexado (`COUNT`), sem colunas mutáveis desnormalizadas ou caches em memória que possam dessincronizar.
 
 ---

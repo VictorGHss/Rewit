@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/review_privacy_rules.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/widgets/rating_bar_widget.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
 
@@ -11,7 +12,10 @@ import 'package:rewit_mobile/features/review_detail/domain/entities/update_revie
 /// - Texto da experiência (até 2000 caracteres);
 /// - Notas dos alvos existentes (1.0 a 5.0);
 /// - Anonimato;
-/// - Visibilidade (PUBLIC, FOLLOWERS, PRIVATE).
+/// - Visibilidade (PUBLIC, FOLLOWERS, PRIVATE), sem combinar anonimato com FOLLOWERS ([ReviewPrivacyRules]).
+///
+/// Uma avaliação antiga que já seja anônima e FOLLOWERS abre como está, com um aviso; para salvar, o autor
+/// escolhe uma combinação válida. Nada é trocado sem ação dele.
 class ReviewEditScreen extends StatefulWidget {
   final FeedReview review;
   final FeedRepository feedRepository;
@@ -37,6 +41,14 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
   bool _isSubmitting = false;
   String? _errorMessage;
 
+  bool get _hasAllowedPrivacy =>
+      ReviewPrivacyRules.isAllowed(isAnonymous: _isAnonymous, visibility: _visibility);
+
+  bool get _canSubmit => !_isSubmitting && _hasAllowedPrivacy;
+
+  bool get _canEnableAnonymous =>
+      ReviewPrivacyRules.canSetAnonymous(value: true, visibility: _visibility);
+
   @override
   void initState() {
     super.initState();
@@ -61,6 +73,13 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
 
   Future<void> _submitEdit() async {
     if (_isSubmitting) return;
+
+    if (!_hasAllowedPrivacy) {
+      setState(() {
+        _errorMessage = ReviewPrivacyRules.incompatibleCombinationMessage;
+      });
+      return;
+    }
 
     if (!(_formKey.currentState?.validate() ?? false)) {
       return;
@@ -89,13 +108,14 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
       }
     } on ApiException catch (e) {
       if (mounted) {
+        final message = ReviewPrivacyRules.messageForError(e.errorCode, e.detail);
         setState(() {
           _isSubmitting = false;
-          _errorMessage = e.detail;
+          _errorMessage = message;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.detail),
+            content: Text(message),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -153,7 +173,7 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
             else
               TextButton(
                 key: const Key('save_review_edit_button'),
-                onPressed: _submitEdit,
+                onPressed: _canSubmit ? _submitEdit : null,
                 child: const Text('Salvar'),
               ),
           ],
@@ -183,6 +203,33 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                             color: theme.colorScheme.onErrorContainer,
                             fontSize: 13,
                           ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // 1.1. Avaliação antiga anônima e restrita a seguidores: pede uma combinação válida
+              if (!_hasAllowedPrivacy) ...[
+                Container(
+                  key: const Key('legacy_privacy_notice'),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade400),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.lock_outline, color: Colors.amber.shade900, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          ReviewPrivacyRules.legacyCombinationNotice,
+                          style: TextStyle(color: Colors.amber.shade900, fontSize: 12),
                         ),
                       ),
                     ],
@@ -356,16 +403,20 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                   border: OutlineInputBorder(),
                   contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
-                items: const [
-                  DropdownMenuItem(
+                items: [
+                  const DropdownMenuItem(
                     value: 'PUBLIC',
                     child: Text('Pública (visível a todos)'),
                   ),
                   DropdownMenuItem(
                     value: 'FOLLOWERS',
-                    child: Text('Apenas seguidores'),
+                    enabled: ReviewPrivacyRules.canSelectVisibility(
+                      value: 'FOLLOWERS',
+                      isAnonymous: _isAnonymous,
+                    ),
+                    child: const Text('Apenas seguidores'),
                   ),
-                  DropdownMenuItem(
+                  const DropdownMenuItem(
                     value: 'PRIVATE',
                     child: Text('Privada (apenas você)'),
                   ),
@@ -373,13 +424,22 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 onChanged: _isSubmitting
                     ? null
                     : (value) {
-                        if (value != null) {
+                        if (value != null &&
+                            ReviewPrivacyRules.canSelectVisibility(value: value, isAnonymous: _isAnonymous)) {
                           setState(() {
                             _visibility = value;
                           });
                         }
                       },
               ),
+              if (_isAnonymous) ...[
+                const SizedBox(height: 6),
+                const Text(
+                  ReviewPrivacyRules.followersUnavailableForAnonymous,
+                  key: Key('edit_followers_unavailable_hint'),
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
               const SizedBox(height: 20),
 
               // 6. Anonimato
@@ -392,12 +452,16 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 child: SwitchListTile(
                   key: const Key('edit_anonymous_switch'),
                   title: const Text('Publicar como anônimo'),
-                  subtitle: const Text(
-                    'Oculta seu nome e avatar da publicação pública.',
-                    style: TextStyle(fontSize: 12),
+                  subtitle: Text(
+                    _canEnableAnonymous || _isAnonymous
+                        ? 'Oculta seu nome e avatar da publicação pública.'
+                        : ReviewPrivacyRules.anonymousUnavailableForFollowers,
+                    key: const Key('edit_anonymous_switch_subtitle'),
+                    style: const TextStyle(fontSize: 12),
                   ),
                   value: _isAnonymous,
-                  onChanged: _isSubmitting
+                  // Ligar o anonimato com "Apenas seguidores" fica bloqueado; desligar é sempre possível
+                  onChanged: _isSubmitting || (!_isAnonymous && !_canEnableAnonymous)
                       ? null
                       : (val) {
                           setState(() {
@@ -411,7 +475,7 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
               // 7. Botão principal de salvar
               FilledButton.icon(
                 key: const Key('submit_edit_button'),
-                onPressed: _isSubmitting ? null : _submitEdit,
+                onPressed: _canSubmit ? _submitEdit : null,
                 icon: _isSubmitting
                     ? const SizedBox(
                         width: 18,

@@ -153,7 +153,7 @@ Com a introdução do subsistema social no Step 15.0:
 3. Na listagem por alvo (`GET /api/v1/targets/{id}/reviews`):
    * As avaliações `FOLLOWERS` dos autores seguidos pelo requester são incluídas na página.
    * Avaliações `FOLLOWERS` de autores não seguidos continuam estritamente omitidas da resposta.
-4. Anonimização mantida: Se uma avaliação `FOLLOWERS` for marcada com `isAnonymous: true`, a identidade do autor continua mascarada como anônima mesmo para seus seguidores.
+4. Anonimato: uma avaliação anônima não pode ter visibilidade `FOLLOWERS` (`422 ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED`). Se o acesso a uma anônima dependesse de seguir o autor real, seguir e deixar de seguir candidatos revelaria a autoria. Linhas anteriores à regra valem como `PRIVATE` para terceiros, seguidores ou não (ver `reviews.md` §1.2).
 
 ---
 

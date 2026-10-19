@@ -200,8 +200,10 @@ public class ModerateReviewUseCase {
                 .sorted()
                 .forEach(targetId -> rateableTargetStatsRepository.recalculateAndSave(targetId));
 
-        // 9. Recálculo factual da reputação do autor da avaliação
-        reputationService.recalculateAndSave(review.getUserId());
+        // 9. Recálculo factual da reputação do autor da avaliação (apenas quando não anônima)
+        if (!review.isAnonymous()) {
+            reputationService.recalculateAndSave(review.getUserId());
+        }
 
         // 10. Processamento de mídia lógica em caso de remoção
         if (command.action() == ModerationAction.REMOVE_REVIEW && reviewMediaRepository != null) {

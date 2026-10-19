@@ -3,16 +3,22 @@ package com.rewit.application.service;
 import com.rewit.application.dto.report.ReportDtos.CreateReportCommand;
 import com.rewit.application.port.RateLimiter;
 import com.rewit.application.port.ReportRepository;
+import com.rewit.application.port.ReputationRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserFollowRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.ReportService.CreateReportResult;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.ReportReason;
 import com.rewit.domain.enums.ReportStatus;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Report;
 import com.rewit.domain.model.Review;
+import com.rewit.domain.model.User;
+import com.rewit.domain.model.UserReputation;
 import com.rewit.infrastructure.ratelimit.RateLimitTestSupport;
+import com.rewit.presentation.dto.reputation.ReputationResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,6 +52,9 @@ class ReportServiceUnitTest {
     @Mock
     private UserFollowRepository userFollowRepository;
 
+    @Mock
+    private ReputationService reputationService;
+
     private RateLimiter rateLimiter;
     private ReportService reportService;
 
@@ -62,17 +71,22 @@ class ReportServiceUnitTest {
                 reviewRepository,
                 accountStatusPolicy,
                 userFollowRepository,
-                rateLimiter
+                rateLimiter,
+                reputationService
         );
     }
 
     private Review createReview(ReviewStatus status, String visibility) {
+        return createReview(status, visibility, false);
+    }
+
+    private Review createReview(ReviewStatus status, String visibility, boolean isAnonymous) {
         return new Review(
                 reviewId,
                 authorUserId,
                 placeId,
                 "Texto avaliativo para testes de denúncia",
-                false,
+                isAnonymous,
                 false,
                 status,
                 visibility,
@@ -270,9 +284,9 @@ class ReportServiceUnitTest {
     }
 
     @Test
-    @DisplayName("13 e 15. Ao atingir o limiar de 3 denúncias pendentes: Review transiciona para UNDER_REVIEW")
+    @DisplayName("13 e 15. Ao atingir o limiar de 3 denúncias pendentes em Review identificada: transiciona para UNDER_REVIEW e recalcula reputação")
     void createReport_reachingThresholdOf3_shouldTransitionToUnderReview() {
-        Review review = createReview(ReviewStatus.ACTIVE, "PUBLIC");
+        Review review = createReview(ReviewStatus.ACTIVE, "PUBLIC", false);
         when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
         when(reportRepository.findByReviewIdAndReporterUserId(reviewId, reporterUserId)).thenReturn(Optional.empty());
 
@@ -288,6 +302,76 @@ class ReportServiceUnitTest {
         ArgumentCaptor<Review> reviewCaptor = ArgumentCaptor.forClass(Review.class);
         verify(reviewRepository, times(1)).save(reviewCaptor.capture());
         assertEquals(ReviewStatus.UNDER_REVIEW, reviewCaptor.getValue().getStatus());
+        verify(reputationService).recalculateAndSave(authorUserId);
+    }
+
+    @Test
+    @DisplayName("16. Ao atingir 3 denúncias pendentes em Review anônima: transiciona para UNDER_REVIEW sem recalcular reputação do autor")
+    void createReport_reachingThresholdOf3OnAnonymousReview_shouldNotRecalculateReputation() {
+        Review anonReview = createReview(ReviewStatus.ACTIVE, "PUBLIC", true);
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(anonReview));
+        when(reportRepository.findByReviewIdAndReporterUserId(reviewId, reporterUserId)).thenReturn(Optional.empty());
+
+        Report saved = new Report(UUID.randomUUID(), reviewId, reporterUserId, ReportReason.SPAM, null);
+        when(reportRepository.save(any(Report.class))).thenReturn(saved);
+        when(reportRepository.countPendingByReviewId(reviewId)).thenReturn(3L);
+
+        CreateReportCommand cmd = new CreateReportCommand(reporterUserId, reviewId, ReportReason.SPAM, null);
+        CreateReportResult result = reportService.createReport(cmd);
+
+        assertTrue(result.newlyCreated());
+
+        ArgumentCaptor<Review> reviewCaptor = ArgumentCaptor.forClass(Review.class);
+        verify(reviewRepository, times(1)).save(reviewCaptor.capture());
+        assertEquals(ReviewStatus.UNDER_REVIEW, reviewCaptor.getValue().getStatus());
+        verifyNoInteractions(reputationService);
+    }
+
+    @Test
+    @DisplayName("16.1 Denunciar Review anônima até UNDER_REVIEW preserva calculatedAt na ReputationResponse pública do autor")
+    void createReport_anonymousReviewReachingThreshold_shouldKeepPublicReputationCalculatedAtUnchanged() {
+        UserRepository localUserRepository = mock(UserRepository.class);
+        ReputationRepository localReputationRepository = mock(ReputationRepository.class);
+        ReputationCalculator localCalculator = mock(ReputationCalculator.class);
+        ReputationService realReputationService = new ReputationService(
+                localUserRepository, localReputationRepository, localCalculator
+        );
+        ReportService reportServiceWithRealReputation = new ReportService(
+                reportRepository,
+                reviewRepository,
+                accountStatusPolicy,
+                userFollowRepository,
+                rateLimiter,
+                realReputationService
+        );
+
+        User author = new User(authorUserId, "author@rewit.com", "hash", AuthProvider.LOCAL, null);
+        Instant initialCalculatedAt = Instant.parse("2026-10-12T08:30:00Z");
+        UserReputation persistedSnapshot = new UserReputation(authorUserId, 1, 3, 2, 7, 3, initialCalculatedAt);
+
+        when(localUserRepository.findByIdIncludingDeleted(authorUserId)).thenReturn(Optional.of(author));
+        when(localReputationRepository.findByUserId(authorUserId)).thenReturn(Optional.of(persistedSnapshot));
+
+        ReputationResponse beforeResponse = ReputationResponse.from(realReputationService.getReputation(authorUserId));
+
+        Review anonReview = createReview(ReviewStatus.ACTIVE, "PUBLIC", true);
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(anonReview));
+        when(reportRepository.findByReviewIdAndReporterUserId(reviewId, reporterUserId)).thenReturn(Optional.empty());
+        Report saved = new Report(UUID.randomUUID(), reviewId, reporterUserId, ReportReason.FRAUD, null);
+        when(reportRepository.save(any(Report.class))).thenReturn(saved);
+        when(reportRepository.countPendingByReviewId(reviewId)).thenReturn(3L);
+
+        CreateReportCommand cmd = new CreateReportCommand(reporterUserId, reviewId, ReportReason.FRAUD, null);
+        CreateReportResult result = reportServiceWithRealReputation.createReport(cmd);
+
+        assertTrue(result.newlyCreated());
+        assertEquals(ReviewStatus.UNDER_REVIEW, anonReview.getStatus());
+
+        ReputationResponse afterResponse = ReputationResponse.from(realReputationService.getReputation(authorUserId));
+        assertEquals(beforeResponse.calculatedAt(), afterResponse.calculatedAt());
+        assertEquals(beforeResponse.signals(), afterResponse.signals());
+        verify(localReputationRepository, never()).save(any());
+        verify(localCalculator, never()).calculate(any());
     }
 
     @Test

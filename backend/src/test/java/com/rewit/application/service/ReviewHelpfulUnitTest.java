@@ -1,11 +1,18 @@
 package com.rewit.application.service;
 
+import com.rewit.application.dto.reputation.ReputationDtos.ReputationView;
+import com.rewit.application.port.ReputationRepository;
 import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.UserFollowRepository;
+import com.rewit.application.port.UserRepository;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.model.Review;
+import com.rewit.domain.model.User;
+import com.rewit.domain.model.UserReputation;
+import com.rewit.presentation.dto.reputation.ReputationResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +45,12 @@ class ReviewHelpfulUnitTest {
     @Mock
     private UserFollowRepository userFollowRepository;
 
+    @Mock
+    private NotificationService notificationService;
+
+    @Mock
+    private ReputationService reputationService;
+
     private ReviewHelpfulService reviewHelpfulService;
 
     private final UUID authorUserId = UUID.randomUUID();
@@ -52,7 +65,9 @@ class ReviewHelpfulUnitTest {
                 reviewReactionRepository,
                 reviewRepository,
                 accountStatusPolicy,
-                userFollowRepository
+                userFollowRepository,
+                notificationService,
+                reputationService
         );
     }
 
@@ -75,7 +90,7 @@ class ReviewHelpfulUnitTest {
     }
 
     @Test
-    @DisplayName("Deve registrar Helpful com sucesso em Review pública")
+    @DisplayName("Deve registrar Helpful com sucesso em Review pública e recalcular reputação do autor")
     void shouldAddHelpfulSuccessfullyOnPublicReview() {
         Review review = createReview(ReviewStatus.ACTIVE, "PUBLIC", false);
         when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(review));
@@ -87,10 +102,11 @@ class ReviewHelpfulUnitTest {
         assertTrue(result.helpful());
         assertEquals(1L, result.helpfulCount());
         verify(reviewReactionRepository).addHelpful(reviewId, otherUserId);
+        verify(reputationService).recalculateAndSave(authorUserId);
     }
 
     @Test
-    @DisplayName("Deve ser idempotente no POST repetido de Helpful")
+    @DisplayName("Deve ser idempotente no POST repetido de Helpful sem recalcular reputação")
     void shouldBeIdempotentOnRepeatedPost() {
         Review review = createReview(ReviewStatus.ACTIVE, "PUBLIC", false);
         when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(review));
@@ -101,10 +117,11 @@ class ReviewHelpfulUnitTest {
 
         assertTrue(result.helpful());
         assertEquals(1L, result.helpfulCount());
+        verifyNoInteractions(reputationService);
     }
 
     @Test
-    @DisplayName("Deve remover marcação de Helpful com sucesso (DELETE)")
+    @DisplayName("Deve remover marcação de Helpful com sucesso (DELETE) e recalcular reputação do autor")
     void shouldRemoveHelpfulSuccessfully() {
         Review review = createReview(ReviewStatus.ACTIVE, "PUBLIC", false);
         when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(review));
@@ -116,10 +133,11 @@ class ReviewHelpfulUnitTest {
         assertFalse(result.helpful());
         assertEquals(0L, result.helpfulCount());
         verify(reviewReactionRepository).removeHelpful(reviewId, otherUserId);
+        verify(reputationService).recalculateAndSave(authorUserId);
     }
 
     @Test
-    @DisplayName("Deve ser idempotente no DELETE repetido de Helpful")
+    @DisplayName("Deve ser idempotente no DELETE repetido de Helpful sem recalcular reputação")
     void shouldBeIdempotentOnRepeatedDelete() {
         Review review = createReview(ReviewStatus.ACTIVE, "PUBLIC", false);
         when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(review));
@@ -130,6 +148,7 @@ class ReviewHelpfulUnitTest {
 
         assertFalse(result.helpful());
         assertEquals(0L, result.helpfulCount());
+        verifyNoInteractions(reputationService);
     }
 
     @Test
@@ -227,7 +246,7 @@ class ReviewHelpfulUnitTest {
     }
 
     @Test
-    @DisplayName("Deve permitir Helpful em Review anônima preservando o mascaramento do autor")
+    @DisplayName("Deve permitir Helpful em Review anônima sem recalcular a reputação do autor real")
     void shouldAllowHelpfulOnAnonymousReview() {
         Review review = createReview(ReviewStatus.ACTIVE, "PUBLIC", true);
         when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(review));
@@ -238,6 +257,67 @@ class ReviewHelpfulUnitTest {
 
         assertTrue(result.helpful());
         assertEquals(5L, result.helpfulCount());
+        verifyNoInteractions(reputationService);
+    }
+
+    @Test
+    @DisplayName("Deve remover Helpful em Review anônima sem recalcular a reputação do autor real")
+    void shouldRemoveHelpfulOnAnonymousReviewWithoutRecalculatingReputation() {
+        Review review = createReview(ReviewStatus.ACTIVE, "PUBLIC", true);
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(review));
+        when(reviewReactionRepository.removeHelpful(reviewId, otherUserId)).thenReturn(true);
+        when(reviewReactionRepository.countHelpful(reviewId)).thenReturn(0L);
+
+        ReviewHelpfulService.HelpfulResult result = reviewHelpfulService.removeHelpful(reviewId, otherUserId);
+
+        assertFalse(result.helpful());
+        assertEquals(0L, result.helpfulCount());
+        verify(reviewReactionRepository).removeHelpful(reviewId, otherUserId);
+        verifyNoInteractions(reputationService);
+    }
+
+    @Test
+    @DisplayName("Não deve alterar calculatedAt da ReputationResponse pública do autor após adicionar e remover Helpful em Review anônima")
+    void shouldKeepPublicReputationResponseUnchangedAfterHelpfulInteractionsOnAnonymousReview() {
+        UserRepository localUserRepository = mock(UserRepository.class);
+        ReputationRepository localReputationRepository = mock(ReputationRepository.class);
+        ReputationCalculator localCalculator = mock(ReputationCalculator.class);
+        ReputationService realReputationService = new ReputationService(
+                localUserRepository, localReputationRepository, localCalculator
+        );
+        ReviewHelpfulService helpfulWithRealReputation = new ReviewHelpfulService(
+                reviewReactionRepository,
+                reviewRepository,
+                accountStatusPolicy,
+                userFollowRepository,
+                notificationService,
+                realReputationService
+        );
+
+        User author = new User(authorUserId, "author@rewit.com", "hash", AuthProvider.LOCAL, null);
+        Instant initialCalculatedAt = Instant.parse("2026-10-10T10:00:00Z");
+        UserReputation persistedSnapshot = new UserReputation(authorUserId, 1, 2, 1, 4, 2, initialCalculatedAt);
+
+        when(localUserRepository.findByIdIncludingDeleted(authorUserId)).thenReturn(Optional.of(author));
+        when(localReputationRepository.findByUserId(authorUserId)).thenReturn(Optional.of(persistedSnapshot));
+
+        ReputationResponse beforeResponse = ReputationResponse.from(realReputationService.getReputation(authorUserId));
+
+        Review anonReview = createReview(ReviewStatus.ACTIVE, "PUBLIC", true);
+        when(reviewRepository.findById(reviewId)).thenReturn(Optional.of(anonReview));
+        when(reviewReactionRepository.addHelpful(reviewId, otherUserId)).thenReturn(true);
+        when(reviewReactionRepository.removeHelpful(reviewId, otherUserId)).thenReturn(true);
+        when(reviewReactionRepository.countHelpful(reviewId)).thenReturn(1L, 0L);
+
+        helpfulWithRealReputation.addHelpful(reviewId, otherUserId);
+        helpfulWithRealReputation.removeHelpful(reviewId, otherUserId);
+
+        ReputationResponse afterResponse = ReputationResponse.from(realReputationService.getReputation(authorUserId));
+
+        assertEquals(beforeResponse.calculatedAt(), afterResponse.calculatedAt());
+        assertEquals(beforeResponse.signals(), afterResponse.signals());
+        verify(localReputationRepository, never()).save(any());
+        verify(localCalculator, never()).calculate(any());
     }
 
     @Test

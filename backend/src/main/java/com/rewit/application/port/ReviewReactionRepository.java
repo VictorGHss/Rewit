@@ -44,7 +44,8 @@ public interface ReviewReactionRepository {
     Set<UUID> findHelpfulReviewIdsByUser(Collection<UUID> reviewIds, UUID userId);
 
     /**
-     * Retorna a quantidade total de votos de Helpful recebidos por todas as avaliações ativas do usuário.
+     * Votos Helpful recebidos nas avaliações ativas e não anônimas do usuário, para o perfil público. Contar os votos
+     * de anônimas permitiria votar numa avaliação anônima e ver qual perfil muda.
      */
-    long countHelpfulVotesReceivedByUserId(UUID userId);
+    long countHelpfulVotesReceivedOnNonAnonymousByUserId(UUID userId);
 }

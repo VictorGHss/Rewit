@@ -3,6 +3,7 @@ import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/review_privacy_rules.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_notifier.dart';
@@ -113,7 +114,7 @@ void main() {
       notifier.setContextPlaceId(validPlaceId);
       notifier.setExperienceText('Lugar agradável');
       notifier.setAnonymous(true);
-      notifier.setVisibility('FOLLOWERS');
+      notifier.setVisibility('PRIVATE');
       notifier.setCoordinates(latitude: -23.5, longitude: -46.6, accuracyMeters: 5.0);
 
       expect(notifier.targets.first.rateableTargetId, validTargetId1);
@@ -122,7 +123,7 @@ void main() {
       expect(notifier.contextPlaceId, validPlaceId);
       expect(notifier.experienceText, 'Lugar agradável');
       expect(notifier.isAnonymous, isTrue);
-      expect(notifier.visibility, 'FOLLOWERS');
+      expect(notifier.visibility, 'PRIVATE');
       expect(notifier.userLatitude, -23.5);
       expect(notifier.userLongitude, -46.6);
       expect(notifier.locationAccuracyMeters, 5.0);
@@ -546,6 +547,79 @@ void main() {
 
         locService.openSettingsResult = false;
         expect(await locNotifier.openAppSettings(), isFalse);
+      });
+    });
+
+    group('Regras e transições de privacidade (Security S2.1)', () {
+      test('não permite ligar anonimato quando visibilidade for FOLLOWERS', () {
+        notifier.setVisibility('FOLLOWERS');
+        expect(notifier.visibility, 'FOLLOWERS');
+        expect(notifier.canEnableAnonymous, isFalse);
+
+        notifier.setAnonymous(true);
+        expect(notifier.isAnonymous, isFalse, reason: 'Ligar anonimato com FOLLOWERS deve ser ignorado');
+      });
+
+      test('não permite selecionar FOLLOWERS quando anonimato estiver ativo', () {
+        notifier.setAnonymous(true);
+        expect(notifier.isAnonymous, isTrue);
+        expect(notifier.isVisibilityOptionAvailable('FOLLOWERS'), isFalse);
+
+        notifier.setVisibility('FOLLOWERS');
+        expect(notifier.visibility, 'PUBLIC', reason: 'Selecionar FOLLOWERS quando anônimo deve ser ignorado');
+      });
+
+      test('permite transição válida: desativar anonimato e escolher FOLLOWERS', () {
+        notifier.setAnonymous(true);
+        expect(notifier.isAnonymous, isTrue);
+
+        notifier.setAnonymous(false);
+        expect(notifier.canEnableAnonymous, isTrue);
+
+        notifier.setVisibility('FOLLOWERS');
+        expect(notifier.visibility, 'FOLLOWERS');
+        expect(notifier.isAnonymous, isFalse);
+      });
+
+      test('permite transição válida: trocar FOLLOWERS para PUBLIC e ativar anonimato', () {
+        notifier.setVisibility('FOLLOWERS');
+        expect(notifier.visibility, 'FOLLOWERS');
+
+        notifier.setVisibility('PUBLIC');
+        expect(notifier.canEnableAnonymous, isTrue);
+
+        notifier.setAnonymous(true);
+        expect(notifier.isAnonymous, isTrue);
+        expect(notifier.visibility, 'PUBLIC');
+      });
+
+      test('permite criação anônima com visibilidade PRIVATE', () {
+        notifier.setAnonymous(true);
+        notifier.setVisibility('PRIVATE');
+
+        expect(notifier.isAnonymous, isTrue);
+        expect(notifier.visibility, 'PRIVATE');
+        expect(ReviewPrivacyRules.isAllowed(isAnonymous: notifier.isAnonymous, visibility: notifier.visibility), isTrue);
+      });
+
+      test('mapeia erro ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED do backend para mensagem amigável', () async {
+        repository.exceptionToThrow = const ApiException(
+          ProblemDetail(
+            type: 'about:blank',
+            title: 'Unprocessable Entity',
+            status: 422,
+            detail: 'Avaliações anônimas não podem ter visibilidade restrita a seguidores',
+            code: 'ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED',
+          ),
+        );
+
+        notifier.updateTarget(0, targetId: validTargetId1);
+        final success = await notifier.submit();
+
+        expect(success, isFalse);
+        expect(notifier.state, isA<ReviewCreateError>());
+        final errorState = notifier.state as ReviewCreateError;
+        expect(errorState.message, ReviewPrivacyRules.incompatibleCombinationMessage);
       });
     });
   });

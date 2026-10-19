@@ -83,11 +83,12 @@ public class UserService {
         Profile profile = profileRepository.findByUserId(targetUserId)
                 .orElseThrow(() -> new BusinessException("Perfil do usuário não encontrado", HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
 
-        long totalReviews = reviewRepository.countActiveByUserId(targetUserId);
-        long verifiedReviewsCount = reviewRepository.countActiveVerifiedByUserId(targetUserId);
+        // Contadores sem avaliações anônimas: incluí-las faria o perfil reagir a uma anônima e revelaria o autor
+        long totalReviews = reviewRepository.countActiveNonAnonymousByUserId(targetUserId);
+        long verifiedReviewsCount = reviewRepository.countActiveVerifiedNonAnonymousByUserId(targetUserId);
         long followersCount = userFollowRepository.countFollowers(targetUserId);
         long followingCount = userFollowRepository.countFollowing(targetUserId);
-        long helpfulVotesReceived = reviewReactionRepository.countHelpfulVotesReceivedByUserId(targetUserId);
+        long helpfulVotesReceived = reviewReactionRepository.countHelpfulVotesReceivedOnNonAnonymousByUserId(targetUserId);
 
         boolean isFollowing = false;
         if (requesterUserId != null && !requesterUserId.equals(targetUserId)) {

@@ -100,10 +100,10 @@ public class ReviewReactionRepositoryAdapter implements ReviewReactionRepository
 
     @Override
     @Transactional(readOnly = true)
-    public long countHelpfulVotesReceivedByUserId(UUID userId) {
+    public long countHelpfulVotesReceivedOnNonAnonymousByUserId(UUID userId) {
         if (userId == null) {
             return 0L;
         }
-        return reviewReactionJpaRepository.countHelpfulVotesReceivedByUserId(userId);
+        return reviewReactionJpaRepository.countHelpfulVotesReceivedByUserIdNonAnon(userId);
     }
 }

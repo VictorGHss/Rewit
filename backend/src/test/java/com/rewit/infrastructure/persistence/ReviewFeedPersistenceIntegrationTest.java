@@ -317,8 +317,8 @@ class ReviewFeedPersistenceIntegrationTest {
     }
 
     @Test
-    @DisplayName("5. Anonimização no Feed: mascara autor anônimo de usuário seguido")
-    void shouldPreserveAnonymizationInFeed() {
+    @DisplayName("5. Anonimato no Feed: review anônima de usuário seguido não entra no feed social")
+    void shouldNotExposeAnonymousReviewsOfFollowedUsersInFeed() {
         User requester = createActiveUser();
         User author = createActiveUser();
         Place place = createPlace();
@@ -326,16 +326,17 @@ class ReviewFeedPersistenceIntegrationTest {
 
         userFollowRepository.follow(requester.getId(), author.getId());
 
-        Review review = createReview(author, place, target, "PUBLIC", ReviewStatus.ACTIVE, true, Instant.now());
+        Review identified = createReview(author, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().minusSeconds(30));
+        Review anonymous = createReview(author, place, target, "PUBLIC", ReviewStatus.ACTIVE, true, Instant.now());
 
         PageResult<ReviewPublicView> feed = reviewService.findFeed(requester.getId(), 0, 10, "newest");
-        ReviewPublicView view = feed.content().stream().filter(r -> r.id().equals(review.getId())).findFirst().orElseThrow();
+        List<UUID> ids = feed.content().stream().map(ReviewPublicView::id).toList();
 
-        assertTrue(view.isAnonymous());
-        assertTrue(view.author().isAnonymous());
-        assertEquals("Anônimo", view.author().displayName());
-        assertNull(view.author().handle());
-        assertNull(view.author().id());
+        // Com um único follow, uma anônima no feed teria um único autor possível
+        assertFalse(ids.contains(anonymous.getId()), "Anônima de usuário seguido não pode aparecer no feed social");
+        assertTrue(ids.contains(identified.getId()), "A review identificada do mesmo autor continua no feed");
+        assertEquals(1L, feed.totalElements(), "O total também não pode contar a anônima");
+        assertTrue(feed.content().stream().noneMatch(ReviewPublicView::isAnonymous));
     }
 
     @Test

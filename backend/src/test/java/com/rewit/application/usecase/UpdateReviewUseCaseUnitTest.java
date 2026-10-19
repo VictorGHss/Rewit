@@ -420,4 +420,68 @@ class UpdateReviewUseCaseUnitTest {
         assertEquals("MISSING_UPDATE_TIMESTAMP", ex.getErrorCode());
         verifyNoInteractions(reviewRepository);
     }
+
+    /** Linha anterior à regra de anonimato: anônima com visibilidade FOLLOWERS. */
+    private Review createLegacyAnonymousFollowersReview() {
+        Review review = new Review(reviewId, authorId, null, "Texto original", true, false,
+                ReviewStatus.ACTIVE, "FOLLOWERS", null, null, null, createdAt, createdAt);
+        review.addTarget(new ReviewTarget(UUID.randomUUID(), reviewId, targetAId, new BigDecimal("3.0"), "Target A", createdAt));
+        return review;
+    }
+
+    @Test
+    @DisplayName("18. Linha antiga anônima FOLLOWERS: reenviar a combinação é rejeitado (422) sem persistir nada")
+    void shouldRejectLegacyRowReaffirmingAnonymousFollowers() {
+        Review review = createLegacyAnonymousFollowersReview();
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
+
+        UpdateReviewCommand command = new UpdateReviewCommand(
+                "Texto novo", null, true, "FOLLOWERS", createdAt.plusSeconds(600));
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                updateReviewUseCase.execute(reviewId, authorId, command));
+
+        assertEquals("ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED", ex.getErrorCode());
+        assertEquals(HttpStatus.UNPROCESSABLE_CONTENT, ex.getStatus());
+        assertTrue(ex.getMessage().contains("pública ou privada"), "A mensagem orienta a escolha válida");
+        assertEquals("Texto original", review.getExperienceText());
+        assertTrue(review.isAnonymousWithFollowersVisibility());
+        verify(reviewRepository, never()).save(any());
+        verifyNoInteractions(reputationService);
+    }
+
+    @Test
+    @DisplayName("19. Linha antiga anônima FOLLOWERS: edição só de texto é aceita e mantém a linha carregável")
+    void shouldAcceptContentOnlyEditOnLegacyRow() {
+        Review review = createLegacyAnonymousFollowersReview();
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        UpdateReviewCommand command = new UpdateReviewCommand(
+                "Texto corrigido", null, null, null, createdAt.plusSeconds(600));
+
+        Review updated = updateReviewUseCase.execute(reviewId, authorId, command);
+
+        assertEquals("Texto corrigido", updated.getExperienceText());
+        assertTrue(updated.isAnonymousWithFollowersVisibility());
+        verify(reviewRepository).save(review);
+    }
+
+    @Test
+    @DisplayName("20. Linha antiga anônima FOLLOWERS: sair para identificada FOLLOWERS recalcula a reputação")
+    void shouldAllowLegacyRowToBecomeIdentifiedFollowers() {
+        Review review = createLegacyAnonymousFollowersReview();
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(review));
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        UpdateReviewCommand command = new UpdateReviewCommand(
+                "Texto original", null, false, "FOLLOWERS", createdAt.plusSeconds(600));
+
+        Review updated = updateReviewUseCase.execute(reviewId, authorId, command);
+
+        assertFalse(updated.isAnonymous());
+        assertEquals("FOLLOWERS", updated.getVisibility());
+        verify(reviewRepository).save(review);
+        verify(reputationService).recalculateAndSave(authorId);
+    }
 }

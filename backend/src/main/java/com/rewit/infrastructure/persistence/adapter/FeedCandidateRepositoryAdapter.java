@@ -56,10 +56,10 @@ import java.util.UUID;
  * Por construção da query, {@code isDirectFollow = true} para todos os candidatos.</p>
  *
  * <h2>Reviews anônimas</h2>
- * <p>Reviews anônimas aparecem nos candidatos com o {@code authorId} interno preservado.
- * Esse ID existe apenas para as regras de diversidade (evitar run de mesmo autor) e nunca
- * é exposto externamente. A camada de hydration/projeção posterior é responsável por
- * ocultar a identidade quando {@code isAnonymous = true}.</p>
+ * <p>O retrieval social não traz reviews anônimas (a composição pelo grafo de follows revelaria
+ * a autoria). Na descoberta elas entram, mas com o próprio {@code reviewId} como chave de autor
+ * da diversidade: com o autor real, o espaçamento afastaria a anônima das reviews identificadas
+ * do mesmo autor, e a ordem do feed ligaria uma à outra. A projeção posterior oculta a identidade.</p>
  *
  * <h2>Índice futuro recomendado</h2>
  * <p>Para cargas maiores, um índice composto em
@@ -79,6 +79,8 @@ public class FeedCandidateRepositoryAdapter implements FeedCandidateRepository {
     private static final int COL_CREATED_AT = 3;
     /** Índice da coluna isVerifiedOnSite no Object[]. */
     private static final int COL_VERIFIED = 4;
+    /** Índice da coluna isAnonymous no Object[]. */
+    private static final int COL_ANONYMOUS = 5;
 
     private final ReviewJpaRepository reviewJpaRepository;
     private final ReviewTargetJpaRepository reviewTargetJpaRepository;
@@ -185,13 +187,15 @@ public class FeedCandidateRepositoryAdapter implements FeedCandidateRepository {
             UUID contextPlaceId = (UUID)    row[COL_CONTEXT_PLACE_ID]; // nullable
             Instant createdAt   = (Instant) row[COL_CREATED_AT];
             boolean verified    = (boolean) row[COL_VERIFIED];
+            boolean anonymous   = (boolean) row[COL_ANONYMOUS];
 
+            UUID diversityAuthorId = anonymous ? reviewId : authorId;
             UUID targetId = resolveTargetId(reviewId, contextPlaceId, primaryTargetByReview);
             int helpful   = helpfulCounts.getOrDefault(reviewId, 0L).intValue();
 
             candidates.add(new FeedCandidate(
                     reviewId,
-                    authorId,
+                    diversityAuthorId,
                     targetId,
                     createdAt,
                     verified,

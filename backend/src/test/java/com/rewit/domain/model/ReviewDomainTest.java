@@ -429,12 +429,13 @@ class ReviewDomainTest {
                 removedReview.updateTargetRating(targetId, new BigDecimal("5.0"), now));
         assertEquals("REVIEW_ALREADY_REMOVED", exRating.getErrorCode());
 
+        // Anonimato e visibilidade só mudam por editContent (não há mutador isolado)
         BusinessException exAnon = assertThrows(BusinessException.class, () ->
-                removedReview.updateAnonymous(true, now));
+                removedReview.editContent("Review", null, true, null, now));
         assertEquals("REVIEW_ALREADY_REMOVED", exAnon.getErrorCode());
 
         BusinessException exVis = assertThrows(BusinessException.class, () ->
-                removedReview.updateVisibility("PRIVATE", now));
+                removedReview.editContent("Review", null, null, "PRIVATE", now));
         assertEquals("REVIEW_ALREADY_REMOVED", exVis.getErrorCode());
 
         // Cenário UNDER_REVIEW:

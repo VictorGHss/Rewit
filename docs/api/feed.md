@@ -20,7 +20,7 @@ O **Feed Social V1** é uma **timeline social estritamente cronológica** das av
   * Visibilidade `FOLLOWERS`: Entram no feed porque a relação de seguidor já está estruturalmente satisfeita.
   * Visibilidade `PRIVATE`: **Nunca** entram no feed.
   * Status `UNDER_REVIEW` e `REMOVED`: **Nunca** entram no feed.
-* **Anonimização Estrita**: Se uma avaliação possuir `isAnonymous = true`, o autor tem sua identidade mascarada para terceiros (`authorHandle = "Anônimo"`, `authorDisplayName = "Anônimo"`). Seguir um autor não concede privilégio de desanonimizá-lo.
+* **Anonimato**: avaliações com `isAnonymous = true` **nunca** entram no feed. Num feed montado só com autores seguidos, a presença delas restringiria a autoria ao conjunto de seguidos (seguir uma única conta a revelaria); por isso não basta mascarar o autor. Elas continuam na listagem por alvo, com o autor mascarado (ver `reviews.md` §1.2). No Feed V2, anônimas `PUBLIC` só aparecem pela descoberta pública, que não depende de follows, e a diversidade por autor usa uma chave da própria avaliação em vez do autor real.
 * **Autor com conta excluída (`DELETED`)**: a avaliação continua no feed, com o autor sem `id`, `handle` e `avatarUrl` e `displayName = "Usuário excluído"` (ver `reviews.md` §1.2).
 * **Autoria Contextual (`isMine`)**: O campo booleano `isMine` presente em cada item retornado (`ReviewResponse`) indica se a avaliação pertence ao usuário autenticado solicitante (`requesterUserId == review.userId`). Para avaliações de terceiros seguidos, é retornado como `false`. Se uma avaliação do próprio usuário estiver presente no feed (inclusive quando `isAnonymous: true`), `isMine` é retornado como `true` sem revelar os dados de autoria pública da avaliação anônima para outros usuários.
 * **Ordenação Determinística**:
@@ -97,15 +97,15 @@ Authorization: Bearer <jwt-token>
     {
       "id": "e4414322-965a-493d-9d58-45a8989c9d74",
       "author": {
-        "id": "00000000-0000-0000-0000-000000000000",
-        "handle": "Anônimo",
-        "displayName": "Anônimo",
+        "id": "7a1f3c52-0b8e-4d6a-9f21-3c4b5d6e7f80",
+        "handle": "bruno",
+        "displayName": "Bruno Lima",
         "avatarUrl": null
       },
       "comment": "Atendimento rápido, mas ambiente barulhento.",
       "status": "ACTIVE",
       "visibility": "FOLLOWERS",
-      "isAnonymous": true,
+      "isAnonymous": false,
       "isVerifiedOnSite": false,
       "helpfulCount": 0,
       "isHelpfulByMe": false,
@@ -161,6 +161,7 @@ JOIN user_follows uf ON uf.followed_user_id = r.user_id
 WHERE uf.follower_user_id = :requesterUserId
   AND r.status = 'ACTIVE'
   AND r.visibility IN ('PUBLIC', 'FOLLOWERS')
+  AND r.is_anonymous = FALSE
 ORDER BY r.created_at DESC, r.id ASC
 LIMIT :limit OFFSET :offset;
 ```

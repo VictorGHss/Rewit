@@ -115,11 +115,12 @@ class ReputationServiceUnitTest {
     }
 
     @Test
-    @DisplayName("recalculateAndSave: Usuário ativo deve calcular, adquirir lock e persistir o snapshot")
+    @DisplayName("recalculateAndSave: Usuário ativo com mudança nos sinais deve calcular, adquirir lock e persistir o snapshot")
     void recalculateAndSave_whenUserIsActive_locksCalculatesAndSaves() {
-        UserReputation snapshot = new UserReputation(activeUserId, 1, 3, 2, 5, 2, Instant.now());
+        UserReputation previousSnapshot = new UserReputation(activeUserId, 1, 2, 1, 4, 2, Instant.parse("2026-10-10T10:00:00Z"));
+        UserReputation snapshot = new UserReputation(activeUserId, 1, 3, 2, 5, 2, Instant.parse("2026-10-10T11:00:00Z"));
         when(userRepository.findByIdIncludingDeleted(activeUserId)).thenReturn(Optional.of(activeUser));
-        when(reputationRepository.findByUserIdForUpdate(activeUserId)).thenReturn(Optional.of(snapshot));
+        when(reputationRepository.findByUserIdForUpdate(activeUserId)).thenReturn(Optional.of(previousSnapshot));
         when(calculator.calculate(activeUserId)).thenReturn(snapshot);
         when(reputationRepository.save(snapshot)).thenReturn(snapshot);
 
@@ -128,11 +129,39 @@ class ReputationServiceUnitTest {
         assertNotNull(result);
         assertEquals(3, result.getActiveReviews());
         assertEquals(5, result.getHelpfulVotesReceived());
+        assertEquals(snapshot.getCalculatedAt(), result.getCalculatedAt());
 
         verify(reputationRepository).insertInitialRowIfNotExists(activeUserId);
         verify(reputationRepository).findByUserIdForUpdate(activeUserId);
         verify(calculator).calculate(activeUserId);
         verify(reputationRepository).save(snapshot);
+    }
+
+    @Test
+    @DisplayName("recalculateAndSave: Quando os sinais e a versão não mudam, deve preservar calculatedAt existente sem sobrescrever")
+    void recalculateAndSave_whenSignalsUnchanged_preservesExistingCalculatedAtWithoutSaving() {
+        Instant initialCalculatedAt = Instant.parse("2026-10-10T10:00:00Z");
+        Instant laterCalculatedAt = Instant.parse("2026-10-10T12:30:00Z");
+        UserReputation existingSnapshot = new UserReputation(activeUserId, 1, 3, 2, 5, 2, initialCalculatedAt);
+        UserReputation recalculatedWithSameSignals = new UserReputation(activeUserId, 1, 3, 2, 5, 2, laterCalculatedAt);
+
+        when(userRepository.findByIdIncludingDeleted(activeUserId)).thenReturn(Optional.of(activeUser));
+        when(reputationRepository.findByUserIdForUpdate(activeUserId)).thenReturn(Optional.of(existingSnapshot));
+        when(calculator.calculate(activeUserId)).thenReturn(recalculatedWithSameSignals);
+
+        UserReputation result = reputationService.recalculateAndSave(activeUserId);
+
+        assertNotNull(result);
+        assertEquals(initialCalculatedAt, result.getCalculatedAt(), "Deve preservar o calculatedAt original quando os sinais não mudam");
+        assertEquals(3, result.getActiveReviews());
+        assertEquals(2, result.getVerifiedReviews());
+        assertEquals(5, result.getHelpfulVotesReceived());
+        assertEquals(2, result.getDistinctTargetsReviewed());
+
+        verify(reputationRepository).insertInitialRowIfNotExists(activeUserId);
+        verify(reputationRepository).findByUserIdForUpdate(activeUserId);
+        verify(calculator).calculate(activeUserId);
+        verify(reputationRepository, never()).save(any());
     }
 
     // =========================================================================

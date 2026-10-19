@@ -73,6 +73,7 @@ public class Review {
         this.locationAccuracyMeters = locationAccuracyMeters;
         this.status = ReviewStatus.ACTIVE;
         this.visibility = normalizeAndValidateVisibility(visibility);
+        validateAnonymityCompatibleWithVisibility(this.isAnonymous, this.visibility);
         this.createdAt = Instant.now();
         this.updatedAt = Instant.now();
     }
@@ -132,6 +133,30 @@ public class Review {
             throw new BusinessException("Nível de visibilidade inválido", "INVALID_VISIBILITY");
         }
         return normalized;
+    }
+
+    /**
+     * Uma avaliação anônima não pode ter visibilidade {@code FOLLOWERS}: com o acesso condicionado a seguir o autor
+     * real, bastaria seguir candidatos e comparar o acesso para descobri-lo. Linhas anteriores à regra continuam
+     * sendo reconstituídas (sem esta validação) e a política de leitura as trata como privadas para terceiros.
+     * Anonimato e visibilidade só mudam juntos, pelo construtor de criação ou por {@link #editContent}, que validam a
+     * combinação final; não há mutador isolado para nenhum dos dois.
+     */
+    private static void validateAnonymityCompatibleWithVisibility(boolean isAnonymous, String normalizedVisibility) {
+        if (isAnonymous && "FOLLOWERS".equals(normalizedVisibility)) {
+            throw new BusinessException(
+                    "Avaliações anônimas não podem ser restritas a seguidores. Escolha visibilidade pública ou "
+                            + "privada, ou publique de forma identificada para manter a visibilidade para seguidores.",
+                    "ANONYMOUS_FOLLOWERS_VISIBILITY_NOT_ALLOWED");
+        }
+    }
+
+    /**
+     * Combinação anônima com visibilidade {@code FOLLOWERS}, só presente em linhas anteriores à regra de
+     * {@link #validateAnonymityCompatibleWithVisibility}.
+     */
+    public boolean isAnonymousWithFollowersVisibility() {
+        return isAnonymous && "FOLLOWERS".equals(visibility);
     }
 
     /**
@@ -334,6 +359,14 @@ public class Review {
         validateActiveForEdit();
         validateTimestamp(now);
 
+        String resultingVisibility = visibility != null ? normalizeAndValidateVisibility(visibility) : this.visibility;
+        boolean resultingAnonymous = isAnonymous != null ? isAnonymous : this.isAnonymous;
+        // Sempre que anonimato ou visibilidade vierem na edição, o resultado precisa ser válido: nem criar a combinação
+        // nem reafirmá-la numa linha antiga. Sem esses campos, a linha antiga segue editável no conteúdo
+        if (isAnonymous != null || visibility != null) {
+            validateAnonymityCompatibleWithVisibility(resultingAnonymous, resultingVisibility);
+        }
+
         this.experienceText = experienceText;
 
         if (targetRatings != null && !targetRatings.isEmpty()) {
@@ -358,9 +391,7 @@ public class Review {
             this.isAnonymous = isAnonymous;
         }
 
-        if (visibility != null) {
-            this.visibility = normalizeAndValidateVisibility(visibility);
-        }
+        this.visibility = resultingVisibility;
 
         this.updatedAt = now;
     }
@@ -392,26 +423,6 @@ public class Review {
                 .orElseThrow(() -> new BusinessException("Alvo avaliado não pertence a esta avaliação", "TARGET_NOT_FOUND"));
 
         target.updateRating(newRating);
-        this.updatedAt = now;
-    }
-
-    /**
-     * Atualiza a opção de anonimato da publicação.
-     */
-    public void updateAnonymous(boolean isAnonymous, Instant now) {
-        validateActiveForEdit();
-        validateTimestamp(now);
-        this.isAnonymous = isAnonymous;
-        this.updatedAt = now;
-    }
-
-    /**
-     * Atualiza a visibilidade da publicação.
-     */
-    public void updateVisibility(String visibility, Instant now) {
-        validateActiveForEdit();
-        validateTimestamp(now);
-        this.visibility = normalizeAndValidateVisibility(visibility);
         this.updatedAt = now;
     }
 

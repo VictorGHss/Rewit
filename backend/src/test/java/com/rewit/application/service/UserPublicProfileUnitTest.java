@@ -155,11 +155,11 @@ class UserPublicProfileUnitTest {
         when(userRepository.findById(targetUserId)).thenReturn(Optional.of(user));
         when(profileRepository.findByUserId(targetUserId)).thenReturn(Optional.of(profile));
 
-        when(reviewRepository.countActiveByUserId(targetUserId)).thenReturn(42L);
-        when(reviewRepository.countActiveVerifiedByUserId(targetUserId)).thenReturn(18L);
+        when(reviewRepository.countActiveNonAnonymousByUserId(targetUserId)).thenReturn(42L);
+        when(reviewRepository.countActiveVerifiedNonAnonymousByUserId(targetUserId)).thenReturn(18L);
         when(userFollowRepository.countFollowers(targetUserId)).thenReturn(17L);
         when(userFollowRepository.countFollowing(targetUserId)).thenReturn(23L);
-        when(reviewReactionRepository.countHelpfulVotesReceivedByUserId(targetUserId)).thenReturn(91L);
+        when(reviewReactionRepository.countHelpfulVotesReceivedOnNonAnonymousByUserId(targetUserId)).thenReturn(91L);
         when(userFollowRepository.isFollowing(requesterUserId, targetUserId)).thenReturn(true);
 
         PublicUserProfileView result = userService.getPublicProfile(targetUserId, requesterUserId);
@@ -189,11 +189,11 @@ class UserPublicProfileUnitTest {
         when(userRepository.findById(targetUserId)).thenReturn(Optional.of(user));
         when(profileRepository.findByUserId(targetUserId)).thenReturn(Optional.of(profile));
 
-        when(reviewRepository.countActiveByUserId(targetUserId)).thenReturn(0L);
-        when(reviewRepository.countActiveVerifiedByUserId(targetUserId)).thenReturn(0L);
+        when(reviewRepository.countActiveNonAnonymousByUserId(targetUserId)).thenReturn(0L);
+        when(reviewRepository.countActiveVerifiedNonAnonymousByUserId(targetUserId)).thenReturn(0L);
         when(userFollowRepository.countFollowers(targetUserId)).thenReturn(0L);
         when(userFollowRepository.countFollowing(targetUserId)).thenReturn(0L);
-        when(reviewReactionRepository.countHelpfulVotesReceivedByUserId(targetUserId)).thenReturn(0L);
+        when(reviewReactionRepository.countHelpfulVotesReceivedOnNonAnonymousByUserId(targetUserId)).thenReturn(0L);
         when(userFollowRepository.isFollowing(requesterUserId, targetUserId)).thenReturn(false);
 
         PublicUserProfileView result = userService.getPublicProfile(targetUserId, requesterUserId);

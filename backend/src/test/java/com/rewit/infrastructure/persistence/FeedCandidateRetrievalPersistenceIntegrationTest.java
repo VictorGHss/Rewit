@@ -429,35 +429,69 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
     }
 
     // ------------------------------------------------------------------
-    // 12. Anonimato: review anônima não gera profile lookup nem expõe identidade
+    // 12. Anonimato: o grafo de follows não pode revelar o autor de uma review anônima
     // ------------------------------------------------------------------
 
     @Test
-    @DisplayName("7.1. Review anônima é retornada nos candidatos com authorId interno preservado")
-    void anonymousReviewReturnsCandidateWithInternalAuthorId() {
+    @DisplayName("7.1. Review anônima de autor seguido não entra nos candidatos sociais; a identificada do mesmo autor entra")
+    void anonymousReviewFromFollowedAuthorIsNotASocialCandidate() {
         User requester = createActiveUser();
         User author    = createActiveUser();
         Place place = createPlace();
         RateableTarget target = createTarget();
         userFollowRepository.follow(requester.getId(), author.getId());
 
-        Review anonymousReview = createReview(author, place, target,
+        Review identified = createReview(author, place, target,
+                "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().minusSeconds(60));
+        Review anonymousPublic = createReview(author, place, target,
+                "PUBLIC", ReviewStatus.ACTIVE, true /* anonymous */, Instant.now());
+        // Linha anterior à validação do domínio (reconstituição não valida a combinação)
+        Review anonymousFollowers = createReview(author, place, target,
+                "FOLLOWERS", ReviewStatus.ACTIVE, true /* anonymous */, Instant.now());
+
+        List<UUID> ids = feedCandidateRepository.retrieveCandidates(
+                        requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW).stream()
+                .map(FeedCandidate::reviewId)
+                .toList();
+
+        assertTrue(ids.contains(identified.getId()), "A review identificada do autor seguido continua no feed social");
+        assertFalse(ids.contains(anonymousPublic.getId()),
+                "Seguir só o autor tornaria toda anônima do feed social atribuível a ele");
+        assertFalse(ids.contains(anonymousFollowers.getId()),
+                "Anônima FOLLOWERS também não pode entrar pelo vínculo de seguidor");
+    }
+
+    @Test
+    @DisplayName("7.2. Na descoberta, a review anônima usa chave própria na diversidade, nunca o autor real")
+    void anonymousDiscoveryCandidateDoesNotCarryRealAuthorId() {
+        User requester = createActiveUser();
+        User author    = createActiveUser();
+        Place place = createPlace();
+        RateableTarget target = createTarget();
+
+        Review identified = createReview(author, place, target,
+                "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().minusSeconds(60));
+        Review anonymous = createReview(author, place, target,
                 "PUBLIC", ReviewStatus.ACTIVE, true /* anonymous */, Instant.now());
 
-        List<FeedCandidate> candidates = feedCandidateRepository.retrieveCandidates(
+        List<FeedCandidate> candidates = feedCandidateRepository.retrieveDiscoveryCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
 
-        FeedCandidate candidate = candidates.stream()
-                .filter(c -> c.reviewId().equals(anonymousReview.getId()))
+        FeedCandidate anonymousCandidate = candidates.stream()
+                .filter(c -> c.reviewId().equals(anonymous.getId()))
                 .findFirst()
-                .orElse(null);
+                .orElseThrow(() -> new AssertionError("Anônima PUBLIC continua elegível na descoberta"));
+        FeedCandidate identifiedCandidate = candidates.stream()
+                .filter(c -> c.reviewId().equals(identified.getId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Review identificada deve estar na descoberta"));
 
-        assertNotNull(candidate, "Review anônima deve aparecer nos candidatos");
-        // O authorId interno é preservado para diversidade — nunca é nulo
-        assertNotNull(candidate.authorId(), "authorId interno deve estar presente mesmo em review anônima");
-        // O authorId correto é o do autor real (necessário para diversidade)
-        assertEquals(author.getId(), candidate.authorId(),
-                "O authorId interno deve ser o do autor real mesmo em review anônima");
+        assertEquals(anonymous.getId(), anonymousCandidate.authorId(),
+                "A chave de autor da anônima é a própria review");
+        assertNotEquals(author.getId(), anonymousCandidate.authorId(),
+                "Com o autor real, a diversidade ligaria a anônima às reviews identificadas do autor");
+        assertEquals(author.getId(), identifiedCandidate.authorId(),
+                "Review identificada mantém o autor real para a diversidade");
     }
 
     // ------------------------------------------------------------------

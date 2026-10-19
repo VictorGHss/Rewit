@@ -217,4 +217,36 @@ class DeleteReviewUseCaseUnitTest {
         assertEquals("MISSING_UPDATE_TIMESTAMP", ex.getErrorCode());
         verifyNoInteractions(reviewRepository);
     }
+
+    @Test
+    @DisplayName("8. Excluir avaliação anônima recalcula stats dos alvos mas não recalcula reputação pública do autor")
+    void shouldSoftDeleteAnonymousReviewWithoutRecalculatingReputation() {
+        Review anonReview = new Review(
+                reviewId,
+                authorId,
+                null,
+                "Texto anônimo para exclusão",
+                true,
+                false,
+                ReviewStatus.ACTIVE,
+                "PUBLIC",
+                null,
+                null,
+                null,
+                createdAt,
+                createdAt
+        );
+        anonReview.addTarget(new ReviewTarget(UUID.randomUUID(), reviewId, targetAId, new BigDecimal("4.0"), "Target A", createdAt));
+
+        when(reviewRepository.findByIdForUpdate(reviewId)).thenReturn(Optional.of(anonReview));
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Instant deleteTime = createdAt.plusSeconds(3600);
+        deleteReviewUseCase.execute(reviewId, authorId, deleteTime);
+
+        assertEquals(ReviewStatus.REMOVED, anonReview.getStatus());
+        verify(reviewRepository).save(anonReview);
+        verify(rateableTargetStatsRepository).recalculateAndSave(targetAId);
+        verifyNoInteractions(reputationService);
+    }
 }

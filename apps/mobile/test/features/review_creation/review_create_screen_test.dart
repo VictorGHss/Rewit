@@ -5,6 +5,7 @@ import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/review_privacy_rules.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
@@ -820,6 +821,179 @@ void main() {
       // Botão é reabilitado
       final reenabledButton = tester.widget<ElevatedButton>(buttonFinder);
       expect(reenabledButton.onPressed, isNotNull);
+    });
+
+    group('Regras e controles de privacidade (Security S2.1)', () {
+      testWidgets('1. criação anônima com visibilidade pública submete com sucesso', (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildSubject(
+          repository: repository,
+          initialTargetId: validTargetId,
+          initialTargetType: 'PLACE',
+        ));
+        await tester.pumpAndSettle();
+
+        // Ativa o switch de anonimato
+        final switchFinder = find.byKey(const Key('create_anonymous_switch'));
+        await tester.ensureVisible(switchFinder);
+        await tester.tap(switchFinder);
+        await tester.pumpAndSettle();
+
+        // Submete
+        final submitButton = find.widgetWithText(ElevatedButton, 'Publicar Avaliação');
+        await tester.ensureVisible(submitButton);
+        await tester.tap(submitButton);
+        await tester.pumpAndSettle();
+
+        expect(repository.capturedInput?.isAnonymous, isTrue);
+        expect(repository.capturedInput?.visibility, 'PUBLIC');
+      });
+
+      testWidgets('2. criação anônima com visibilidade privada submete com sucesso', (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildSubject(
+          repository: repository,
+          initialTargetId: validTargetId,
+          initialTargetType: 'PLACE',
+        ));
+        await tester.pumpAndSettle();
+
+        // Seleciona Visibilidade Privada no Dropdown
+        final dropdownFinder = find.byKey(const Key('create_visibility_dropdown'));
+        await tester.ensureVisible(dropdownFinder);
+        await tester.tap(dropdownFinder);
+        await tester.pumpAndSettle();
+
+        final privateItem = find.text('Privado (apenas você)').last;
+        await tester.tap(privateItem);
+        await tester.pumpAndSettle();
+
+        // Ativa o switch de anonimato
+        final switchFinder = find.byKey(const Key('create_anonymous_switch'));
+        await tester.ensureVisible(switchFinder);
+        await tester.tap(switchFinder);
+        await tester.pumpAndSettle();
+
+        // Submete
+        final submitButton = find.widgetWithText(ElevatedButton, 'Publicar Avaliação');
+        await tester.ensureVisible(submitButton);
+        await tester.tap(submitButton);
+        await tester.pumpAndSettle();
+
+        expect(repository.capturedInput?.isAnonymous, isTrue);
+        expect(repository.capturedInput?.visibility, 'PRIVATE');
+      });
+
+      testWidgets('3. bloqueio da opção FOLLOWERS em avaliação anônima exibe aviso em português', (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildSubject(
+          repository: repository,
+          initialTargetId: validTargetId,
+          initialTargetType: 'PLACE',
+        ));
+        await tester.pumpAndSettle();
+
+        // Ativa o switch de anonimato
+        final switchFinder = find.byKey(const Key('create_anonymous_switch'));
+        await tester.ensureVisible(switchFinder);
+        await tester.tap(switchFinder);
+        await tester.pumpAndSettle();
+
+        // Verifica aviso explicativo de que seguidores não está disponível para anônimos
+        expect(find.byKey(const Key('create_followers_unavailable_hint')), findsOneWidget);
+        expect(find.text(ReviewPrivacyRules.followersUnavailableForAnonymous), findsOneWidget);
+
+        // Abre o dropdown e verifica que o item Seguidores está desabilitado
+        final dropdownFinder = find.byKey(const Key('create_visibility_dropdown'));
+        await tester.ensureVisible(dropdownFinder);
+        await tester.tap(dropdownFinder);
+        await tester.pumpAndSettle();
+
+        final followersItemFinder = find.widgetWithText(DropdownMenuItem<String>, 'Seguidores (apenas quem te segue)');
+        expect(followersItemFinder, findsWidgets);
+        final followersItemWidget = tester.widget<DropdownMenuItem<String>>(followersItemFinder.last);
+        expect(followersItemWidget.enabled, isFalse);
+
+        // Fecha o popup do dropdown tocando fora
+        await tester.tapAt(const Offset(10, 10));
+        await tester.pumpAndSettle();
+
+        // A visibilidade deve continuar como PUBLIC (não trocou para FOLLOWERS)
+        final submitButton = find.widgetWithText(ElevatedButton, 'Publicar Avaliação');
+        await tester.ensureVisible(submitButton);
+        await tester.tap(submitButton);
+        await tester.pumpAndSettle();
+
+        expect(repository.capturedInput?.isAnonymous, isTrue);
+        expect(repository.capturedInput?.visibility, 'PUBLIC');
+      });
+
+      testWidgets('4. desativação do anonimato permite escolha explícita de FOLLOWERS e vice-versa', (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(buildSubject(
+          repository: repository,
+          initialTargetId: validTargetId,
+          initialTargetType: 'PLACE',
+        ));
+        await tester.pumpAndSettle();
+
+        // 1. Escolhe Seguidores com avaliação identificada
+        final dropdownFinder = find.byKey(const Key('create_visibility_dropdown'));
+        await tester.ensureVisible(dropdownFinder);
+        await tester.tap(dropdownFinder);
+        await tester.pumpAndSettle();
+
+        final followersItem = find.text('Seguidores (apenas quem te segue)').last;
+        await tester.tap(followersItem);
+        await tester.pumpAndSettle();
+
+        // Com FOLLOWERS selecionado, o switch de anônimo exibe aviso e fica desabilitado
+        final switchFinder = find.byKey(const Key('create_anonymous_switch'));
+        await tester.ensureVisible(switchFinder);
+        expect(find.text(ReviewPrivacyRules.anonymousUnavailableForFollowers), findsOneWidget);
+        final switchWidget = tester.widget<SwitchListTile>(switchFinder);
+        expect(switchWidget.onChanged, isNull);
+
+        // 2. Troca visibilidade para Pública
+        await tester.tap(dropdownFinder);
+        await tester.pumpAndSettle();
+        final publicItem = find.text('Público (visível a toda a comunidade)').last;
+        await tester.tap(publicItem);
+        await tester.pumpAndSettle();
+
+        // Agora o switch de anônimo volta a ser habilitado
+        final reenabledSwitch = tester.widget<SwitchListTile>(switchFinder);
+        expect(reenabledSwitch.onChanged, isNotNull);
+
+        // Ativa o anonimato
+        await tester.tap(switchFinder);
+        await tester.pumpAndSettle();
+
+        // Submete
+        final submitButton = find.widgetWithText(ElevatedButton, 'Publicar Avaliação');
+        await tester.ensureVisible(submitButton);
+        await tester.tap(submitButton);
+        await tester.pumpAndSettle();
+
+        expect(repository.capturedInput?.isAnonymous, isTrue);
+        expect(repository.capturedInput?.visibility, 'PUBLIC');
+      });
     });
   });
 }
