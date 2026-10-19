@@ -1288,4 +1288,51 @@ void main() {
       expect(navigatedProfileUserId, isNull);
     });
   });
+
+  group('UserProfileScreen em tela estreita (S3-B)', () {
+    testWidgets('contadores de seguidores, seguindo e avaliações cabem em 320 dp com fonte 1,6x', (tester) async {
+      tester.view.physicalSize = const Size(320, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final authNotifier = AuthNotifier(authRepository: FakeAuthRepo());
+      await authNotifier.checkAuthStatus();
+      final repo = FakeUserProfileRepository()
+        ..profileToReturn = const UserProfile(
+          id: 'other-id',
+          handle: 'perfil',
+          displayName: 'Perfil com nome comprido para teste',
+          isFollowing: true,
+          stats: UserStats(
+            totalReviews: 1234567,
+            followersCount: 7654321,
+            followingCount: 98765,
+            helpfulVotesReceived: 4567890,
+          ),
+        );
+
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.6)),
+          child: child!,
+        ),
+        home: UserProfileScreen(
+          userId: 'other-id',
+          userProfileRepository: repo,
+          authNotifier: authNotifier,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      for (final label in ['Seguidores', 'Avaliações', 'Votos Úteis']) {
+        expect(find.text(label), findsOneWidget);
+      }
+      // Os quatro contadores dividem a largura: nenhum invade o vizinho
+      final followers = tester.getRect(find.text('Seguidores'));
+      final reviews = tester.getRect(find.text('Avaliações'));
+      expect(followers.overlaps(reviews), isFalse);
+    });
+  });
 }

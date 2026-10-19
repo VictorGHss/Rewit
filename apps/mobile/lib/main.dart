@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/app/app.dart';
 import 'package:rewit_mobile/app/config/app_config.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
+import 'package:rewit_mobile/core/network/session_refresher.dart';
+import 'package:rewit_mobile/core/network/token_refreshing_client.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -33,17 +38,27 @@ void main() async {
 
   // 3. Inicializar cliente HTTP e repositórios
   late final AuthNotifier authNotifier;
+  late final AuthRepositoryImpl authRepository;
+
+  // Renovação única e compartilhada do access token (15 min): evita encerrar a sessão enquanto o refresh vale
+  final sessionRefresher = SessionRefresher(
+    refreshAccessToken: () async => (await authRepository.refreshTokens()).tokens.accessToken,
+  );
 
   final httpClient = RewitHttpClient(
     baseUrl: config.apiBaseUrl,
     timeout: config.timeout,
+    client: TokenRefreshingClient(
+      inner: http.Client(),
+      sessionRefresher: sessionRefresher,
+    ),
     tokenStorage: tokenStorage,
     onSessionExpired: () {
-      authNotifier.handleSessionExpired();
+      unawaited(authNotifier.handleSessionExpired());
     },
   );
 
-  final authRepository = AuthRepositoryImpl(
+  authRepository = AuthRepositoryImpl(
     httpClient: httpClient,
     tokenStorage: tokenStorage,
   );
@@ -63,7 +78,11 @@ void main() async {
   final businessRepository = BusinessRepositoryImpl(httpClient: httpClient);
   final businessResponseRepository = BusinessResponseRepositoryImpl(httpClient: httpClient);
 
-  authNotifier = AuthNotifier(authRepository: authRepository);
+  authNotifier = AuthNotifier(
+    authRepository: authRepository,
+    sessionRefresher: sessionRefresher,
+    clearLocalSession: tokenStorage.clearTokens,
+  );
   final feedNotifier = FeedNotifier(feedRepository: feedRepository);
 
   // 4. Verificar se há sessão previamente salva

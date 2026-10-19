@@ -49,7 +49,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _currentIndex = 0;
+  static const int _feedTabIndex = 0;
+  static const int _profileTabIndex = 3;
+
+  int _currentIndex = _feedTabIndex;
   NotificationsNotifier? _notificationsNotifier;
   bool _internalNotificationsNotifier = false;
 
@@ -101,6 +104,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _openMyProfile() {
+    setState(() {
+      _currentIndex = _profileTabIndex;
+    });
+  }
+
+  /// O cartão inteiro leva à aba Perfil, como o toque no nome do usuário sugere.
   Widget _buildUserHeaderCard(BuildContext context, Authenticated auth) {
     final user = auth.user;
     final theme = Theme.of(context);
@@ -109,73 +119,92 @@ class _HomeScreenState extends State<HomeScreen> {
       elevation: 0.5,
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: theme.colorScheme.primary.withAlpha(30),
-              child: Text(
-                user.displayName.isNotEmpty ? user.displayName[0].toUpperCase() : 'U',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          user.displayName,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (user.isVerified) ...[
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.verified,
-                          size: 14,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ],
-                    ],
-                  ),
-                  Text(
-                    '@${user.handle}',
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: const Key('home_user_header_card'),
+        onTap: _openMyProfile,
+        child: Semantics(
+          button: true,
+          hint: 'Abrir meu perfil',
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: theme.colorScheme.primary.withAlpha(30),
+                  child: Text(
+                    user.displayName.isNotEmpty ? user.displayName[0].toUpperCase() : 'U',
                     style: TextStyle(
-                      color: theme.colorScheme.onSurface.withAlpha(160),
-                      fontSize: 12,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.primary,
                     ),
                   ),
-                ],
-              ),
-            ),
-            Row(
-              children: [
-                Icon(Icons.star, size: 14, color: Colors.amber[700]),
-                const SizedBox(width: 4),
-                Text(
-                  'Reputação: ${user.reputationScore}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.onSurface.withAlpha(200),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              user.displayName,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (user.isVerified) ...[
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.verified,
+                              size: 14,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ],
+                        ],
+                      ),
+                      Text(
+                        '@${user.handle}',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface.withAlpha(160),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.star, size: 14, color: Colors.amber[700]),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Reputação: ${user.reputationScore}',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: theme.colorScheme.onSurface.withAlpha(200),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.onSurface.withAlpha(120)),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -334,15 +363,32 @@ class _HomeScreenState extends State<HomeScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Rewit'),
+            // Dois controles de cada lado mantêm o título de fato centralizado em qualquer largura
+            centerTitle: true,
+            title: Semantics(
+              header: true,
+              child: const Text('Rewit'),
+            ),
+            leadingWidth: 96,
+            leading: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  key: const Key('home_open_profile_button'),
+                  icon: const Icon(Icons.account_circle_outlined),
+                  tooltip: 'Meu perfil',
+                  onPressed: _openMyProfile,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.qr_code_scanner),
+                  tooltip: 'Escanear Código',
+                  onPressed: () {
+                    Navigator.of(context).pushNamed(AppRouter.scanner);
+                  },
+                ),
+              ],
+            ),
             actions: [
-              IconButton(
-                icon: const Icon(Icons.qr_code_scanner),
-                tooltip: 'Escanear Código',
-                onPressed: () {
-                  Navigator.of(context).pushNamed(AppRouter.scanner);
-                },
-              ),
               if (_notificationsNotifier != null)
                 ListenableBuilder(
                   listenable: _notificationsNotifier!,
@@ -364,17 +410,36 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                   },
                 ),
-              IconButton(
-                icon: const Icon(Icons.settings_outlined),
-                tooltip: 'Configurações da Conta',
-                onPressed: () {
-                  Navigator.of(context).pushNamed(AppRouter.accountSettings);
+              PopupMenuButton<_HomeMenuAction>(
+                key: const Key('home_more_options_button'),
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'Mais opções',
+                onSelected: (action) {
+                  switch (action) {
+                    case _HomeMenuAction.settings:
+                      Navigator.of(context).pushNamed(AppRouter.accountSettings);
+                    case _HomeMenuAction.logout:
+                      _confirmLogout();
+                  }
                 },
-              ),
-              IconButton(
-                icon: const Icon(Icons.logout),
-                tooltip: 'Sair da Conta',
-                onPressed: _confirmLogout,
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: _HomeMenuAction.settings,
+                    child: ListTile(
+                      leading: Icon(Icons.settings_outlined),
+                      title: Text('Configurações da Conta'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _HomeMenuAction.logout,
+                    child: ListTile(
+                      leading: Icon(Icons.logout),
+                      title: Text('Sair da Conta'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -387,9 +452,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: const Icon(Icons.add_comment_outlined),
                 )
               : null,
-          body: IndexedStack(
-            index: _currentIndex,
-            children: pages,
+          // Voltar fora da aba Início retorna a ela, em vez de fechar o app
+          body: PopScope(
+            canPop: _currentIndex == _feedTabIndex,
+            onPopInvokedWithResult: (didPop, _) {
+              if (!didPop) {
+                setState(() {
+                  _currentIndex = _feedTabIndex;
+                });
+              }
+            },
+            child: IndexedStack(
+              index: _currentIndex,
+              children: pages,
+            ),
           ),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _currentIndex,
@@ -426,3 +502,5 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+
+enum _HomeMenuAction { settings, logout }

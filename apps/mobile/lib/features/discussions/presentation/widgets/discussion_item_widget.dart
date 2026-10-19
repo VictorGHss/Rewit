@@ -221,10 +221,12 @@ class DiscussionItemWidget extends StatelessWidget {
             ],
             const SizedBox(height: 6),
 
-            // Barra de ações
+            // Barra de ações: quebra para a linha de baixo em tela estreita ou fonte ampliada
             Padding(
               padding: EdgeInsets.only(left: isRoot ? 36 : 30),
-              child: Row(
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                runSpacing: 4,
                 children: [
                   // Ação Responder (permitido apenas na raiz e se canReply for true)
                   if (item.canReply && onReply != null) ...[

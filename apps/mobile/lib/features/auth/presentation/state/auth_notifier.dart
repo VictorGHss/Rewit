@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/core/network/session_refresher.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
@@ -7,10 +8,21 @@ import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.d
 /// Gerenciador reativo de estado de autenticação (ChangeNotifier).
 class AuthNotifier extends ChangeNotifier {
   final AuthRepository _authRepository;
+  final SessionRefresher? _sessionRefresher;
+  final Future<void> Function()? _clearLocalSession;
   AuthState _state = const AuthInitial();
+  bool _isHandlingExpiry = false;
 
-  AuthNotifier({required AuthRepository authRepository})
-      : _authRepository = authRepository;
+  /// [sessionRefresher] permite confirmar, antes de encerrar a sessão, se o refresh token ainda vale;
+  /// [clearLocalSession] apaga os tokens guardados quando a sessão acaba de fato. Sem eles, um 401
+  /// encerra a sessão na hora, como antes.
+  AuthNotifier({
+    required AuthRepository authRepository,
+    SessionRefresher? sessionRefresher,
+    Future<void> Function()? clearLocalSession,
+  })  : _authRepository = authRepository,
+        _sessionRefresher = sessionRefresher,
+        _clearLocalSession = clearLocalSession;
 
   AuthState get state => _state;
   bool get isAuthenticated => _state is Authenticated;
@@ -261,8 +273,33 @@ class AuthNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Invocado quando o cliente HTTP detecta resposta 401 não recuperável.
-  void handleSessionExpired() {
+  /// Invocado quando o cliente HTTP recebe 401 numa requisição autenticada.
+  ///
+  /// Com [SessionRefresher], a sessão só termina se o servidor recusar o refresh token: renovada (por exemplo,
+  /// num upload, que não é repetido automaticamente) ou sem resposta do servidor, ela continua. Ao terminar, os
+  /// tokens locais são apagados e o estado vira [Unauthenticated] com `SESSION_EXPIRED`, que leva o app de volta
+  /// à tela inicial. A verificação de sessão e o login tratam o próprio 401, por isso só uma sessão ativa é
+  /// avaliada aqui.
+  Future<void> handleSessionExpired() async {
+    final refresher = _sessionRefresher;
+    if (refresher == null) {
+      _expireSession();
+      return;
+    }
+    if (_state is! Authenticated || _isHandlingExpiry) return;
+
+    _isHandlingExpiry = true;
+    try {
+      final result = await refresher.refresh();
+      if (result.outcome != SessionRefreshOutcome.rejected || _state is! Authenticated) return;
+      await _clearLocalSession?.call();
+      _expireSession();
+    } finally {
+      _isHandlingExpiry = false;
+    }
+  }
+
+  void _expireSession() {
     _state = const Unauthenticated(
       errorMessage: 'Sua sessão expirou. Faça login novamente.',
       errorCode: 'SESSION_EXPIRED',

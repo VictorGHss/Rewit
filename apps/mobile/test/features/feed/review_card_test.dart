@@ -118,7 +118,9 @@ void main() {
       expect(find.text('Presença confirmada no local'), findsOneWidget);
       expect(find.text('1 útil'), findsOneWidget);
       expect(find.byIcon(Icons.thumb_up_outlined), findsOneWidget);
-      expect(find.text('Seguidores'), findsOneWidget);
+      // Anônima + FOLLOWERS é uma linha antiga que o backend trata como privada: não pode aparecer como "Seguidores"
+      expect(find.text('Seguidores'), findsNothing);
+      expect(find.text('Somente você'), findsOneWidget);
     });
 
     testWidgets('chama onTap ao clicar no card', (tester) async {

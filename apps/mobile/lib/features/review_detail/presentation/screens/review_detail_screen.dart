@@ -1027,10 +1027,16 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
               ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                // Wrap: em tela estreita ou fonte ampliada o botão desce para a linha de baixo em vez de
+                // sobrepor o contador
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 8,
                   children: [
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
                           review.isHelpfulByMe ? Icons.thumb_up : Icons.thumb_up_outlined,
@@ -1040,16 +1046,21 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
                           size: 20,
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          '${review.helpfulCount} pessoas acharam útil',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            color: theme.colorScheme.onSurface.withAlpha(200),
+                        Flexible(
+                          child: Text(
+                            review.helpfulCount == 1
+                                ? '1 pessoa achou útil'
+                                : '${review.helpfulCount} pessoas acharam útil',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              color: theme.colorScheme.onSurface.withAlpha(200),
+                            ),
                           ),
                         ),
                       ],
                     ),
                     OutlinedButton.icon(
+                      key: const Key('review_detail_helpful_button'),
                       onPressed: _isTogglingHelpful ? null : _handleToggleHelpful,
                       icon: _isTogglingHelpful
                           ? const SizedBox(
