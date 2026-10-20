@@ -108,6 +108,9 @@ class PlaceMediaConcurrencyTest {
                 ReviewMediaType.IMAGE, "image/jpeg", 1024L, 800, 600,
                 status, false, null, null, Instant.now(), Instant.now()
         );
+        if (status == PlaceMediaStatus.REMOVED) {
+            media.markRemovedByModerator();
+        }
         return placeMediaRepository.save(media);
     }
 

@@ -51,10 +51,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SearchRateLimitIntegrationTest {
 
     private static final long WINDOW_WAIT_MILLIS = 2_300;
-    private static final String REDIS_HOST = System.getProperty("spring.data.redis.host", envOrDefault("REDIS_HOST", "localhost"));
+    private static final String REDIS_HOST = System.getProperty("spring.data.redis.host", System.getenv().getOrDefault("TEST_REDIS_HOST", envOrDefault("REDIS_HOST", "localhost")));
     private static final int REDIS_PORT = resolveRedisPort();
 
     private static int resolveRedisPort() {
+        String testEnv = System.getenv("TEST_REDIS_PORT");
+        if (testEnv != null && !testEnv.isBlank()) {
+            return validateSafeRedisPort(Integer.parseInt(testEnv.trim()));
+        }
         String prop = System.getProperty("spring.data.redis.port");
         if (prop != null && !prop.isBlank()) {
             return validateSafeRedisPort(Integer.parseInt(prop));

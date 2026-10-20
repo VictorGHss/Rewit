@@ -30,6 +30,8 @@ class SeaweedStorageIntegrationTest {
             System.getenv().getOrDefault("STORAGE_SECRET_KEY", "change-me"))));
 
     private static String resolveStorageEndpoint() {
+        String testEp = System.getenv("TEST_STORAGE_ENDPOINT");
+        if (testEp != null && !testEp.isBlank()) return testEp.trim();
         String ep = System.getProperty("OBJECT_STORAGE_ENDPOINT");
         if (ep != null && !ep.isBlank()) return ep.trim();
         ep = System.getProperty("rewit.storage.seaweed.endpoint");

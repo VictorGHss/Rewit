@@ -30,13 +30,23 @@ class DatabaseDomainIntegrityTest {
         if (envUrl != null && !envUrl.isBlank()) {
             return envUrl;
         }
+        String testUrl = System.getenv("TEST_DATASOURCE_URL");
+        if (testUrl != null && !testUrl.isBlank()) {
+            return testUrl;
+        }
+        String testPort = System.getenv("TEST_POSTGRES_PORT");
+        if (testPort != null && !testPort.isBlank()) {
+            String host = System.getenv().getOrDefault("TEST_POSTGRES_HOST", "127.0.0.1");
+            String db = System.getenv().getOrDefault("TEST_POSTGRES_DB", "rewit_test");
+            return "jdbc:postgresql://" + host + ":" + testPort + "/" + db;
+        }
         String port = System.getProperty("postgres.port", System.getenv("POSTGRES_PORT"));
         if (port != null && !port.isBlank()) {
             return "jdbc:postgresql://localhost:" + port + "/rewit_db";
         }
         throw new IllegalStateException("PostgreSQL de teste isolado não configurado! " +
-                "Defina 'spring.datasource.url' ou 'POSTGRES_PORT' com o endpoint da instância descartável. " +
-                "Conexão com a porta compartilhada 5433 é estritamente proibida.");
+                "Defina 'TEST_DATASOURCE_URL' ou 'TEST_POSTGRES_PORT' com o endpoint da instância descartável. " +
+                "Conexão com as portas compartilhadas 5432/5433 é estritamente proibida.");
     }
 
     private static void validateSafeEndpoint(String url) {
@@ -400,6 +410,110 @@ class DatabaseDomainIntegrityTest {
                     assertTrue(rs.next());
                     assertFalse(rs.getBoolean("is_verified_on_site"), "Review deve ser sincronizada para FALSE via trigger");
                 }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("V35 / AO-1: Demonstra garantia append-only (bloqueio de UPDATE, DELETE e TRUNCATE) sob a role efetiva da aplicação")
+    void shouldDemonstrateAppendOnlyProtectionUnderEffectiveApplicationRole() throws SQLException {
+        try (Connection conn = getConnection()) {
+            UUID auditId = UUID.randomUUID();
+            UUID mediaId = UUID.randomUUID();
+            UUID placeId = UUID.randomUUID();
+
+            // 1. Inserir registro válido de auditoria com SYSTEM actor (V35)
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media_moderation_audit_logs " +
+                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at) " +
+                            "VALUES (?, ?, ?, NULL, 'SYSTEM', 'AUTO_RESOLVE_REPORT', 'Violação', 'Resolução automática', NOW())")) {
+                ps.setObject(1, auditId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, placeId);
+                assertEquals(1, ps.executeUpdate(), "Inserção de auditoria com SYSTEM actor e actor_user_id NULL deve suceder");
+            }
+
+            // 2. Demonstrar que UPDATE é bloqueado por trigger sob a role de aplicação
+            SQLException exUpdate = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE place_media_moderation_audit_logs SET notes = 'tentativa de adulteração' WHERE id = ?")) {
+                    ps.setObject(1, auditId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exUpdate.getMessage().contains("append-only") || exUpdate.getMessage().contains("UPDATE"),
+                    "Trigger deve bloquear UPDATE: " + exUpdate.getMessage());
+
+            // 3. Demonstrar que DELETE é bloqueado por trigger sob a role de aplicação
+            SQLException exDelete = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM place_media_moderation_audit_logs WHERE id = ?")) {
+                    ps.setObject(1, auditId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exDelete.getMessage().contains("append-only") || exDelete.getMessage().contains("DELETE"),
+                    "Trigger deve bloquear DELETE: " + exDelete.getMessage());
+
+            // 4. Demonstrar que TRUNCATE é bloqueado por trigger sob a role de aplicação
+            SQLException exTruncate = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "TRUNCATE TABLE place_media_moderation_audit_logs")) {
+                    ps.execute();
+                }
+            });
+            assertTrue(exTruncate.getMessage().contains("append-only") || exTruncate.getMessage().contains("TRUNCATE"),
+                    "Trigger deve bloquear TRUNCATE: " + exTruncate.getMessage());
+        }
+    }
+
+    @Test
+    @DisplayName("V35 / AU-1: Valida constraints de actor_type, actor_user_id e ações automáticas na trilha de auditoria")
+    void shouldValidateAuditActorConstraintsAndAutoActions() throws SQLException {
+        try (Connection conn = getConnection()) {
+            UUID auditId = UUID.randomUUID();
+            UUID mediaId = UUID.randomUUID();
+            UUID placeId = UUID.randomUUID();
+
+            // 1. actor_type = 'USER' com actor_user_id NULL deve falhar
+            SQLException exUserNull = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO place_media_moderation_audit_logs " +
+                                "(id, place_media_id, place_id, actor_user_id, actor_type, action, created_at) " +
+                                "VALUES (?, ?, ?, NULL, 'USER', 'REMOVE', NOW())")) {
+                    ps.setObject(1, auditId);
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, placeId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exUserNull.getMessage().contains("chk_place_media_audit_actor_type_user_id")
+                    || exUserNull.getMessage().contains("violates check constraint"));
+
+            // 2. actor_type inválido deve falhar
+            SQLException exInvalidType = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO place_media_moderation_audit_logs " +
+                                "(id, place_media_id, place_id, actor_user_id, actor_type, action, created_at) " +
+                                "VALUES (?, ?, ?, NULL, 'BOT', 'AUTO_QUARANTINE', NOW())")) {
+                    ps.setObject(1, auditId);
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, placeId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exInvalidType.getMessage().contains("chk_place_media_audit_actor_type")
+                    || exInvalidType.getMessage().contains("violates check constraint"));
+
+            // 3. AUTO_QUARANTINE com actor_type = 'SYSTEM' e actor_user_id = NULL deve suceder
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media_moderation_audit_logs " +
+                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, created_at) " +
+                            "VALUES (?, ?, ?, NULL, 'SYSTEM', 'AUTO_QUARANTINE', NOW())")) {
+                ps.setObject(1, auditId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, placeId);
+                assertEquals(1, ps.executeUpdate());
             }
         }
     }

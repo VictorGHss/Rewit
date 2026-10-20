@@ -712,9 +712,16 @@ class PlaceMediaServiceTest {
         assertTrue(media.isActive());
 
         // Quando storage já foi purgado:
-        when(objectStoragePort.exists(media.getObjectKey())).thenReturn(false);
+        UUID purgedMediaId = UUID.randomUUID();
+        PlaceMedia purgedMedia = new PlaceMedia(
+                purgedMediaId, placeId, userId, "places/" + placeId + "/" + purgedMediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now()
+        );
+        when(placeMediaRepository.findByIdForUpdate(purgedMediaId)).thenReturn(Optional.of(purgedMedia));
+        when(objectStoragePort.exists(purgedMedia.getObjectKey())).thenReturn(false);
         BusinessException ex = assertThrows(BusinessException.class, () ->
-                placeMediaService.restoreMediaByModerator(modId, placeId, mediaId, "Restaurando novamente")
+                placeMediaService.restoreMediaByModerator(modId, placeId, purgedMediaId, "Restaurando purgada")
         );
         assertEquals("STORAGE_OBJECT_PURGED", ex.getErrorCode());
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
@@ -956,11 +963,15 @@ class PlaceMediaServiceTest {
 
         var log1 = logs.stream().filter(l -> report1Id.equals(l.getReportId())).findFirst().orElseThrow();
         assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.ACCEPT_REPORT, log1.getAction());
+        assertEquals(com.rewit.domain.model.PlaceMediaModerationAuditLog.ActorType.USER, log1.getActorType());
+        assertEquals(modId, log1.getActorUserId());
         assertEquals("SPAM_1", log1.getReason());
         assertEquals("Foto confirmada imprópria", log1.getNotes());
 
         var log2 = logs.stream().filter(l -> report2Id.equals(l.getReportId())).findFirst().orElseThrow();
-        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.ACCEPT_REPORT, log2.getAction());
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.AUTO_RESOLVE_REPORT, log2.getAction());
+        assertEquals(com.rewit.domain.model.PlaceMediaModerationAuditLog.ActorType.SYSTEM, log2.getActorType());
+        assertNull(log2.getActorUserId());
         assertEquals("OFENSIVO_2", log2.getReason());
         assertTrue(log2.getNotes().contains("Resolução automática em lote"));
     }
@@ -992,7 +1003,8 @@ class PlaceMediaServiceTest {
         org.mockito.Mockito.verify(placeMediaModerationAuditLogRepository).save(captor.capture());
         assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.AUTO_QUARANTINE, captor.getValue().getAction());
         assertEquals(mediaId, captor.getValue().getPlaceMediaId());
-        assertEquals(reporter, captor.getValue().getActorUserId());
+        assertEquals(com.rewit.domain.model.PlaceMediaModerationAuditLog.ActorType.SYSTEM, captor.getValue().getActorType());
+        assertNull(captor.getValue().getActorUserId());
     }
 
     @Test
@@ -1040,7 +1052,9 @@ class PlaceMediaServiceTest {
         assertEquals(managerId, removalLog.getActorUserId());
 
         var reportResolutionLog = captor.getAllValues().get(1);
-        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.ACCEPT_REPORT, reportResolutionLog.getAction());
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.AUTO_RESOLVE_REPORT, reportResolutionLog.getAction());
+        assertEquals(com.rewit.domain.model.PlaceMediaModerationAuditLog.ActorType.SYSTEM, reportResolutionLog.getActorType());
+        assertNull(reportResolutionLog.getActorUserId());
         assertEquals("CONTEUDO_INADEQUADO", reportResolutionLog.getReason());
         assertEquals(reportId, reportResolutionLog.getReportId());
     }
@@ -1106,5 +1120,92 @@ class PlaceMediaServiceTest {
         assertEquals(mediaId, view.id());
         // Rate limiter NUNCA deve ter sido invocado para o replay idempotente
         verify(rateLimiter, never()).acquireOrThrow(any(), any());
+    }
+
+    @Test
+    @DisplayName("32. restoreMediaByModerator: rejeita restauração se fotografia já estiver ACTIVE (HTTP 409 MEDIA_ALREADY_ACTIVE)")
+    void shouldRejectRestorationWhenMediaAlreadyActive() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia activeMedia = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(activeMedia));
+
+        var ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.restoreMediaByModerator(modId, placeId, mediaId, "Tentativa de restaurar foto ativa")
+        );
+        assertEquals("MEDIA_ALREADY_ACTIVE", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    }
+
+    @Test
+    @DisplayName("33. restoreMediaByModerator: rejeita restauração se fotografia não estiver REMOVED (HTTP 409 MEDIA_NOT_REMOVED)")
+    void shouldRejectRestorationWhenMediaNotRemoved() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia reviewMedia = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(reviewMedia));
+
+        var ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.restoreMediaByModerator(modId, placeId, mediaId, "Tentativa de restaurar foto em revisão")
+        );
+        assertEquals("MEDIA_NOT_REMOVED", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    }
+
+    @Test
+    @DisplayName("34. deleteMedia por representante comercial verificado: classifica explicitamente como BUSINESS_OWNER e audita")
+    void shouldDistinguishBusinessOwnerRemovalFromPlaceManager() {
+        UUID businessAdminUserId = UUID.randomUUID();
+        UUID businessId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+
+        Place claimedPlace = new Place(
+                placeId, "Local Claimed", "local-claimed", "RESTAURANTE", "Desc", "End",
+                "100", "Bairro", "Curitiba", "PR", "BR", -25.4, -49.2, 50,
+                "USER", true, businessId, UUID.randomUUID(), "ACTIVE"
+        );
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        com.rewit.domain.model.BusinessAccount account = org.mockito.Mockito.mock(com.rewit.domain.model.BusinessAccount.class);
+        when(account.isAdministeredBy(businessAdminUserId)).thenReturn(true);
+        when(account.getVerificationStatus()).thenReturn(com.rewit.domain.enums.VerificationStatus.APPROVED);
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(claimedPlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(businessAccountRepository.findById(businessId)).thenReturn(Optional.of(account));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
+
+        placeMediaService.deleteMedia(businessAdminUserId, placeId, mediaId);
+
+        assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
+        assertEquals(com.rewit.domain.enums.RemovalSource.BUSINESS_OWNER, media.getRemovalSource());
+
+        org.mockito.ArgumentCaptor<com.rewit.domain.model.PlaceMediaModerationAuditLog> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rewit.domain.model.PlaceMediaModerationAuditLog.class);
+        verify(placeMediaModerationAuditLogRepository).save(captor.capture());
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE, captor.getValue().getAction());
+        assertEquals(businessAdminUserId, captor.getValue().getActorUserId());
+        assertEquals(com.rewit.domain.model.PlaceMediaModerationAuditLog.ActorType.USER, captor.getValue().getActorType());
     }
 }

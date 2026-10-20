@@ -1,24 +1,24 @@
 # Configuração do perfil local para testes automatizados
-# Exige configuração explícita de infraestrutura isolada (A-1); sem fallback para serviços compartilhados.
+# Exige configuração explícita de infraestrutura isolada de teste (A-1); sem fallback para serviços compartilhados.
 spring:
   datasource:
-    url: ${SPRING_DATASOURCE_URL:${DATABASE_URL:jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:}/${POSTGRES_DB:rewit_db}}}
-    username: ${POSTGRES_USER:rewit_user}
-    password: ${POSTGRES_PASSWORD:rewit_local_password}
+    url: ${TEST_DATASOURCE_URL:jdbc:postgresql://${TEST_POSTGRES_HOST:127.0.0.1}:${TEST_POSTGRES_PORT:}/${TEST_POSTGRES_DB:rewit_test}}
+    username: ${TEST_POSTGRES_USER:rewit_user}
+    password: ${TEST_POSTGRES_PASSWORD:rewit_local_password}
   data:
     redis:
-      host: ${SPRING_DATA_REDIS_HOST:${REDIS_HOST:127.0.0.1}}
-      port: ${SPRING_DATA_REDIS_PORT:${REDIS_PORT:}}
-      password: ${REDIS_PASSWORD:}
+      host: ${TEST_REDIS_HOST:127.0.0.1}
+      port: ${TEST_REDIS_PORT:}
+      password: ${TEST_REDIS_PASSWORD:}
       timeout: 3000ms
   jpa:
     open-in-view: false
 
 rewit:
   minio:
-    endpoint: ${OBJECT_STORAGE_ENDPOINT:${REWIT_STORAGE_SEAWEED_ENDPOINT:${MINIO_ENDPOINT:http://127.0.0.1:58333}}}
-    access-key: ${OBJECT_STORAGE_ACCESS_KEY:${MINIO_ROOT_USER:change-me}}
-    secret-key: ${OBJECT_STORAGE_SECRET_KEY:${MINIO_ROOT_PASSWORD:change-me}}
-    bucket-name: ${OBJECT_STORAGE_BUCKET:${MINIO_BUCKET_NAME:rewit-local}}
+    endpoint: ${TEST_STORAGE_ENDPOINT:}
+    access-key: ${TEST_STORAGE_ACCESS_KEY:change-me}
+    secret-key: ${TEST_STORAGE_SECRET_KEY:change-me}
+    bucket-name: ${TEST_STORAGE_BUCKET:rewit-local}
   security:
     jwt-secret: ${JWT_SECRET:test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!}

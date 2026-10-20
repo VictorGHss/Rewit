@@ -290,10 +290,11 @@ public class PlaceMediaService {
         }
 
         boolean isAuthor = media.getUserId().equals(actorUserId);
+        boolean isPlaceManager = false;
         boolean isBusinessOwner = false;
         if (!isAuthor) {
             if (place.getCreatedByUserId() != null && place.getCreatedByUserId().equals(actorUserId)) {
-                isBusinessOwner = true;
+                isPlaceManager = true;
             } else if (place.getClaimedByBusinessId() != null && businessAccountRepository != null) {
                 isBusinessOwner = businessAccountRepository.findById(place.getClaimedByBusinessId())
                         .filter(acc -> acc.isAdministeredBy(actorUserId) && BusinessRepresentationPolicy.isApproved(acc))
@@ -301,25 +302,33 @@ public class PlaceMediaService {
             }
         }
         boolean isModerator = false;
-        if (!isAuthor && !isBusinessOwner) {
+        if (!isAuthor && !isPlaceManager && !isBusinessOwner) {
             isModerator = userRepository.findById(actorUserId)
                     .map(u -> u.getRole() == Role.MODERATOR || u.getRole() == Role.ADMIN)
                     .orElse(false);
         }
 
-        if (!isAuthor && !isBusinessOwner && !isModerator) {
-            throw new BusinessException("Acesso restrito ao autor da fotografia, ao proprietário do estabelecimento ou a moderadores", HttpStatus.FORBIDDEN, "FORBIDDEN");
+        if (!isAuthor && !isPlaceManager && !isBusinessOwner && !isModerator) {
+            throw new BusinessException("Acesso restrito ao autor da fotografia, ao proprietário do estabelecimento, ao criador do local ou a moderadores", HttpStatus.FORBIDDEN, "FORBIDDEN");
         }
 
         boolean wasPrimary = media.isPrimary();
+        String removalCause;
         if (isAuthor) {
             media.markRemovedByAuthor();
+            removalCause = "próprio autor da fotografia";
             saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.AUTHOR_REMOVE, "Remoção pelo próprio autor", null, null);
+        } else if (isPlaceManager) {
+            media.markRemovedByPlaceManager();
+            removalCause = "responsável/criador direto do local";
+            saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.PLACE_MANAGER_REMOVE, "Remoção pelo responsável/criador do local", null, null);
         } else if (isBusinessOwner) {
             media.markRemovedByBusinessOwner();
-            saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE, "Remoção pelo proprietário do estabelecimento", null, null);
+            removalCause = "representante comercial do estabelecimento";
+            saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE, "Remoção pelo representante comercial do estabelecimento", null, null);
         } else {
             media.markRemovedByModerator();
+            removalCause = "moderação administrativa";
             saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.REMOVE, "Remoção por moderação administrativa", null, null);
         }
         placeMediaRepository.save(media);
@@ -332,18 +341,17 @@ public class PlaceMediaService {
             });
         }
 
-        // Resolve TODAS as denúncias pendentes associadas à mídia removida e registra auditoria individual
+        // Resolve TODAS as denúncias pendentes associadas à mídia removida (AU-1):
+        // Registra como AUTO_RESOLVE_REPORT atribuído ao SYSTEM (sem atribuir decisão explícita ao autor ou proprietário)
         List<PlaceMediaReport> reports = placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId);
         for (PlaceMediaReport r : reports) {
             if (r.isPending()) {
-                String resolutionNote = isAuthor ? "Resolvida: fotografia excluída pelo próprio autor"
-                        : (isBusinessOwner ? "Resolvida: fotografia excluída pelo proprietário do estabelecimento"
-                        : "Deferida: fotografia excluída por moderação administrativa");
+                String resolutionNote = "Resolução automática: fotografia removida pelo " + removalCause;
                 r.accept(actorUserId, resolutionNote);
                 placeMediaReportRepository.save(r);
 
-                saveAuditLog(mediaId, placeId, actorUserId,
-                        PlaceMediaModerationAction.ACCEPT_REPORT,
+                saveAuditLog(mediaId, placeId, null,
+                        PlaceMediaModerationAction.AUTO_RESOLVE_REPORT,
                         r.getReason(),
                         resolutionNote,
                         r.getId());
@@ -411,7 +419,7 @@ public class PlaceMediaService {
                     placeMediaRepository.save(next);
                 });
             }
-            saveAuditLog(media.getId(), placeId, actorUserId,
+            saveAuditLog(media.getId(), placeId, null,
                     PlaceMediaModerationAction.AUTO_QUARANTINE,
                     "Quarentena automática após atingir limiar de " + pendingReports + " denúncias pendentes",
                     "Transição preventiva de ACTIVE para UNDER_REVIEW",
@@ -550,8 +558,8 @@ public class PlaceMediaService {
                     sib.accept(moderatorUserId, sibNotes);
                     placeMediaReportRepository.save(sib);
 
-                    saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), moderatorUserId,
-                            PlaceMediaModerationAction.ACCEPT_REPORT, sib.getReason(), sibNotes, sib.getId());
+                    saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), null,
+                            PlaceMediaModerationAction.AUTO_RESOLVE_REPORT, sib.getReason(), sibNotes, sib.getId());
                 }
             }
         } else {
@@ -606,8 +614,8 @@ public class PlaceMediaService {
                     r.accept(moderatorUserId, repNotes);
                     placeMediaReportRepository.save(r);
 
-                    saveAuditLog(mediaId, placeId, moderatorUserId,
-                            PlaceMediaModerationAction.ACCEPT_REPORT,
+                    saveAuditLog(mediaId, placeId, null,
+                            PlaceMediaModerationAction.AUTO_RESOLVE_REPORT,
                             r.getReason(),
                             repNotes,
                             r.getId());
@@ -642,6 +650,13 @@ public class PlaceMediaService {
 
         if (!lockedMedia.getPlaceId().equals(placeId)) {
             throw new BusinessException("Fotografia não pertence ao local informado", HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND");
+        }
+
+        if (lockedMedia.isActive()) {
+            throw new BusinessException("A fotografia já se encontra ativa", HttpStatus.CONFLICT, "MEDIA_ALREADY_ACTIVE");
+        }
+        if (!lockedMedia.isRemoved()) {
+            throw new BusinessException("Apenas fotografias removidas podem ser restauradas", HttpStatus.CONFLICT, "MEDIA_NOT_REMOVED");
         }
 
         if (lockedMedia.getRemovalSource() == RemovalSource.AUTHOR) {
@@ -783,11 +798,15 @@ public class PlaceMediaService {
 
     private void saveAuditLog(UUID mediaId, UUID placeId, UUID actorUserId,
                               PlaceMediaModerationAction action, String reason, String notes, UUID reportId) {
+        PlaceMediaModerationAuditLog.ActorType actorType = (actorUserId != null)
+                ? PlaceMediaModerationAuditLog.ActorType.USER
+                : PlaceMediaModerationAuditLog.ActorType.SYSTEM;
         placeMediaModerationAuditLogRepository.save(new PlaceMediaModerationAuditLog(
                 UUID.randomUUID(),
                 mediaId,
                 placeId,
                 actorUserId,
+                actorType,
                 action,
                 reason,
                 notes,
