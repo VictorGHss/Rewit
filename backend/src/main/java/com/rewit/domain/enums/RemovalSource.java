@@ -8,5 +8,7 @@ package com.rewit.domain.enums;
 public enum RemovalSource {
     AUTHOR,
     BUSINESS_OWNER,
-    MODERATOR
+    PLACE_MANAGER,
+    MODERATOR,
+    LEGACY
 }

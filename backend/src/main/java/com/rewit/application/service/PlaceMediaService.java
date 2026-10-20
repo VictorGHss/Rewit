@@ -545,7 +545,8 @@ public class PlaceMediaService {
             List<PlaceMediaReport> siblings = placeMediaReportRepository.findByPlaceMediaIdForUpdate(lockedMedia.getId());
             for (PlaceMediaReport sib : siblings) {
                 if (sib.isPending() && !sib.getId().equals(lockedReport.getId())) {
-                    String sibNotes = notes != null ? notes : "Deferida em conjunto";
+                    String sibNotes = (notes != null && !notes.isBlank() ? notes + " - " : "") +
+                            "Resolução automática em lote vinculada à denúncia " + lockedReport.getId();
                     sib.accept(moderatorUserId, sibNotes);
                     placeMediaReportRepository.save(sib);
 
@@ -646,6 +647,14 @@ public class PlaceMediaService {
         if (lockedMedia.getRemovalSource() == RemovalSource.AUTHOR) {
             throw new BusinessException("Fotografia removida pelo próprio autor não pode ser restaurada por moderação",
                     HttpStatus.CONFLICT, "CANNOT_RESTORE_AUTHOR_REMOVED_MEDIA");
+        }
+        if (lockedMedia.getRemovalSource() == RemovalSource.BUSINESS_OWNER || lockedMedia.getRemovalSource() == RemovalSource.PLACE_MANAGER) {
+            throw new BusinessException("Fotografia removida pelo responsável do local não pode ser restaurada por moderação",
+                    HttpStatus.CONFLICT, "CANNOT_RESTORE_PLACE_MANAGER_REMOVED_MEDIA");
+        }
+        if (lockedMedia.getRemovalSource() == RemovalSource.LEGACY) {
+            throw new BusinessException("Fotografia com remoção legada não pode ser restaurada por moderação",
+                    HttpStatus.CONFLICT, "CANNOT_RESTORE_LEGACY_REMOVED_MEDIA");
         }
 
         if (lockedMedia.isPurged() || !objectStoragePort.exists(lockedMedia.getObjectKey())) {

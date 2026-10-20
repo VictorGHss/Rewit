@@ -37,6 +37,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -645,7 +647,6 @@ class PlaceMediaServiceTest {
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
         when(placeMediaReportRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
-        when(placeMediaReportRepository.countByPlaceMediaIdAndStatus(mediaId, PlaceMediaReport.STATUS_PENDING)).thenReturn(1L);
 
         var res = placeMediaService.decideReport(modId, reportId, "REJECT", "Denúncia infundada");
 
@@ -656,8 +657,8 @@ class PlaceMediaServiceTest {
     }
 
     @Test
-    @DisplayName("18b. decideReport com REJECT restabelece automaticamente a foto para ACTIVE quando a última denúncia é rejeitada")
-    void shouldRestoreMediaToActiveWhenLastReportIsRejected() {
+    @DisplayName("18b. decideReport com REJECT rejeita a denúncia sem reativação implícita da foto, mantendo UNDER_REVIEW")
+    void shouldRejectReportWithoutImplicitReactivationEvenWhenNoOtherPendingReports() {
         UUID modId = moderatorId;
         UUID reportId = UUID.randomUUID();
         UUID mediaId = UUID.randomUUID();
@@ -678,17 +679,13 @@ class PlaceMediaServiceTest {
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
         when(placeMediaReportRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
-        when(placeMediaReportRepository.countByPlaceMediaIdAndStatus(mediaId, PlaceMediaReport.STATUS_PENDING)).thenReturn(0L);
-        when(placeMediaRepository.countActiveByPlaceId(placeId)).thenReturn(1L);
-        when(placeMediaRepository.findPrimaryByPlaceId(placeId)).thenReturn(Optional.empty());
 
         var res = placeMediaService.decideReport(modId, reportId, "REJECT", "Denúncia infundada");
 
         assertEquals("REJECTED", res.status());
-        assertEquals(PlaceMediaStatus.ACTIVE, media.getStatus());
-        assertTrue(media.isActive());
-        assertTrue(media.isPrimary());
-        verify(placeMediaRepository).save(media);
+        assertEquals(PlaceMediaStatus.UNDER_REVIEW, media.getStatus());
+        assertFalse(media.isActive());
+        verify(placeMediaRepository, never()).save(media);
     }
 
     @Test
@@ -915,5 +912,198 @@ class PlaceMediaServiceTest {
         assertEquals(mediaId, queue.content().get(0).media().getId());
         assertEquals(3L, queue.content().get(0).pendingReportsCount());
         assertEquals(3, queue.content().get(0).reports().size());
+    }
+
+    @Test
+    @DisplayName("27. decideReport com ACCEPT e múltiplas denúncias: grava auditoria para principal e irmãs com IDs e motivos corretos")
+    void shouldAuditAllReportsWhenAcceptingInBatch() {
+        UUID modId = moderatorId;
+        UUID report1Id = UUID.randomUUID();
+        UUID report2Id = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+
+        var report1 = new PlaceMediaReport(
+                report1Id, mediaId, UUID.randomUUID(), "SPAM_1", "Propaganda 1",
+                PlaceMediaReport.STATUS_PENDING, Instant.now(), Instant.now(), null, null, null
+        );
+        var report2 = new PlaceMediaReport(
+                report2Id, mediaId, UUID.randomUUID(), "OFENSIVO_2", "Conteúdo ofensivo 2",
+                PlaceMediaReport.STATUS_PENDING, Instant.now(), Instant.now(), null, null, null
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeMediaReportRepository.findById(report1Id)).thenReturn(Optional.of(report1));
+        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.findByIdForUpdate(report1Id)).thenReturn(Optional.of(report1));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(report1, report2));
+
+        placeMediaService.decideReport(modId, report1Id, "ACCEPT", "Foto confirmada imprópria");
+
+        org.mockito.ArgumentCaptor<com.rewit.domain.model.PlaceMediaModerationAuditLog> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rewit.domain.model.PlaceMediaModerationAuditLog.class);
+        org.mockito.Mockito.verify(placeMediaModerationAuditLogRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+
+        List<com.rewit.domain.model.PlaceMediaModerationAuditLog> logs = captor.getAllValues();
+        assertEquals(2, logs.size());
+
+        var log1 = logs.stream().filter(l -> report1Id.equals(l.getReportId())).findFirst().orElseThrow();
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.ACCEPT_REPORT, log1.getAction());
+        assertEquals("SPAM_1", log1.getReason());
+        assertEquals("Foto confirmada imprópria", log1.getNotes());
+
+        var log2 = logs.stream().filter(l -> report2Id.equals(l.getReportId())).findFirst().orElseThrow();
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.ACCEPT_REPORT, log2.getAction());
+        assertEquals("OFENSIVO_2", log2.getReason());
+        assertTrue(log2.getNotes().contains("Resolução automática em lote"));
+    }
+
+    @Test
+    @DisplayName("28. reportMedia: ao atingir 3 denúncias, transiciona para UNDER_REVIEW e grava auditoria AUTO_QUARANTINE")
+    void shouldRecordAutoQuarantineAuditLogWhenThresholdReached() {
+        UUID reporter = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, true, null, null, Instant.now(), Instant.now()
+        );
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.existsByPlaceMediaIdAndReporterUserId(mediaId, reporter)).thenReturn(false);
+        when(placeMediaReportRepository.countByPlaceMediaIdAndStatus(mediaId, PlaceMediaReport.STATUS_PENDING)).thenReturn(3L);
+
+        placeMediaService.reportMedia(reporter, placeId, mediaId, "SPAM", "Terceira denúncia");
+
+        assertEquals(PlaceMediaStatus.UNDER_REVIEW, media.getStatus());
+        assertFalse(media.isPrimary());
+
+        org.mockito.ArgumentCaptor<com.rewit.domain.model.PlaceMediaModerationAuditLog> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rewit.domain.model.PlaceMediaModerationAuditLog.class);
+        org.mockito.Mockito.verify(placeMediaModerationAuditLogRepository).save(captor.capture());
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.AUTO_QUARANTINE, captor.getValue().getAction());
+        assertEquals(mediaId, captor.getValue().getPlaceMediaId());
+        assertEquals(reporter, captor.getValue().getActorUserId());
+    }
+
+    @Test
+    @DisplayName("29. deleteMedia por responsável do local: classifica como PLACE_MANAGER / BUSINESS_OWNER e audita")
+    void shouldHandleDeletionByPlaceManager() {
+        UUID managerId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        UUID reportId = UUID.randomUUID();
+
+        // Local criado por managerId
+        Place placeCreatedByManager = new Place(
+                placeId, "Local do Gerente", "local-gerente", "RESTAURANTE", "Desc", "End",
+                "100", "Bairro", "Curitiba", "PR", "BR", -25.4, -49.2, 50,
+                "USER", false, null, managerId, "ACTIVE"
+        );
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        PlaceMediaReport pendingReport = new PlaceMediaReport(
+                reportId, mediaId, UUID.randomUUID(), "CONTEUDO_INADEQUADO", "Detalhes",
+                PlaceMediaReport.STATUS_PENDING, Instant.now(), Instant.now(), null, null, null
+        );
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(placeCreatedByManager));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(pendingReport));
+
+        placeMediaService.deleteMedia(managerId, placeId, mediaId);
+
+        assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
+        assertTrue(media.getRemovalSource() == com.rewit.domain.enums.RemovalSource.BUSINESS_OWNER
+                || media.getRemovalSource() == com.rewit.domain.enums.RemovalSource.PLACE_MANAGER);
+
+        org.mockito.ArgumentCaptor<com.rewit.domain.model.PlaceMediaModerationAuditLog> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rewit.domain.model.PlaceMediaModerationAuditLog.class);
+        org.mockito.Mockito.verify(placeMediaModerationAuditLogRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+
+        var removalLog = captor.getAllValues().get(0);
+        assertTrue(removalLog.getAction() == com.rewit.domain.enums.PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE
+                || removalLog.getAction() == com.rewit.domain.enums.PlaceMediaModerationAction.PLACE_MANAGER_REMOVE);
+        assertEquals(managerId, removalLog.getActorUserId());
+
+        var reportResolutionLog = captor.getAllValues().get(1);
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.ACCEPT_REPORT, reportResolutionLog.getAction());
+        assertEquals("CONTEUDO_INADEQUADO", reportResolutionLog.getReason());
+        assertEquals(reportId, reportResolutionLog.getReportId());
+    }
+
+    @Test
+    @DisplayName("30. restoreMediaByModerator: não permite restaurar foto removida por responsável do local ou legada")
+    void shouldRejectRestorationOfPlaceManagerOrLegacyRemovedMedia() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia mediaManager = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now(),
+                null, Instant.now(), com.rewit.domain.enums.RemovalSource.BUSINESS_OWNER
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(mediaManager));
+
+        var exManager = assertThrows(BusinessException.class, () ->
+                placeMediaService.restoreMediaByModerator(modId, placeId, mediaId, "Tentativa de restaurar foto de gerente")
+        );
+        assertEquals("CANNOT_RESTORE_PLACE_MANAGER_REMOVED_MEDIA", exManager.getErrorCode());
+
+        PlaceMedia mediaLegacy = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now(),
+                null, Instant.now(), com.rewit.domain.enums.RemovalSource.LEGACY
+        );
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(mediaLegacy));
+
+        var exLegacy = assertThrows(BusinessException.class, () ->
+                placeMediaService.restoreMediaByModerator(modId, placeId, mediaId, "Tentativa de restaurar foto legada")
+        );
+        assertEquals("CANNOT_RESTORE_LEGACY_REMOVED_MEDIA", exLegacy.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("31. uploadMedia: replay idempotente não consome cota do rate limiter")
+    void shouldNotConsumeRateLimitOnIdempotentReplay() throws Exception {
+        UUID mediaId = UUID.randomUUID();
+        byte[] pngBytes = createValidPngBytes();
+        String sha = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(pngBytes));
+
+        PlaceMedia existingMedia = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.png",
+                ReviewMediaType.IMAGE, "image/png", (long) pngBytes.length, 32, 24,
+                PlaceMediaStatus.ACTIVE, true, "idem-key-123", sha, Instant.now(), Instant.now()
+        );
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdempotencyKey(userId, placeId, "idem-key-123"))
+                .thenReturn(Optional.of(existingMedia));
+
+        var cmd = new UploadPlaceMediaCommand(placeId, userId, pngBytes, "foto.png", "idem-key-123");
+        var view = placeMediaService.uploadMedia(cmd);
+
+        assertNotNull(view);
+        assertEquals(mediaId, view.id());
+        // Rate limiter NUNCA deve ter sido invocado para o replay idempotente
+        verify(rateLimiter, never()).acquireOrThrow(any(), any());
     }
 }

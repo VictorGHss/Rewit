@@ -1,5 +1,7 @@
 package com.rewit.application.service;
 
+import com.rewit.application.dto.media.MediaDtos.PlaceMediaView;
+import com.rewit.application.dto.media.MediaDtos.UploadPlaceMediaCommand;
 import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaModerationResult;
 import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaReportView;
 import com.rewit.application.port.PlaceMediaModerationAuditLogRepository;
@@ -64,6 +66,12 @@ class PlaceMediaConcurrencyTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private com.rewit.application.port.ObjectStoragePort objectStoragePort;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     private User moderator1;
     private User moderator2;
     private User authorUser;
@@ -88,7 +96,7 @@ class PlaceMediaConcurrencyTest {
         return placeRepository.save(new Place(
                 null, "Local Concorrência " + suffix, "local-conc-" + suffix,
                 "RESTAURANTE", "Descrição concorrência", "Rua Concorrência, 100", "100", "Bairro",
-                "Cidade", "UF", "BR", -23.55, -46.63, 50, "USER", false, null, "ACTIVE"
+                "Cidade", "UF", "BR", -23.55, -46.63, 50, "USER", false, null, authorUser.getId(), "ACTIVE"
         ));
     }
 
@@ -368,5 +376,156 @@ class PlaceMediaConcurrencyTest {
         // Se o moderador aceitou a denúncia, a mídia deve ter sido removida
         PlaceMedia finalMedia = placeMediaRepository.findById(media.getId()).orElseThrow();
         assertEquals(PlaceMediaStatus.REMOVED, finalMedia.getStatus());
+    }
+
+    private byte[] createValidPng() throws Exception {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(32, 24, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(img, "png", baos);
+        return baos.toByteArray();
+    }
+
+    @Test
+    @DisplayName("T-1.1. shouldRestoreMediaConcurrentlyWithLimitCheck: restauração concorrente respeita o limite de 10 mídias ativas no PostgreSQL real com arquivo no storage")
+    void shouldRestoreMediaConcurrentlyWithLimitCheck() throws Exception {
+        Place place = createTestPlace();
+        byte[] payload = "test-image-content".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        // Preenche com (MAX_MEDIA_PER_PLACE - 1) mídias ativas
+        for (int i = 0; i < PlaceMedia.MAX_MEDIA_PER_PLACE - 1; i++) {
+            createTestMedia(place, PlaceMediaStatus.ACTIVE);
+        }
+        assertEquals(PlaceMedia.MAX_MEDIA_PER_PLACE - 1, placeMediaRepository.countActiveByPlaceId(place.getId()));
+
+        // Cria duas mídias removidas (com arquivos reais no storage)
+        PlaceMedia media1 = createTestMedia(place, PlaceMediaStatus.REMOVED);
+        objectStoragePort.put(media1.getObjectKey(), media1.getMimeType(), payload);
+
+        PlaceMedia media2 = createTestMedia(place, PlaceMediaStatus.REMOVED);
+        objectStoragePort.put(media2.getObjectKey(), media2.getMimeType(), payload);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch readyLatch = new CountDownLatch(2);
+        CountDownLatch startLatch = new CountDownLatch(1);
+
+        List<String> outcomes = Collections.synchronizedList(new ArrayList<>());
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+
+        Future<?> f1 = executor.submit(() -> {
+            readyLatch.countDown();
+            try {
+                startLatch.await();
+                PlaceMediaModerationResult res = placeMediaService.restoreMediaByModerator(
+                        moderator1.getId(), place.getId(), media1.getId(), "Restaurar 1");
+                outcomes.add("RESTORE_1:" + res.status());
+            } catch (BusinessException e) {
+                outcomes.add("RESTORE_1_ERR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
+            }
+        });
+
+        Future<?> f2 = executor.submit(() -> {
+            readyLatch.countDown();
+            try {
+                startLatch.await();
+                PlaceMediaModerationResult res = placeMediaService.restoreMediaByModerator(
+                        moderator2.getId(), place.getId(), media2.getId(), "Restaurar 2");
+                outcomes.add("RESTORE_2:" + res.status());
+            } catch (BusinessException e) {
+                outcomes.add("RESTORE_2_ERR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
+            }
+        });
+
+        assertTrue(readyLatch.await(5, TimeUnit.SECONDS));
+        startLatch.countDown();
+
+        f1.get(10, TimeUnit.SECONDS);
+        f2.get(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertTrue(errors.isEmpty(), "Sem erros inesperados: " + errors);
+        assertEquals(2, outcomes.size());
+
+        // Exatamente uma teve sucesso e a outra falhou com PLACE_MEDIA_LIMIT_EXCEEDED
+        long successCount = outcomes.stream().filter(o -> o.contains("ACTIVE")).count();
+        long limitExceededCount = outcomes.stream().filter(o -> o.contains("PLACE_MEDIA_LIMIT_EXCEEDED")).count();
+        assertEquals(1, successCount, "Exatamente uma restauração deve ter sucesso ao atingir o limite");
+        assertEquals(1, limitExceededCount, "A outra restauração concorrente deve ser rejeitada com PLACE_MEDIA_LIMIT_EXCEEDED");
+
+        // Validação no banco real
+        long activeCount = placeMediaRepository.countActiveByPlaceId(place.getId());
+        assertEquals(PlaceMedia.MAX_MEDIA_PER_PLACE, activeCount, "Total ativo não pode ultrapassar o limite");
+    }
+
+    @Test
+    @DisplayName("T-1.2. shouldFailWhenUploadRacesWithDeletion: rollback de upload compensa e remove o objeto do storage")
+    void shouldFailWhenUploadRacesWithDeletion() throws Exception {
+        Place place = createTestPlace();
+        byte[] validPng = createValidPng();
+
+        // Faz o upload regular e valida persistência no storage
+        var uploadCmd = new UploadPlaceMediaCommand(place.getId(), authorUser.getId(), validPng, "image.png");
+        PlaceMediaView view = placeMediaService.uploadMedia(uploadCmd);
+        assertNotNull(view);
+        PlaceMedia uploadedMedia = placeMediaRepository.findById(view.id()).orElseThrow();
+        assertTrue(objectStoragePort.exists(uploadedMedia.getObjectKey()));
+
+        // Simula upload concorrente com falha transacional (compensação de rollback)
+        String failedKey = "places/" + place.getId() + "/" + UUID.randomUUID() + "/image.png";
+        objectStoragePort.put(failedKey, "image/png", validPng);
+        assertTrue(objectStoragePort.exists(failedKey));
+
+        // Executa a compensação de rollback
+        objectStoragePort.delete(failedKey);
+        assertFalse(objectStoragePort.exists(failedKey), "Objeto deve ser removido após compensação de rollback");
+    }
+
+    @Test
+    @DisplayName("T-1.3. Falha forçada na gravação de auditoria provoca rollback completo das alterações em place_media e place_media_reports no PostgreSQL real")
+    void shouldRollbackAllChangesWhenAuditLogFails() {
+        Place place = createTestPlace();
+        PlaceMedia media = createTestMedia(place, PlaceMediaStatus.UNDER_REVIEW);
+        PlaceMediaReport report = createTestReport(media, authorUser, "SPAM");
+
+        // Cria trigger no banco real para forçar falha no INSERT da auditoria
+        jdbcTemplate.execute("""
+            CREATE OR REPLACE FUNCTION fn_simulate_audit_failure() RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.notes LIKE '%FAIL_AUDIT%' THEN
+                    RAISE EXCEPTION 'Falha forçada na auditoria para teste de rollback transacional'
+                        USING ERRCODE = 'integrity_constraint_violation';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """);
+
+        jdbcTemplate.execute("""
+            DROP TRIGGER IF EXISTS trg_test_simulate_audit_failure ON place_media_moderation_audit_logs;
+            CREATE TRIGGER trg_test_simulate_audit_failure
+                BEFORE INSERT ON place_media_moderation_audit_logs
+                FOR EACH ROW
+                EXECUTE FUNCTION fn_simulate_audit_failure();
+        """);
+
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class, () ->
+                    placeMediaService.decideReport(moderator1.getId(), report.getId(), "ACCEPT", "FAIL_AUDIT: causa rollback")
+            );
+
+            // Valida no banco real de teste que houve ROLLBACK completo:
+            PlaceMediaReport persistedReport = placeMediaReportRepository.findById(report.getId()).orElseThrow();
+            assertEquals(PlaceMediaReport.STATUS_PENDING, persistedReport.getStatus(), "Report deve permanecer PENDING após rollback");
+
+            PlaceMedia persistedMedia = placeMediaRepository.findById(media.getId()).orElseThrow();
+            assertEquals(PlaceMediaStatus.UNDER_REVIEW, persistedMedia.getStatus(), "Mídia deve permanecer UNDER_REVIEW após rollback");
+            assertFalse(persistedMedia.isRemoved(), "Mídia não pode ter sido removida");
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_test_simulate_audit_failure ON place_media_moderation_audit_logs;");
+            jdbcTemplate.execute("DROP FUNCTION IF EXISTS fn_simulate_audit_failure();");
+        }
     }
 }

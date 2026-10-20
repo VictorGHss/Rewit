@@ -223,6 +223,18 @@ public class PlaceMedia {
         this.updatedAt = this.removedAt;
     }
 
+    public void markRemovedByPlaceManager() {
+        markRemovedByPlaceManager(Instant.now());
+    }
+
+    public void markRemovedByPlaceManager(Instant when) {
+        this.status = PlaceMediaStatus.REMOVED;
+        this.isPrimary = false;
+        this.removedAt = when != null ? when : Instant.now();
+        this.removalSource = RemovalSource.PLACE_MANAGER;
+        this.updatedAt = this.removedAt;
+    }
+
     public void markUnderReview() {
         this.status = PlaceMediaStatus.UNDER_REVIEW;
         this.isPrimary = false;

@@ -17,8 +17,8 @@ spring:
 rewit:
   minio:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:${REWIT_STORAGE_SEAWEED_ENDPOINT:${MINIO_ENDPOINT:http://127.0.0.1:58333}}}
-    access-key: ${OBJECT_STORAGE_ACCESS_KEY:${MINIO_ROOT_USER:rewit_local_access}}
-    secret-key: ${OBJECT_STORAGE_SECRET_KEY:${MINIO_ROOT_PASSWORD:rewit_local_secret}}
+    access-key: ${OBJECT_STORAGE_ACCESS_KEY:${MINIO_ROOT_USER:change-me}}
+    secret-key: ${OBJECT_STORAGE_SECRET_KEY:${MINIO_ROOT_PASSWORD:change-me}}
     bucket-name: ${OBJECT_STORAGE_BUCKET:${MINIO_BUCKET_NAME:rewit-local}}
   security:
     jwt-secret: ${JWT_SECRET:test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!}
