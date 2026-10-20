@@ -67,6 +67,7 @@ import static org.junit.jupiter.api.Assertions.*;
                 "logging.structured.json.stacktrace.printer=com.rewit.infrastructure.observability.SanitizedStackTracePrinter",
                 "logging.structured.json.stacktrace.max-length=8192",
                 "logging.structured.json.stacktrace.max-throwable-depth=30",
+                "logging.level.org.springframework.web=WARN",
                 "rewit.google.places.api-key=" + ObservabilityTracingLoggingIntegrationTest.GOOGLE_API_KEY
         }
 )
