@@ -154,17 +154,18 @@ class CatalogPersistenceIntegrationTest {
     @Test
     @DisplayName("3. Unicidade: Constraint uq_places_slug deve rejeitar slugs duplicados no PostgreSQL")
     void shouldRejectDuplicatePlaceSlugAtDatabaseLevel() {
-        String slug = "slug-conflito-" + UUID.randomUUID().toString().substring(0, 8);
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String slug = "slug-conflito-" + suffix;
 
         Place placeA = new Place(
-                null, "Lugar A", slug, "BAR", "Desc",
-                "Rua 1", "Curitiba", "PR", "BR", -25.4, -49.2, 50, "USER", false, null, "ACTIVE"
+                null, "Lugar A " + suffix, slug, "BAR", "Desc",
+                "Rua 1 " + suffix, "Curitiba", "PR", "BR", -25.4, -49.2, 50, "USER", false, null, "ACTIVE"
         );
         placeRepository.save(placeA);
 
         Place placeB = new Place(
-                null, "Lugar B", slug, "CAFE", "Outro",
-                "Rua 2", "Curitiba", "PR", "BR", -25.5, -49.3, 50, "USER", false, null, "ACTIVE"
+                null, "Lugar B " + suffix, slug, "CAFE", "Outro",
+                "Rua 2 " + suffix, "Curitiba", "PR", "BR", -25.5, -49.3, 50, "USER", false, null, "ACTIVE"
         );
 
         Exception duplicateSlugEx = assertThrows(Exception.class, () -> {
