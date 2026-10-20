@@ -9,6 +9,6 @@
 -- CONCURRENTLY não bloqueia escritas e não roda em transação: ver o arquivo
 -- V16__auth_sessions_replaced_by_index.sql.conf (executeInTransaction=false).
 
-CREATE INDEX CONCURRENTLY idx_auth_sessions_replaced_by_session_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_auth_sessions_replaced_by_session_id
     ON auth_sessions (replaced_by_session_id)
     WHERE replaced_by_session_id IS NOT NULL;

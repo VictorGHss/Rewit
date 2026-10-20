@@ -50,19 +50,31 @@ public class PlaceMediaReportJpaEntity {
     @Column(name = "decision_notes", length = 500)
     private String decisionNotes;
 
+    @Column(name = "is_legacy_decision", nullable = false)
+    private boolean isLegacyDecision = false;
+
     public PlaceMediaReportJpaEntity() {
     }
 
     public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
                                      String reason, String detail, String status,
                                      Instant createdAt, Instant updatedAt) {
-        this(id, placeMediaId, reporterUserId, reason, detail, status, createdAt, updatedAt, null, null, null);
+        this(id, placeMediaId, reporterUserId, reason, detail, status, createdAt, updatedAt, null, null, null, false);
     }
 
     public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
                                      String reason, String detail, String status,
                                      Instant createdAt, Instant updatedAt,
                                      UUID decidedByUserId, Instant decidedAt, String decisionNotes) {
+        this(id, placeMediaId, reporterUserId, reason, detail, status,
+                createdAt, updatedAt, decidedByUserId, decidedAt, decisionNotes, false);
+    }
+
+    public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
+                                     String reason, String detail, String status,
+                                     Instant createdAt, Instant updatedAt,
+                                     UUID decidedByUserId, Instant decidedAt, String decisionNotes,
+                                     boolean isLegacyDecision) {
         this.id = id != null ? id : UUID.randomUUID();
         this.placeMediaId = placeMediaId;
         this.reporterUserId = reporterUserId;
@@ -74,6 +86,7 @@ public class PlaceMediaReportJpaEntity {
         this.decidedByUserId = decidedByUserId;
         this.decidedAt = decidedAt;
         this.decisionNotes = decisionNotes;
+        this.isLegacyDecision = isLegacyDecision;
     }
 
     public static PlaceMediaReportJpaEntity fromDomain(com.rewit.domain.model.PlaceMediaReport domain) {
@@ -89,7 +102,8 @@ public class PlaceMediaReportJpaEntity {
                 domain.getUpdatedAt(),
                 domain.getDecidedByUserId(),
                 domain.getDecidedAt(),
-                domain.getDecisionNotes()
+                domain.getDecisionNotes(),
+                domain.isLegacyDecision()
         );
     }
 
@@ -105,7 +119,8 @@ public class PlaceMediaReportJpaEntity {
                 this.updatedAt,
                 this.decidedByUserId,
                 this.decidedAt,
-                this.decisionNotes
+                this.decisionNotes,
+                this.isLegacyDecision
         );
     }
 
@@ -195,6 +210,14 @@ public class PlaceMediaReportJpaEntity {
 
     public void setDecisionNotes(String decisionNotes) {
         this.decisionNotes = decisionNotes;
+    }
+
+    public boolean isLegacyDecision() {
+        return isLegacyDecision;
+    }
+
+    public void setLegacyDecision(boolean legacyDecision) {
+        this.isLegacyDecision = legacyDecision;
     }
 
     @Override

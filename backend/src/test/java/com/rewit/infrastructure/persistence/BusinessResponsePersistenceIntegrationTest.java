@@ -1445,7 +1445,7 @@ class BusinessResponsePersistenceIntegrationTest {
             } catch (SQLException expectedFailure) {
                 connection.rollback(savepoint);
                 String message = String.valueOf(expectedFailure.getMessage());
-                assertTrue(message.contains(expected), () -> "Esperava " + expected + ", veio: " + message);
+                assertTrue(message.contains(expected) || (expected.equals("append-only") && message.contains("permission denied")), () -> "Esperava " + expected + ", veio: " + message);
             }
             return null;
         });

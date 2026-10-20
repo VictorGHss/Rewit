@@ -4,7 +4,7 @@ spring:
   datasource:
     url: ${TEST_DATASOURCE_URL:jdbc:postgresql://${TEST_POSTGRES_HOST:127.0.0.1}:${TEST_POSTGRES_PORT:55432}/${TEST_POSTGRES_DB:rewit_db}}
     username: ${TEST_APP_DB_USER:rewit_app}
-    password: ${TEST_APP_DB_PASSWORD:rewit_app_local_password}
+    password: ${TEST_APP_DB_PASSWORD:test_app_password}
     hikari:
       maximum-pool-size: 5
       minimum-idle: 1
@@ -12,7 +12,7 @@ spring:
       max-lifetime: 30000
   flyway:
     user: ${TEST_MIGRATION_DB_USER:rewit_user}
-    password: ${TEST_MIGRATION_DB_PASSWORD:rewit_local_password}
+    password: ${TEST_MIGRATION_DB_PASSWORD:test_postgres_password}
   data:
     redis:
       host: ${TEST_REDIS_HOST:127.0.0.1}

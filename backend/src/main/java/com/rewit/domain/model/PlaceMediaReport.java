@@ -28,17 +28,27 @@ public class PlaceMediaReport {
     private UUID decidedByUserId;
     private Instant decidedAt;
     private String decisionNotes;
+    private final boolean legacyDecision;
 
     public PlaceMediaReport(UUID id, UUID placeMediaId, UUID reporterUserId,
                             String reason, String detail) {
         this(id, placeMediaId, reporterUserId, reason, detail, STATUS_PENDING,
-                Instant.now(), Instant.now(), null, null, null);
+                Instant.now(), Instant.now(), null, null, null, false);
     }
 
     public PlaceMediaReport(UUID id, UUID placeMediaId, UUID reporterUserId,
                             String reason, String detail, String status,
                             Instant createdAt, Instant updatedAt,
                             UUID decidedByUserId, Instant decidedAt, String decisionNotes) {
+        this(id, placeMediaId, reporterUserId, reason, detail, status,
+                createdAt, updatedAt, decidedByUserId, decidedAt, decisionNotes, false);
+    }
+
+    public PlaceMediaReport(UUID id, UUID placeMediaId, UUID reporterUserId,
+                            String reason, String detail, String status,
+                            Instant createdAt, Instant updatedAt,
+                            UUID decidedByUserId, Instant decidedAt, String decisionNotes,
+                            boolean legacyDecision) {
         this.id = id != null ? id : UUID.randomUUID();
         this.placeMediaId = Objects.requireNonNull(placeMediaId, "placeMediaId must not be null");
         this.reporterUserId = Objects.requireNonNull(reporterUserId, "reporterUserId must not be null");
@@ -53,6 +63,7 @@ public class PlaceMediaReport {
         this.decidedByUserId = decidedByUserId;
         this.decidedAt = decidedAt;
         this.decisionNotes = decisionNotes != null ? decisionNotes.trim() : null;
+        this.legacyDecision = legacyDecision;
     }
 
     public boolean isPending() {
@@ -137,5 +148,9 @@ public class PlaceMediaReport {
 
     public String getDecisionNotes() {
         return decisionNotes;
+    }
+
+    public boolean isLegacyDecision() {
+        return legacyDecision;
     }
 }

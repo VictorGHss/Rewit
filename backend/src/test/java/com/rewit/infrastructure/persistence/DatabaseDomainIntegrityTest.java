@@ -3,6 +3,7 @@ package com.rewit.infrastructure.persistence;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.flywaydb.core.Flyway;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -21,12 +22,12 @@ class DatabaseDomainIntegrityTest {
                     System.getenv().getOrDefault("TEST_POSTGRES_USER", "rewit_user")));
     private static final String MIGRATION_DB_PASSWORD = System.getProperty("spring.flyway.password",
             System.getenv().getOrDefault("TEST_MIGRATION_DB_PASSWORD",
-                    System.getenv().getOrDefault("TEST_POSTGRES_PASSWORD", "rewit_local_password")));
+                    System.getenv().getOrDefault("TEST_POSTGRES_PASSWORD", "test_postgres_password")));
 
     private static final String APP_DB_USER = System.getProperty("spring.datasource.username",
             System.getenv().getOrDefault("TEST_APP_DB_USER", "rewit_app"));
     private static final String APP_DB_PASSWORD = System.getProperty("spring.datasource.password",
-            System.getenv().getOrDefault("TEST_APP_DB_PASSWORD", "rewit_app_local_password"));
+            System.getenv().getOrDefault("TEST_APP_DB_PASSWORD", "test_app_password"));
 
     private static String resolveDbUrl() {
         String sysTestUrl = System.getProperty("TEST_DATASOURCE_URL");
@@ -69,6 +70,15 @@ class DatabaseDomainIntegrityTest {
         } catch (SQLException e) {
             fail("PostgreSQL de teste isolado não está acessível em " + dbUrl + ": " + e.getMessage(), e);
         }
+
+        // Executa Flyway para aplicar todas as migrations canônicas da base
+        Flyway flyway = Flyway.configure()
+                .dataSource(dbUrl, MIGRATION_DB_USER, MIGRATION_DB_PASSWORD)
+                .locations("classpath:db/migration")
+                .configuration(java.util.Map.of("flyway.postgresql.transactional.lock", "false"))
+                .baselineOnMigrate(true)
+                .load();
+        flyway.migrate();
     }
 
     private Connection getConnection() throws SQLException {
@@ -664,6 +674,317 @@ class DatabaseDomainIntegrityTest {
                 ps.setObject(3, placeId);
                 ps.setObject(4, reporterId);
                 assertEquals(1, ps.executeUpdate());
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("AO-2: Privilégio mínimo e imutabilidade de todas as 4 trilhas de auditoria e do histórico Flyway sob rewit_app")
+    void shouldEnforceLeastPrivilegeOnAllFourAuditTrailsForRuntimeRole() throws SQLException {
+        try (Connection appConn = getAppConnection()) {
+            // 1. rewit_app não possui superuser, inheritance, criação de roles ou criação de databases
+            try (PreparedStatement ps = appConn.prepareStatement(
+                    "SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = 'rewit_app'")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next(), "A role rewit_app deve existir no catálogo pg_roles");
+                    assertFalse(rs.getBoolean("rolsuper"), "rewit_app NÃO pode ser superuser");
+                    assertFalse(rs.getBoolean("rolinherit"), "rewit_app NÃO pode ter inherit habilitado");
+                    assertFalse(rs.getBoolean("rolcreaterole"), "rewit_app NÃO pode ter permissão de criar roles");
+                    assertFalse(rs.getBoolean("rolcreatedb"), "rewit_app NÃO pode ter permissão de criar bancos");
+                }
+            }
+
+            // 2. DDL negado sob rewit_app
+            SQLException exCreate = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement("CREATE TABLE test_hacker_table (id INT)")) {
+                    ps.execute();
+                }
+            });
+            assertTrue(exCreate.getMessage().contains("permission denied") || exCreate.getMessage().contains("permissão negada") || exCreate.getMessage().contains("must be owner"),
+                    "DDL CREATE TABLE deve ser negado para rewit_app");
+
+            SQLException exAlter = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement("ALTER TABLE places ADD COLUMN test_hack TEXT")) {
+                    ps.execute();
+                }
+            });
+            assertTrue(exAlter.getMessage().contains("must be owner") || exAlter.getMessage().contains("permission denied") || exAlter.getMessage().contains("permissão negada"),
+                    "DDL ALTER TABLE deve ser negado para rewit_app");
+
+            // 3. Prova para todas as 4 trilhas de auditoria
+            String[] auditTables = {
+                    "moderation_audit_logs",
+                    "discussion_moderation_audit_logs",
+                    "business_response_moderation_audit_logs",
+                    "place_media_moderation_audit_logs"
+            };
+
+            for (String table : auditTables) {
+                // UPDATE negado
+                SQLException exUpdate = assertThrows(SQLException.class, () -> {
+                    try (PreparedStatement ps = appConn.prepareStatement("UPDATE " + table + " SET id = gen_random_uuid() WHERE 1=0")) {
+                        ps.executeUpdate();
+                    }
+                }, "UPDATE em " + table + " deve ser negado para rewit_app");
+                assertTrue(exUpdate.getMessage().contains("permission denied") || exUpdate.getMessage().contains("append-only") || exUpdate.getMessage().contains("permissão negada"),
+                        "UPDATE deve falhar por falta de permissão ou trigger append-only em " + table);
+
+                // DELETE negado
+                SQLException exDelete = assertThrows(SQLException.class, () -> {
+                    try (PreparedStatement ps = appConn.prepareStatement("DELETE FROM " + table + " WHERE 1=0")) {
+                        ps.executeUpdate();
+                    }
+                }, "DELETE em " + table + " deve ser negado para rewit_app");
+                assertTrue(exDelete.getMessage().contains("permission denied") || exDelete.getMessage().contains("append-only") || exDelete.getMessage().contains("permissão negada"),
+                        "DELETE deve falhar por falta de permissão ou trigger append-only em " + table);
+
+                // TRUNCATE negado
+                SQLException exTruncate = assertThrows(SQLException.class, () -> {
+                    try (PreparedStatement ps = appConn.prepareStatement("TRUNCATE TABLE " + table)) {
+                        ps.execute();
+                    }
+                }, "TRUNCATE em " + table + " deve ser negado para rewit_app");
+                assertTrue(exTruncate.getMessage().contains("permission denied") || exTruncate.getMessage().contains("append-only") || exTruncate.getMessage().contains("must be owner") || exTruncate.getMessage().contains("permissão negada"),
+                        "TRUNCATE deve falhar por falta de permissão ou trigger append-only em " + table);
+            }
+
+            // 4. Prova para flyway_schema_history
+            SQLException exFlywayUpdate = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement("UPDATE flyway_schema_history SET success = false WHERE 1=0")) {
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exFlywayUpdate.getMessage().contains("permission denied") || exFlywayUpdate.getMessage().contains("permissão negada"),
+                    "UPDATE em flyway_schema_history deve ser negado para rewit_app");
+
+            SQLException exFlywayDelete = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement("DELETE FROM flyway_schema_history WHERE 1=0")) {
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exFlywayDelete.getMessage().contains("permission denied") || exFlywayDelete.getMessage().contains("permissão negada"),
+                    "DELETE em flyway_schema_history deve ser negado para rewit_app");
+        }
+    }
+
+    @Test
+    @DisplayName("V36 / AU-1 / AU-2: Suporte a is_legacy_decision preservando decisões históricas sem moderador")
+    void shouldSupportLegacyUnattributedDecisionsWhileEnforcingStrictRulesForNewDecisions() throws SQLException {
+        try (Connection conn = getConnection()) {
+            UUID mediaId = UUID.randomUUID();
+            UUID reporterId = UUID.randomUUID();
+            UUID moderatorId = UUID.randomUUID();
+            UUID placeId = UUID.randomUUID();
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO users (id, email, auth_provider) VALUES (?, 'rep.v36.leg." + UUID.randomUUID() + "@rewit.com', 'LOCAL')")) {
+                ps.setObject(1, reporterId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO users (id, email, auth_provider) VALUES (?, 'mod.v36.leg." + UUID.randomUUID() + "@rewit.com', 'LOCAL')")) {
+                ps.setObject(1, moderatorId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')")) {
+                ps.setObject(1, placeId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) " +
+                            "VALUES (?, 'Local V36 Leg " + placeId + "', 'slug-leg-" + placeId + "', 'BAR', 'Rua Leg " + placeId + "', 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))")) {
+                ps.setObject(1, placeId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media (id, place_id, user_id, object_key, media_type, mime_type, size_bytes, width, height, status, is_primary, created_at, updated_at) " +
+                            "VALUES (?, ?, ?, 'places/test-leg-" + mediaId + ".jpg', 'IMAGE', 'image/jpeg', 1024, 800, 600, 'ACTIVE', false, NOW(), NOW())")) {
+                ps.setObject(1, mediaId);
+                ps.setObject(2, placeId);
+                ps.setObject(3, reporterId);
+                ps.executeUpdate();
+            }
+
+            // 1. Decisão legada ACCEPTED sem moderador e is_legacy_decision = true é ACEITA
+            UUID legacyAccId = UUID.randomUUID();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at, is_legacy_decision) " +
+                            "VALUES (?, ?, ?, 'SPAM', 'ACCEPTED', NULL, NOW(), true)")) {
+                ps.setObject(1, legacyAccId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, reporterId);
+                assertEquals(1, ps.executeUpdate(), "Decisão legada ACCEPTED sem moderador deve ser aceita quando is_legacy_decision=true");
+            }
+
+            // 2. Nova decisão ACCEPTED sem moderador com is_legacy_decision = false é REJEITADA
+            UUID reporterId2 = UUID.randomUUID();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO users (id, email, auth_provider) VALUES (?, 'rep2.v36.leg." + UUID.randomUUID() + "@rewit.com', 'LOCAL')")) {
+                ps.setObject(1, reporterId2);
+                ps.executeUpdate();
+            }
+
+            UUID invalidAccId = UUID.randomUUID();
+            SQLException exAccNoMod = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at, is_legacy_decision) " +
+                                "VALUES (?, ?, ?, 'SPAM', 'ACCEPTED', NULL, NOW(), false)")) {
+                    ps.setObject(1, invalidAccId);
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, reporterId2);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exAccNoMod.getMessage().contains("chk_place_media_reports_decided_by"),
+                    "Nova decisão ACCEPTED sem moderador deve ser rejeitada pela check constraint");
+
+            // 3. Nova decisão ACCEPTED com moderador é ACEITA
+            UUID reporterId3 = UUID.randomUUID();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO users (id, email, auth_provider) VALUES (?, 'rep3.v36.leg." + UUID.randomUUID() + "@rewit.com', 'LOCAL')")) {
+                ps.setObject(1, reporterId3);
+                ps.executeUpdate();
+            }
+
+            UUID validAccId = UUID.randomUUID();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at, is_legacy_decision) " +
+                            "VALUES (?, ?, ?, 'OFENSIVO', 'ACCEPTED', ?, NOW(), false)")) {
+                ps.setObject(1, validAccId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, reporterId3);
+                ps.setObject(4, moderatorId);
+                assertEquals(1, ps.executeUpdate());
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("V36 / Seção 8: ACCEPT_REPORT posterior não substitui remoção realizada previamente pelo autor (AUTHOR_REMOVE)")
+    void shouldNotOverwriteAuthorRemovalWithSubsequentAcceptReport() throws SQLException {
+        try (Connection conn = getConnection()) {
+            UUID mediaId = UUID.randomUUID();
+            UUID authorId = UUID.randomUUID();
+            UUID moderatorId = UUID.randomUUID();
+            UUID placeId = UUID.randomUUID();
+            UUID reportId = UUID.randomUUID();
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO users (id, email, auth_provider, role) VALUES (?, 'author." + UUID.randomUUID() + "@rewit.com', 'LOCAL', 'USER')")) {
+                ps.setObject(1, authorId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO users (id, email, auth_provider, role) VALUES (?, 'mod." + UUID.randomUUID() + "@rewit.com', 'LOCAL', 'MODERATOR')")) {
+                ps.setObject(1, moderatorId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')")) {
+                ps.setObject(1, placeId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) " +
+                            "VALUES (?, 'Local Rem " + placeId + "', 'slug-rem-" + placeId + "', 'BAR', 'Rua Rem " + placeId + "', 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))")) {
+                ps.setObject(1, placeId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media (id, place_id, user_id, object_key, media_type, mime_type, size_bytes, width, height, status, is_primary, created_at, updated_at) " +
+                            "VALUES (?, ?, ?, 'places/test-rem-" + mediaId + ".jpg', 'IMAGE', 'image/jpeg', 1024, 800, 600, 'REMOVED', false, NOW() - INTERVAL '2 hours', NOW())")) {
+                ps.setObject(1, mediaId);
+                ps.setObject(2, placeId);
+                ps.setObject(3, authorId);
+                ps.executeUpdate();
+            }
+
+            // 1. Evento cronológico 1: Autor remove a própria foto (1 hora atrás)
+            UUID auditAuthorId = UUID.randomUUID();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media_moderation_audit_logs " +
+                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at) " +
+                            "VALUES (?, ?, ?, ?, 'USER', 'AUTHOR_REMOVE', 'Foto excluída pelo autor', 'Remoção voluntária', NOW() - INTERVAL '1 hour')")) {
+                ps.setObject(1, auditAuthorId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, placeId);
+                ps.setObject(4, authorId);
+                assertEquals(1, ps.executeUpdate());
+            }
+
+            // 2. Evento cronológico 2: Moderador aceita denúncia pendente posteriormente (30 minutos atrás)
+            UUID auditModId = UUID.randomUUID();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media_moderation_audit_logs " +
+                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, report_id, created_at) " +
+                            "VALUES (?, ?, ?, ?, 'USER', 'ACCEPT_REPORT', 'Denúncia procedente', 'Deferida', ?, NOW() - INTERVAL '30 minutes')")) {
+                ps.setObject(1, auditModId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, placeId);
+                ps.setObject(4, moderatorId);
+                ps.setObject(5, reportId);
+                assertEquals(1, ps.executeUpdate());
+            }
+
+            // 3. Executa a query de classificação da migration V36
+            String backfillSql = """
+                WITH media_last_restore AS (
+                    SELECT
+                        place_media_id,
+                        MAX(created_at) AS last_restore_at
+                    FROM place_media_moderation_audit_logs
+                    WHERE action IN ('RESTORE', 'RELEASE_REVIEW')
+                    GROUP BY place_media_id
+                ),
+                first_valid_removal AS (
+                    SELECT DISTINCT ON (al.place_media_id)
+                        al.place_media_id,
+                        al.action,
+                        al.actor_user_id,
+                        al.actor_type,
+                        al.created_at,
+                        al.id
+                    FROM place_media_moderation_audit_logs al
+                    LEFT JOIN media_last_restore lr ON lr.place_media_id = al.place_media_id
+                    WHERE al.action IN ('REMOVE', 'ACCEPT_REPORT', 'AUTHOR_REMOVE', 'PLACE_MANAGER_REMOVE', 'BUSINESS_OWNER_REMOVE')
+                      AND (lr.last_restore_at IS NULL OR al.created_at > lr.last_restore_at)
+                    ORDER BY al.place_media_id, al.created_at ASC, al.id ASC
+                )
+                UPDATE place_media pm
+                SET removal_source = CASE
+                    WHEN fvr.action = 'AUTHOR_REMOVE' THEN 'AUTHOR'
+                    WHEN fvr.action = 'PLACE_MANAGER_REMOVE' THEN 'PLACE_MANAGER'
+                    WHEN fvr.action = 'BUSINESS_OWNER_REMOVE' THEN 'BUSINESS_OWNER'
+                    WHEN fvr.action = 'REMOVE' AND fvr.actor_user_id = pm.user_id THEN 'AUTHOR'
+                    WHEN fvr.action = 'REMOVE' AND EXISTS (
+                        SELECT 1 FROM places p WHERE p.id = pm.place_id AND p.created_by_user_id = fvr.actor_user_id
+                    ) THEN 'PLACE_MANAGER'
+                    WHEN fvr.action IN ('REMOVE', 'ACCEPT_REPORT') AND fvr.actor_type = 'USER' AND EXISTS (
+                        SELECT 1 FROM users u WHERE u.id = fvr.actor_user_id AND u.role IN ('MODERATOR', 'ADMIN')
+                    ) THEN 'MODERATOR'
+                    ELSE 'LEGACY'
+                END
+                FROM first_valid_removal fvr
+                WHERE pm.id = fvr.place_media_id
+                  AND pm.id = ?
+                  AND pm.status = 'REMOVED'
+            """;
+
+            try (PreparedStatement ps = conn.prepareStatement(backfillSql)) {
+                ps.setObject(1, mediaId);
+                assertEquals(1, ps.executeUpdate());
+            }
+
+            // 4. Confirma que a origem resultante é AUTHOR, NÃO MODERATOR
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT removal_source FROM place_media WHERE id = ?")) {
+                ps.setObject(1, mediaId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("AUTHOR", rs.getString("removal_source"),
+                            "A remoção prévia pelo autor não deve ser sobreposta retroativamente pelo ACCEPT_REPORT posterior");
+                }
             }
         }
     }

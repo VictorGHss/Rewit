@@ -19,14 +19,10 @@ BEGIN
     END IF;
 END $$;
 
--- Preenchimento seguro de mídias legadas já removidas
+-- Preenchimento seguro da data de remoção para mídias legadas sem timestamp
 UPDATE place_media
-SET removed_at = NOW(), removal_source = 'MODERATOR'
+SET removed_at = NOW()
 WHERE status = 'REMOVED' AND removed_at IS NULL;
-
-UPDATE place_media
-SET removal_source = 'MODERATOR'
-WHERE status = 'REMOVED' AND removal_source IS NULL;
 
 -- 2. INTEGRIDADE E CONSTRAINTS NA TRILHA DE AUDITORIA
 DO $$
