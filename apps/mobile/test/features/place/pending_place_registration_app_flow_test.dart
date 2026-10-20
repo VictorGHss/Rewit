@@ -200,6 +200,12 @@ void main() {
   }
 
   Future<void> logoutThroughUi(WidgetTester tester) async {
+    // O layout pode agrupar o logout num menu de opções (S1/S3-B); o caminho continua sendo a UI real
+    final moreOptions = find.byKey(const Key('home_more_options_button'));
+    if (moreOptions.evaluate().isNotEmpty) {
+      await tester.tap(moreOptions);
+      await tester.pumpAndSettle();
+    }
     await tester.tap(find.byIcon(Icons.logout));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ElevatedButton, 'Sair'));
