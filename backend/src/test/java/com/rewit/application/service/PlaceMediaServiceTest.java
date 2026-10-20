@@ -1086,7 +1086,8 @@ class PlaceMediaServiceTest {
     void shouldNotConsumeRateLimitOnIdempotentReplay() throws Exception {
         UUID mediaId = UUID.randomUUID();
         byte[] pngBytes = createValidPngBytes();
-        String sha = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(pngBytes));
+        byte[] sanitizedBytes = new ImageSanitizer().sanitize(pngBytes).bytes();
+        String sha = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(sanitizedBytes));
 
         PlaceMedia existingMedia = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.png",
