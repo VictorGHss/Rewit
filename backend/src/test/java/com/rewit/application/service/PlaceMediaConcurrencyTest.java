@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -186,13 +187,21 @@ class PlaceMediaConcurrencyTest {
             assertFalse(finalReport.isPending(), "Denúncia não pode permanecer PENDING");
 
             PlaceMedia finalMedia = placeMediaRepository.findById(media.getId()).orElseThrow();
+            var auditLogs = auditLogRepository.findByPlaceMediaId(media.getId());
+            assertEquals(1, auditLogs.size(), "Iteração " + i + ": Deve haver exatamente 1 log de auditoria para a decisão vencedora");
             if (successes.get(0).startsWith("ACCEPT")) {
                 assertEquals(PlaceMediaReport.STATUS_ACCEPTED, finalReport.getStatus());
                 assertEquals(PlaceMediaStatus.REMOVED, finalMedia.getStatus());
                 assertEquals(com.rewit.domain.enums.RemovalSource.MODERATOR, finalMedia.getRemovalSource());
+                assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.ACCEPT_REPORT, auditLogs.get(0).getAction());
+                assertEquals(report.getId(), auditLogs.get(0).getReportId());
+                assertEquals(moderator1.getId(), auditLogs.get(0).getActorUserId());
             } else {
                 assertEquals(PlaceMediaReport.STATUS_REJECTED, finalReport.getStatus());
                 assertEquals(PlaceMediaStatus.UNDER_REVIEW, finalMedia.getStatus());
+                assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.REJECT_REPORT, auditLogs.get(0).getAction());
+                assertEquals(report.getId(), auditLogs.get(0).getReportId());
+                assertEquals(moderator2.getId(), auditLogs.get(0).getActorUserId());
             }
         }
     }
@@ -259,14 +268,22 @@ class PlaceMediaConcurrencyTest {
         if (finalMedia.getStatus() == PlaceMediaStatus.REMOVED) {
             assertEquals(PlaceMediaReport.STATUS_ACCEPTED, r1.getStatus());
         }
+        var auditLogs = auditLogRepository.findByPlaceMediaId(media.getId());
+        assertFalse(auditLogs.isEmpty(), "Auditoria deve conter registros das decisões");
+        for (var log : auditLogs) {
+            assertNotNull(log.getReportId(), "Cada log de decisão deve estar associado a um report_id inequívoco");
+            assertNotNull(log.getAction());
+        }
     }
 
     @Test
     @DisplayName("H-2.3. Remoção concorrente contra restauração da mesma fotografia")
     void shouldHandleConcurrentRemovalAgainstRestoration() throws Exception {
         Place place = createTestPlace();
-        // Mídia inicialmente ativa
+        // Mídia inicialmente ativa com objeto real persistido no SeaweedFS (58333)
         PlaceMedia media = createTestMedia(place, PlaceMediaStatus.ACTIVE);
+        byte[] payload = "test-image-content".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        objectStoragePort.put(media.getObjectKey(), media.getMimeType(), payload);
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         CountDownLatch readyLatch = new CountDownLatch(2);
@@ -314,10 +331,12 @@ class PlaceMediaConcurrencyTest {
         assertTrue(errors.isEmpty(), "Sem erros inesperados: " + errors);
         assertEquals(2, results.size());
 
-        // O estado final do banco deve ser determinístico: ou ACTIVE ou REMOVED_BY_MODERATOR, nunca corrompido
+        // O estado final do banco deve ser determinístico: ou ACTIVE ou REMOVED, nunca corrompido
         PlaceMedia finalMedia = placeMediaRepository.findById(media.getId()).orElseThrow();
         assertTrue(finalMedia.getStatus() == PlaceMediaStatus.ACTIVE || finalMedia.getStatus() == PlaceMediaStatus.REMOVED,
                 "Estado final deve ser válido e coerente");
+        var auditLogs = auditLogRepository.findByPlaceMediaId(media.getId());
+        assertFalse(auditLogs.isEmpty(), "Auditoria deve conter registros das ações de moderação concorrentes");
     }
 
     @Test
@@ -458,29 +477,86 @@ class PlaceMediaConcurrencyTest {
         // Validação no banco real
         long activeCount = placeMediaRepository.countActiveByPlaceId(place.getId());
         assertEquals(PlaceMedia.MAX_MEDIA_PER_PLACE, activeCount, "Total ativo não pode ultrapassar o limite");
+
+        PlaceMedia successfulMedia = placeMediaRepository.findById(media1.getId()).orElseThrow().getStatus() == PlaceMediaStatus.ACTIVE
+                ? media1 : media2;
+        var restoreLogs = auditLogRepository.findByPlaceMediaId(successfulMedia.getId());
+        assertTrue(restoreLogs.stream().anyMatch(l -> l.getAction() == com.rewit.domain.enums.PlaceMediaModerationAction.RESTORE),
+                "Mídia restaurada com sucesso deve possuir log de ação RESTORE");
     }
 
     @Test
-    @DisplayName("T-1.2. shouldFailWhenUploadRacesWithDeletion: rollback de upload compensa e remove o objeto do storage")
-    void shouldFailWhenUploadRacesWithDeletion() throws Exception {
+    @DisplayName("T-1.2. Upload concorrente contra remoção de mídia existente: mantém capa consistente e contagem correta")
+    void shouldHandleConcurrentUploadAgainstRemoval() throws Exception {
         Place place = createTestPlace();
+        PlaceMedia existingMedia = createTestMedia(place, PlaceMediaStatus.ACTIVE);
+        existingMedia.setPrimary(true);
+        placeMediaRepository.save(existingMedia);
+
         byte[] validPng = createValidPng();
 
-        // Faz o upload regular e valida persistência no storage
-        var uploadCmd = new UploadPlaceMediaCommand(place.getId(), authorUser.getId(), validPng, "image.png");
-        PlaceMediaView view = placeMediaService.uploadMedia(uploadCmd);
-        assertNotNull(view);
-        PlaceMedia uploadedMedia = placeMediaRepository.findById(view.id()).orElseThrow();
-        assertTrue(objectStoragePort.exists(uploadedMedia.getObjectKey()));
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch readyLatch = new CountDownLatch(2);
+        CountDownLatch startLatch = new CountDownLatch(1);
 
-        // Simula upload concorrente com falha transacional (compensação de rollback)
-        String failedKey = "places/" + place.getId() + "/" + UUID.randomUUID() + "/image.png";
-        objectStoragePort.put(failedKey, "image/png", validPng);
-        assertTrue(objectStoragePort.exists(failedKey));
+        List<String> outcomes = Collections.synchronizedList(new ArrayList<>());
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
 
-        // Executa a compensação de rollback
-        objectStoragePort.delete(failedKey);
-        assertFalse(objectStoragePort.exists(failedKey), "Objeto deve ser removido após compensação de rollback");
+        Future<?> f1 = executor.submit(() -> {
+            readyLatch.countDown();
+            try {
+                startLatch.await();
+                var uploadCmd = new UploadPlaceMediaCommand(place.getId(), authorUser.getId(), validPng, "image.png");
+                PlaceMediaView view = placeMediaService.uploadMedia(uploadCmd);
+                outcomes.add("UPLOAD_SUCCESS:" + view.id());
+            } catch (BusinessException e) {
+                outcomes.add("UPLOAD_ERR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
+            }
+        });
+
+        Future<?> f2 = executor.submit(() -> {
+            readyLatch.countDown();
+            try {
+                startLatch.await();
+                PlaceMediaModerationResult res = placeMediaService.removeMediaByModerator(
+                        moderator1.getId(), place.getId(), existingMedia.getId(), "SPAM", "Removendo foto antiga");
+                outcomes.add("REMOVE_SUCCESS:" + res.status());
+            } catch (BusinessException e) {
+                outcomes.add("REMOVE_ERR:" + e.getErrorCode());
+            } catch (Throwable t) {
+                errors.add(t);
+            }
+        });
+
+        assertTrue(readyLatch.await(5, TimeUnit.SECONDS));
+        startLatch.countDown();
+
+        f1.get(10, TimeUnit.SECONDS);
+        f2.get(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertTrue(errors.isEmpty(), "Sem erros inesperados: " + errors);
+        assertEquals(2, outcomes.size());
+
+        // A mídia antiga deve estar REMOVED
+        PlaceMedia persistedOld = placeMediaRepository.findById(existingMedia.getId()).orElseThrow();
+        assertEquals(PlaceMediaStatus.REMOVED, persistedOld.getStatus());
+
+        // A nova mídia deve estar ACTIVE e no storage
+        long activeCount = placeMediaRepository.countActiveByPlaceId(place.getId());
+        assertEquals(1, activeCount, "Deve haver exatamente 1 mídia ativa após upload e remoção concorrentes");
+
+        Optional<PlaceMedia> primary = placeMediaRepository.findPrimaryByPlaceId(place.getId());
+        assertTrue(primary.isPresent(), "Deve haver uma mídia primária definida");
+        assertTrue(primary.get().isPrimary());
+        assertEquals(PlaceMediaStatus.ACTIVE, primary.get().getStatus());
+
+        // Auditoria da remoção registrada
+        var auditLogs = auditLogRepository.findByPlaceMediaId(existingMedia.getId());
+        assertFalse(auditLogs.isEmpty());
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.REMOVE, auditLogs.get(0).getAction());
     }
 
     @Test
