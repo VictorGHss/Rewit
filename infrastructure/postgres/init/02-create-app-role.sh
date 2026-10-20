@@ -65,9 +65,10 @@ fi
 
 echo "Provisionando role de runtime '${APP_USER}'..."
 # printf é builtin do shell: a senha não aparece na lista de processos. setsid retira o terminal
-# de controle, de modo que o \password do psql leia a senha da entrada padrão mesmo sob TTY.
+# de controle, de modo que o \password do psql leia a senha da entrada padrão mesmo sob TTY;
+# -w espera o psql e propaga seu código de saída (sem -w, um líder de grupo faria fork e sairia 0).
 printf '%s\n%s\n' "$APP_DB_PASSWORD" "$APP_DB_PASSWORD" \
-    | setsid psql -X -q -v ON_ERROR_STOP=1 --no-password \
+    | setsid -w psql -X -q -v ON_ERROR_STOP=1 --no-password \
         --username "$ADMIN_USER" --dbname "$ADMIN_DB" \
         -v app_user="$APP_USER" \
         -f "$PROVISION_SQL"

@@ -20,6 +20,8 @@ RUN_ID="rewit-provtest-$(date +%s)-$$"
 ADMIN_USER="rewit_provtest_admin"
 ADMIN_DB="rewit_provtest"
 WORK=$(mktemp -d)
+# No Git Bash, git.exe e docker.exe são nativos: use o mesmo caminho Windows em todos os comandos
+if command -v cygpath >/dev/null 2>&1; then WORK=$(cygpath -m "$WORK"); fi
 CONTAINERS=()
 FAILURES=0
 
@@ -29,9 +31,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-host_path() {
-    if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi
-}
+host_path() { printf '%s' "$1"; }
 
 pass() { printf '  [OK]    %s\n' "$1"; }
 fail() { printf '  [FALHA] %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
@@ -47,6 +47,9 @@ INIT_DIR="$WORK/repo/infrastructure/postgres/init"
 SQL_DIR="$WORK/repo/infrastructure/postgres"
 SCRIPT="$INIT_DIR/02-create-app-role.sh"
 
+if [ ! -f "$SCRIPT" ] || [ ! -f "$SQL_DIR/provision-runtime-role.sql" ]; then
+    echo "Clone limpo sem os scripts de provisionamento"; exit 1
+fi
 check "script de init sem CR após checkout com autocrlf" "! grep -q \$'\\r' '$SCRIPT'"
 check "SQL de provisionamento sem CR após checkout com autocrlf" "! grep -q \$'\\r' '$SQL_DIR/provision-runtime-role.sql'"
 check "shebang válido (#!/bin/sh)" "[ \"\$(head -n1 '$SCRIPT')\" = '#!/bin/sh' ]"
@@ -197,8 +200,15 @@ APP_DB_PASSWORD="$PW2" docker exec -e APP_DB_PASSWORD "$c" /docker-entrypoint-in
     && pass "reprovisionamento de role pré-existente com privilégios" || fail "reprovisionamento de role pré-existente com privilégios"
 check "atributos privilegiados e memberships removidos" "[ \"\$(role_attrs '$c')\" = '$expected_attrs' ]"
 
+# Falha dentro do psql (role dona de objeto) precisa propagar para o código de saída do script
+admin_sql "$c" "CREATE TABLE rewit_provtest_owned (id INT); ALTER TABLE rewit_provtest_owned OWNER TO rewit_app;" >/dev/null
+APP_DB_PASSWORD="$PW1" docker exec -e APP_DB_PASSWORD "$c" /docker-entrypoint-initdb.d/02-create-app-role.sh >/dev/null 2>&1 \
+    && fail "script falha quando a role é owner de objetos" || pass "script falha quando a role é owner de objetos"
+check "senha não foi trocada pela execução recusada" "login_as_app '$c' \"\$PW2\""
+admin_sql "$c" "DROP TABLE rewit_provtest_owned;" >/dev/null
+
 # Script SQL administrativo direto (psql -v app_user=... -f), senha pela entrada padrão
-if printf '%s\n%s\n' "$PW3" "$PW3" | docker exec -i "$c" setsid psql -X -q -v ON_ERROR_STOP=1 \
+if printf '%s\n%s\n' "$PW3" "$PW3" | docker exec -i "$c" setsid -w psql -X -q -v ON_ERROR_STOP=1 \
         -U "$ADMIN_USER" -d "$ADMIN_DB" -v app_user=rewit_app -f /opt/rewit/postgres/provision-runtime-role.sql >/dev/null 2>&1; then
     pass "script administrativo provision-runtime-role.sql executa com -v app_user"
 else
@@ -207,13 +217,13 @@ fi
 check "rotação pelo script administrativo" "login_as_app '$c' \"\$PW3\""
 check "atributos após script administrativo" "[ \"\$(role_attrs '$c')\" = '$expected_attrs' ]"
 
-if printf 'x\nx\n' | docker exec -i "$c" setsid psql -X -q -v ON_ERROR_STOP=1 -U "$ADMIN_USER" -d "$ADMIN_DB" \
+if printf 'x\nx\n' | docker exec -i "$c" setsid -w psql -X -q -v ON_ERROR_STOP=1 -U "$ADMIN_USER" -d "$ADMIN_DB" \
         -v app_user="$ADMIN_USER" -f /opt/rewit/postgres/provision-runtime-role.sql >/dev/null 2>&1; then
     fail "script administrativo recusa a própria role administrativa"
 else
     pass "script administrativo recusa a própria role administrativa"
 fi
-if printf 'x\nx\n' | docker exec -i "$c" setsid psql -X -q -v ON_ERROR_STOP=1 -U "$ADMIN_USER" -d "$ADMIN_DB" \
+if printf 'x\nx\n' | docker exec -i "$c" setsid -w psql -X -q -v ON_ERROR_STOP=1 -U "$ADMIN_USER" -d "$ADMIN_DB" \
         -v app_user='bad"name; DROP ROLE x' -f /opt/rewit/postgres/provision-runtime-role.sql >/dev/null 2>&1; then
     fail "script administrativo recusa identificador inválido"
 else
