@@ -495,7 +495,8 @@ class PlaceMediaServiceTest {
         assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
         var captor = org.mockito.ArgumentCaptor.forClass(PlaceMediaReport.class);
         verify(placeMediaReportRepository).save(captor.capture());
-        assertEquals("ACCEPTED", captor.getValue().getStatus());
+        assertEquals("AUTO_RESOLVED", captor.getValue().getStatus());
+        assertNull(captor.getValue().getDecidedByUserId());
     }
 
     @Test
@@ -1207,5 +1208,148 @@ class PlaceMediaServiceTest {
         assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE, captor.getValue().getAction());
         assertEquals(businessAdminUserId, captor.getValue().getActorUserId());
         assertEquals(com.rewit.domain.model.PlaceMediaModerationAuditLog.ActorType.USER, captor.getValue().getActorType());
+    }
+
+    @Test
+    @DisplayName("35. releaseReviewByModerator: libera com sucesso mídia UNDER_REVIEW com denúncias rejeitadas e grava auditoria RELEASE_REVIEW (R-1)")
+    void shouldReleaseReviewSuccessfullyWhenReportsRejected() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia reviewMedia = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+
+        PlaceMediaReport report = new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", "Spam");
+        report.reject(modId, "Denúncia improcedente");
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(reviewMedia));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(report));
+        when(objectStoragePort.exists(reviewMedia.getObjectKey())).thenReturn(true);
+        when(placeMediaRepository.countActiveByPlaceId(placeId)).thenReturn(1L);
+
+        var result = placeMediaService.releaseReviewByModerator(modId, placeId, mediaId, "Liberando após análise");
+
+        assertNotNull(result);
+        assertEquals(PlaceMediaStatus.ACTIVE.name(), result.status());
+        assertEquals(PlaceMediaStatus.ACTIVE, reviewMedia.getStatus());
+
+        org.mockito.ArgumentCaptor<com.rewit.domain.model.PlaceMediaModerationAuditLog> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rewit.domain.model.PlaceMediaModerationAuditLog.class);
+        verify(placeMediaModerationAuditLogRepository).save(captor.capture());
+        assertEquals(com.rewit.domain.enums.PlaceMediaModerationAction.RELEASE_REVIEW, captor.getValue().getAction());
+        assertEquals(modId, captor.getValue().getActorUserId());
+    }
+
+    @Test
+    @DisplayName("36. releaseReviewByModerator: rejeita se fotografia já estiver ACTIVE (HTTP 409 MEDIA_ALREADY_ACTIVE)")
+    void shouldRejectReleaseReviewWhenMediaAlreadyActive() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia activeMedia = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(activeMedia));
+
+        var ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.releaseReviewByModerator(modId, placeId, mediaId, "Liberando foto ativa")
+        );
+        assertEquals("MEDIA_ALREADY_ACTIVE", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    }
+
+    @Test
+    @DisplayName("37. releaseReviewByModerator: rejeita se fotografia estiver REMOVED (HTTP 409 CANNOT_RELEASE_REMOVED_MEDIA)")
+    void shouldRejectReleaseReviewWhenMediaRemoved() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia removedMedia = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.REMOVED, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(removedMedia));
+
+        var ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.releaseReviewByModerator(modId, placeId, mediaId, "Liberando foto removida")
+        );
+        assertEquals("CANNOT_RELEASE_REMOVED_MEDIA", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    }
+
+    @Test
+    @DisplayName("38. releaseReviewByModerator: rejeita se ainda existirem denúncias pendentes (HTTP 409 REPORTS_STILL_PENDING)")
+    void shouldRejectReleaseReviewWhenReportsPending() {
+        UUID modId = moderatorId;
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia reviewMedia = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+
+        PlaceMediaReport pendingReport = new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", "Spam");
+
+        when(userRepository.findById(modId)).thenReturn(Optional.of(moderatorUser));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(reviewMedia));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(pendingReport));
+
+        var ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.releaseReviewByModerator(modId, placeId, mediaId, "Liberando com pendências")
+        );
+        assertEquals("REPORTS_STILL_PENDING", ex.getErrorCode());
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    }
+
+    @Test
+    @DisplayName("39. AU-1: deleteMedia marca denúncias pendentes como AUTO_RESOLVED com decided_by nulo")
+    void shouldAutoResolvePendingReportsWithNullDecidedByOnDeleteMedia() {
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        PlaceMediaReport pendingReport = new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "INAPPROPRIATE", "Conteúdo ofensivo");
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of(pendingReport));
+
+        placeMediaService.deleteMedia(userId, placeId, mediaId);
+
+        assertTrue(pendingReport.isAutoResolved());
+        assertNull(pendingReport.getDecidedByUserId());
+        assertNotNull(pendingReport.getDecidedAt());
+        assertTrue(pendingReport.getDecisionNotes().contains("Resolução automática"));
+
+        org.mockito.ArgumentCaptor<com.rewit.domain.model.PlaceMediaModerationAuditLog> captor =
+                org.mockito.ArgumentCaptor.forClass(com.rewit.domain.model.PlaceMediaModerationAuditLog.class);
+        verify(placeMediaModerationAuditLogRepository, atLeastOnce()).save(captor.capture());
+
+        List<com.rewit.domain.model.PlaceMediaModerationAuditLog> logs = captor.getAllValues();
+        assertEquals(2, logs.size(), "Logs capturados: " + logs.stream().map(l -> l.getAction() + ":" + l.getActorUserId()).toList());
+        boolean hasAutoResolveAudit = logs.stream()
+                .anyMatch(a -> a.getAction() == com.rewit.domain.enums.PlaceMediaModerationAction.AUTO_RESOLVE_REPORT
+                        && a.getActorUserId() == null);
+        assertTrue(hasAutoResolveAudit, "Deveria registrar auditoria AUTO_RESOLVE_REPORT com actor nulo para resolução automática do sistema");
     }
 }

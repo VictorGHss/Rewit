@@ -350,4 +350,33 @@ class AdminPlaceMediaModerationControllerUnitTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].media.id").value(mediaId.toString()));
     }
+
+    @Test
+    @DisplayName("POST /places/{placeId}/{mediaId}/release-review - Liberação de análise após rejeição das denúncias (R-1)")
+    void shouldReleaseReviewEndpoint() throws Exception {
+        UUID placeId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMediaModerationResult result = new PlaceMediaModerationResult(
+                mediaId, placeId, "ACTIVE", true, "Fotografia liberada da análise com sucesso"
+        );
+
+        when(placeMediaService.releaseReviewByModerator(eq(moderatorId), eq(placeId), eq(mediaId), eq("Todas denúncias rejeitadas")))
+                .thenReturn(result);
+
+        RestorePlaceMediaRequest request = new RestorePlaceMediaRequest("Todas denúncias rejeitadas");
+
+        mockMvc.perform(post("/api/v1/admin/place-media/{placeId}/{mediaId}/release-review", placeId, mediaId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request))
+                        .principal(authentication))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mediaId").value(mediaId.toString()))
+                .andExpect(jsonPath("$.placeId").value(placeId.toString()))
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.isPrimary").value(true))
+                .andExpect(jsonPath("$.message").value("Fotografia liberada da análise com sucesso"));
+
+        verify(placeMediaService).releaseReviewByModerator(moderatorId, placeId, mediaId, "Todas denúncias rejeitadas");
+    }
 }

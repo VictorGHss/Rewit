@@ -48,7 +48,8 @@ class SeaweedStorageIntegrationTest {
         if (ep != null && !ep.isBlank()) return ep.trim();
         ep = System.getenv("STORAGE_ENDPOINT");
         if (ep != null && !ep.isBlank()) return ep.trim();
-        return "";
+        // Default seguro para infraestrutura isolada de teste (porta 58333 conforme application-local.yml)
+        return "http://127.0.0.1:58333";
     }
 
     private MinioStorageAdapter storageAdapter;

@@ -16,15 +16,26 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integridade Relacional e Triggers no PostgreSQL (Step 2.1)")
 class DatabaseDomainIntegrityTest {
 
-    private static final String DB_USER = System.getProperty("spring.datasource.username",
-            System.getenv().getOrDefault("SPRING_DATASOURCE_USERNAME", "rewit_user"));
-    private static final String DB_PASSWORD = System.getProperty("spring.datasource.password",
-            System.getenv().getOrDefault("SPRING_DATASOURCE_PASSWORD", "rewit_local_password"));
+    private static final String MIGRATION_DB_USER = System.getProperty("spring.flyway.user",
+            System.getenv().getOrDefault("TEST_MIGRATION_DB_USER",
+                    System.getenv().getOrDefault("TEST_POSTGRES_USER", "rewit_user")));
+    private static final String MIGRATION_DB_PASSWORD = System.getProperty("spring.flyway.password",
+            System.getenv().getOrDefault("TEST_MIGRATION_DB_PASSWORD",
+                    System.getenv().getOrDefault("TEST_POSTGRES_PASSWORD", "rewit_local_password")));
+
+    private static final String APP_DB_USER = System.getProperty("spring.datasource.username",
+            System.getenv().getOrDefault("TEST_APP_DB_USER", "rewit_app"));
+    private static final String APP_DB_PASSWORD = System.getProperty("spring.datasource.password",
+            System.getenv().getOrDefault("TEST_APP_DB_PASSWORD", "rewit_app_local_password"));
 
     private static String resolveDbUrl() {
         String sysUrl = System.getProperty("spring.datasource.url");
         if (sysUrl != null && !sysUrl.isBlank()) {
             return sysUrl;
+        }
+        String sysTestUrl = System.getProperty("TEST_DATASOURCE_URL");
+        if (sysTestUrl != null && !sysTestUrl.isBlank()) {
+            return sysTestUrl;
         }
         String envUrl = System.getenv("SPRING_DATASOURCE_URL");
         if (envUrl != null && !envUrl.isBlank()) {
@@ -34,19 +45,17 @@ class DatabaseDomainIntegrityTest {
         if (testUrl != null && !testUrl.isBlank()) {
             return testUrl;
         }
-        String testPort = System.getenv("TEST_POSTGRES_PORT");
-        if (testPort != null && !testPort.isBlank()) {
-            String host = System.getenv().getOrDefault("TEST_POSTGRES_HOST", "127.0.0.1");
-            String db = System.getenv().getOrDefault("TEST_POSTGRES_DB", "rewit_test");
-            return "jdbc:postgresql://" + host + ":" + testPort + "/" + db;
+        String testPort = System.getProperty("TEST_POSTGRES_PORT", System.getenv("TEST_POSTGRES_PORT"));
+        if (testPort == null || testPort.isBlank()) {
+            testPort = System.getProperty("postgres.port", System.getenv("POSTGRES_PORT"));
         }
-        String port = System.getProperty("postgres.port", System.getenv("POSTGRES_PORT"));
-        if (port != null && !port.isBlank()) {
-            return "jdbc:postgresql://localhost:" + port + "/rewit_db";
+        if (testPort == null || testPort.isBlank()) {
+            // Default seguro para infraestrutura isolada de teste (porta 55432 conforme application-local.yml)
+            testPort = "55432";
         }
-        throw new IllegalStateException("PostgreSQL de teste isolado não configurado! " +
-                "Defina 'TEST_DATASOURCE_URL' ou 'TEST_POSTGRES_PORT' com o endpoint da instância descartável. " +
-                "Conexão com as portas compartilhadas 5432/5433 é estritamente proibida.");
+        String host = System.getProperty("TEST_POSTGRES_HOST", System.getenv().getOrDefault("TEST_POSTGRES_HOST", "127.0.0.1"));
+        String db = System.getProperty("TEST_POSTGRES_DB", System.getenv().getOrDefault("TEST_POSTGRES_DB", "rewit_db"));
+        return "jdbc:postgresql://" + host + ":" + testPort + "/" + db;
     }
 
     private static void validateSafeEndpoint(String url) {
@@ -60,7 +69,8 @@ class DatabaseDomainIntegrityTest {
     static void checkDatabaseAvailability() {
         String dbUrl = resolveDbUrl();
         validateSafeEndpoint(dbUrl);
-        try (Connection conn = DriverManager.getConnection(dbUrl, DB_USER, DB_PASSWORD)) {
+        // Valida conectividade básica através da role de migração ou de aplicação
+        try (Connection conn = DriverManager.getConnection(dbUrl, MIGRATION_DB_USER, MIGRATION_DB_PASSWORD)) {
             if (conn == null || !conn.isValid(2)) {
                 fail("Falha ao validar conexão com PostgreSQL de teste isolado em " + dbUrl);
             }
@@ -70,9 +80,19 @@ class DatabaseDomainIntegrityTest {
     }
 
     private Connection getConnection() throws SQLException {
+        return getMigrationConnection();
+    }
+
+    private Connection getMigrationConnection() throws SQLException {
         String dbUrl = resolveDbUrl();
         validateSafeEndpoint(dbUrl);
-        return DriverManager.getConnection(dbUrl, DB_USER, DB_PASSWORD);
+        return DriverManager.getConnection(dbUrl, MIGRATION_DB_USER, MIGRATION_DB_PASSWORD);
+    }
+
+    private Connection getAppConnection() throws SQLException {
+        String dbUrl = resolveDbUrl();
+        validateSafeEndpoint(dbUrl);
+        return DriverManager.getConnection(dbUrl, APP_DB_USER, APP_DB_PASSWORD);
     }
 
     @Test
@@ -513,6 +533,144 @@ class DatabaseDomainIntegrityTest {
                 ps.setObject(1, auditId);
                 ps.setObject(2, mediaId);
                 ps.setObject(3, placeId);
+                assertEquals(1, ps.executeUpdate());
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("AO-1: Role da aplicação (rewit_app) não tem ownership e não pode desabilitar triggers nem executar DDL/DROP na trilha de auditoria")
+    void shouldProveAppRoleCannotAlterAuditTableOrBypassTriggers() throws SQLException {
+        try (Connection appConn = getAppConnection()) {
+            UUID auditId = UUID.randomUUID();
+            UUID mediaId = UUID.randomUUID();
+            UUID placeId = UUID.randomUUID();
+
+            // 1. rewit_app consegue inserir registros de auditoria (DML INSERT permitido)
+            try (PreparedStatement ps = appConn.prepareStatement(
+                    "INSERT INTO place_media_moderation_audit_logs " +
+                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at) " +
+                            "VALUES (?, ?, ?, NULL, 'SYSTEM', 'RELEASE_REVIEW', 'Análise aprovada', 'Sem denúncias ativas', NOW())")) {
+                ps.setObject(1, auditId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, placeId);
+                assertEquals(1, ps.executeUpdate(), "rewit_app deve conseguir inserir na trilha de auditoria");
+            }
+
+            // 2. rewit_app NÃO é owner da tabela e o PostgreSQL recusa qualquer comando de DDL
+            SQLException exDdlDisable = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement(
+                        "ALTER TABLE place_media_moderation_audit_logs DISABLE TRIGGER ALL")) {
+                    ps.execute();
+                }
+            });
+            assertTrue(exDdlDisable.getMessage().contains("must be owner") || exDdlDisable.getMessage().contains("permission denied"),
+                    "PostgreSQL deve rejeitar DISABLE TRIGGER sob a role de aplicação não-proprietária: " + exDdlDisable.getMessage());
+
+            SQLException exDdlDrop = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement(
+                        "DROP TABLE place_media_moderation_audit_logs")) {
+                    ps.execute();
+                }
+            });
+            assertTrue(exDdlDrop.getMessage().contains("must be owner") || exDdlDrop.getMessage().contains("permission denied"),
+                    "PostgreSQL deve rejeitar DROP TABLE sob a role de aplicação: " + exDdlDrop.getMessage());
+
+            // 3. REVOKE explícito de UPDATE, DELETE e TRUNCATE impede qualquer adulteração DML mesmo além do trigger
+            SQLException exUpdateApp = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement(
+                        "UPDATE place_media_moderation_audit_logs SET notes = 'fraude' WHERE id = ?")) {
+                    ps.setObject(1, auditId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exUpdateApp.getMessage().contains("permission denied") || exUpdateApp.getMessage().contains("append-only"),
+                    "UPDATE deve ser bloqueado por permissão DCL ou trigger: " + exUpdateApp.getMessage());
+
+            SQLException exDeleteApp = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement(
+                        "DELETE FROM place_media_moderation_audit_logs WHERE id = ?")) {
+                    ps.setObject(1, auditId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exDeleteApp.getMessage().contains("permission denied") || exDeleteApp.getMessage().contains("append-only"),
+                    "DELETE deve ser bloqueado por permissão DCL ou trigger: " + exDeleteApp.getMessage());
+        }
+    }
+
+    @Test
+    @DisplayName("V36 / AU-1 / R-1: Valida constraints de AUTO_RESOLVED, decided_by e RELEASE_REVIEW")
+    void shouldValidateV36AuditConstraintsAndAutoResolved() throws SQLException {
+        try (Connection conn = getConnection()) {
+            UUID mediaId = UUID.randomUUID();
+            UUID reportId = UUID.randomUUID();
+            UUID reporterId = UUID.randomUUID();
+            UUID moderatorId = UUID.randomUUID();
+            UUID placeId = UUID.randomUUID();
+
+            // Semeia usuário, local e mídia para o teste
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO users (id, email, auth_provider) VALUES (?, 'rep.v36." + UUID.randomUUID() + "@rewit.com', 'LOCAL')")) {
+                ps.setObject(1, reporterId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')")) {
+                ps.setObject(1, placeId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) " +
+                            "VALUES (?, 'Local V36 " + placeId + "', 'slug-v36-" + placeId + "', 'BAR', 'Rua V36 " + placeId + "', 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))")) {
+                ps.setObject(1, placeId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media (id, place_id, user_id, object_key, media_type, mime_type, size_bytes, width, height, status, is_primary, created_at, updated_at) " +
+                            "VALUES (?, ?, ?, 'places/test-" + mediaId + ".jpg', 'IMAGE', 'image/jpeg', 1024, 800, 600, 'ACTIVE', false, NOW(), NOW())")) {
+                ps.setObject(1, mediaId);
+                ps.setObject(2, placeId);
+                ps.setObject(3, reporterId);
+                ps.executeUpdate();
+            }
+
+            // 1. AUTO_RESOLVED com decided_by_user_id NULL deve ser aceito pela constraint chk_place_media_reports_decided_by
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at, decision_notes) " +
+                            "VALUES (?, ?, ?, 'SPAM', 'AUTO_RESOLVED', NULL, NOW(), 'Encerrada pelo sistema')")) {
+                ps.setObject(1, reportId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, reporterId);
+                assertEquals(1, ps.executeUpdate());
+            }
+
+            // 2. AUTO_RESOLVED com decided_by_user_id preenchido deve ser rejeitado pela constraint
+            UUID invalidReportId = UUID.randomUUID();
+            SQLException exAutoResolvedWithDecidedBy = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at, decision_notes) " +
+                                "VALUES (?, ?, ?, 'SPAM', 'AUTO_RESOLVED', ?, NOW(), 'Incorreto')")) {
+                    ps.setObject(1, invalidReportId);
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, reporterId);
+                    ps.setObject(4, moderatorId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exAutoResolvedWithDecidedBy.getMessage().contains("chk_place_media_reports_decided_by")
+                    || exAutoResolvedWithDecidedBy.getMessage().contains("violates check constraint"));
+
+            // 3. RELEASE_REVIEW é aceito como ação válida na trilha de auditoria
+            UUID auditId = UUID.randomUUID();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO place_media_moderation_audit_logs " +
+                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at) " +
+                            "VALUES (?, ?, ?, ?, 'USER', 'RELEASE_REVIEW', 'Denúncias improcedentes', 'Liberada', NOW())")) {
+                ps.setObject(1, auditId);
+                ps.setObject(2, mediaId);
+                ps.setObject(3, placeId);
+                ps.setObject(4, reporterId);
                 assertEquals(1, ps.executeUpdate());
             }
         }

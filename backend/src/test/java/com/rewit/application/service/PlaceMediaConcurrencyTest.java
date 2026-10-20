@@ -73,6 +73,19 @@ class PlaceMediaConcurrencyTest {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private org.springframework.core.env.Environment environment;
+
+    private void executeDdlAsMigrationUser(String sql) throws Exception {
+        String url = environment.getProperty("spring.datasource.url");
+        String user = environment.getProperty("spring.flyway.user", "rewit_user");
+        String pass = environment.getProperty("spring.flyway.password", "rewit_local_password");
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(url, user, pass);
+             java.sql.Statement stmt = conn.createStatement()) {
+            stmt.execute(sql);
+        }
+    }
+
     private User moderator1;
     private User moderator2;
     private User authorUser;
@@ -280,11 +293,11 @@ class PlaceMediaConcurrencyTest {
     }
 
     @Test
-    @DisplayName("H-2.3. Remoção concorrente contra restauração da mesma fotografia")
+    @DisplayName("H-2.3. Remoção concorrente contra restauração da mesma fotografia (iniciando em REMOVED com arquivo válido)")
     void shouldHandleConcurrentRemovalAgainstRestoration() throws Exception {
         Place place = createTestPlace();
-        // Mídia inicialmente ativa com objeto real persistido no SeaweedFS (58333)
-        PlaceMedia media = createTestMedia(place, PlaceMediaStatus.ACTIVE);
+        // Mídia inicialmente removida por moderador com objeto real persistido no SeaweedFS (58333)
+        PlaceMedia media = createTestMedia(place, PlaceMediaStatus.REMOVED);
         byte[] payload = "test-image-content".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         objectStoragePort.put(media.getObjectKey(), media.getMimeType(), payload);
 
@@ -564,13 +577,13 @@ class PlaceMediaConcurrencyTest {
 
     @Test
     @DisplayName("T-1.3. Falha forçada na gravação de auditoria provoca rollback completo das alterações em place_media e place_media_reports no PostgreSQL real")
-    void shouldRollbackAllChangesWhenAuditLogFails() {
+    void shouldRollbackAllChangesWhenAuditLogFails() throws Exception {
         Place place = createTestPlace();
         PlaceMedia media = createTestMedia(place, PlaceMediaStatus.UNDER_REVIEW);
         PlaceMediaReport report = createTestReport(media, authorUser, "SPAM");
 
-        // Cria trigger no banco real para forçar falha no INSERT da auditoria
-        jdbcTemplate.execute("""
+        // Cria trigger no banco real como migration user (DDL) para forçar falha no INSERT da auditoria
+        executeDdlAsMigrationUser("""
             CREATE OR REPLACE FUNCTION fn_simulate_audit_failure() RETURNS TRIGGER AS $$
             BEGIN
                 IF NEW.notes LIKE '%FAIL_AUDIT%' THEN
@@ -582,7 +595,7 @@ class PlaceMediaConcurrencyTest {
             $$ LANGUAGE plpgsql;
         """);
 
-        jdbcTemplate.execute("""
+        executeDdlAsMigrationUser("""
             DROP TRIGGER IF EXISTS trg_test_simulate_audit_failure ON place_media_moderation_audit_logs;
             CREATE TRIGGER trg_test_simulate_audit_failure
                 BEFORE INSERT ON place_media_moderation_audit_logs
@@ -603,8 +616,8 @@ class PlaceMediaConcurrencyTest {
             assertEquals(PlaceMediaStatus.UNDER_REVIEW, persistedMedia.getStatus(), "Mídia deve permanecer UNDER_REVIEW após rollback");
             assertFalse(persistedMedia.isRemoved(), "Mídia não pode ter sido removida");
         } finally {
-            jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_test_simulate_audit_failure ON place_media_moderation_audit_logs;");
-            jdbcTemplate.execute("DROP FUNCTION IF EXISTS fn_simulate_audit_failure();");
+            executeDdlAsMigrationUser("DROP TRIGGER IF EXISTS trg_test_simulate_audit_failure ON place_media_moderation_audit_logs;");
+            executeDdlAsMigrationUser("DROP FUNCTION IF EXISTS fn_simulate_audit_failure();");
         }
     }
 }

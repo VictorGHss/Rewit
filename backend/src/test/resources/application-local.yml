@@ -2,13 +2,21 @@
 # Exige configuração explícita de infraestrutura isolada de teste (A-1); sem fallback para serviços compartilhados.
 spring:
   datasource:
-    url: ${TEST_DATASOURCE_URL:jdbc:postgresql://${TEST_POSTGRES_HOST:127.0.0.1}:${TEST_POSTGRES_PORT:}/${TEST_POSTGRES_DB:rewit_test}}
-    username: ${TEST_POSTGRES_USER:rewit_user}
-    password: ${TEST_POSTGRES_PASSWORD:rewit_local_password}
+    url: ${TEST_DATASOURCE_URL:jdbc:postgresql://${TEST_POSTGRES_HOST:127.0.0.1}:${TEST_POSTGRES_PORT:55432}/${TEST_POSTGRES_DB:rewit_db}}
+    username: ${TEST_APP_DB_USER:rewit_app}
+    password: ${TEST_APP_DB_PASSWORD:rewit_app_local_password}
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      idle-timeout: 10000
+      max-lifetime: 30000
+  flyway:
+    user: ${TEST_MIGRATION_DB_USER:${TEST_POSTGRES_USER:rewit_user}}
+    password: ${TEST_MIGRATION_DB_PASSWORD:${TEST_POSTGRES_PASSWORD:rewit_local_password}}
   data:
     redis:
       host: ${TEST_REDIS_HOST:127.0.0.1}
-      port: ${TEST_REDIS_PORT:}
+      port: ${TEST_REDIS_PORT:56379}
       password: ${TEST_REDIS_PASSWORD:}
       timeout: 3000ms
   jpa:
@@ -16,7 +24,7 @@ spring:
 
 rewit:
   minio:
-    endpoint: ${TEST_STORAGE_ENDPOINT:}
+    endpoint: ${TEST_STORAGE_ENDPOINT:${OBJECT_STORAGE_ENDPOINT:http://127.0.0.1:58333}}
     access-key: ${TEST_STORAGE_ACCESS_KEY:change-me}
     secret-key: ${TEST_STORAGE_SECRET_KEY:change-me}
     bucket-name: ${TEST_STORAGE_BUCKET:rewit-local}

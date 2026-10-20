@@ -15,6 +15,7 @@ public class PlaceMediaReport {
     public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_ACCEPTED = "ACCEPTED";
     public static final String STATUS_REJECTED = "REJECTED";
+    public static final String STATUS_AUTO_RESOLVED = "AUTO_RESOLVED";
 
     private final UUID id;
     private final UUID placeMediaId;
@@ -64,6 +65,18 @@ public class PlaceMediaReport {
 
     public boolean isRejected() {
         return STATUS_REJECTED.equals(this.status);
+    }
+
+    public boolean isAutoResolved() {
+        return STATUS_AUTO_RESOLVED.equals(this.status);
+    }
+
+    public void autoResolve(String notes) {
+        this.status = STATUS_AUTO_RESOLVED;
+        this.decidedByUserId = null;
+        this.decidedAt = Instant.now();
+        this.updatedAt = this.decidedAt;
+        this.decisionNotes = notes != null ? notes.trim() : null;
     }
 
     public void accept(UUID moderatorUserId, String notes) {

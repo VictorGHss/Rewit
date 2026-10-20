@@ -84,17 +84,25 @@ No catálogo de estabelecimentos físicos (`places/`), fotografias removidas por
 
 
 
-6. **Tratamento de Registros Legados e Backfill Conservador (V33 e V35):**
-   - A migration V33 preencheu `removed_at` histórico com base em `updated_at` (ou `created_at` na ausência deste).
-   - Para evitar a atribuição indevida de `MODERATOR` a mídias sem comprovação probatória (achado RS-1 / V34-1 da auditoria S3-A.6), a migration V35 realiza a reclassificação conservadora:
-     - Mídias com registro explícito de `REMOVE` ou `ACCEPT_REPORT` por moderador na tabela de auditoria permanecem com `removal_source = 'MODERATOR'`.
-     - Mídias com registro de remoção pelo autor ou responsável permanecem como `AUTHOR` ou `BUSINESS_OWNER` / `PLACE_MANAGER`.
-     - Mídias removidas sem comprovação de ato deliberado de remoção (incluindo mídias que possuam apenas `REJECT_REPORT` ou sem nenhum log de remoção) são reclassificadas como `LEGACY`.
+6. **Tratamento de Registros Legados e Backfill Conservador (V33, V35 e V36):**
+   - A migration V33 preencheu `removed_at` histórico com base no instante da migração (`NOW()`) para mídias já com status `REMOVED`.
+   - Para evitar a atribuição indevida de `MODERATOR` a mídias sem comprovação probatória e assegurar que evidências anteriores à última restauração não corrompam o estado atual, a migration V36 realiza a reclassificação conservadora e determinística:
+     - Mídias com registro explícito de `REMOVE` ou `ACCEPT_REPORT` por moderador na tabela de auditoria, ocorridos estritamente após a última restauração (`RESTORE` ou `RELEASE_REVIEW`), são classificadas com `removal_source = 'MODERATOR'`.
+     - Mídias com registro de remoção pelo autor ou responsável ocorridos após a última restauração permanecem como `AUTHOR` ou `BUSINESS_OWNER` / `PLACE_MANAGER`.
+     - Mídias removidas sem comprovação de ato deliberado posterior à última restauração (incluindo mídias que possuam apenas `REJECT_REPORT` ou sem nenhum log de remoção no ciclo corrente) são classificadas estritamente como `LEGACY`.
    - Mídias com `removal_source = 'LEGACY'` não possuem histórico de consentimento auditável completo e **nunca** podem ser restauradas por moderação (retorno HTTP 409 com código `CANNOT_RESTORE_LEGACY_REMOVED_MEDIA`).
 
+7. **Liberação Transacional de Análise (RELEASE_REVIEW) e Resoluções Automáticas (V36):**
+   - **Fluxo de Liberação (R-1):** Fotografias em estado `UNDER_REVIEW` cujas denúncias foram todas rejeitadas ou encerradas sem deferimento não utilizam o endpoint de restauração (`/restore`, exclusivo para `REMOVED`). Em vez disso, são liberadas através do endpoint administrativo dedicado `POST /admin/place-media/{placeId}/{mediaId}/release-review`. A liberação transaciona o status para `ACTIVE`, reavalia a elegibilidade de capa e registra o evento `RELEASE_REVIEW` na trilha de auditoria.
+   - **Status `AUTO_RESOLVED` para Denúncias (AU-1):** Denúncias encerradas automaticamente em virtude da exclusão da fotografia pelo autor, pelo proprietário comercial ou por encerramento em cascata recebem o status inequívoco `AUTO_RESOLVED`, com `decided_by_user_id = NULL`. Uma check constraint no banco de dados (`chk_place_media_reports_decided_by`) garante que denúncias automáticas nunca recebam ID de operador, e que decisões humanas (`ACCEPTED`/`REJECTED`) sempre tenham operador associado.
 
+8. **Isolamento de Credenciais de Banco e Defesa Append-Only (AO-1):**
+   - A execução da aplicação em runtime e das suítes de teste de integração opera sob a role de aplicação restrita `rewit_app`, sem privilégios de superuser e sem ownership sobre as tabelas.
+   - O schema e as migrações pertencem exclusivamente à role de migração `rewit_user` (utilizada pelo Flyway).
+   - Como non-owner, o PostgreSQL rejeita nativamente comandos DDL (como `ALTER TABLE ... DISABLE TRIGGER` ou `DROP TABLE`) disparados pela aplicação.
+   - Adicionalmente, comandos `UPDATE`, `DELETE` e `TRUNCATE` sobre `place_media_moderation_audit_logs` são revogados da role `rewit_app`, assegurando defesa em profundidade (DCL + triggers de integridade).
 
-7. **Ordem de Locks e Revalidação Pessimista:**
+9. **Ordem de Locks e Revalidação Pessimista:**
 
    - Antes de efetuar o expurgo físico, o ciclo de GC adquire os locks pessimistas na ordem global:
 
@@ -112,9 +120,7 @@ No catálogo de estabelecimentos físicos (`places/`), fotografias removidas por
 
      - Não há nenhuma transação de restauração ou concorrência pendente.
 
-
-
-8. **Exclusão Física Idempotente e Registro Atômico:**
+10. **Exclusão Física Idempotente e Registro Atômico:**
 
    - A exclusão física no Object Storage é realizada exclusivamente pela porta autorizada de storage. `NOT_FOUND` no storage é tratado como idempotência com sucesso.
 

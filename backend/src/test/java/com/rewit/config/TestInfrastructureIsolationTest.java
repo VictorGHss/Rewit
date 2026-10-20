@@ -34,7 +34,45 @@ class TestInfrastructureIsolationTest {
     }
 
     @Test
-    @DisplayName("Rejeita Redis apontando para porta compartilhada/desenvolvimento 6379")
+    @DisplayName("Rejeita DataSource Hikari apontando para porta compartilhada/desenvolvimento 5432")
+    void shouldRejectHikariDatasourceOnPort5432() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.datasource.hikari.jdbc-url", "jdbc:postgresql://localhost:5432/rewit_db");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("5432"));
+        assertTrue(ex.getMessage().contains("spring.datasource.hikari.jdbc-url"));
+    }
+
+    @Test
+    @DisplayName("Rejeita DataSource sem porta explícita (PostgreSQL default 5432) em spring.datasource.url")
+    void shouldRejectDatasourceWithoutExplicitPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.datasource.url", "jdbc:postgresql://localhost/rewit_db");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("não possui porta explícita"));
+    }
+
+    @Test
+    @DisplayName("Rejeita DataSource Hikari sem porta explícita em spring.datasource.hikari.jdbc-url")
+    void shouldRejectHikariDatasourceWithoutExplicitPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.datasource.hikari.jdbc-url", "jdbc:postgresql://127.0.0.1/rewit_db");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("não possui porta explícita"));
+        assertTrue(ex.getMessage().contains("spring.datasource.hikari.jdbc-url"));
+    }
+
+    @Test
+    @DisplayName("Rejeita Redis apontando para porta compartilhada/desenvolvimento 6379 via spring.data.redis.port")
     void shouldRejectRedisOnPort6379() {
         MockEnvironment env = new MockEnvironment();
         env.setProperty("spring.data.redis.port", "6379");
@@ -43,6 +81,30 @@ class TestInfrastructureIsolationTest {
                 TestInfrastructureSafetyValidator.validateEnvironment(env)
         );
         assertTrue(ex.getMessage().contains("6379"));
+    }
+
+    @Test
+    @DisplayName("Rejeita Redis apontando para porta 6379 via spring.data.redis.url")
+    void shouldRejectRedisUrlOnPort6379() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.data.redis.url", "redis://localhost:6379");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("6379"));
+    }
+
+    @Test
+    @DisplayName("Rejeita Redis URL sem porta explícita (default 6379) via spring.data.redis.url")
+    void shouldRejectRedisUrlWithoutExplicitPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.data.redis.url", "redis://localhost/0");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("porta omitida"));
     }
 
     @Test
@@ -69,6 +131,17 @@ class TestInfrastructureIsolationTest {
     }
 
     @Test
+    @DisplayName("Aceita configuração válida com Hikari e Redis URL em portas isoladas de teste")
+    void shouldAcceptIsolatedHikariAndRedisUrlPorts() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.datasource.hikari.jdbc-url", "jdbc:postgresql://127.0.0.1:55432/rewit_test");
+        env.setProperty("spring.data.redis.url", "redis://127.0.0.1:56379");
+        env.setProperty("rewit.minio.endpoint", "http://127.0.0.1:58333");
+
+        assertDoesNotThrow(() -> TestInfrastructureSafetyValidator.validateEnvironment(env));
+    }
+
+    @Test
     @DisplayName("Variáveis de desenvolvimento não influenciam propriedades de teste no YAML")
     void devEnvironmentVariablesDoNotAffectTestProperties() {
         // Simula variáveis genéricas de ambiente de desenvolvimento
@@ -83,4 +156,3 @@ class TestInfrastructureIsolationTest {
         assertNull(env.getProperty("TEST_STORAGE_ENDPOINT"));
     }
 }
-

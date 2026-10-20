@@ -200,6 +200,30 @@ public class AdminPlaceMediaModerationController {
         return ResponseEntity.ok(PlaceMediaModerationActionResponse.fromResult(result));
     }
 
+    @PostMapping("/{placeId}/{mediaId}/release-review")
+    @PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")
+    @Operation(summary = "Liberação administrativa de foto em análise cujas denúncias foram rejeitadas", security = @SecurityRequirement(name = "bearerAuth"))
+    public ResponseEntity<PlaceMediaModerationActionResponse> releaseReview(
+            @PathVariable("placeId") UUID placeId,
+            @PathVariable("mediaId") UUID mediaId,
+            @Valid @RequestBody(required = false) RestorePlaceMediaRequest request,
+            Authentication authentication
+    ) {
+        UUID moderatorUserId = requireAuthenticatedUser(authentication);
+        if (moderatorRolePolicy != null) {
+            moderatorRolePolicy.requireCurrentModerator(moderatorUserId);
+        }
+
+        String notes = request != null ? request.notes() : null;
+        PlaceMediaModerationResult result = placeMediaService.releaseReviewByModerator(
+                moderatorUserId,
+                placeId,
+                mediaId,
+                notes
+        );
+        return ResponseEntity.ok(PlaceMediaModerationActionResponse.fromResult(result));
+    }
+
     @PostMapping("/{placeId}/{mediaId}/restore")
     @PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")
     @Operation(summary = "Restauração administrativa de foto removida", security = @SecurityRequirement(name = "bearerAuth"))

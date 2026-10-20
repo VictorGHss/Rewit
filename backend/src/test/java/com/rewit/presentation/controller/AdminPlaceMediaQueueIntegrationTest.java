@@ -138,6 +138,7 @@ class AdminPlaceMediaQueueIntegrationTest {
 
         // GET /api/v1/admin/place-media/under-review
         mockMvc.perform(get("/api/v1/admin/place-media/under-review")
+                        .param("size", "100")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
@@ -146,6 +147,7 @@ class AdminPlaceMediaQueueIntegrationTest {
 
         // GET /api/v1/admin/place-media/queue
         mockMvc.perform(get("/api/v1/admin/place-media/queue")
+                        .param("size", "100")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());

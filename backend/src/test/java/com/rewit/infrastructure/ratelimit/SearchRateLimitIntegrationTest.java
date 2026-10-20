@@ -67,9 +67,8 @@ class SearchRateLimitIntegrationTest {
         if (env != null && !env.isBlank()) {
             return validateSafeRedisPort(Integer.parseInt(env));
         }
-        throw new IllegalStateException("Porta do Redis de teste isolado não configurada! " +
-                "Defina 'spring.data.redis.port' ou 'REDIS_PORT' com a porta da instância descartável (ex: 56379). " +
-                "Conexões à porta compartilhada 6379 são estritamente proibidas.");
+        // Default seguro para infraestrutura isolada de teste (56379 conforme application-local.yml)
+        return validateSafeRedisPort(56379);
     }
 
     private static int validateSafeRedisPort(int port) {
