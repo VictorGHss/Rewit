@@ -67,7 +67,8 @@ class RedisSerializationTest {
         // ou 56379 (porta isolada), nunca o default compartilhado 6379.
         int port = (portProp != null && !portProp.isBlank()) ? Integer.parseInt(portProp) : 56379;
         if (port == 6379 && !"true".equalsIgnoreCase(System.getProperty("rewit.test.allow-shared-redis"))) {
-            port = 56379;
+            throw new IllegalStateException("Uso acidental da porta 6379 (Redis compartilhado) detectado em teste de integração! " +
+                    "Use uma instância descartável (ex: porta 56379).");
         }
         LettuceConnectionFactory factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(host, port));
         factory.afterPropertiesSet();

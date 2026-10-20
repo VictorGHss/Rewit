@@ -8,6 +8,7 @@ public enum PlaceMediaModerationAction {
     RESTORE,
     ACCEPT_REPORT,
     REJECT_REPORT,
-    AUTHOR_REMOVE
+    AUTHOR_REMOVE,
+    BUSINESS_OWNER_REMOVE,
+    AUTO_QUARANTINE
 }
-

@@ -203,6 +203,11 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
         PlaceMedia savedAuth = placeMediaRepository.save(media);
         assertEquals(RemovalSource.AUTHOR, savedAuth.getRemovalSource());
 
+        // Deve aceitar BUSINESS_OWNER
+        media.markRemovedByBusinessOwner();
+        PlaceMedia savedOwner = placeMediaRepository.save(media);
+        assertEquals(RemovalSource.BUSINESS_OWNER, savedOwner.getRemovalSource());
+
         // Deve aceitar NULL (quando restaurado/ativo)
         media.markActive();
         PlaceMedia savedActive = placeMediaRepository.save(media);
@@ -216,6 +221,64 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
                         media.getId()
                 )
         );
+    }
+
+    @Test
+    @DisplayName("Trigger no banco deve rejeitar TRUNCATE em place_media_moderation_audit_logs (append-only V34)")
+    @Transactional
+    void shouldRejectTruncateOnAuditLog() {
+        DataIntegrityViolationException ex = assertThrows(DataIntegrityViolationException.class, () ->
+                jdbcTemplate.execute("TRUNCATE TABLE place_media_moderation_audit_logs")
+        );
+        assertTrue(ex.getMessage().contains("append-only") || ex.getMessage().contains("TRUNCATE não"));
+    }
+
+    @Test
+    @DisplayName("Deve persistir auditoria de AUTO_QUARANTINE e BUSINESS_OWNER_REMOVE com sucesso")
+    @Transactional
+    void shouldPersistAutoQuarantineAndBusinessOwnerRemoveAuditLogs() {
+        User user = createModerator();
+        Place place = createPlace();
+        PlaceMedia media = createMedia(place, user);
+
+        PlaceMediaModerationAuditLog autoQuarantineLog = new PlaceMediaModerationAuditLog(
+                UUID.randomUUID(),
+                media.getId(),
+                place.getId(),
+                user.getId(),
+                PlaceMediaModerationAction.AUTO_QUARANTINE,
+                "Quarentena automática por excesso de denúncias",
+                "Limiar atingido",
+                Instant.now()
+        );
+        auditLogRepository.save(autoQuarantineLog);
+
+        PlaceMediaModerationAuditLog ownerRemoveLog = new PlaceMediaModerationAuditLog(
+                UUID.randomUUID(),
+                media.getId(),
+                place.getId(),
+                user.getId(),
+                PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE,
+                "Remoção pelo proprietário do estabelecimento",
+                "Foto desatualizada",
+                Instant.now()
+        );
+        auditLogRepository.save(ownerRemoveLog);
+        entityManager.flush();
+
+        Integer countAuto = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM place_media_moderation_audit_logs WHERE id = ? AND action = 'AUTO_QUARANTINE'",
+                Integer.class,
+                autoQuarantineLog.getId()
+        );
+        assertEquals(1, countAuto);
+
+        Integer countOwner = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM place_media_moderation_audit_logs WHERE id = ? AND action = 'BUSINESS_OWNER_REMOVE'",
+                Integer.class,
+                ownerRemoveLog.getId()
+        );
+        assertEquals(1, countOwner);
     }
 }
 
