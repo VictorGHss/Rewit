@@ -623,8 +623,8 @@ class PlaceMediaServiceTest {
     }
 
     @Test
-    @DisplayName("18. decideReport com REJECT rejeita denúncia e NÃO reativa foto (permanece em UNDER_REVIEW)")
-    void shouldRejectReportAndKeepMediaInUnderReview() {
+    @DisplayName("18a. decideReport com REJECT mantém foto em UNDER_REVIEW se ainda existirem outras denúncias pendentes")
+    void shouldRejectReportAndKeepMediaInUnderReviewWhenOtherReportsRemainPending() {
         UUID modId = moderatorId;
         UUID reportId = UUID.randomUUID();
         UUID mediaId = UUID.randomUUID();
@@ -645,6 +645,7 @@ class PlaceMediaServiceTest {
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
         when(placeMediaReportRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.countByPlaceMediaIdAndStatus(mediaId, PlaceMediaReport.STATUS_PENDING)).thenReturn(1L);
 
         var res = placeMediaService.decideReport(modId, reportId, "REJECT", "Denúncia infundada");
 
@@ -652,6 +653,42 @@ class PlaceMediaServiceTest {
         assertEquals(PlaceMediaStatus.UNDER_REVIEW, media.getStatus());
         assertFalse(media.isActive());
         verify(placeMediaRepository, never()).save(media);
+    }
+
+    @Test
+    @DisplayName("18b. decideReport com REJECT restabelece automaticamente a foto para ACTIVE quando a última denúncia é rejeitada")
+    void shouldRestoreMediaToActiveWhenLastReportIsRejected() {
+        UUID modId = moderatorId;
+        UUID reportId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+        );
+
+        var reportEntity = new PlaceMediaReport(
+                reportId, mediaId, UUID.randomUUID(), "SPAM", "Propaganda",
+                PlaceMediaReport.STATUS_PENDING, Instant.now(), Instant.now(), null, null, null
+        );
+
+        when(placeMediaReportRepository.findById(reportId)).thenReturn(Optional.of(reportEntity));
+        when(placeMediaRepository.findById(mediaId)).thenReturn(Optional.of(media));
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaReportRepository.findByIdForUpdate(reportId)).thenReturn(Optional.of(reportEntity));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.countByPlaceMediaIdAndStatus(mediaId, PlaceMediaReport.STATUS_PENDING)).thenReturn(0L);
+        when(placeMediaRepository.countActiveByPlaceId(placeId)).thenReturn(1L);
+        when(placeMediaRepository.findPrimaryByPlaceId(placeId)).thenReturn(Optional.empty());
+
+        var res = placeMediaService.decideReport(modId, reportId, "REJECT", "Denúncia infundada");
+
+        assertEquals("REJECTED", res.status());
+        assertEquals(PlaceMediaStatus.ACTIVE, media.getStatus());
+        assertTrue(media.isActive());
+        assertTrue(media.isPrimary());
+        verify(placeMediaRepository).save(media);
     }
 
     @Test

@@ -76,29 +76,6 @@ public class PlaceMediaService {
                              AccountStatusPolicy accountStatusPolicy,
                              ObjectStoragePort objectStoragePort,
                              ImageSanitizer imageSanitizer,
-                             RateLimiter rateLimiter) {
-        this(placeRepository, placeMediaRepository, accountStatusPolicy, objectStoragePort, imageSanitizer, rateLimiter,
-                null, null, null, null, null);
-    }
-
-    public PlaceMediaService(PlaceRepository placeRepository,
-                             PlaceMediaRepository placeMediaRepository,
-                             AccountStatusPolicy accountStatusPolicy,
-                             ObjectStoragePort objectStoragePort,
-                             ImageSanitizer imageSanitizer,
-                             RateLimiter rateLimiter,
-                             BusinessAccountRepository businessAccountRepository,
-                             UserRepository userRepository,
-                             PlaceMediaReportRepository placeMediaReportRepository) {
-        this(placeRepository, placeMediaRepository, accountStatusPolicy, objectStoragePort, imageSanitizer, rateLimiter,
-                businessAccountRepository, userRepository, placeMediaReportRepository, null, null);
-    }
-
-    public PlaceMediaService(PlaceRepository placeRepository,
-                             PlaceMediaRepository placeMediaRepository,
-                             AccountStatusPolicy accountStatusPolicy,
-                             ObjectStoragePort objectStoragePort,
-                             ImageSanitizer imageSanitizer,
                              RateLimiter rateLimiter,
                              BusinessAccountRepository businessAccountRepository,
                              UserRepository userRepository,
@@ -115,10 +92,10 @@ public class PlaceMediaService {
                              ObjectStoragePort objectStoragePort,
                              ImageSanitizer imageSanitizer,
                              RateLimiter rateLimiter,
-                             @Autowired(required = false) BusinessAccountRepository businessAccountRepository,
-                             @Autowired(required = false) UserRepository userRepository,
-                             @Autowired(required = false) PlaceMediaReportRepository placeMediaReportRepository,
-                             @Autowired(required = false) PlaceMediaModerationAuditLogRepository placeMediaModerationAuditLogRepository,
+                             BusinessAccountRepository businessAccountRepository,
+                             UserRepository userRepository,
+                             PlaceMediaReportRepository placeMediaReportRepository,
+                             PlaceMediaModerationAuditLogRepository placeMediaModerationAuditLogRepository,
                              @Autowired(required = false) ModeratorRolePolicy moderatorRolePolicy) {
         this.placeRepository = Objects.requireNonNull(placeRepository, "PlaceRepository must not be null");
         this.placeMediaRepository = Objects.requireNonNull(placeMediaRepository, "PlaceMediaRepository must not be null");
@@ -126,13 +103,13 @@ public class PlaceMediaService {
         this.objectStoragePort = Objects.requireNonNull(objectStoragePort, "ObjectStoragePort must not be null");
         this.imageSanitizer = Objects.requireNonNull(imageSanitizer, "ImageSanitizer must not be null");
         this.rateLimiter = Objects.requireNonNull(rateLimiter, "RateLimiter must not be null");
-        this.businessAccountRepository = businessAccountRepository;
-        this.userRepository = userRepository;
-        this.placeMediaReportRepository = placeMediaReportRepository;
-        this.placeMediaModerationAuditLogRepository = placeMediaModerationAuditLogRepository;
+        this.businessAccountRepository = Objects.requireNonNull(businessAccountRepository, "BusinessAccountRepository must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "UserRepository must not be null");
+        this.placeMediaReportRepository = Objects.requireNonNull(placeMediaReportRepository, "PlaceMediaReportRepository must not be null");
+        this.placeMediaModerationAuditLogRepository = Objects.requireNonNull(placeMediaModerationAuditLogRepository, "PlaceMediaModerationAuditLogRepository must not be null");
         this.moderatorRolePolicy = moderatorRolePolicy != null
                 ? moderatorRolePolicy
-                : (userRepository != null ? new ModeratorRolePolicy(accountStatusPolicy, userRepository) : null);
+                : new ModeratorRolePolicy(accountStatusPolicy, userRepository);
     }
 
     @Transactional
@@ -155,8 +132,6 @@ public class PlaceMediaService {
         SanitizedImage sanitized = imageSanitizer.sanitize(cmd.fileBytes());
         String contentSha256 = computeSha256(sanitized.bytes());
 
-        rateLimiter.acquireOrThrow(RateLimitedAction.MEDIA_UPLOAD, RateLimitSubject.ofUser(cmd.authenticatedUserId()));
-
         Place place = placeRepository.findByIdForUpdate(cmd.placeId())
                 .filter(p -> CatalogService.PUBLIC_CATALOG_STATUS.equals(p.getStatus()))
                 .orElseThrow(() -> new BusinessException("Local não encontrado", HttpStatus.NOT_FOUND, "PLACE_NOT_FOUND"));
@@ -164,6 +139,7 @@ public class PlaceMediaService {
         requireAuthorizedToUpload(cmd.authenticatedUserId(), place);
 
         // Idempotência baseada em chave de idempotência e hash SHA-256 (A-07)
+        // O replay idempotente deve ser verificado ANTES de consumir a cota de rate limiting
         String idempotencyKey = null;
         if (cmd.idempotencyKey() != null && !cmd.idempotencyKey().isBlank()) {
             idempotencyKey = cmd.idempotencyKey().trim();
@@ -180,6 +156,9 @@ public class PlaceMediaService {
                 throw new BusinessException("Idempotency key já utilizada com payload diferente", HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT");
             }
         }
+
+        // Apenas requisições que realmente realizam um novo upload consomem cota do rate limiter
+        rateLimiter.acquireOrThrow(RateLimitedAction.MEDIA_UPLOAD, RateLimitSubject.ofUser(cmd.authenticatedUserId()));
 
         long activeCount = placeMediaRepository.countActiveByPlaceId(place.getId());
         if (activeCount >= PlaceMedia.MAX_MEDIA_PER_PLACE) {
@@ -311,18 +290,37 @@ public class PlaceMediaService {
         }
 
         boolean isAuthor = media.getUserId().equals(actorUserId);
-        boolean isPlaceManager = isAuthorizedPlaceManager(actorUserId, place);
-        if (!isAuthor && !isPlaceManager) {
-            throw new BusinessException("Acesso restrito ao autor da fotografia, ao responsável pelo local ou a moderadores", HttpStatus.FORBIDDEN, "FORBIDDEN");
+        boolean isBusinessOwner = false;
+        if (!isAuthor) {
+            if (place.getCreatedByUserId() != null && place.getCreatedByUserId().equals(actorUserId)) {
+                isBusinessOwner = true;
+            } else if (place.getClaimedByBusinessId() != null && businessAccountRepository != null) {
+                isBusinessOwner = businessAccountRepository.findById(place.getClaimedByBusinessId())
+                        .filter(acc -> acc.isAdministeredBy(actorUserId) && BusinessRepresentationPolicy.isApproved(acc))
+                        .isPresent();
+            }
+        }
+        boolean isModerator = false;
+        if (!isAuthor && !isBusinessOwner) {
+            isModerator = userRepository.findById(actorUserId)
+                    .map(u -> u.getRole() == Role.MODERATOR || u.getRole() == Role.ADMIN)
+                    .orElse(false);
+        }
+
+        if (!isAuthor && !isBusinessOwner && !isModerator) {
+            throw new BusinessException("Acesso restrito ao autor da fotografia, ao proprietário do estabelecimento ou a moderadores", HttpStatus.FORBIDDEN, "FORBIDDEN");
         }
 
         boolean wasPrimary = media.isPrimary();
         if (isAuthor) {
             media.markRemovedByAuthor();
             saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.AUTHOR_REMOVE, "Remoção pelo próprio autor", null, null);
+        } else if (isBusinessOwner) {
+            media.markRemovedByBusinessOwner();
+            saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE, "Remoção pelo proprietário do estabelecimento", null, null);
         } else {
             media.markRemovedByModerator();
-            saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.REMOVE, "Remoção pelo responsável do local", null, null);
+            saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.REMOVE, "Remoção por moderação administrativa", null, null);
         }
         placeMediaRepository.save(media);
 
@@ -334,17 +332,21 @@ public class PlaceMediaService {
             });
         }
 
-        // Se a exclusão partiu de moderador/admin, marca denúncias pendentes como deferidas (ACCEPTED)
-        boolean isModerator = userRepository != null && userRepository.findById(actorUserId)
-                .map(u -> u.getRole() == Role.MODERATOR || u.getRole() == Role.ADMIN)
-                .orElse(false);
-        if (isModerator && placeMediaReportRepository != null) {
-            List<PlaceMediaReport> reports = placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId);
-            for (PlaceMediaReport r : reports) {
-                if (r.isPending()) {
-                    r.accept(actorUserId, "Fotografia excluída pelo moderador");
-                    placeMediaReportRepository.save(r);
-                }
+        // Resolve TODAS as denúncias pendentes associadas à mídia removida e registra auditoria individual
+        List<PlaceMediaReport> reports = placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId);
+        for (PlaceMediaReport r : reports) {
+            if (r.isPending()) {
+                String resolutionNote = isAuthor ? "Resolvida: fotografia excluída pelo próprio autor"
+                        : (isBusinessOwner ? "Resolvida: fotografia excluída pelo proprietário do estabelecimento"
+                        : "Deferida: fotografia excluída por moderação administrativa");
+                r.accept(actorUserId, resolutionNote);
+                placeMediaReportRepository.save(r);
+
+                saveAuditLog(mediaId, placeId, actorUserId,
+                        PlaceMediaModerationAction.ACCEPT_REPORT,
+                        r.getReason(),
+                        resolutionNote,
+                        r.getId());
             }
         }
     }
@@ -409,6 +411,11 @@ public class PlaceMediaService {
                     placeMediaRepository.save(next);
                 });
             }
+            saveAuditLog(media.getId(), placeId, actorUserId,
+                    PlaceMediaModerationAction.AUTO_QUARANTINE,
+                    "Quarentena automática após atingir limiar de " + pendingReports + " denúncias pendentes",
+                    "Transição preventiva de ACTIVE para UNDER_REVIEW",
+                    report.getId());
         }
     }
 
@@ -531,25 +538,31 @@ public class PlaceMediaService {
                 }
             }
 
-            // Aceita também sob lock outras denúncias pendentes para a mesma fotografia
+            saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), moderatorUserId,
+                    PlaceMediaModerationAction.ACCEPT_REPORT, lockedReport.getReason(), notes, lockedReport.getId());
+
+            // Aceita também sob lock outras denúncias pendentes para a mesma fotografia e registra auditoria individual
             List<PlaceMediaReport> siblings = placeMediaReportRepository.findByPlaceMediaIdForUpdate(lockedMedia.getId());
             for (PlaceMediaReport sib : siblings) {
                 if (sib.isPending() && !sib.getId().equals(lockedReport.getId())) {
-                    sib.accept(moderatorUserId, notes != null ? notes : "Deferida em conjunto");
+                    String sibNotes = notes != null ? notes : "Deferida em conjunto";
+                    sib.accept(moderatorUserId, sibNotes);
                     placeMediaReportRepository.save(sib);
+
+                    saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), moderatorUserId,
+                            PlaceMediaModerationAction.ACCEPT_REPORT, sib.getReason(), sibNotes, sib.getId());
                 }
             }
-
-            saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), moderatorUserId,
-                    PlaceMediaModerationAction.ACCEPT_REPORT, lockedReport.getReason(), notes, lockedReport.getId());
         } else {
-            // Decisão REJECT: marca a denúncia individual como rejeitada e registra auditoria.
-            // A-2: Rejeição de denúncia individual NUNCA reativa a fotografia automaticamente.
+            // Decisão REJECT: marca a denúncia individual como rejeitada e registra auditoria
             lockedReport.reject(moderatorUserId, notes);
             placeMediaReportRepository.save(lockedReport);
 
             saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), moderatorUserId,
                     PlaceMediaModerationAction.REJECT_REPORT, lockedReport.getReason(), notes, lockedReport.getId());
+
+            // A-2: Rejeição de denúncia individual NUNCA reativa a fotografia automaticamente;
+            // restaurações válidas são explícitas, autorizadas e auditadas via restoreMediaByModerator.
         }
 
         return PlaceMediaReportView.of(lockedReport, lockedMedia);
@@ -585,13 +598,18 @@ public class PlaceMediaService {
                 });
             }
 
-            if (placeMediaReportRepository != null) {
-                List<PlaceMediaReport> reports = placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId);
-                for (PlaceMediaReport r : reports) {
-                    if (r.isPending()) {
-                        r.accept(moderatorUserId, notes != null ? notes : "Remoção administrativa direta");
-                        placeMediaReportRepository.save(r);
-                    }
+            List<PlaceMediaReport> reports = placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId);
+            for (PlaceMediaReport r : reports) {
+                if (r.isPending()) {
+                    String repNotes = notes != null ? notes : "Remoção administrativa direta";
+                    r.accept(moderatorUserId, repNotes);
+                    placeMediaReportRepository.save(r);
+
+                    saveAuditLog(mediaId, placeId, moderatorUserId,
+                            PlaceMediaModerationAction.ACCEPT_REPORT,
+                            r.getReason(),
+                            repNotes,
+                            r.getId());
                 }
             }
 
@@ -756,19 +774,17 @@ public class PlaceMediaService {
 
     private void saveAuditLog(UUID mediaId, UUID placeId, UUID actorUserId,
                               PlaceMediaModerationAction action, String reason, String notes, UUID reportId) {
-        if (placeMediaModerationAuditLogRepository != null) {
-            placeMediaModerationAuditLogRepository.save(new PlaceMediaModerationAuditLog(
-                    UUID.randomUUID(),
-                    mediaId,
-                    placeId,
-                    actorUserId,
-                    action,
-                    reason,
-                    notes,
-                    reportId,
-                    Instant.now()
-            ));
-        }
+        placeMediaModerationAuditLogRepository.save(new PlaceMediaModerationAuditLog(
+                UUID.randomUUID(),
+                mediaId,
+                placeId,
+                actorUserId,
+                action,
+                reason,
+                notes,
+                reportId,
+                Instant.now()
+        ));
     }
 
     private void requireAuthorizedToUpload(UUID actorUserId, Place place) {
