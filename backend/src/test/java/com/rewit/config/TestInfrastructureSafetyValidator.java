@@ -32,12 +32,39 @@ public class TestInfrastructureSafetyValidator implements ApplicationContextInit
     }
 
     public static void validateEnvironment(ConfigurableEnvironment env) {
-        validateDatasourceProperty(env.getProperty("spring.datasource.url"), "spring.datasource.url");
-        validateDatasourceProperty(env.getProperty("spring.datasource.hikari.jdbc-url"), "spring.datasource.hikari.jdbc-url");
-        validateDatasourceProperty(env.getProperty("spring.datasource.jdbc-url"), "spring.datasource.jdbc-url");
+        validateDatasourceProperty(resolve(env, "spring.datasource.url"), "spring.datasource.url");
+        validateDatasourceProperty(resolve(env, "spring.datasource.hikari.jdbc-url"), "spring.datasource.hikari.jdbc-url");
+        validateDatasourceProperty(resolve(env, "spring.datasource.jdbc-url"), "spring.datasource.jdbc-url");
 
         validateRedisProperties(env);
-        validateStorageProperty(env.getProperty("rewit.minio.endpoint"));
+        String storageEndpoint = resolve(env, "rewit.minio.endpoint");
+        if (storageEndpoint != null && !storageEndpoint.isBlank()) {
+            validateStorageEndpoint(storageEndpoint, "rewit.minio.endpoint");
+        }
+    }
+
+    /**
+     * Resolve a propriedade convertendo placeholder sem valor (variável TEST_* ausente, sem default
+     * no YAML de teste) em falha explícita antes que qualquer bean tente conectar.
+     */
+    private static String resolve(ConfigurableEnvironment env, String property) {
+        try {
+            return env.getProperty(property);
+        } catch (IllegalArgumentException unresolved) {
+            throw new IllegalStateException("Configuração de teste obrigatória ausente para " + property
+                    + ": " + unresolved.getMessage()
+                    + ". Defina as variáveis TEST_* da infraestrutura descartável (docs/development/local-setup.md).",
+                    unresolved);
+        }
+    }
+
+    /** Valida uma URL JDBC de teste avulsa (testes sem contexto Spring). Exige URL PostgreSQL não vazia. */
+    public static void validateJdbcUrl(String url, String name) {
+        if (url == null || url.isBlank() || !url.trim().startsWith("jdbc:postgresql:")) {
+            throw new IllegalStateException("SEGURANÇA DE INFRAESTRUTURA DE TESTE VIOLADA: " + name
+                    + " precisa ser uma URL jdbc:postgresql://host:porta/database explícita");
+        }
+        validateDatasourceProperty(url, name);
     }
 
     private static void validateDatasourceProperty(String datasourceUrl, String propertyName) {
@@ -213,14 +240,29 @@ public class TestInfrastructureSafetyValidator implements ApplicationContextInit
         }
     }
 
-    private static void validateStorageProperty(String storageEndpoint) {
-        if (storageEndpoint != null && !storageEndpoint.isBlank()) {
-            if (storageEndpoint.contains(":" + FORBIDDEN_STORAGE_PORT)) {
-                throw new IllegalStateException(
-                        "SEGURANÇA DE INFRAESTRUTURA DE TESTE VIOLADA: Storage de teste aponta para porta compartilhada proibida (" +
-                                FORBIDDEN_STORAGE_PORT + "): " + storageEndpoint
-                );
-            }
+    /** Endpoint S3 de teste: http(s)://host:porta com porta explícita e diferente da compartilhada. */
+    public static void validateStorageEndpoint(String storageEndpoint, String name) {
+        URI uri;
+        try {
+            uri = URI.create(storageEndpoint.trim());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("SEGURANÇA DE INFRAESTRUTURA DE TESTE VIOLADA: " + name
+                    + " inválido: " + storageEndpoint, e);
+        }
+        if (uri.getScheme() == null || !(uri.getScheme().equals("http") || uri.getScheme().equals("https"))
+                || uri.getHost() == null) {
+            throw new IllegalStateException("SEGURANÇA DE INFRAESTRUTURA DE TESTE VIOLADA: " + name
+                    + " precisa ser http(s)://host:porta: " + storageEndpoint);
+        }
+        if (uri.getPort() == -1) {
+            throw new IllegalStateException("SEGURANÇA DE INFRAESTRUTURA DE TESTE VIOLADA: " + name
+                    + " não possui porta explícita: " + storageEndpoint);
+        }
+        if (uri.getPort() == FORBIDDEN_STORAGE_PORT) {
+            throw new IllegalStateException(
+                    "SEGURANÇA DE INFRAESTRUTURA DE TESTE VIOLADA: Storage de teste aponta para porta compartilhada proibida (" +
+                            FORBIDDEN_STORAGE_PORT + "): " + storageEndpoint
+            );
         }
     }
 }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.ratelimit.RateLimitSubject;
 import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.TestInfrastructureConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,33 +52,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SearchRateLimitIntegrationTest {
 
     private static final long WINDOW_WAIT_MILLIS = 2_300;
-    private static final String REDIS_HOST = System.getProperty("spring.data.redis.host", System.getenv().getOrDefault("TEST_REDIS_HOST", envOrDefault("REDIS_HOST", "localhost")));
-    private static final int REDIS_PORT = resolveRedisPort();
-
-    private static int resolveRedisPort() {
-        String testEnv = System.getenv("TEST_REDIS_PORT");
-        if (testEnv != null && !testEnv.isBlank()) {
-            return validateSafeRedisPort(Integer.parseInt(testEnv.trim()));
-        }
-        String prop = System.getProperty("spring.data.redis.port");
-        if (prop != null && !prop.isBlank()) {
-            return validateSafeRedisPort(Integer.parseInt(prop));
-        }
-        String env = System.getenv("REDIS_PORT");
-        if (env != null && !env.isBlank()) {
-            return validateSafeRedisPort(Integer.parseInt(env));
-        }
-        // Default seguro para infraestrutura isolada de teste (56379 conforme application-local.yml)
-        return validateSafeRedisPort(56379);
-    }
-
-    private static int validateSafeRedisPort(int port) {
-        if (port == 6379) {
-            throw new IllegalStateException("Uso acidental da porta 6379 (Redis compartilhado) detectado em teste de integração! " +
-                    "Use uma instância descartável (ex: porta 56379).");
-        }
-        return port;
-    }
+    // A-1b: endpoint explícito e validado (somente TEST_REDIS_HOST/TEST_REDIS_PORT, sem defaults)
+    private static final String REDIS_HOST = TestInfrastructureConfig.current().redisHost();
+    private static final int REDIS_PORT = TestInfrastructureConfig.current().redisPort();
 
     @Autowired
     private WebApplicationContext webApplicationContext;
@@ -194,8 +171,4 @@ class SearchRateLimitIntegrationTest {
 
     private record TestUser(UUID id, String accessToken) {}
 
-    private static String envOrDefault(String name, String fallback) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? fallback : value;
-    }
 }

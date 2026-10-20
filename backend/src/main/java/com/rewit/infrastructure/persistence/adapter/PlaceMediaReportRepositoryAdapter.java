@@ -132,7 +132,7 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<PlaceMediaReport> findByStatus(String status, int page, int size) {
+    public PageResult<PlaceMediaReport> findByStatusAndDecisionOrigin(String status, String decisionOrigin, int page, int size) {
         String normalizedStatus = null;
         if (status != null && !status.isBlank()) {
             String trimmed = status.trim().toUpperCase();
@@ -149,10 +149,29 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
             };
         }
 
+        String normalizedOrigin = null;
+        if (decisionOrigin != null && !decisionOrigin.isBlank()) {
+            normalizedOrigin = switch (decisionOrigin.trim().toUpperCase()) {
+                case PlaceMediaReport.DECISION_ORIGIN_MODERATOR -> PlaceMediaReport.DECISION_ORIGIN_MODERATOR;
+                case PlaceMediaReport.DECISION_ORIGIN_SYSTEM -> PlaceMediaReport.DECISION_ORIGIN_SYSTEM;
+                case PlaceMediaReport.DECISION_ORIGIN_LEGACY -> PlaceMediaReport.DECISION_ORIGIN_LEGACY;
+                default -> throw new com.rewit.common.exception.BusinessException(
+                        "Origem de decisão de denúncia inválida: " + decisionOrigin,
+                        org.springframework.http.HttpStatus.BAD_REQUEST,
+                        "INVALID_DECISION_ORIGIN"
+                );
+            };
+        }
+
         Pageable pageable = PageRequest.of(page, size);
-        Page<PlaceMediaReportJpaEntity> jpaPage = (normalizedStatus != null)
-                ? placeMediaReportJpaRepository.findByStatusOrderByCreatedAtDescIdAsc(normalizedStatus, pageable)
-                : placeMediaReportJpaRepository.findAllByOrderByCreatedAtDescIdAsc(pageable);
+        Page<PlaceMediaReportJpaEntity> jpaPage;
+        if (normalizedOrigin != null) {
+            jpaPage = placeMediaReportJpaRepository.findByStatusAndDecisionOrigin(normalizedStatus, normalizedOrigin, pageable);
+        } else if (normalizedStatus != null) {
+            jpaPage = placeMediaReportJpaRepository.findByStatusOrderByCreatedAtDescIdAsc(normalizedStatus, pageable);
+        } else {
+            jpaPage = placeMediaReportJpaRepository.findAllByOrderByCreatedAtDescIdAsc(pageable);
+        }
 
         List<PlaceMediaReport> content = jpaPage.getContent().stream()
                 .map(PlaceMediaReportJpaEntity::toDomain)

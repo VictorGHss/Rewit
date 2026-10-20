@@ -73,6 +73,8 @@ public final class AdminPlaceMediaModerationDtos {
             UUID decidedByUserId,
             Instant decidedAt,
             String decisionNotes,
+            boolean legacyDecision,
+            String decisionOrigin,
             PlaceMediaSummaryResponse media
     ) {
         public static AdminPlaceMediaReportResponse of(PlaceMediaReport report, PlaceMedia media) {
@@ -85,9 +87,11 @@ public final class AdminPlaceMediaModerationDtos {
                     report.getStatus(),
                     report.getCreatedAt(),
                     report.getUpdatedAt(),
-                    report.getDecidedByUserId(),
+                    report.getVerifiedDeciderUserId(),
                     report.getDecidedAt(),
                     report.getDecisionNotes(),
+                    report.isLegacyDecision(),
+                    report.getDecisionOrigin(),
                     PlaceMediaSummaryResponse.fromDomain(media)
             );
         }
@@ -106,6 +110,8 @@ public final class AdminPlaceMediaModerationDtos {
                     view.decidedByUserId(),
                     view.decidedAt(),
                     view.decisionNotes(),
+                    view.legacyDecision(),
+                    view.decisionOrigin(),
                     PlaceMediaSummaryResponse.fromView(view.media())
             );
         }

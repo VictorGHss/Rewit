@@ -30,5 +30,14 @@ public interface PlaceMediaReportRepository {
         return findByPlaceMediaId(placeMediaId);
     }
 
-    PageResult<PlaceMediaReport> findByStatus(String status, int page, int size);
+    default PageResult<PlaceMediaReport> findByStatus(String status, int page, int size) {
+        return findByStatusAndDecisionOrigin(status, null, page, size);
+    }
+
+    /**
+     * Lista denúncias filtrando opcionalmente por status e pela proveniência da decisão
+     * ({@link PlaceMediaReport#DECISION_ORIGIN_MODERATOR}, {@link PlaceMediaReport#DECISION_ORIGIN_SYSTEM}
+     * ou {@link PlaceMediaReport#DECISION_ORIGIN_LEGACY}); {@code null} em qualquer filtro não restringe.
+     */
+    PageResult<PlaceMediaReport> findByStatusAndDecisionOrigin(String status, String decisionOrigin, int page, int size);
 }

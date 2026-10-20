@@ -2,7 +2,25 @@ package com.rewit.config;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.mock.env.MockEnvironment;
+
+import java.io.IOException;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -141,19 +159,157 @@ class TestInfrastructureIsolationTest {
         assertDoesNotThrow(() -> TestInfrastructureSafetyValidator.validateEnvironment(env));
     }
 
-    @Test
-    @DisplayName("Variáveis de desenvolvimento não influenciam propriedades de teste no YAML")
-    void devEnvironmentVariablesDoNotAffectTestProperties() {
-        // Simula variáveis genéricas de ambiente de desenvolvimento
-        MockEnvironment env = new MockEnvironment();
-        env.setProperty("POSTGRES_PORT", "5433");
-        env.setProperty("REDIS_PORT", "6379");
-        env.setProperty("MINIO_ENDPOINT", "http://127.0.0.1:8333");
+    /** Afirma a rejeição e que ela traz mensagem diagnóstica (nunca uma falha silenciosa). */
+    private static void assertRejected(Class<? extends RuntimeException> type, org.junit.jupiter.api.function.Executable action) {
+        RuntimeException ex = assertThrows(type, action);
+        assertNotNull(ex.getMessage(), "Rejeição sem mensagem diagnóstica");
+    }
 
-        // As propriedades de teste devem estar desacopladas das variáveis de desenvolvimento
-        assertNull(env.getProperty("TEST_POSTGRES_PORT"));
-        assertNull(env.getProperty("TEST_REDIS_PORT"));
-        assertNull(env.getProperty("TEST_STORAGE_ENDPOINT"));
+    private static void assertRejected(Class<? extends RuntimeException> type, org.junit.jupiter.api.function.Executable action,
+                                       String message) {
+        RuntimeException ex = assertThrows(type, action, message);
+        assertNotNull(ex.getMessage(), message);
+    }
+
+    // ------------------------------------------------------------------ A-1b: configuração explícita sem defaults
+
+    private static final Map<String, String> DEV_VARIABLES = Map.of(
+            "POSTGRES_HOST", "127.0.0.1", "POSTGRES_PORT", "5433", "POSTGRES_DB", "rewit_db",
+            "DATABASE_URL", "jdbc:postgresql://127.0.0.1:5433/rewit_db",
+            "REDIS_HOST", "127.0.0.1", "REDIS_PORT", "6379",
+            "OBJECT_STORAGE_ENDPOINT", "http://127.0.0.1:8333", "STORAGE_ENDPOINT", "http://127.0.0.1:8333");
+
+    private static final Map<String, String> TEST_VARIABLES = Map.ofEntries(
+            Map.entry("TEST_DATASOURCE_URL", "jdbc:postgresql://127.0.0.1:61234/rewit_suite"),
+            Map.entry("TEST_APP_DB_USER", "rewit_app"), Map.entry("TEST_APP_DB_PASSWORD", "app-secret"),
+            Map.entry("TEST_MIGRATION_DB_USER", "rewit_owner"), Map.entry("TEST_MIGRATION_DB_PASSWORD", "owner-secret"),
+            Map.entry("TEST_REDIS_HOST", "127.0.0.1"), Map.entry("TEST_REDIS_PORT", "61235"),
+            Map.entry("TEST_STORAGE_ENDPOINT", "http://127.0.0.1:61236"), Map.entry("TEST_STORAGE_ACCESS_KEY", "access"),
+            Map.entry("TEST_STORAGE_SECRET_KEY", "secret"), Map.entry("TEST_STORAGE_BUCKET", "bucket"));
+
+    /** Ambiente com os YAMLs REAIS de teste (application.yml e application-local.yml do classpath de teste). */
+    private static StandardEnvironment environmentWith(Map<String, String> variables) throws IOException {
+        StandardEnvironment env = new StandardEnvironment();
+        MutablePropertySources sources = env.getPropertySources();
+        sources.remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
+        sources.remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
+        sources.addFirst(new MapPropertySource("variaveis", new HashMap<>(variables)));
+        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
+        for (String file : List.of("application-local.yml", "application.yml")) {
+            for (PropertySource<?> source : loader.load(file, new ClassPathResource(file))) {
+                sources.addLast(source);
+            }
+        }
+        return env;
+    }
+
+    @Test
+    @DisplayName("A-1b: com apenas variáveis de desenvolvimento, os YAMLs de teste falham antes de qualquer conexão")
+    void developmentVariablesAloneFailBeforeAnyConnection() throws Exception {
+        StandardEnvironment env = environmentWith(DEV_VARIABLES);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> TestInfrastructureSafetyValidator.validateEnvironment(env));
+        assertTrue(ex.getMessage().contains("TEST_DATASOURCE_URL"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("obrigatória ausente"), ex.getMessage());
+        for (String property : List.of("spring.data.redis.port", "spring.data.redis.host", "rewit.minio.endpoint",
+                "spring.datasource.username", "spring.datasource.password", "spring.flyway.user")) {
+            assertRejected(IllegalArgumentException.class, () -> env.getProperty(property),
+                    property + " não pode ter valor padrão nem usar variável de desenvolvimento");
+        }
+    }
+
+    @Test
+    @DisplayName("A-1b: com variáveis TEST_*, os YAMLs resolvem exatamente esses valores e ignoram as de desenvolvimento")
+    void testVariablesWinAndDevelopmentVariablesAreIgnored() throws Exception {
+        Map<String, String> all = new HashMap<>(DEV_VARIABLES);
+        all.putAll(TEST_VARIABLES);
+        StandardEnvironment env = environmentWith(all);
+
+        assertDoesNotThrow(() -> TestInfrastructureSafetyValidator.validateEnvironment(env));
+        assertEquals("jdbc:postgresql://127.0.0.1:61234/rewit_suite", env.getProperty("spring.datasource.url"));
+        assertEquals("61235", env.getProperty("spring.data.redis.port"));
+        assertEquals("http://127.0.0.1:61236", env.getProperty("rewit.minio.endpoint"));
+        assertEquals("rewit_owner", env.getProperty("spring.flyway.user"));
+    }
+
+    @Test
+    @DisplayName("A-1b: application-local.yml de teste sombreia o do main, cujos defaults apontam para serviços de desenvolvimento")
+    void testLocalProfileShadowsMainLocalProfile() throws Exception {
+        URL local = getClass().getClassLoader().getResource("application-local.yml");
+        assertNotNull(local);
+        assertTrue(local.toString().contains("test-classes"), "application-local.yml resolvido fora do classpath de teste: " + local);
+        StandardEnvironment env = environmentWith(Map.of());
+        assertRejected(IllegalStateException.class, () -> TestInfrastructureSafetyValidator.validateEnvironment(env));
+    }
+
+    @Test
+    @DisplayName("A-1b: TestInfrastructureConfig falha sem TEST_* e nunca recorre a variáveis genéricas")
+    void infrastructureConfigRequiresExplicitTestVariables() {
+        TestInfrastructureConfig devOnly = TestInfrastructureConfig.of(DEV_VARIABLES);
+        for (String variable : TestInfrastructureConfig.REQUIRED_VARIABLES) {
+            IllegalStateException ex = assertThrows(IllegalStateException.class, () -> devOnly.require(variable));
+            assertTrue(ex.getMessage().contains(variable));
+        }
+        assertRejected(IllegalStateException.class, devOnly::datasourceUrl);
+        assertRejected(IllegalStateException.class, devOnly::redisPort);
+        assertRejected(IllegalStateException.class, devOnly::storageEndpoint);
+        // O teste destrutivo deriva o database descartável da URL explícita, nunca de uma porta padrão
+        assertRejected(IllegalStateException.class, () -> devOnly.datasourceUrlForDatabase("rewit_migtest_0000000000000000"));
+    }
+
+    @Test
+    @DisplayName("A-1b: database descartável derivado usa o host/porta de TEST_DATASOURCE_URL (nenhuma porta implícita)")
+    void derivedDisposableDatabaseUsesExplicitServer() {
+        TestInfrastructureConfig config = TestInfrastructureConfig.of(TEST_VARIABLES);
+        String derived = config.datasourceUrlForDatabase("rewit_migtest_0123456789abcdef");
+        assertEquals("jdbc:postgresql://127.0.0.1:61234/rewit_migtest_0123456789abcdef", derived);
+        assertRejected(IllegalArgumentException.class, () -> config.datasourceUrlForDatabase("rewit; DROP DATABASE x"));
+
+        Map<String, String> forbidden = new HashMap<>(TEST_VARIABLES);
+        forbidden.put("TEST_DATASOURCE_URL", "jdbc:postgresql://127.0.0.1:5433/rewit_db");
+        assertRejected(IllegalStateException.class, () -> TestInfrastructureConfig.of(forbidden).datasourceUrl());
+        forbidden.put("TEST_DATASOURCE_URL", "jdbc:postgresql://127.0.0.1/rewit_db");
+        assertRejected(IllegalStateException.class, () -> TestInfrastructureConfig.of(forbidden).datasourceUrl());
+        forbidden.put("TEST_DATASOURCE_URL", "jdbc:postgresql://127.0.0.1:61234,127.0.0.1:61240/rewit_db");
+        assertRejected(IllegalStateException.class, () -> TestInfrastructureConfig.of(forbidden).datasourceUrlForDatabase("rewit_x"));
+        forbidden.put("TEST_REDIS_PORT", "6379");
+        assertRejected(IllegalStateException.class, () -> TestInfrastructureConfig.of(forbidden).redisPort());
+        forbidden.put("TEST_STORAGE_ENDPOINT", "http://127.0.0.1");
+        assertRejected(IllegalStateException.class, () -> TestInfrastructureConfig.of(forbidden).storageEndpoint());
+        forbidden.put("TEST_STORAGE_ENDPOINT", "http://127.0.0.1:8333");
+        assertRejected(IllegalStateException.class, () -> TestInfrastructureConfig.of(forbidden).storageEndpoint());
+    }
+
+    @Test
+    @DisplayName("A-1b: nenhum teste ou YAML de teste referencia variáveis de desenvolvimento ou portas descartáveis fixas")
+    void testSourcesHaveNoGenericVariablesOrFixedPorts() throws Exception {
+        // Somente leituras de configuração (literal "NOME" ou placeholder ${NOME}); constantes Java homônimas não contam
+        Pattern generic = Pattern.compile(
+                "(?:\"|\\$\\{)(POSTGRES_(HOST|PORT|DB|USER|PASSWORD)|REDIS_(HOST|PORT|URL)|OBJECT_STORAGE_ENDPOINT|STORAGE_ENDPOINT"
+                        + "|MINIO_ENDPOINT|DATABASE_URL)(?=[\"}:])");
+        Pattern fixedPorts = Pattern.compile("\\b(55432|56379|58333)\\b");
+        List<String> offenders = new ArrayList<>();
+        for (String root : List.of("src/test/java", "src/test/resources")) {
+            try (Stream<Path> files = Files.walk(Path.of(root))) {
+                for (Path file : files.filter(Files::isRegularFile).toList()) {
+                    if (file.getFileName().toString().equals("TestInfrastructureIsolationTest.java")) {
+                        continue;
+                    }
+                    String content = Files.readString(file);
+                    // O lookbehind exclui nomes prefixados (TEST_*), que são os permitidos
+                    Matcher genericMatch = generic.matcher(content);
+                    if (genericMatch.find()) {
+                        offenders.add(file + " -> " + genericMatch.group());
+                    }
+                    Matcher portMatch = fixedPorts.matcher(content);
+                    if (portMatch.find()) {
+                        offenders.add(file + " -> porta fixa " + portMatch.group());
+                    }
+                }
+            }
+        }
+        assertTrue(offenders.isEmpty(), "Referências proibidas: " + offenders);
     }
 
     @Test

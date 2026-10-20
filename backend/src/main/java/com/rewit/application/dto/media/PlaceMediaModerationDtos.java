@@ -27,8 +27,14 @@ public final class PlaceMediaModerationDtos {
             UUID decidedByUserId,
             Instant decidedAt,
             String decisionNotes,
+            boolean legacyDecision,
+            String decisionOrigin,
             PlaceMediaView media
     ) {
+        /**
+         * decidedByUserId só é preenchido para decisão humana verificável; decisões legadas
+         * são identificadas por legacyDecision/decisionOrigin, nunca por um decisor não confirmado.
+         */
         public static PlaceMediaReportView of(PlaceMediaReport report, PlaceMedia media) {
             return new PlaceMediaReportView(
                     report.getId(),
@@ -39,9 +45,11 @@ public final class PlaceMediaModerationDtos {
                     report.getStatus(),
                     report.getCreatedAt(),
                     report.getUpdatedAt(),
-                    report.getDecidedByUserId(),
+                    report.getVerifiedDeciderUserId(),
                     report.getDecidedAt(),
                     report.getDecisionNotes(),
+                    report.isLegacyDecision(),
+                    report.getDecisionOrigin(),
                     media != null ? PlaceMediaView.fromDomain(media) : null
             );
         }

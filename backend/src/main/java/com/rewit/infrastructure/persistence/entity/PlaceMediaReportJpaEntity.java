@@ -50,7 +50,9 @@ public class PlaceMediaReportJpaEntity {
     @Column(name = "decision_notes", length = 500)
     private String decisionNotes;
 
-    @Column(name = "is_legacy_decision", nullable = false)
+    // Condição histórica fixada pela migração V36 (LEG-1): somente leitura para o runtime, que não tem
+    // privilégio de INSERT/UPDATE nesta coluna. Novas linhas recebem o DEFAULT FALSE do banco.
+    @Column(name = "is_legacy_decision", nullable = false, insertable = false, updatable = false)
     private boolean isLegacyDecision = false;
 
     public PlaceMediaReportJpaEntity() {

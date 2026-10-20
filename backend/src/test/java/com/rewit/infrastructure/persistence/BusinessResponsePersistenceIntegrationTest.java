@@ -319,7 +319,7 @@ class BusinessResponsePersistenceIntegrationTest {
 
     @Test
     @Transactional
-    @DisplayName("Exclusões: avaliação e comentário levam as respostas; empresa, local e autor são histórico (RESTRICT)")
+    @DisplayName("Exclusões: avaliação e comentário levam as respostas, nunca a auditoria; empresa, local e autor são histórico (RESTRICT)")
     void deletionBehaviour() {
         Fixture f = fixture();
         BusinessResponse onReview = responseRepository.save(publish(f, null, "Na avaliação"));
@@ -343,8 +343,9 @@ class BusinessResponsePersistenceIntegrationTest {
 
         jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", f.review());
         assertEquals(0, count("SELECT count(*) FROM business_responses WHERE review_id = ?", f.review()));
-        assertEquals(0, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ?",
-                onReview.getId()));
+        // AO-2: a trilha de auditoria não acompanha a resposta excluída; mantém o identificador e o contexto
+        assertEquals(1, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ? AND review_id = ?",
+                onReview.getId(), f.review()));
     }
 
     @Test
@@ -1144,7 +1145,8 @@ class BusinessResponsePersistenceIntegrationTest {
             release.countDown();
             executor.shutdownNow();
             cleanup(f);
-            jdbcTemplate.update("DELETE FROM users WHERE id = ?", moderator);
+            // O moderador permanece: a auditoria sobrevive à exclusão da resposta (AO-2) e o mantém por RESTRICT
+            assertEquals(1, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ?", old));
         }
     }
 

@@ -296,7 +296,7 @@ class PlaceMediaConcurrencyTest {
     @DisplayName("H-2.3. Remoção concorrente contra restauração da mesma fotografia (iniciando em REMOVED com arquivo válido)")
     void shouldHandleConcurrentRemovalAgainstRestoration() throws Exception {
         Place place = createTestPlace();
-        // Mídia inicialmente removida por moderador com objeto real persistido no SeaweedFS (58333)
+        // Mídia inicialmente removida por moderador com objeto real persistido no SeaweedFS de teste
         PlaceMedia media = createTestMedia(place, PlaceMediaStatus.REMOVED);
         byte[] payload = "test-image-content".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         objectStoragePort.put(media.getObjectKey(), media.getMimeType(), payload);

@@ -61,16 +61,9 @@ class RedisSerializationTest {
     @DisplayName("RedisConfig deve instanciar RedisTemplate devidamente configurado com novo serializer")
     void shouldConfigureRedisTemplateProperly() {
         RedisConfig config = new RedisConfig();
-        String host = System.getProperty("TEST_REDIS_HOST", System.getenv().getOrDefault("TEST_REDIS_HOST", "127.0.0.1"));
-        String portProp = System.getProperty("TEST_REDIS_PORT", System.getenv("TEST_REDIS_PORT"));
-        if (portProp == null || portProp.isBlank()) {
-            portProp = System.getProperty("spring.data.redis.port");
-        }
-        int port = (portProp != null && !portProp.isBlank()) ? Integer.parseInt(portProp) : 56379;
-        if (port == 6379) {
-            throw new IllegalStateException("Uso acidental da porta 6379 (Redis compartilhado) detectado em teste de integração! " +
-                    "Use uma instância descartável (ex: porta 56379).");
-        }
+        TestInfrastructureConfig infrastructure = TestInfrastructureConfig.current();
+        String host = infrastructure.redisHost();
+        int port = infrastructure.redisPort();
         LettuceConnectionFactory factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(host, port));
         factory.afterPropertiesSet();
 

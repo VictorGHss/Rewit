@@ -474,6 +474,12 @@ public class PlaceMediaService {
 
     @Transactional(readOnly = true)
     public PageResult<PlaceMediaReportView> listReports(UUID moderatorUserId, String status, int page, int size) {
+        return listReports(moderatorUserId, status, null, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResult<PlaceMediaReportView> listReports(UUID moderatorUserId, String status, String decisionOrigin,
+                                                        int page, int size) {
         requireModerator(moderatorUserId);
 
         if (placeMediaReportRepository == null) {
@@ -482,7 +488,8 @@ public class PlaceMediaService {
         int safePage = Math.max(page, 0);
         int safeSize = (size <= 0 || size > 100) ? 20 : size;
 
-        PageResult<PlaceMediaReport> reportsPage = placeMediaReportRepository.findByStatus(status, safePage, safeSize);
+        PageResult<PlaceMediaReport> reportsPage = placeMediaReportRepository.findByStatusAndDecisionOrigin(
+                status, decisionOrigin, safePage, safeSize);
 
         List<PlaceMediaReportView> dtoList = reportsPage.content().stream()
                 .map(report -> {

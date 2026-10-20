@@ -17,6 +17,13 @@ public class PlaceMediaReport {
     public static final String STATUS_REJECTED = "REJECTED";
     public static final String STATUS_AUTO_RESOLVED = "AUTO_RESOLVED";
 
+    /** Decisão humana com moderador comprovado na trilha de auditoria. */
+    public static final String DECISION_ORIGIN_MODERATOR = "MODERATOR";
+    /** Resolução automática do sistema, sem decisor humano. */
+    public static final String DECISION_ORIGIN_SYSTEM = "SYSTEM";
+    /** Decisão histórica sem moderador verificável (fixada pela migração V36). */
+    public static final String DECISION_ORIGIN_LEGACY = "LEGACY";
+
     private final UUID id;
     private final UUID placeMediaId;
     private final UUID reporterUserId;
@@ -152,5 +159,27 @@ public class PlaceMediaReport {
 
     public boolean isLegacyDecision() {
         return legacyDecision;
+    }
+
+    /**
+     * Proveniência da decisão, ou {@code null} enquanto a denúncia está pendente.
+     * Decisões legadas nunca são apresentadas como decisão de moderador.
+     */
+    public String getDecisionOrigin() {
+        if (isPending()) {
+            return null;
+        }
+        if (isAutoResolved()) {
+            return DECISION_ORIGIN_SYSTEM;
+        }
+        return legacyDecision ? DECISION_ORIGIN_LEGACY : DECISION_ORIGIN_MODERATOR;
+    }
+
+    /**
+     * Moderador responsável somente quando a decisão humana é verificável. Em decisões legadas o
+     * valor eventualmente registrado não é confirmado pela trilha de auditoria e não é exposto.
+     */
+    public UUID getVerifiedDeciderUserId() {
+        return DECISION_ORIGIN_MODERATOR.equals(getDecisionOrigin()) ? decidedByUserId : null;
     }
 }

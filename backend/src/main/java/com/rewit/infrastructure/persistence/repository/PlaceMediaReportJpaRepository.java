@@ -30,5 +30,18 @@ public interface PlaceMediaReportJpaRepository extends JpaRepository<PlaceMediaR
     Page<PlaceMediaReportJpaEntity> findByStatusOrderByCreatedAtDescIdAsc(String status, Pageable pageable);
 
     Page<PlaceMediaReportJpaEntity> findAllByOrderByCreatedAtDescIdAsc(Pageable pageable);
+
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT r FROM PlaceMediaReportJpaEntity r
+            WHERE (:status IS NULL OR r.status = :status)
+              AND ((:origin = 'LEGACY' AND r.isLegacyDecision = true)
+                OR (:origin = 'MODERATOR' AND r.isLegacyDecision = false AND r.status IN ('ACCEPTED', 'REJECTED'))
+                OR (:origin = 'SYSTEM' AND r.status = 'AUTO_RESOLVED'))
+            ORDER BY r.createdAt DESC, r.id ASC
+            """)
+    Page<PlaceMediaReportJpaEntity> findByStatusAndDecisionOrigin(
+            @org.springframework.data.repository.query.Param("status") String status,
+            @org.springframework.data.repository.query.Param("origin") String origin,
+            Pageable pageable);
 }
 

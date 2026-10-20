@@ -1,32 +1,8 @@
-# Configuração do perfil local para testes automatizados
-# Exige configuração explícita de infraestrutura isolada de teste (A-1); sem fallback para serviços compartilhados.
+# Perfil "local" nos testes automatizados.
+# Herda integralmente de application.yml a configuração explícita da infraestrutura descartável
+# (somente variáveis TEST_*, sem valores padrão - A-1b). Este arquivo existe para sombrear
+# src/main/resources/application-local.yml, cujos defaults apontam para os serviços de
+# desenvolvimento (POSTGRES_*, REDIS_*, OBJECT_STORAGE_*) e nunca podem valer em teste.
 spring:
-  datasource:
-    url: ${TEST_DATASOURCE_URL:jdbc:postgresql://${TEST_POSTGRES_HOST:127.0.0.1}:${TEST_POSTGRES_PORT:55432}/${TEST_POSTGRES_DB:rewit_db}}
-    username: ${TEST_APP_DB_USER:rewit_app}
-    password: ${TEST_APP_DB_PASSWORD:test_app_password}
-    hikari:
-      maximum-pool-size: 5
-      minimum-idle: 1
-      idle-timeout: 10000
-      max-lifetime: 30000
-  flyway:
-    user: ${TEST_MIGRATION_DB_USER:rewit_user}
-    password: ${TEST_MIGRATION_DB_PASSWORD:test_postgres_password}
-  data:
-    redis:
-      host: ${TEST_REDIS_HOST:127.0.0.1}
-      port: ${TEST_REDIS_PORT:56379}
-      password: ${TEST_REDIS_PASSWORD:}
-      timeout: 3000ms
   jpa:
     open-in-view: false
-
-rewit:
-  minio:
-    endpoint: ${TEST_STORAGE_ENDPOINT:http://127.0.0.1:58333}
-    access-key: ${TEST_STORAGE_ACCESS_KEY:change-me}
-    secret-key: ${TEST_STORAGE_SECRET_KEY:change-me}
-    bucket-name: ${TEST_STORAGE_BUCKET:rewit-local}
-  security:
-    jwt-secret: ${JWT_SECRET:test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!}

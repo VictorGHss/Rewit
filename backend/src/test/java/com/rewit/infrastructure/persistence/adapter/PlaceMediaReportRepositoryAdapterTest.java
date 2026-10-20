@@ -98,4 +98,42 @@ class PlaceMediaReportRepositoryAdapterTest {
         assertDoesNotThrow(() -> adapter.findByStatus("resolved", 0, 20));
         assertDoesNotThrow(() -> adapter.findByStatus("dismissed", 0, 20));
     }
+
+    @Test
+    @DisplayName("LEG-2: filtro por origem LEGACY combinado com status usa a consulta de proveniência e preserva a marcação legada")
+    void shouldFilterByDecisionOrigin() {
+        PlaceMediaReportJpaEntity legacy = new PlaceMediaReportJpaEntity(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "SPAM", null, "ACCEPTED", Instant.now(), Instant.now(), UUID.randomUUID(), Instant.now(), null, true);
+        when(jpaRepository.findByStatusAndDecisionOrigin(eq("ACCEPTED"), eq("LEGACY"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(legacy)));
+
+        PageResult<PlaceMediaReport> result = adapter.findByStatusAndDecisionOrigin("resolved", "legacy", 0, 20);
+
+        assertEquals(1, result.content().size());
+        PlaceMediaReport report = result.content().get(0);
+        assertTrue(report.isLegacyDecision());
+        assertEquals(PlaceMediaReport.DECISION_ORIGIN_LEGACY, report.getDecisionOrigin());
+        assertNull(report.getVerifiedDeciderUserId(), "Decisor registrado de decisão legada não é verificado");
+        verify(jpaRepository).findByStatusAndDecisionOrigin(eq("ACCEPTED"), eq("LEGACY"), any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("LEG-2: filtro por origem sem status usa consulta de proveniência com status nulo")
+    void shouldFilterByDecisionOriginWithoutStatus() {
+        when(jpaRepository.findByStatusAndDecisionOrigin(eq(null), eq("SYSTEM"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(autoResolvedEntity)));
+
+        PageResult<PlaceMediaReport> result = adapter.findByStatusAndDecisionOrigin(null, "SYSTEM", 0, 20);
+
+        assertEquals(PlaceMediaReport.DECISION_ORIGIN_SYSTEM, result.content().get(0).getDecisionOrigin());
+    }
+
+    @Test
+    @DisplayName("LEG-2: origem de decisão inválida lança BAD_REQUEST INVALID_DECISION_ORIGIN")
+    void shouldRejectInvalidDecisionOrigin() {
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                adapter.findByStatusAndDecisionOrigin(null, "HUMANO", 0, 20));
+        assertEquals("INVALID_DECISION_ORIGIN", ex.getErrorCode());
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+    }
 }

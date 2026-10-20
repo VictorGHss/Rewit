@@ -67,6 +67,7 @@ public class AdminPlaceMediaModerationController {
     @Operation(summary = "Listar denúncias de fotos de locais (paginado)", security = @SecurityRequirement(name = "bearerAuth"))
     public ResponseEntity<PagedResponse<AdminPlaceMediaReportResponse>> listReports(
             @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "decisionOrigin", required = false) String decisionOrigin,
             @RequestParam(name = "page", defaultValue = "0") int page,
             @RequestParam(name = "size", defaultValue = "20") int size,
             Authentication authentication
@@ -76,7 +77,8 @@ public class AdminPlaceMediaModerationController {
             moderatorRolePolicy.requireCurrentModerator(moderatorUserId);
         }
 
-        PageResult<PlaceMediaReportView> result = placeMediaService.listReports(moderatorUserId, status, page, size);
+        PageResult<PlaceMediaReportView> result = placeMediaService.listReports(
+                moderatorUserId, status, decisionOrigin, page, size);
         List<AdminPlaceMediaReportResponse> content = result.content().stream()
                 .map(AdminPlaceMediaReportResponse::fromView)
                 .toList();

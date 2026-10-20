@@ -33,6 +33,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -91,7 +92,7 @@ class AdminPlaceMediaModerationControllerUnitTest {
         PlaceMediaReportView reportView = PlaceMediaReportView.of(report, media);
         PageResult<PlaceMediaReportView> pageResult = PageResult.of(List.of(reportView), 0, 20, 1);
 
-        when(placeMediaService.listReports(eq(moderatorId), eq("PENDING"), eq(0), eq(20))).thenReturn(pageResult);
+        when(placeMediaService.listReports(eq(moderatorId), eq("PENDING"), isNull(), eq(0), eq(20))).thenReturn(pageResult);
 
         mockMvc.perform(get("/api/v1/admin/place-media/reports")
                         .param("status", "PENDING")
@@ -104,7 +105,45 @@ class AdminPlaceMediaModerationControllerUnitTest {
                 .andExpect(jsonPath("$.content[0].reason").value("CONTEUDO_INADEQUADO"))
                 .andExpect(jsonPath("$.totalElements").value(1));
 
-        verify(placeMediaService).listReports(moderatorId, "PENDING", 0, 20);
+        verify(placeMediaService).listReports(moderatorId, "PENDING", null, 0, 20);
+    }
+
+    @Test
+    @DisplayName("LEG-2: GET /reports distingue decisão legada (sem decisor exposto), humana validada e automática, com filtro de origem")
+    void shouldExposeDecisionOriginAndHideUnverifiedDecider() throws Exception {
+        UUID placeId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        UUID moderator = UUID.randomUUID();
+        UUID unverifiedRecordedDecider = UUID.randomUUID();
+        Instant decidedAt = Instant.parse("2026-01-10T10:00:00Z");
+        PlaceMedia media = new PlaceMedia(mediaId, placeId, UUID.randomUUID(), "places/" + placeId + "/" + mediaId + "/img.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 1024, 800, 600);
+
+        PlaceMediaReport legacy = new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", null, "ACCEPTED",
+                decidedAt, decidedAt, unverifiedRecordedDecider, decidedAt, null, true);
+        PlaceMediaReport human = new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", null, "REJECTED",
+                decidedAt, decidedAt, moderator, decidedAt, null, false);
+        PlaceMediaReport automatic = new PlaceMediaReport(UUID.randomUUID(), mediaId, UUID.randomUUID(), "SPAM", null, "AUTO_RESOLVED",
+                decidedAt, decidedAt, null, decidedAt, null, false);
+        PageResult<PlaceMediaReportView> page = PageResult.of(List.of(
+                PlaceMediaReportView.of(legacy, media), PlaceMediaReportView.of(human, media), PlaceMediaReportView.of(automatic, media)),
+                0, 20, 3);
+        when(placeMediaService.listReports(eq(moderatorId), isNull(), eq("LEGACY"), eq(0), eq(20))).thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/admin/place-media/reports")
+                        .param("decisionOrigin", "LEGACY")
+                        .principal(authentication))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].legacyDecision").value(true))
+                .andExpect(jsonPath("$.content[0].decisionOrigin").value("LEGACY"))
+                .andExpect(jsonPath("$.content[0].decidedByUserId").doesNotExist())
+                .andExpect(jsonPath("$.content[1].legacyDecision").value(false))
+                .andExpect(jsonPath("$.content[1].decisionOrigin").value("MODERATOR"))
+                .andExpect(jsonPath("$.content[1].decidedByUserId").value(moderator.toString()))
+                .andExpect(jsonPath("$.content[2].decisionOrigin").value("SYSTEM"))
+                .andExpect(jsonPath("$.content[2].decidedByUserId").doesNotExist());
+
+        verify(placeMediaService).listReports(moderatorId, null, "LEGACY", 0, 20);
     }
 
     @Test

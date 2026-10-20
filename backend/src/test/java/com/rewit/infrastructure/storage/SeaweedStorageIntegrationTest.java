@@ -1,6 +1,7 @@
 package com.rewit.infrastructure.storage;
 
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
+import com.rewit.config.TestInfrastructureConfig;
 import io.minio.MinioClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -15,48 +16,24 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integração de Storage: SeaweedFS Real (Step 21.0 - Requisito 28)")
 class SeaweedStorageIntegrationTest {
 
-    private static final String STORAGE_ENDPOINT = resolveStorageEndpoint();
-    private static final String STORAGE_BUCKET = System.getProperty("TEST_STORAGE_BUCKET",
-            System.getProperty("rewit.minio.bucket-name",
-            System.getenv().getOrDefault("TEST_STORAGE_BUCKET", "rewit-local")));
-    private static final String ACCESS_KEY = System.getProperty("TEST_STORAGE_ACCESS_KEY",
-            System.getProperty("rewit.minio.access-key",
-            System.getenv().getOrDefault("TEST_STORAGE_ACCESS_KEY", "change-me")));
-    private static final String SECRET_KEY = System.getProperty("TEST_STORAGE_SECRET_KEY",
-            System.getProperty("rewit.minio.secret-key",
-            System.getenv().getOrDefault("TEST_STORAGE_SECRET_KEY", "change-me")));
-
-    private static String resolveStorageEndpoint() {
-        String testEp = System.getenv("TEST_STORAGE_ENDPOINT");
-        if (testEp != null && !testEp.isBlank()) return testEp.trim();
-        String sysProp = System.getProperty("TEST_STORAGE_ENDPOINT");
-        if (sysProp != null && !sysProp.isBlank()) return sysProp.trim();
-        sysProp = System.getProperty("rewit.minio.endpoint");
-        if (sysProp != null && !sysProp.isBlank()) return sysProp.trim();
-        return "";
-    }
+    // A-1b: somente TEST_STORAGE_* explícitas e validadas, sem defaults nem variáveis de desenvolvimento
+    private static final TestInfrastructureConfig INFRASTRUCTURE = TestInfrastructureConfig.current();
 
     private MinioStorageAdapter storageAdapter;
 
     @BeforeEach
     void setUpStorage() {
-        if (STORAGE_ENDPOINT.isBlank()) {
-            fail("Endpoint de SeaweedFS/S3 descartável não configurado. Forneça -Drewit.storage.seaweed.endpoint ou OBJECT_STORAGE_ENDPOINT.");
-        }
-        if (STORAGE_ENDPOINT.contains(":8333") || STORAGE_ENDPOINT.contains("localhost:8333") || STORAGE_ENDPOINT.contains("127.0.0.1:8333")) {
-            throw new IllegalStateException("Uso acidental do SeaweedFS compartilhado (porta 8333) detectado em teste de integração! " +
-                    "Use uma instância descartável (ex: porta 58333).");
-        }
+        String endpoint = INFRASTRUCTURE.storageEndpoint();
         try {
             storageAdapter = new MinioStorageAdapter(
                     MinioClient.builder()
-                            .endpoint(STORAGE_ENDPOINT)
-                            .credentials(ACCESS_KEY, SECRET_KEY)
+                            .endpoint(endpoint)
+                            .credentials(INFRASTRUCTURE.storageAccessKey(), INFRASTRUCTURE.storageSecretKey())
                             .build(),
-                    STORAGE_BUCKET);
+                    INFRASTRUCTURE.storageBucket());
             storageAdapter.exists("health-check-" + UUID.randomUUID());
         } catch (Exception e) {
-            fail("SeaweedFS/S3 storage descartável não acessível em " + STORAGE_ENDPOINT + ": " + e.getMessage(), e);
+            fail("SeaweedFS/S3 storage descartável não acessível em " + endpoint + ": " + e.getMessage(), e);
         }
     }
 
