@@ -19,15 +19,25 @@ No catálogo de estabelecimentos físicos (`places/`), fotografias removidas por
    - A data de remoção lógica é persistida de forma confiável na coluna `place_media.removed_at` no instante em que a transição para `REMOVED` ocorre.
    - O período de carência e retenção mínimo é de 24 horas (`PT24H`). Durante esse intervalo, o objeto físico entra em quarentena de segurança e não pode ser excluído por nenhum processo em segundo plano.
 
-3. **Origem da Remoção e Proteção da Vontade do Autor:**
-   - A coluna `place_media.removal_source` categoriza a origem da remoção como `AUTHOR` (exclusão pelo próprio usuário que enviou a foto) ou `MODERATOR` (remoção administrativa após deferimento de denúncia ou ação direta da moderação).
+3. **Origem da Remoção e Proteção da Vontade do Autor e do Estabelecimento:**
+   - A coluna `place_media.removal_source` categoriza a origem da remoção como:
+     - `AUTHOR`: exclusão pelo próprio usuário que enviou a fotografia;
+     - `BUSINESS_OWNER` / `PLACE_MANAGER`: remoção pelo responsável legal ou verificado do local comercial;
+     - `MODERATOR`: remoção administrativa por moderação do sistema;
+     - `LEGACY`: registros históricos anteriores à migração V34.
    - Mídias com `removal_source = 'AUTHOR'` representam direito de arrependimento e privacidade do autor e **nunca** podem ser restauradas por moderadores (retorno HTTP 409 com código `CANNOT_RESTORE_AUTHOR_REMOVED_MEDIA`).
+   - Mídias com `removal_source IN ('BUSINESS_OWNER', 'PLACE_MANAGER')` representam decisão autônoma do responsável do local e **nunca** podem ser restauradas por moderadores (retorno HTTP 409 com código `CANNOT_RESTORE_PLACE_MANAGER_REMOVED_MEDIA`).
+   - Mídias com `removal_source = 'LEGACY'` não possuem histórico de consentimento auditável completo e **nunca** podem ser restauradas por moderação (retorno HTTP 409 com código `CANNOT_RESTORE_LEGACY_REMOVED_MEDIA`).
+   - Restaurações administrativas são permitidas exclusivamente para fotografias com `removal_source = 'MODERATOR'`, desde que o arquivo físico permaneça presente no Object Storage e a cota do local não exceda o limite de 5 mídias ativas.
 
-4. **Trilha de Auditoria Imutável vs Estado Lógico Corrente:**
+4. **Trilha de Auditoria Imutável e Proteção Append-Only em V34:**
    - Há separação estrita entre:
      - O estado operacional corrente da mídia mantido em `place_media` (`removed_at`, `removal_source`, `status`), que reflete a situação presente da entidade no catálogo;
-     - O histórico probatório e irrevogável gravado na tabela append-only `place_media_moderation_audit_logs`. Esta tabela é protegida no banco por triggers contra `UPDATE` e `DELETE`, registrando permanentemente o identificador da denúncia (`report_id`), o motivo real informado e os metadados do autor de cada ação.
-   - Todas as mutações de moderação e remoções públicas/autor são acompanhadas de registro atômico e obrigatório na auditoria, sob a mesma transação de banco de dados.
+     - O histórico probatório e irrevogável gravado na tabela append-only `place_media_moderation_audit_logs`. Esta tabela é protegida no banco PostgreSQL por triggers que impedem `UPDATE`, `DELETE` e `TRUNCATE` (fortalecimento implementado na migration V34).
+   - Todas as mutações de moderação e remoções públicas/autor/gerente são acompanhadas de registro atômico e obrigatório na auditoria, sob a mesma transação de banco de dados. Falha ao persistir o log de auditoria reverte atomicamente todas as alterações em mídias, capas e denúncias.
+   - **Auditoria completa de denúncias em lote:** Quando uma decisão de ACCEPT defere uma denúncia e resolve denúncias irmãs pendentes da mesma foto, um evento de auditoria é gerado individualmente para cada denúncia afetada, preservando seu `report_id` inequívoco e distinguindo a decisão deliberada da resolução automática em lote.
+   - **Quarentena automática auditada (`AUTO_QUARANTINE`):** Quando o limiar de 3 denúncias pendentes é atingido e a mídia transiciona para `UNDER_REVIEW`, um log de auditoria com a ação `AUTO_QUARANTINE` é registrado transacionalmente no banco de dados.
+   - **Rejeição de denúncia sem reativação implícita:** A rejeição de uma denúncia (`REJECT`) **nunca** reativa automaticamente a mídia para `ACTIVE`. A mídia permanece em seu estado atual (`UNDER_REVIEW` ou removida); restaurações exigem comando explícito e auditado (`RESTORE`).
 
 5. **Garbage Collection (GC) Desligado e Dry-Run por Padrão:**
    - O orquestrador de expurgo físico no Object Storage permanece estritamente desativado por padrão (`rewit.storage-gc.enabled=false`).
