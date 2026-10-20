@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
@@ -21,6 +23,8 @@ class TargetSearchSelectorWidget extends StatefulWidget {
   final ValueChanged<String>? onManualTargetIdEntered;
   final ValueChanged<File>? onManualPlacePhotoSelected;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+  final String? currentUserId;
+  final AuthNotifier? authNotifier;
 
   const TargetSearchSelectorWidget({
     super.key,
@@ -33,6 +37,8 @@ class TargetSearchSelectorWidget extends StatefulWidget {
     this.onManualTargetIdEntered,
     this.onManualPlacePhotoSelected,
     this.onPickManualPlacePhoto,
+    this.currentUserId,
+    this.authNotifier,
   });
 
   @override
@@ -54,10 +60,38 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   // Cache em memória durante a sessão da tela para evitar requisições idênticas
   final Map<String, List<SearchResultItem>> _queryCache = {};
   PendingPlaceRegistration? _pendingRegistration;
+  String? _scopedUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    _scopedUserId = _getCurrentUserId();
+    widget.authNotifier?.addListener(_onAuthChanged);
+  }
+
+  String? _getCurrentUserId() {
+    if (widget.currentUserId != null) return widget.currentUserId;
+    final authState = widget.authNotifier?.state;
+    if (authState is Authenticated) {
+      return authState.user.id;
+    }
+    return null;
+  }
+
+  void _onAuthChanged() {
+    final newUserId = _getCurrentUserId();
+    if (newUserId != _scopedUserId) {
+      setState(() {
+        _scopedUserId = newUserId;
+        _pendingRegistration = null;
+      });
+    }
+  }
 
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    widget.authNotifier?.removeListener(_onAuthChanged);
     _searchController.dispose();
     _manualUuidController.dispose();
     super.dispose();
@@ -156,29 +190,73 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     });
   }
 
-  Future<void> _openManualPlaceRegistration() async {
+  Future<void> _openManualPlaceRegistration({String? initialQuery}) async {
     if (!widget.enabled || widget.placeRepository == null) return;
 
+    final currentUid = _getCurrentUserId();
+    final nameToUse = (initialQuery ?? _searchController.text).trim();
+
+    // MB-1b: Novo cadastro de local NUNCA herda estado pendente anterior
     final result = await ManualPlaceRegistrationSheet.show(
       context,
       placeRepository: widget.placeRepository!,
-      initialName: _pendingRegistration != null ? _pendingRegistration!.place.name : _searchController.text.trim(),
-      initialPendingPlace: _pendingRegistration?.place,
-      initialUploadIdempotencyKey: _pendingRegistration?.uploadIdempotencyKey,
-      initialPhoto: _pendingRegistration?.photoFile,
+      initialName: nameToUse,
+      initialPendingPlace: null,
+      initialUploadIdempotencyKey: null,
+      initialPhoto: null,
+      currentUserId: currentUid,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
 
     if (!mounted || result == null) return;
 
+    // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado
+    final postWaitUid = _getCurrentUserId();
+    if (postWaitUid != currentUid) return;
+
+    _handleRegistrationResult(result, currentUid);
+  }
+
+  Future<void> _resumePendingRegistration() async {
+    if (!widget.enabled || widget.placeRepository == null || _pendingRegistration == null) return;
+
+    final currentUid = _getCurrentUserId();
+    final pending = _pendingRegistration!;
+
+    final result = await ManualPlaceRegistrationSheet.show(
+      context,
+      placeRepository: widget.placeRepository!,
+      initialName: pending.place.name,
+      initialPendingPlace: pending.place,
+      initialUploadIdempotencyKey: pending.uploadIdempotencyKey,
+      initialPhoto: pending.photoFile,
+      currentUserId: currentUid,
+      onPickPhoto: widget.onPickManualPlacePhoto,
+    );
+
+    if (!mounted || result == null) return;
+
+    // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado
+    final postWaitUid = _getCurrentUserId();
+    if (postWaitUid != currentUid) return;
+
+    _handleRegistrationResult(result, currentUid);
+  }
+
+  void _handleRegistrationResult(ManualPlaceRegistrationResult result, String? currentUid) {
     if (result.isPhotoPending) {
-      _pendingRegistration = PendingPlaceRegistration(
-        place: result.place,
-        uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
-        photoFile: result.photoFile,
-      );
+      setState(() {
+        _pendingRegistration = PendingPlaceRegistration(
+          place: result.place,
+          uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
+          photoFile: result.photoFile,
+          userId: currentUid,
+        );
+      });
     } else {
-      _pendingRegistration = null;
+      setState(() {
+        _pendingRegistration = null;
+      });
     }
 
     final createdItem = SearchResultItem(
@@ -207,6 +285,11 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente.',
           ),
           backgroundColor: Colors.orange.shade800,
+          action: SnackBarAction(
+            label: 'Retomar',
+            textColor: Colors.white,
+            onPressed: () => _resumePendingRegistration(),
+          ),
         ),
       );
     }
@@ -263,6 +346,41 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Banner de fotografia pendente para retomada explícita (MB-1b)
+        if (_pendingRegistration != null) ...[
+          Container(
+            key: const Key('target_pending_registration_banner'),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.shade300),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, size: 20, color: Colors.orange.shade800),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Envio de fotografia pendente para "${_pendingRegistration!.place.name}".',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange.shade900,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  key: const Key('target_resume_pending_registration_button'),
+                  onPressed: widget.enabled ? _resumePendingRegistration : null,
+                  child: const Text('Retomar'),
+                ),
+              ],
+            ),
+          ),
+        ],
+
         // Campo de entrada da busca
         TextFormField(
           controller: _searchController,

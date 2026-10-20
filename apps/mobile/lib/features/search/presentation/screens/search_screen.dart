@@ -158,6 +158,10 @@ class _SearchScreenState extends State<SearchScreen>
 
     if (!mounted || result == null) return;
 
+    // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado
+    final postWaitUid = _getCurrentUserId();
+    if (postWaitUid != currentUid) return;
+
     if (result.isPhotoPending) {
       setState(() {
         _scopedUserId = currentUid;

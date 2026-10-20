@@ -15,6 +15,7 @@ import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_re
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
+import 'package:rewit_mobile/features/review_creation/presentation/widgets/target_search_selector_widget.dart';
 
 class _RecordingPlaceRepository implements PlaceRepository {
   int createPlaceCalls = 0;
@@ -702,6 +703,220 @@ void main() {
       expect(repo.createPlaceCalls, 1);
       expect(repo.uploadCalls, 1);
       expect(repo.uploadArguments.first['placeId'], 'place-uuid-1');
+    });
+
+    testWidgets('11. MB-1a: SearchScreen descarta resultado retornado se a sessão mudar para outro usuário durante o await da modal', (tester) async {
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERR', 'Falha temporária');
+      final authNotifier = _FakeAuthNotifier();
+      authNotifier.emit(
+        const Authenticated(
+          user: AuthUserDto(id: 'user-a-111', handle: 'user_a', email: 'a@test.com', displayName: 'User A'),
+          tokens: AuthTokens(accessToken: 'token-a', refreshToken: 'ref-a'),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SearchScreen(
+            searchRepository: _StubSearchRepository(),
+            placeRepository: repo,
+            authNotifier: authNotifier,
+            onPickManualPlacePhoto: (source) async => testPhotoFile1,
+          ),
+        ),
+      );
+
+      // Usuário A abre a modal para cadastrar 'Café do Ponto'
+      await tester.enterText(find.byType(TextFormField), 'Café do Ponto');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('search_register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua das Flores, 10');
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      // Durante a exibição da modal (antes do close ser consumido pelo caller), a autenticação muda para Usuário B
+      authNotifier.emit(
+        const Authenticated(
+          user: AuthUserDto(id: 'user-b-222', handle: 'user_b', email: 'b@test.com', displayName: 'User B'),
+          tokens: AuthTokens(accessToken: 'token-b', refreshToken: 'ref-b'),
+        ),
+      );
+
+      // Agora o usuário fecha a modal
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      // MB-1a: Como a sessão mudou durante o await, o resultado não é aceito para a conta B
+      expect(find.byKey(const Key('search_pending_registration_banner')), findsNothing);
+    });
+
+    testWidgets('12. MB-1b: TargetSearchSelectorWidget não injeta foto pendente de local anterior em novo cadastro', (tester) async {
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERR', 'Falha temporária');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TargetSearchSelectorWidget(
+              searchRepository: _StubSearchRepository(),
+              placeRepository: repo,
+              targetIndex: 0,
+              onTargetSelected: (_) {},
+              onPickManualPlacePhoto: (source) async => testPhotoFile1,
+            ),
+          ),
+        ),
+      );
+
+      // 1. Cadastra 'Padaria Central' e upload falha -> pendência salva
+      await tester.enterText(find.byType(TextFormField).first, 'Padaria Central');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Av. Central, 100');
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      // Banner de pendência exibido para 'Padaria Central'
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsOneWidget);
+      expect(find.text('Envio de fotografia pendente para "Padaria Central".'), findsOneWidget);
+
+      // 2. Usuário pesquisa por outro estabelecimento: 'Livraria Moderna'
+      await tester.enterText(find.byType(TextFormField).first, 'Livraria Moderna');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      // 3. Usuário clica em cadastrar manualmente para o novo termo
+      await tester.tap(find.byKey(const Key('register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      // MB-1b: A modal NÃO deve herdar 'Padaria Central' nem a foto pendente anterior!
+      expect(find.descendant(of: find.byType(ManualPlaceRegistrationSheet), matching: find.text('Livraria Moderna')), findsOneWidget);
+      expect(find.text('Padaria Central'), findsNothing);
+      expect(find.byKey(const Key('manual_place_partial_created_banner')), findsNothing);
+      expect(find.byKey(const Key('manual_place_photo_preview')), findsNothing);
+    });
+
+    testWidgets('13. MB-1b: TargetSearchSelectorWidget retoma pendência explicitamente via botão Retomar', (tester) async {
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERR', 'Falha temporária');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TargetSearchSelectorWidget(
+              searchRepository: _StubSearchRepository(),
+              placeRepository: repo,
+              targetIndex: 0,
+              onTargetSelected: (_) {},
+              onPickManualPlacePhoto: (source) async => testPhotoFile1,
+            ),
+          ),
+        ),
+      );
+
+      // Cadastra 'Padaria Central' e upload falha
+      await tester.enterText(find.byType(TextFormField).first, 'Padaria Central');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Av. Central, 100');
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsOneWidget);
+
+      // Recupera o storage
+      repo.uploadPhotoException = null;
+
+      // Clica explicitamente em Retomar no banner
+      await tester.tap(find.byKey(const Key('target_resume_pending_registration_button')));
+      await tester.pumpAndSettle();
+
+      // Modal abre no modo de retomada da 'Padaria Central' com a foto original preservada
+      expect(find.byKey(const Key('manual_place_partial_created_banner')), findsOneWidget);
+      expect(find.text('Reenviar Fotografia e Concluir'), findsOneWidget);
+      expect(find.byKey(const Key('manual_place_photo_preview')), findsOneWidget);
+
+      // Conclui o envio
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      // Local não foi duplicado (idempotente) e banner foi limpo
+      expect(repo.createPlaceCalls, 1);
+      expect(repo.uploadCalls, 2);
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsNothing);
+    });
+
+    testWidgets('14. MB-1a: TargetSearchSelectorWidget limpa estado pendente no logout ou troca de conta', (tester) async {
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERR', 'Falha temporária');
+      final authNotifier = _FakeAuthNotifier();
+      authNotifier.emit(
+        const Authenticated(
+          user: AuthUserDto(id: 'user-x-123', handle: 'user_x', email: 'x@test.com', displayName: 'User X'),
+          tokens: AuthTokens(accessToken: 'token-x', refreshToken: 'ref-x'),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TargetSearchSelectorWidget(
+              searchRepository: _StubSearchRepository(),
+              placeRepository: repo,
+              targetIndex: 0,
+              authNotifier: authNotifier,
+              onTargetSelected: (_) {},
+              onPickManualPlacePhoto: (source) async => testPhotoFile1,
+            ),
+          ),
+        ),
+      );
+
+      // Usuário X registra e falha upload
+      await tester.enterText(find.byType(TextFormField).first, 'Loja X');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua X, 5');
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsOneWidget);
+
+      // Simula logout
+      authNotifier.emit(const Unauthenticated());
+      await tester.pumpAndSettle();
+
+      // Banner não deve mais estar visível
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsNothing);
     });
   });
 }
