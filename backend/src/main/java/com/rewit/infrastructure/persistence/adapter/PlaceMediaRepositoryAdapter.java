@@ -23,17 +23,13 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
     private final PlaceMediaJpaRepository placeMediaJpaRepository;
 
     @jakarta.persistence.PersistenceContext
-    private jakarta.persistence.EntityManager entityManager;
+    private final jakarta.persistence.EntityManager entityManager;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public PlaceMediaRepositoryAdapter(PlaceMediaJpaRepository placeMediaJpaRepository) {
-        this.placeMediaJpaRepository = Objects.requireNonNull(placeMediaJpaRepository, "PlaceMediaJpaRepository must not be null");
-    }
-
     public PlaceMediaRepositoryAdapter(PlaceMediaJpaRepository placeMediaJpaRepository,
                                        jakarta.persistence.EntityManager entityManager) {
         this.placeMediaJpaRepository = Objects.requireNonNull(placeMediaJpaRepository, "PlaceMediaJpaRepository must not be null");
-        this.entityManager = entityManager;
+        this.entityManager = Objects.requireNonNull(entityManager, "EntityManager must not be null");
     }
 
     @Override
@@ -63,12 +59,13 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
             return Optional.empty();
         }
         PlaceMediaJpaEntity entity = entityOpt.get();
-        if (entityManager != null) {
-            try {
-                entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
-            } catch (jakarta.persistence.EntityNotFoundException e) {
-                return Optional.empty();
-            }
+        if (entityManager == null) {
+            throw new IllegalStateException("EntityManager é obrigatório para execução de lock pessimista e refresh");
+        }
+        try {
+            entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        } catch (jakarta.persistence.EntityNotFoundException e) {
+            return Optional.empty();
         }
         return Optional.of(entity.toDomain());
     }

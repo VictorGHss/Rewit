@@ -83,6 +83,32 @@ class ObservabilityConfigurationTest {
         assertTrue(FORBIDDEN_ENDPOINTS.stream().anyMatch(exposed::contains));
     }
 
+    @Test
+    @DisplayName("MeterFilter de disco: higieniza apenas disk.free e disk.total, preservando tags path em outras metricas")
+    void testDiskPathSanitizingMeterFilter() {
+        ObservabilityConfiguration config = new ObservabilityConfiguration();
+        io.micrometer.core.instrument.config.MeterFilter filter = config.diskPathSanitizingMeterFilter();
+
+        // 1. disk.free com path absoluto deve ter path sanitizado para "/"
+        io.micrometer.core.instrument.Meter.Id diskFree = new io.micrometer.core.instrument.Meter.Id(
+                "disk.free", io.micrometer.core.instrument.Tags.of("path", "/var/lib/rewit/data"), null, null, io.micrometer.core.instrument.Meter.Type.GAUGE);
+        io.micrometer.core.instrument.Meter.Id mappedDiskFree = filter.map(diskFree);
+        assertEquals("/", mappedDiskFree.getTag("path"));
+
+        // 2. disk.total com path absoluto deve ter path sanitizado para "/"
+        io.micrometer.core.instrument.Meter.Id diskTotal = new io.micrometer.core.instrument.Meter.Id(
+                "disk.total", io.micrometer.core.instrument.Tags.of("path", "C:\\Users\\tozez\\app"), null, null, io.micrometer.core.instrument.Meter.Type.GAUGE);
+        io.micrometer.core.instrument.Meter.Id mappedDiskTotal = filter.map(diskTotal);
+        assertEquals("/", mappedDiskTotal.getTag("path"));
+
+        // 3. Outra metrica (ex: http.server.requests) com tag path NAO deve ser alterada
+        io.micrometer.core.instrument.Meter.Id httpReq = new io.micrometer.core.instrument.Meter.Id(
+                "http.server.requests", io.micrometer.core.instrument.Tags.of("path", "/api/v1/places", "method", "GET"), null, null, io.micrometer.core.instrument.Meter.Type.TIMER);
+        io.micrometer.core.instrument.Meter.Id mappedHttpReq = filter.map(httpReq);
+        assertEquals("/api/v1/places", mappedHttpReq.getTag("path"));
+        assertEquals("GET", mappedHttpReq.getTag("method"));
+    }
+
     private static String defaultOf(String placeholder) {
         return placeholder.substring(placeholder.indexOf(':') + 1, placeholder.length() - 1);
     }

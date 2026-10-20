@@ -22,7 +22,7 @@ public interface PlaceMediaReportJpaRepository extends JpaRepository<PlaceMediaR
     java.util.Optional<PlaceMediaReportJpaEntity> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);
 
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-    @org.springframework.data.jpa.repository.Query("SELECT r FROM PlaceMediaReportJpaEntity r WHERE r.placeMediaId = :placeMediaId")
+    @org.springframework.data.jpa.repository.Query("SELECT r FROM PlaceMediaReportJpaEntity r WHERE r.placeMediaId = :placeMediaId ORDER BY r.id ASC")
     List<PlaceMediaReportJpaEntity> findByPlaceMediaIdForUpdate(@org.springframework.data.repository.query.Param("placeMediaId") UUID placeMediaId);
 
     List<PlaceMediaReportJpaEntity> findByPlaceMediaId(UUID placeMediaId);

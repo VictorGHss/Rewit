@@ -26,17 +26,13 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
     private final PlaceMediaReportJpaRepository placeMediaReportJpaRepository;
 
     @jakarta.persistence.PersistenceContext
-    private jakarta.persistence.EntityManager entityManager;
+    private final jakarta.persistence.EntityManager entityManager;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public PlaceMediaReportRepositoryAdapter(PlaceMediaReportJpaRepository placeMediaReportJpaRepository) {
-        this.placeMediaReportJpaRepository = Objects.requireNonNull(placeMediaReportJpaRepository, "PlaceMediaReportJpaRepository must not be null");
-    }
-
     public PlaceMediaReportRepositoryAdapter(PlaceMediaReportJpaRepository placeMediaReportJpaRepository,
                                              jakarta.persistence.EntityManager entityManager) {
         this.placeMediaReportJpaRepository = Objects.requireNonNull(placeMediaReportJpaRepository, "PlaceMediaReportJpaRepository must not be null");
-        this.entityManager = entityManager;
+        this.entityManager = Objects.requireNonNull(entityManager, "EntityManager must not be null");
     }
 
     @Override
@@ -72,12 +68,13 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
             return Optional.empty();
         }
         PlaceMediaReportJpaEntity entity = entityOpt.get();
-        if (entityManager != null) {
-            try {
-                entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
-            } catch (jakarta.persistence.EntityNotFoundException e) {
-                return Optional.empty();
-            }
+        if (entityManager == null) {
+            throw new IllegalStateException("EntityManager é obrigatório para execução de lock pessimista e refresh");
+        }
+        try {
+            entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        } catch (jakarta.persistence.EntityNotFoundException e) {
+            return Optional.empty();
         }
         return Optional.of(entity.toDomain());
     }
@@ -119,12 +116,13 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
             return List.of();
         }
         List<PlaceMediaReportJpaEntity> entities = placeMediaReportJpaRepository.findByPlaceMediaIdForUpdate(placeMediaId);
-        if (entityManager != null) {
-            for (PlaceMediaReportJpaEntity entity : entities) {
-                try {
-                    entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
-                } catch (jakarta.persistence.EntityNotFoundException ignored) {
-                }
+        if (entityManager == null) {
+            throw new IllegalStateException("EntityManager é obrigatório para execução de lock pessimista e refresh");
+        }
+        for (PlaceMediaReportJpaEntity entity : entities) {
+            try {
+                entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+            } catch (jakarta.persistence.EntityNotFoundException ignored) {
             }
         }
         return entities.stream()
