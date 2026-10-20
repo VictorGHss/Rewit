@@ -2,6 +2,7 @@ package com.rewit.infrastructure.storage;
 
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
 import io.minio.MinioClient;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -14,30 +15,55 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integração de Storage: SeaweedFS Real (Step 21.0 - Requisito 28)")
 class SeaweedStorageIntegrationTest {
 
-    private static final String STORAGE_ENDPOINT = System.getProperty("rewit.storage.endpoint",
-            System.getenv().getOrDefault("STORAGE_ENDPOINT", "http://localhost:8333"));
+    private static final String STORAGE_ENDPOINT = resolveStorageEndpoint();
     private static final String STORAGE_BUCKET = System.getProperty("rewit.storage.bucket",
-            System.getenv().getOrDefault("STORAGE_BUCKET", "rewit-local"));
+            System.getProperty("rewit.minio.bucket-name",
+            System.getenv().getOrDefault("OBJECT_STORAGE_BUCKET",
+            System.getenv().getOrDefault("STORAGE_BUCKET", "rewit-local"))));
     private static final String ACCESS_KEY = System.getProperty("rewit.storage.access-key",
-            System.getenv().getOrDefault("STORAGE_ACCESS_KEY", "change-me"));
+            System.getProperty("rewit.minio.access-key",
+            System.getenv().getOrDefault("OBJECT_STORAGE_ACCESS_KEY",
+            System.getenv().getOrDefault("STORAGE_ACCESS_KEY", "change-me"))));
     private static final String SECRET_KEY = System.getProperty("rewit.storage.secret-key",
-            System.getenv().getOrDefault("STORAGE_SECRET_KEY", "change-me"));
+            System.getProperty("rewit.minio.secret-key",
+            System.getenv().getOrDefault("OBJECT_STORAGE_SECRET_KEY",
+            System.getenv().getOrDefault("STORAGE_SECRET_KEY", "change-me"))));
 
-    // JUnit cria uma instância por teste, então o adaptador continua isolado por método
-    private final MinioStorageAdapter storageAdapter = new MinioStorageAdapter(
-            MinioClient.builder()
-                    .endpoint(STORAGE_ENDPOINT)
-                    .credentials(ACCESS_KEY, SECRET_KEY)
-                    .build(),
-            STORAGE_BUCKET);
+    private static String resolveStorageEndpoint() {
+        String ep = System.getProperty("rewit.storage.seaweed.endpoint");
+        if (ep != null && !ep.isBlank()) return ep.trim();
+        ep = System.getProperty("rewit.minio.endpoint");
+        if (ep != null && !ep.isBlank()) return ep.trim();
+        ep = System.getProperty("rewit.storage.endpoint");
+        if (ep != null && !ep.isBlank()) return ep.trim();
+        ep = System.getProperty("object.storage.endpoint");
+        if (ep != null && !ep.isBlank()) return ep.trim();
+        ep = System.getProperty("minio.endpoint");
+        if (ep != null && !ep.isBlank()) return ep.trim();
+        ep = System.getenv("OBJECT_STORAGE_ENDPOINT");
+        if (ep != null && !ep.isBlank()) return ep.trim();
+        ep = System.getenv("STORAGE_ENDPOINT");
+        if (ep != null && !ep.isBlank()) return ep.trim();
+        return "";
+    }
 
-    @org.junit.jupiter.api.BeforeEach
-    void checkStorageAvailability() {
+    private MinioStorageAdapter storageAdapter;
+
+    @BeforeEach
+    void setUpStorage() {
+        if (STORAGE_ENDPOINT.isBlank()) {
+            fail("Endpoint de SeaweedFS/S3 descartável não configurado. Forneça -Drewit.storage.seaweed.endpoint ou OBJECT_STORAGE_ENDPOINT.");
+        }
         try {
+            storageAdapter = new MinioStorageAdapter(
+                    MinioClient.builder()
+                            .endpoint(STORAGE_ENDPOINT)
+                            .credentials(ACCESS_KEY, SECRET_KEY)
+                            .build(),
+                    STORAGE_BUCKET);
             storageAdapter.exists("health-check-" + UUID.randomUUID());
         } catch (Exception e) {
-            org.junit.jupiter.api.Assumptions.assumeTrue(false,
-                    "SeaweedFS/S3 storage não acessível em " + STORAGE_ENDPOINT + ": " + e.getMessage());
+            fail("SeaweedFS/S3 storage descartável não acessível em " + STORAGE_ENDPOINT + ": " + e.getMessage(), e);
         }
     }
 

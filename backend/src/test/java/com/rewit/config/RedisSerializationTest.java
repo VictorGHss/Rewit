@@ -62,7 +62,13 @@ class RedisSerializationTest {
     void shouldConfigureRedisTemplateProperly() {
         RedisConfig config = new RedisConfig();
         String host = System.getProperty("spring.data.redis.host", System.getenv().getOrDefault("REDIS_HOST", "localhost"));
-        int port = Integer.parseInt(System.getProperty("spring.data.redis.port", System.getenv().getOrDefault("REDIS_PORT", "6379")));
+        String portProp = System.getProperty("spring.data.redis.port", System.getenv("REDIS_PORT"));
+        // Para verificação de serialização sem tráfego de rede, usar a porta configurada de teste
+        // ou 56379 (porta isolada), nunca o default compartilhado 6379.
+        int port = (portProp != null && !portProp.isBlank()) ? Integer.parseInt(portProp) : 56379;
+        if (port == 6379 && !"true".equalsIgnoreCase(System.getProperty("rewit.test.allow-shared-redis"))) {
+            port = 56379;
+        }
         LettuceConnectionFactory factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(host, port));
         factory.afterPropertiesSet();
 

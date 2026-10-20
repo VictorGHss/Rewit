@@ -38,8 +38,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("Rate limiting: janela deslizante no Redis real")
 class RedisRateLimitStoreIntegrationTest {
 
-    private static final String REDIS_HOST = envOrDefault("REDIS_HOST", "localhost");
-    private static final int REDIS_PORT = Integer.parseInt(envOrDefault("REDIS_PORT", "6379"));
+    private static final String REDIS_HOST = System.getProperty("spring.data.redis.host", envOrDefault("REDIS_HOST", "localhost"));
+    private static final int REDIS_PORT = resolveRedisPort();
+
+    private static int resolveRedisPort() {
+        String prop = System.getProperty("spring.data.redis.port");
+        if (prop != null && !prop.isBlank()) {
+            return validateSafeRedisPort(Integer.parseInt(prop));
+        }
+        String env = System.getenv("REDIS_PORT");
+        if (env != null && !env.isBlank()) {
+            return validateSafeRedisPort(Integer.parseInt(env));
+        }
+        throw new IllegalStateException("Porta do Redis de teste isolado não configurada! " +
+                "Defina 'spring.data.redis.port' ou 'REDIS_PORT' com a porta da instância descartável (ex: 56379). " +
+                "Conexões à porta compartilhada 6379 são estritamente proibidas.");
+    }
+
+    private static int validateSafeRedisPort(int port) {
+        if (port == 6379 && !"true".equalsIgnoreCase(System.getProperty("rewit.test.allow-shared-redis"))) {
+            throw new IllegalStateException("Uso acidental da porta 6379 (Redis compartilhado) detectado em teste de integração! " +
+                    "Use uma instância descartável (ex: porta 56379).");
+        }
+        return port;
+    }
     private static final Duration WINDOW = Duration.ofMinutes(1);
 
     private final List<LettuceConnectionFactory> factories = new ArrayList<>();

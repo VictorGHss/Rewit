@@ -1,6 +1,5 @@
 package com.rewit.infrastructure.persistence;
 
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,24 +16,53 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integridade Relacional e Triggers no PostgreSQL (Step 2.1)")
 class DatabaseDomainIntegrityTest {
 
-    private static final String DB_PORT = System.getenv("POSTGRES_PORT") != null ? System.getenv("POSTGRES_PORT") : "5433";
-    private static final String DB_URL = "jdbc:postgresql://localhost:" + DB_PORT + "/rewit_db";
-    private static final String DB_USER = "rewit_user";
-    private static final String DB_PASSWORD = "rewit_local_password";
-    private static boolean databaseAvailable = false;
+    private static final String DB_USER = System.getProperty("spring.datasource.username",
+            System.getenv().getOrDefault("SPRING_DATASOURCE_USERNAME", "rewit_user"));
+    private static final String DB_PASSWORD = System.getProperty("spring.datasource.password",
+            System.getenv().getOrDefault("SPRING_DATASOURCE_PASSWORD", "rewit_local_password"));
+
+    private static String resolveDbUrl() {
+        String sysUrl = System.getProperty("spring.datasource.url");
+        if (sysUrl != null && !sysUrl.isBlank()) {
+            return sysUrl;
+        }
+        String envUrl = System.getenv("SPRING_DATASOURCE_URL");
+        if (envUrl != null && !envUrl.isBlank()) {
+            return envUrl;
+        }
+        String port = System.getProperty("postgres.port", System.getenv("POSTGRES_PORT"));
+        if (port != null && !port.isBlank()) {
+            return "jdbc:postgresql://localhost:" + port + "/rewit_db";
+        }
+        throw new IllegalStateException("PostgreSQL de teste isolado não configurado! " +
+                "Defina 'spring.datasource.url' ou 'POSTGRES_PORT' com o endpoint da instância descartável. " +
+                "Conexão com a porta compartilhada 5433 é estritamente proibida.");
+    }
+
+    private static void validateSafeEndpoint(String url) {
+        if (url.contains(":5433/") && !"true".equalsIgnoreCase(System.getProperty("rewit.test.allow-shared-postgres"))) {
+            throw new IllegalStateException("Uso acidental da porta 5433 (PostgreSQL compartilhado) detectado em teste de integração! " +
+                    "Use uma instância descartável (ex: porta 55432).");
+        }
+    }
 
     @BeforeAll
     static void checkDatabaseAvailability() {
-        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
-            databaseAvailable = conn != null && conn.isValid(2);
+        String dbUrl = resolveDbUrl();
+        validateSafeEndpoint(dbUrl);
+        try (Connection conn = DriverManager.getConnection(dbUrl, DB_USER, DB_PASSWORD)) {
+            if (conn == null || !conn.isValid(2)) {
+                fail("Falha ao validar conexão com PostgreSQL de teste isolado em " + dbUrl);
+            }
         } catch (SQLException e) {
-            databaseAvailable = false;
+            fail("PostgreSQL de teste isolado não está acessível em " + dbUrl + ": " + e.getMessage(), e);
         }
     }
 
     private Connection getConnection() throws SQLException {
-        Assumptions.assumeTrue(databaseAvailable, "PostgreSQL 18 local não está acessível no momento");
-        return DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+        String dbUrl = resolveDbUrl();
+        validateSafeEndpoint(dbUrl);
+        return DriverManager.getConnection(dbUrl, DB_USER, DB_PASSWORD);
     }
 
     @Test

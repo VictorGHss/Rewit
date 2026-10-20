@@ -1,10 +1,16 @@
 # Configuração padrão de testes automatizados
-# Define porta do PostgreSQL para 5433 (ou POSTGRES_PORT do ambiente) e um segredo válido de teste
+# Exige configuração explícita de infraestrutura isolada (A-1); sem fallback para serviços compartilhados.
 spring:
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/${POSTGRES_DB:rewit_db}}
+    url: ${SPRING_DATASOURCE_URL:${DATABASE_URL:jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:}/${POSTGRES_DB:rewit_db}}}
     username: ${POSTGRES_USER:rewit_user}
     password: ${POSTGRES_PASSWORD:rewit_local_password}
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:${REDIS_HOST:127.0.0.1}}
+      port: ${SPRING_DATA_REDIS_PORT:${REDIS_PORT:}}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3000ms
   jpa:
     open-in-view: false
   # Mesmo lock de sessão da aplicação: a V16 usa CREATE INDEX CONCURRENTLY (não transacional)
@@ -36,7 +42,7 @@ rewit:
   # Os testes do Step 28.5 montam o orquestrador diretamente, com objetos próprios.
   storage-gc:
     enabled: false
-  # Rate limiting usa o Redis de teste compartilhado. Segredo aleatório por contexto: as chaves mudam a cada
+  # Rate limiting usa o Redis de teste isolado. Segredo aleatório por contexto: as chaves mudam a cada
   # execução e contexto, então contadores de execuções anteriores não interferem.
   rate-limit:
     key-secret: test-rate-limit-key-${random.uuid}
@@ -52,7 +58,7 @@ rewit:
     purge:
       enabled: false
   minio:
-    endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:8333}
+    endpoint: ${OBJECT_STORAGE_ENDPOINT:${REWIT_STORAGE_SEAWEED_ENDPOINT:${MINIO_ENDPOINT:http://127.0.0.1:58333}}}
     access-key: ${OBJECT_STORAGE_ACCESS_KEY:change-me}
     secret-key: ${OBJECT_STORAGE_SECRET_KEY:change-me}
     bucket-name: ${OBJECT_STORAGE_BUCKET:rewit-local}
