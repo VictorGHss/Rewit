@@ -548,7 +548,7 @@ void main() {
         expect(registeredResult!.place.id, 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d');
         expect(registeredResult!.place.name, 'Pastel da Dona Ana');
         expect(registeredResult!.place.photoUrl, '/api/v1/places/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d/media/media-1');
-        expect(registeredResult!.photoFile.path, fakePhoto.path);
+        expect(registeredResult!.photoFile!.path, fakePhoto.path);
       },
     );
   });

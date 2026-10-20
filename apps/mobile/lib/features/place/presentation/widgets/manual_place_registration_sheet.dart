@@ -6,14 +6,45 @@ import 'package:rewit_mobile/core/error/api_exception.dart';
 import '../../domain/entities/place_detail.dart';
 import '../../domain/repositories/place_repository.dart';
 
+/// Gera um UUID v4 criptograficamente seguro e em conformidade estrita com o RFC 4122.
+import 'dart:math';
+
+/// Gera um UUID v4 criptograficamente seguro e em conformidade estrita com o RFC 4122.
+String generateUuidV4() {
+  final Random random = Random.secure();
+  final values = List<int>.generate(16, (i) => random.nextInt(256));
+  values[6] = (values[6] & 0x0f) | 0x40;
+  values[8] = (values[8] & 0x3f) | 0x80;
+  final hex = values.map((b) => b.toRadixString(16).padLeft(2, '0')).toList();
+  return '${hex.sublist(0, 4).join()}-${hex.sublist(4, 6).join()}-${hex.sublist(6, 8).join()}-${hex.sublist(8, 10).join()}-${hex.sublist(10, 16).join()}';
+}
+
+/// Registro retido fora do ciclo de vida da sheet para evitar que o fechamento da modal
+/// perca o local pendente criado no backend e provoque HTTP 409 em tentativas subsequentes.
+class PendingPlaceRegistration {
+  final PlaceDetail place;
+  final String uploadIdempotencyKey;
+  final File? photoFile;
+
+  const PendingPlaceRegistration({
+    required this.place,
+    required this.uploadIdempotencyKey,
+    this.photoFile,
+  });
+}
+
 /// Resultado retornado após o cadastro manual de um local com fotografia.
 class ManualPlaceRegistrationResult {
   final PlaceDetail place;
-  final File photoFile;
+  final File? photoFile;
+  final bool isPhotoPending;
+  final String? uploadIdempotencyKey;
 
   const ManualPlaceRegistrationResult({
     required this.place,
-    required this.photoFile,
+    this.photoFile,
+    this.isPhotoPending = false,
+    this.uploadIdempotencyKey,
   });
 }
 
@@ -30,6 +61,9 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
   final double? initialLatitude;
   final double? initialLongitude;
   final Future<File?> Function(ImageSource source)? onPickPhoto;
+  final PlaceDetail? initialPendingPlace;
+  final String? initialUploadIdempotencyKey;
+  final File? initialPhoto;
 
   const ManualPlaceRegistrationSheet({
     super.key,
@@ -38,7 +72,29 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
     this.initialLatitude,
     this.initialLongitude,
     this.onPickPhoto,
+    this.initialPendingPlace,
+    this.initialUploadIdempotencyKey,
+    this.initialPhoto,
   });
+
+  /// Cache em memória fora do ciclo de vida do StatefulWidget para preservar locais criados
+  /// que aguardam upload de foto mesmo se o usuário fechar a modal.
+  static final Map<String, PendingPlaceRegistration> _pendingRegistrations = {};
+
+  static String _buildCacheKey(String name, [String? address]) {
+    final cleanName = name.trim().toLowerCase();
+    final cleanAddress = (address ?? '').trim().toLowerCase();
+    return cleanAddress.isNotEmpty ? '$cleanName:::$cleanAddress' : cleanName;
+  }
+
+  @visibleForTesting
+  static void clearPendingRegistrations() {
+    _pendingRegistrations.clear();
+  }
+
+  @visibleForTesting
+  static Map<String, PendingPlaceRegistration> get pendingRegistrations =>
+      Map.unmodifiable(_pendingRegistrations);
 
   static Future<ManualPlaceRegistrationResult?> show(
     BuildContext context, {
@@ -47,6 +103,9 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
     double? initialLatitude,
     double? initialLongitude,
     Future<File?> Function(ImageSource source)? onPickPhoto,
+    PlaceDetail? initialPendingPlace,
+    String? initialUploadIdempotencyKey,
+    File? initialPhoto,
   }) {
     return showModalBottomSheet<ManualPlaceRegistrationResult>(
       context: context,
@@ -61,6 +120,9 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
         initialLatitude: initialLatitude,
         initialLongitude: initialLongitude,
         onPickPhoto: onPickPhoto,
+        initialPendingPlace: initialPendingPlace,
+        initialUploadIdempotencyKey: initialUploadIdempotencyKey,
+        initialPhoto: initialPhoto,
       ),
     );
   }
@@ -94,8 +156,35 @@ class _ManualPlaceRegistrationSheetState
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: widget.initialName.trim());
+    final initialNameTrimmed = widget.initialName.trim();
+    _nameController = TextEditingController(text: initialNameTrimmed);
     _addressController = TextEditingController();
+
+    if (widget.initialPendingPlace != null) {
+      _pendingCreatedPlace = widget.initialPendingPlace;
+      _uploadIdempotencyKey = widget.initialUploadIdempotencyKey ?? generateUuidV4();
+      if (_nameController.text.isEmpty) {
+        _nameController.text = _pendingCreatedPlace!.name;
+      }
+      if (_addressController.text.isEmpty) {
+        _addressController.text = _pendingCreatedPlace!.addressText;
+      }
+    } else if (initialNameTrimmed.isNotEmpty) {
+      final cached = ManualPlaceRegistrationSheet._pendingRegistrations[
+          ManualPlaceRegistrationSheet._buildCacheKey(initialNameTrimmed)];
+      if (cached != null) {
+        _pendingCreatedPlace = cached.place;
+        _uploadIdempotencyKey = cached.uploadIdempotencyKey;
+        _nameController.text = cached.place.name;
+        _addressController.text = cached.place.addressText;
+        if (cached.photoFile != null && cached.photoFile!.existsSync()) {
+          _selectedPhoto = cached.photoFile;
+          try {
+            _selectedPhotoBytes = cached.photoFile!.readAsBytesSync();
+          } catch (_) {}
+        }
+      }
+    }
   }
 
   @override
@@ -103,6 +192,31 @@ class _ManualPlaceRegistrationSheetState
     _nameController.dispose();
     _addressController.dispose();
     super.dispose();
+  }
+
+  void _handleClose() {
+    if (_isSubmitting) return;
+    if (_pendingCreatedPlace != null) {
+      final cacheKey = ManualPlaceRegistrationSheet._buildCacheKey(
+        _pendingCreatedPlace!.name,
+        _pendingCreatedPlace!.addressText,
+      );
+      ManualPlaceRegistrationSheet._pendingRegistrations[cacheKey] = PendingPlaceRegistration(
+        place: _pendingCreatedPlace!,
+        uploadIdempotencyKey: _uploadIdempotencyKey ?? generateUuidV4(),
+        photoFile: _selectedPhoto,
+      );
+      Navigator.of(context).pop(
+        ManualPlaceRegistrationResult(
+          place: _pendingCreatedPlace!,
+          photoFile: _selectedPhoto,
+          isPhotoPending: true,
+          uploadIdempotencyKey: _uploadIdempotencyKey,
+        ),
+      );
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   Future<void> _pickPhoto(ImageSource source) async {
@@ -264,6 +378,13 @@ class _ManualPlaceRegistrationSheetState
     });
 
     try {
+      final preCacheKey = ManualPlaceRegistrationSheet._buildCacheKey(name, address);
+      if (_pendingCreatedPlace == null && ManualPlaceRegistrationSheet._pendingRegistrations.containsKey(preCacheKey)) {
+        final cached = ManualPlaceRegistrationSheet._pendingRegistrations[preCacheKey]!;
+        _pendingCreatedPlace = cached.place;
+        _uploadIdempotencyKey ??= cached.uploadIdempotencyKey;
+      }
+
       PlaceDetail place = _pendingCreatedPlace ??
           await widget.placeRepository.createPlace(
             CreatePlaceInput(
@@ -275,7 +396,8 @@ class _ManualPlaceRegistrationSheetState
           );
       _pendingCreatedPlace = place;
 
-      _uploadIdempotencyKey ??= 'm-${DateTime.now().microsecondsSinceEpoch}-${place.id.length >= 8 ? place.id.substring(0, 8) : place.id}';
+      final cacheKey = ManualPlaceRegistrationSheet._buildCacheKey(place.name, place.addressText);
+      _uploadIdempotencyKey ??= generateUuidV4();
       final filename = _selectedPhoto!.path.split(RegExp(r'[/\\]')).last;
       final uploadedPhotoUrl = await widget.placeRepository.uploadPlacePhoto(
         placeId: place.id,
@@ -285,6 +407,8 @@ class _ManualPlaceRegistrationSheetState
       );
       final completedPlace = place.copyWith(photoUrl: uploadedPhotoUrl);
 
+      ManualPlaceRegistrationSheet._pendingRegistrations.remove(cacheKey);
+
       if (!mounted) return;
       Navigator.of(context).pop(
         ManualPlaceRegistrationResult(
@@ -293,6 +417,14 @@ class _ManualPlaceRegistrationSheetState
         ),
       );
     } on ApiException catch (e) {
+      if (_pendingCreatedPlace != null) {
+        final cacheKey = ManualPlaceRegistrationSheet._buildCacheKey(_pendingCreatedPlace!.name, _pendingCreatedPlace!.addressText);
+        ManualPlaceRegistrationSheet._pendingRegistrations[cacheKey] = PendingPlaceRegistration(
+          place: _pendingCreatedPlace!,
+          uploadIdempotencyKey: _uploadIdempotencyKey ?? generateUuidV4(),
+          photoFile: _selectedPhoto,
+        );
+      }
       if (!mounted) return;
       String message;
       if (e.isConflict && _pendingCreatedPlace == null) {
@@ -345,20 +477,45 @@ class _ManualPlaceRegistrationSheetState
     }
   }
 
+  void _savePendingToCacheIfCreated() {
+    if (_pendingCreatedPlace != null) {
+      final key1 = ManualPlaceRegistrationSheet._buildCacheKey(
+        _pendingCreatedPlace!.name,
+        _pendingCreatedPlace!.addressText,
+      );
+      final key2 = ManualPlaceRegistrationSheet._buildCacheKey(
+        _pendingCreatedPlace!.name,
+      );
+      final entry = PendingPlaceRegistration(
+        place: _pendingCreatedPlace!,
+        uploadIdempotencyKey: _uploadIdempotencyKey ?? generateUuidV4(),
+        photoFile: _selectedPhoto,
+      );
+      ManualPlaceRegistrationSheet._pendingRegistrations[key1] = entry;
+      ManualPlaceRegistrationSheet._pendingRegistrations[key2] = entry;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     final isPlaceAlreadyCreated = _pendingCreatedPlace != null;
 
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 16,
-        bottom: bottomInset + 20,
-      ),
-      child: SingleChildScrollView(
+    return PopScope(
+      canPop: !_isSubmitting,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) return;
+        _savePendingToCacheIfCreated();
+      },
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          top: 16,
+          bottom: bottomInset + 20,
+        ),
+        child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -379,11 +536,10 @@ class _ManualPlaceRegistrationSheetState
                   ),
                 ),
                 IconButton(
+                  key: const Key('manual_place_close_button'),
                   icon: const Icon(Icons.close),
                   tooltip: 'Fechar',
-                  onPressed: _isSubmitting
-                      ? null
-                      : () => Navigator.of(context).pop(),
+                  onPressed: _isSubmitting ? null : _handleClose,
                 ),
               ],
             ),
@@ -629,6 +785,7 @@ class _ManualPlaceRegistrationSheetState
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }

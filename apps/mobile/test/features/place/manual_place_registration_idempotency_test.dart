@@ -98,6 +98,7 @@ void main() {
     late File testPhotoFile1;
 
     setUp(() {
+      ManualPlaceRegistrationSheet.clearPendingRegistrations();
       repo = _RecordingPlaceRepository();
       tempDir = Directory.systemTemp.createTempSync('rewit_test_');
       testPhotoFile1 = File('${tempDir.path}/mock_photo_1.jpg');
@@ -105,6 +106,7 @@ void main() {
     });
 
     tearDown(() {
+      ManualPlaceRegistrationSheet.clearPendingRegistrations();
       try {
         tempDir.deleteSync(recursive: true);
       } catch (_) {}
@@ -146,7 +148,8 @@ void main() {
       final key = repo.uploadArguments.first['idempotencyKey'] as String?;
       expect(key, isNotNull);
       expect(key!.isNotEmpty, isTrue);
-      expect(key.startsWith('m-'), isTrue);
+      final uuidRegex = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+      expect(uuidRegex.hasMatch(key), isTrue, reason: 'A chave de idempotência deve ser um UUID v4 válido');
     });
 
     testWidgets('2. Um retry da mesma operação com o mesmo payload reutiliza a chave', (tester) async {
@@ -284,6 +287,157 @@ void main() {
       expect(result, isNotNull);
       expect(result!.place.photoUrl, contains('/media/photo-2'));
       expect(result!.place.name, 'Pastelaria Central');
+    });
+
+    testWidgets('8. Falha de upload persiste local criado e fechar a modal retorna resultado com isPhotoPending: true', (tester) async {
+      ManualPlaceRegistrationSheet.clearPendingRegistrations();
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERROR', 'Falha no storage');
+
+      ManualPlaceRegistrationResult? result;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: ElevatedButton(
+                onPressed: () async {
+                  result = await ManualPlaceRegistrationSheet.show(
+                    context,
+                    placeRepository: repo,
+                    initialName: 'Café Teste',
+                    onPickPhoto: (source) async => testPhotoFile1,
+                  );
+                },
+                child: const Text('Abrir'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Abrir'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('manual_place_address_field')),
+        'Rua das Palmeiras, 100',
+      );
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+
+      // Submissão falha no upload após criar local
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      expect(repo.createPlaceCalls, 1);
+      expect(repo.uploadCalls, 1);
+
+      // Clica no botão fechar da modal
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      // Modal fechada retorna o resultado com isPhotoPending: true
+      expect(result, isNotNull);
+      expect(result!.isPhotoPending, isTrue);
+      expect(result!.place.name, 'Café Teste');
+      expect(result!.uploadIdempotencyKey, isNotNull);
+      expect(ManualPlaceRegistrationSheet.pendingRegistrations.isNotEmpty, isTrue);
+    });
+
+    testWidgets('9. Reabertura da modal para o mesmo local não cria local duplicado (evita 409) e retoma upload', (tester) async {
+      ManualPlaceRegistrationSheet.clearPendingRegistrations();
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERROR', 'Falha temporária');
+
+      ManualPlaceRegistrationResult? firstResult;
+      ManualPlaceRegistrationResult? secondResult;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Column(
+                children: [
+                  ElevatedButton(
+                    key: const Key('btn_open_first'),
+                    onPressed: () async {
+                      firstResult = await ManualPlaceRegistrationSheet.show(
+                        context,
+                        placeRepository: repo,
+                        initialName: 'Padaria Alvorada',
+                        onPickPhoto: (source) async => testPhotoFile1,
+                      );
+                    },
+                    child: const Text('Primeira Abertura'),
+                  ),
+                  ElevatedButton(
+                    key: const Key('btn_open_second'),
+                    onPressed: () async {
+                      secondResult = await ManualPlaceRegistrationSheet.show(
+                        context,
+                        placeRepository: repo,
+                        initialName: 'Padaria Alvorada',
+                        initialPendingPlace: firstResult?.place,
+                        initialUploadIdempotencyKey: firstResult?.uploadIdempotencyKey,
+                        onPickPhoto: (source) async => testPhotoFile1,
+                      );
+                    },
+                    child: const Text('Segunda Abertura'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // 1. Primeira abertura
+      await tester.tap(find.byKey(const Key('btn_open_first')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('manual_place_address_field')),
+        'Rua do Amanhecer, 20',
+      );
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+
+      // Submissão falha no upload
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      expect(repo.createPlaceCalls, 1);
+      expect(repo.uploadCalls, 1);
+
+      // Fecha a modal
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      expect(firstResult, isNotNull);
+      expect(firstResult!.isPhotoPending, isTrue);
+
+      // 2. Segunda abertura para o mesmo local (simulando reabertura pelo usuário)
+      repo.uploadPhotoException = null; // Recuperou o storage
+      await tester.tap(find.byKey(const Key('btn_open_second')));
+      await tester.pumpAndSettle();
+
+      // Deve exibir o banner de local já registrado
+      expect(find.byKey(const Key('manual_place_partial_created_banner')), findsOneWidget);
+      expect(find.text('Reenviar Fotografia e Concluir'), findsOneWidget);
+
+      // Anexa foto se necessário e submete
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      // CRÍTICO: Não deve ter chamado createPlace pela 2ª vez (evitou HTTP 409)
+      expect(repo.createPlaceCalls, 1, reason: 'createPlace NUNCA deve ser invocado novamente para o local pendente');
+      expect(repo.uploadCalls, 2);
+
+      expect(secondResult, isNotNull);
+      expect(secondResult!.isPhotoPending, isFalse);
+      expect(secondResult!.place.photoUrl, contains('/media/photo-2'));
     });
   });
 }

@@ -1,3 +1,4 @@
+import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -244,7 +245,12 @@ void main() {
     late MockReviewCreationRepository repository;
 
     setUp(() {
+      ManualPlaceRegistrationSheet.clearPendingRegistrations();
       repository = MockReviewCreationRepository();
+    });
+
+    tearDown(() {
+      ManualPlaceRegistrationSheet.clearPendingRegistrations();
     });
 
     testWidgets('renderiza todos os componentes do formulário de criação', (tester) async {

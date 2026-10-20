@@ -115,6 +115,17 @@ class _SearchScreenState extends State<SearchScreen>
 
     if (!mounted || result == null) return;
 
+    if (result.isPhotoPending && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente.',
+          ),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+    }
+
     if (widget.onManualPlaceRegistered != null) {
       widget.onManualPlaceRegistered!(result);
       return;

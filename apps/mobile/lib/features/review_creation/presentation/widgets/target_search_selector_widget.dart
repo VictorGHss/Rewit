@@ -186,8 +186,21 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
       ];
     }
 
+    if (result.isPhotoPending && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente.',
+          ),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+    }
+
     widget.onTargetSelected(createdItem);
-    widget.onManualPlacePhotoSelected?.call(result.photoFile);
+    if (result.photoFile != null) {
+      widget.onManualPlacePhotoSelected?.call(result.photoFile!);
+    }
   }
 
   @override
