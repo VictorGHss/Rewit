@@ -78,7 +78,43 @@ flutter run
 
 ---
 
-## 4. Uso do Cloudflare Tunnel para Testes Móveis
+## 4. Role de Runtime do PostgreSQL (`rewit_app`)
+
+O backend conecta como `rewit_app` (sem DDL, sem superuser). Na criação do volume, o init do container a provisiona com a senha de `APP_DB_PASSWORD` — **obrigatória e sem valor padrão**: com ela vazia, ausente ou igual ao exemplo, o init falha com mensagem explícita.
+
+Para provisionar de novo ou rotacionar a senha num banco existente, altere `APP_DB_PASSWORD` no `.env`, recrie o container (`docker compose up -d postgres`; o volume é preservado) e execute:
+```powershell
+docker compose exec postgres /docker-entrypoint-initdb.d/02-create-app-role.sh
+```
+A senha chega ao `psql` pela entrada padrão e o servidor recebe apenas o verificador SCRAM. Fora do Docker, use `psql -U rewit_user -d rewit_db -v app_user=rewit_app -f infrastructure/postgres/provision-runtime-role.sql` (a senha é pedida sem eco).
+
+O teste `bash infrastructure/postgres/tests/provisioning-test.sh [commit]` valida o provisionamento a partir de um clone limpo, em containers descartáveis.
+
+---
+
+## 5. Testes Automatizados do Backend
+
+Os testes de integração usam **somente** infraestrutura descartável declarada por variáveis `TEST_*`; não há valores padrão nem fallback para as variáveis de desenvolvimento (`POSTGRES_*`, `REDIS_*`, `OBJECT_STORAGE_*`). Sem elas, a suíte falha antes de qualquer conexão. Portas compartilhadas (5432, 5433, 6379, 8333) são recusadas.
+
+| Variável | Conteúdo |
+| :--- | :--- |
+| `TEST_DATASOURCE_URL` | `jdbc:postgresql://127.0.0.1:<porta>/<database>` do PostgreSQL descartável |
+| `TEST_APP_DB_USER` / `TEST_APP_DB_PASSWORD` | Role de runtime (`rewit_app`) provisionada no banco de teste |
+| `TEST_MIGRATION_DB_USER` / `TEST_MIGRATION_DB_PASSWORD` | Role de migração (owner do schema; precisa de `CREATEDB` para o teste de upgrade) |
+| `TEST_REDIS_HOST` / `TEST_REDIS_PORT` | Redis descartável (`TEST_REDIS_PASSWORD` opcional) |
+| `TEST_STORAGE_ENDPOINT` | `http://127.0.0.1:<porta>` do S3 descartável (porta explícita) |
+| `TEST_STORAGE_ACCESS_KEY` / `TEST_STORAGE_SECRET_KEY` / `TEST_STORAGE_BUCKET` | Credenciais e bucket do S3 descartável |
+
+O PostgreSQL de teste deve ser criado com os scripts de `infrastructure/postgres/init` (montando também `infrastructure/postgres` em `/opt/rewit/postgres`), para que `rewit_app` exista. O teste de upgrade de migrations cria e remove o próprio database descartável no mesmo servidor e nunca executa `flyway clean`.
+
+```powershell
+cd backend
+./mvnw clean test
+```
+
+---
+
+## 6. Uso do Cloudflare Tunnel para Testes Móveis
 
 Para permitir que o aplicativo mobile rodando em um celular físico conectado na rede móvel 4G/5G acesse seu backend rodando no notebook:
 1. Instale o executável `cloudflared` ou utilize o profile Docker preparado no `docker-compose.yml`:
