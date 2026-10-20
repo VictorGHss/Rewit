@@ -50,8 +50,10 @@ SCRIPT="$INIT_DIR/02-create-app-role.sh"
 if [ ! -f "$SCRIPT" ] || [ ! -f "$SQL_DIR/provision-runtime-role.sql" ]; then
     echo "Clone limpo sem os scripts de provisionamento"; exit 1
 fi
-check "script de init sem CR após checkout com autocrlf" "! grep -q \$'\\r' '$SCRIPT'"
-check "SQL de provisionamento sem CR após checkout com autocrlf" "! grep -q \$'\\r' '$SQL_DIR/provision-runtime-role.sql'"
+# Conta bytes CR diretamente: o grep do Git Bash descarta CR em modo texto e não serviria de prova
+cr_count() { tr -dc '\r' < "$1" | wc -c | tr -d ' '; }
+check "script de init sem CR após checkout com autocrlf" "[ \"\$(cr_count '$SCRIPT')\" = 0 ]"
+check "SQL de provisionamento sem CR após checkout com autocrlf" "[ \"\$(cr_count '$SQL_DIR/provision-runtime-role.sql')\" = 0 ]"
 check "shebang válido (#!/bin/sh)" "[ \"\$(head -n1 '$SCRIPT')\" = '#!/bin/sh' ]"
 check "bit de execução registrado no Git (100755)" \
     "git -C '$WORK/repo' ls-files -s infrastructure/postgres/init/02-create-app-role.sh | grep -q '^100755 '"
