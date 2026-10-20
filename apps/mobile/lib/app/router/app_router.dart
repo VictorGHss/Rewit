@@ -228,6 +228,7 @@ class AppRouter {
           builder: (context) => SearchScreen(
             searchRepository: searchRepository,
             placeRepository: placeRepository,
+            authNotifier: authNotifier,
           ),
           settings: settings,
         );

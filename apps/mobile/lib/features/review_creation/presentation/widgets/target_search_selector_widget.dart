@@ -53,6 +53,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
 
   // Cache em memória durante a sessão da tela para evitar requisições idênticas
   final Map<String, List<SearchResultItem>> _queryCache = {};
+  PendingPlaceRegistration? _pendingRegistration;
 
   @override
   void dispose() {
@@ -161,11 +162,24 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     final result = await ManualPlaceRegistrationSheet.show(
       context,
       placeRepository: widget.placeRepository!,
-      initialName: _searchController.text.trim(),
+      initialName: _pendingRegistration != null ? _pendingRegistration!.place.name : _searchController.text.trim(),
+      initialPendingPlace: _pendingRegistration?.place,
+      initialUploadIdempotencyKey: _pendingRegistration?.uploadIdempotencyKey,
+      initialPhoto: _pendingRegistration?.photoFile,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
 
     if (!mounted || result == null) return;
+
+    if (result.isPhotoPending) {
+      _pendingRegistration = PendingPlaceRegistration(
+        place: result.place,
+        uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
+        photoFile: result.photoFile,
+      );
+    } else {
+      _pendingRegistration = null;
+    }
 
     final createdItem = SearchResultItem(
       id: result.place.id,

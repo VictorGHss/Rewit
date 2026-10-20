@@ -1,3 +1,5 @@
+import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -34,6 +36,8 @@ class SearchScreen extends StatefulWidget {
   final void Function(SearchResultItem item)? onTargetTap;
   final void Function(ManualPlaceRegistrationResult result)? onManualPlaceRegistered;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+  final AuthNotifier? authNotifier;
+  final String? currentUserId;
 
   const SearchScreen({
     super.key,
@@ -43,6 +47,8 @@ class SearchScreen extends StatefulWidget {
     this.onTargetTap,
     this.onManualPlaceRegistered,
     this.onPickManualPlacePhoto,
+    this.authNotifier,
+    this.currentUserId,
   });
 
   @override
@@ -56,6 +62,11 @@ class _SearchScreenState extends State<SearchScreen>
 
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
+  PendingPlaceRegistration? _pendingRegistration;
+  String? _scopedUserId;
+
+  PendingPlaceRegistration? get pendingRegistration => _pendingRegistration;
 
   @override
   bool get wantKeepAlive => true;
@@ -74,12 +85,34 @@ class _SearchScreenState extends State<SearchScreen>
     }
 
     _scrollController.addListener(_onScroll);
+    _scopedUserId = _getCurrentUserId();
+    widget.authNotifier?.addListener(_onAuthChanged);
+  }
+
+  String? _getCurrentUserId() {
+    if (widget.currentUserId != null) return widget.currentUserId;
+    final authState = widget.authNotifier?.state;
+    if (authState is Authenticated) {
+      return authState.user.id;
+    }
+    return null;
+  }
+
+  void _onAuthChanged() {
+    final newUserId = _getCurrentUserId();
+    if (newUserId != _scopedUserId) {
+      setState(() {
+        _scopedUserId = newUserId;
+        _pendingRegistration = null;
+      });
+    }
   }
 
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    widget.authNotifier?.removeListener(_onAuthChanged);
     _searchController.dispose();
     if (_ownsNotifier) {
       _notifier.dispose();
@@ -103,28 +136,59 @@ class _SearchScreenState extends State<SearchScreen>
     _notifier.clear();
   }
 
-  Future<void> _openManualPlaceRegistration(String initialQuery) async {
+  Future<void> _openManualPlaceRegistration({
+    String? initialQuery,
+    PendingPlaceRegistration? pendingToResume,
+  }) async {
     if (widget.placeRepository == null) return;
+
+    final currentUid = _getCurrentUserId();
+    final initialPending = pendingToResume;
 
     final result = await ManualPlaceRegistrationSheet.show(
       context,
       placeRepository: widget.placeRepository!,
-      initialName: initialQuery.trim(),
+      initialName: initialPending != null ? initialPending.place.name : (initialQuery ?? '').trim(),
+      initialPendingPlace: initialPending?.place,
+      initialUploadIdempotencyKey: initialPending?.uploadIdempotencyKey,
+      initialPhoto: initialPending?.photoFile,
+      currentUserId: currentUid,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
 
     if (!mounted || result == null) return;
 
-    if (result.isPhotoPending && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente.',
+    if (result.isPhotoPending) {
+      setState(() {
+        _scopedUserId = currentUid;
+        _pendingRegistration = PendingPlaceRegistration(
+          place: result.place,
+          uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
+          photoFile: result.photoFile,
+          userId: currentUid,
+        );
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            action: SnackBarAction(
+              label: 'Retomar',
+              textColor: Colors.white,
+              onPressed: () => _resumePendingRegistration(),
+            ),
           ),
-          backgroundColor: Colors.orange.shade800,
-        ),
-      );
+        );
+      }
+      return;
     }
+
+    setState(() {
+      _pendingRegistration = null;
+    });
 
     if (widget.onManualPlaceRegistered != null) {
       widget.onManualPlaceRegistered!(result);
@@ -140,6 +204,11 @@ class _SearchScreenState extends State<SearchScreen>
         'category': result.place.category,
       },
     );
+  }
+
+  void _resumePendingRegistration() {
+    if (_pendingRegistration == null) return;
+    _openManualPlaceRegistration(pendingToResume: _pendingRegistration);
   }
 
   void _handleItemTap(SearchResultItem item) {
@@ -257,6 +326,45 @@ class _SearchScreenState extends State<SearchScreen>
           ),
 
           const Divider(height: 1),
+
+          if (_pendingRegistration != null) ...[
+            Container(
+              key: const Key('search_pending_registration_banner'),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: theme.colorScheme.secondary.withAlpha(80)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.pending_actions, color: theme.colorScheme.secondary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Foto pendente: ${_pendingRegistration!.place.name}',
+                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          'O local foi criado. Toque para concluir o envio da fotografia.',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    key: const Key('search_resume_pending_place_button'),
+                    onPressed: _resumePendingRegistration,
+                    child: const Text('Retomar'),
+                  ),
+                ],
+              ),
+            ),
+          ],
 
           // 3. Conteúdo Dinâmico por Estado
           Expanded(
@@ -396,7 +504,7 @@ class _SearchScreenState extends State<SearchScreen>
               const SizedBox(height: 16),
               FilledButton.tonalIcon(
                 key: const Key('search_register_manual_place_button'),
-                onPressed: () => _openManualPlaceRegistration(query),
+                onPressed: () => _openManualPlaceRegistration(initialQuery: query),
                 icon: const Icon(Icons.add_location_alt_outlined),
                 label: const Text('Cadastrar local manualmente'),
               ),

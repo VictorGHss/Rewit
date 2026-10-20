@@ -310,6 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
           SearchScreen(
             searchRepository: widget.searchRepository,
             placeRepository: widget.placeRepository,
+            authNotifier: widget.authNotifier,
           ),
           ReviewCreateScreen(
             repository: widget.reviewCreationRepository,

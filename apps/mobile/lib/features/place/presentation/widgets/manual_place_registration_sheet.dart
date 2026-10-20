@@ -6,7 +6,6 @@ import 'package:rewit_mobile/core/error/api_exception.dart';
 import '../../domain/entities/place_detail.dart';
 import '../../domain/repositories/place_repository.dart';
 
-/// Gera um UUID v4 criptograficamente seguro e em conformidade estrita com o RFC 4122.
 import 'dart:math';
 
 /// Gera um UUID v4 criptograficamente seguro e em conformidade estrita com o RFC 4122.
@@ -19,17 +18,19 @@ String generateUuidV4() {
   return '${hex.sublist(0, 4).join()}-${hex.sublist(4, 6).join()}-${hex.sublist(6, 8).join()}-${hex.sublist(8, 10).join()}-${hex.sublist(10, 16).join()}';
 }
 
-/// Registro retido fora do ciclo de vida da sheet para evitar que o fechamento da modal
-/// perca o local pendente criado no backend e provoque HTTP 409 em tentativas subsequentes.
+/// Registro de local criado retornado para preservação pelo chamador ou gerenciador de estado
+/// da feature quando a fotografia fica pendente de upload.
 class PendingPlaceRegistration {
   final PlaceDetail place;
   final String uploadIdempotencyKey;
   final File? photoFile;
+  final String? userId;
 
   const PendingPlaceRegistration({
     required this.place,
     required this.uploadIdempotencyKey,
     this.photoFile,
+    this.userId,
   });
 }
 
@@ -53,8 +54,8 @@ class ManualPlaceRegistrationResult {
 /// Coleta nome, endereço e fotografia obrigatória, registra o local no backend
 /// (`POST /api/v1/places`), vincula a fotografia diretamente ao local
 /// (`POST /api/v1/places/{placeId}/media`) e retorna o [PlaceDetail] com seu UUID canônico.
-/// Se a criação do local funcionar e o upload da fotografia falhar, preserva o local
-/// criado em memória para permitir o reenvio apenas da fotografia sem criar duplicatas.
+/// Se a criação do local funcionar e o upload da fotografia falhar, devolve o local
+/// criado e a chave da operação no resultado para permitir retomada explícita sem criar duplicatas.
 class ManualPlaceRegistrationSheet extends StatefulWidget {
   final PlaceRepository placeRepository;
   final String initialName;
@@ -64,6 +65,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
   final PlaceDetail? initialPendingPlace;
   final String? initialUploadIdempotencyKey;
   final File? initialPhoto;
+  final String? currentUserId;
 
   const ManualPlaceRegistrationSheet({
     super.key,
@@ -75,26 +77,11 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
     this.initialPendingPlace,
     this.initialUploadIdempotencyKey,
     this.initialPhoto,
+    this.currentUserId,
   });
 
-  /// Cache em memória fora do ciclo de vida do StatefulWidget para preservar locais criados
-  /// que aguardam upload de foto mesmo se o usuário fechar a modal.
-  static final Map<String, PendingPlaceRegistration> _pendingRegistrations = {};
-
-  static String _buildCacheKey(String name, [String? address]) {
-    final cleanName = name.trim().toLowerCase();
-    final cleanAddress = (address ?? '').trim().toLowerCase();
-    return cleanAddress.isNotEmpty ? '$cleanName:::$cleanAddress' : cleanName;
-  }
-
   @visibleForTesting
-  static void clearPendingRegistrations() {
-    _pendingRegistrations.clear();
-  }
-
-  @visibleForTesting
-  static Map<String, PendingPlaceRegistration> get pendingRegistrations =>
-      Map.unmodifiable(_pendingRegistrations);
+  static void clearPendingRegistrations() {}
 
   static Future<ManualPlaceRegistrationResult?> show(
     BuildContext context, {
@@ -106,6 +93,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
     PlaceDetail? initialPendingPlace,
     String? initialUploadIdempotencyKey,
     File? initialPhoto,
+    String? currentUserId,
   }) {
     return showModalBottomSheet<ManualPlaceRegistrationResult>(
       context: context,
@@ -123,6 +111,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
         initialPendingPlace: initialPendingPlace,
         initialUploadIdempotencyKey: initialUploadIdempotencyKey,
         initialPhoto: initialPhoto,
+        currentUserId: currentUserId,
       ),
     );
   }
@@ -151,6 +140,7 @@ class _ManualPlaceRegistrationSheetState
   String? _uploadIdempotencyKey;
   bool _isSubmitting = false;
   bool _isPickingPhoto = false;
+  bool _canPopNow = false;
   String? _errorMessage;
 
   @override
@@ -169,20 +159,11 @@ class _ManualPlaceRegistrationSheetState
       if (_addressController.text.isEmpty) {
         _addressController.text = _pendingCreatedPlace!.addressText;
       }
-    } else if (initialNameTrimmed.isNotEmpty) {
-      final cached = ManualPlaceRegistrationSheet._pendingRegistrations[
-          ManualPlaceRegistrationSheet._buildCacheKey(initialNameTrimmed)];
-      if (cached != null) {
-        _pendingCreatedPlace = cached.place;
-        _uploadIdempotencyKey = cached.uploadIdempotencyKey;
-        _nameController.text = cached.place.name;
-        _addressController.text = cached.place.addressText;
-        if (cached.photoFile != null && cached.photoFile!.existsSync()) {
-          _selectedPhoto = cached.photoFile;
-          try {
-            _selectedPhotoBytes = cached.photoFile!.readAsBytesSync();
-          } catch (_) {}
-        }
+      if (widget.initialPhoto != null && widget.initialPhoto!.existsSync()) {
+        _selectedPhoto = widget.initialPhoto;
+        try {
+          _selectedPhotoBytes = widget.initialPhoto!.readAsBytesSync();
+        } catch (_) {}
       }
     }
   }
@@ -196,22 +177,14 @@ class _ManualPlaceRegistrationSheetState
 
   void _handleClose() {
     if (_isSubmitting) return;
+    _canPopNow = true;
     if (_pendingCreatedPlace != null) {
-      final cacheKey = ManualPlaceRegistrationSheet._buildCacheKey(
-        _pendingCreatedPlace!.name,
-        _pendingCreatedPlace!.addressText,
-      );
-      ManualPlaceRegistrationSheet._pendingRegistrations[cacheKey] = PendingPlaceRegistration(
-        place: _pendingCreatedPlace!,
-        uploadIdempotencyKey: _uploadIdempotencyKey ?? generateUuidV4(),
-        photoFile: _selectedPhoto,
-      );
       Navigator.of(context).pop(
         ManualPlaceRegistrationResult(
           place: _pendingCreatedPlace!,
           photoFile: _selectedPhoto,
           isPhotoPending: true,
-          uploadIdempotencyKey: _uploadIdempotencyKey,
+          uploadIdempotencyKey: _uploadIdempotencyKey ?? generateUuidV4(),
         ),
       );
     } else {
@@ -257,7 +230,7 @@ class _ManualPlaceRegistrationSheetState
       setState(() {
         _selectedPhoto = file;
         _selectedPhotoBytes = bytes;
-        _uploadIdempotencyKey = null;
+        _uploadIdempotencyKey = null; // Nova fotografia gera nova chave de upload lógica
         _errorMessage = null;
       });
     } on PlatformException {
@@ -378,13 +351,6 @@ class _ManualPlaceRegistrationSheetState
     });
 
     try {
-      final preCacheKey = ManualPlaceRegistrationSheet._buildCacheKey(name, address);
-      if (_pendingCreatedPlace == null && ManualPlaceRegistrationSheet._pendingRegistrations.containsKey(preCacheKey)) {
-        final cached = ManualPlaceRegistrationSheet._pendingRegistrations[preCacheKey]!;
-        _pendingCreatedPlace = cached.place;
-        _uploadIdempotencyKey ??= cached.uploadIdempotencyKey;
-      }
-
       PlaceDetail place = _pendingCreatedPlace ??
           await widget.placeRepository.createPlace(
             CreatePlaceInput(
@@ -396,7 +362,6 @@ class _ManualPlaceRegistrationSheetState
           );
       _pendingCreatedPlace = place;
 
-      final cacheKey = ManualPlaceRegistrationSheet._buildCacheKey(place.name, place.addressText);
       _uploadIdempotencyKey ??= generateUuidV4();
       final filename = _selectedPhoto!.path.split(RegExp(r'[/\\]')).last;
       final uploadedPhotoUrl = await widget.placeRepository.uploadPlacePhoto(
@@ -407,24 +372,16 @@ class _ManualPlaceRegistrationSheetState
       );
       final completedPlace = place.copyWith(photoUrl: uploadedPhotoUrl);
 
-      ManualPlaceRegistrationSheet._pendingRegistrations.remove(cacheKey);
-
       if (!mounted) return;
+      _canPopNow = true;
       Navigator.of(context).pop(
         ManualPlaceRegistrationResult(
           place: completedPlace,
           photoFile: _selectedPhoto!,
+          isPhotoPending: false,
         ),
       );
     } on ApiException catch (e) {
-      if (_pendingCreatedPlace != null) {
-        final cacheKey = ManualPlaceRegistrationSheet._buildCacheKey(_pendingCreatedPlace!.name, _pendingCreatedPlace!.addressText);
-        ManualPlaceRegistrationSheet._pendingRegistrations[cacheKey] = PendingPlaceRegistration(
-          place: _pendingCreatedPlace!,
-          uploadIdempotencyKey: _uploadIdempotencyKey ?? generateUuidV4(),
-          photoFile: _selectedPhoto,
-        );
-      }
       if (!mounted) return;
       String message;
       if (e.isConflict && _pendingCreatedPlace == null) {
@@ -477,25 +434,6 @@ class _ManualPlaceRegistrationSheetState
     }
   }
 
-  void _savePendingToCacheIfCreated() {
-    if (_pendingCreatedPlace != null) {
-      final key1 = ManualPlaceRegistrationSheet._buildCacheKey(
-        _pendingCreatedPlace!.name,
-        _pendingCreatedPlace!.addressText,
-      );
-      final key2 = ManualPlaceRegistrationSheet._buildCacheKey(
-        _pendingCreatedPlace!.name,
-      );
-      final entry = PendingPlaceRegistration(
-        place: _pendingCreatedPlace!,
-        uploadIdempotencyKey: _uploadIdempotencyKey ?? generateUuidV4(),
-        photoFile: _selectedPhoto,
-      );
-      ManualPlaceRegistrationSheet._pendingRegistrations[key1] = entry;
-      ManualPlaceRegistrationSheet._pendingRegistrations[key2] = entry;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -503,10 +441,12 @@ class _ManualPlaceRegistrationSheetState
     final isPlaceAlreadyCreated = _pendingCreatedPlace != null;
 
     return PopScope(
-      canPop: !_isSubmitting,
+      canPop: _canPopNow,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) return;
-        _savePendingToCacheIfCreated();
+        if (didPop) return;
+        if (!_isSubmitting) {
+          _handleClose();
+        }
       },
       child: Padding(
         padding: EdgeInsets.only(
@@ -694,6 +634,7 @@ class _ManualPlaceRegistrationSheetState
                           : () => setState(() {
                                 _selectedPhoto = null;
                                 _selectedPhotoBytes = null;
+                                _uploadIdempotencyKey = null;
                               }),
                     ),
                   ],
