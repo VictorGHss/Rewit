@@ -59,8 +59,7 @@ class SeaweedStorageIntegrationTest {
         if (STORAGE_ENDPOINT.isBlank()) {
             fail("Endpoint de SeaweedFS/S3 descartável não configurado. Forneça -Drewit.storage.seaweed.endpoint ou OBJECT_STORAGE_ENDPOINT.");
         }
-        if ((STORAGE_ENDPOINT.contains(":8333") || STORAGE_ENDPOINT.contains("localhost:8333") || STORAGE_ENDPOINT.contains("127.0.0.1:8333"))
-                && !"true".equalsIgnoreCase(System.getProperty("rewit.test.allow-shared-storage"))) {
+        if (STORAGE_ENDPOINT.contains(":8333") || STORAGE_ENDPOINT.contains("localhost:8333") || STORAGE_ENDPOINT.contains("127.0.0.1:8333")) {
             throw new IllegalStateException("Uso acidental do SeaweedFS compartilhado (porta 8333) detectado em teste de integração! " +
                     "Use uma instância descartável (ex: porta 58333).");
         }

@@ -59,7 +59,7 @@ class DatabaseDomainIntegrityTest {
     }
 
     private static void validateSafeEndpoint(String url) {
-        if ((url.contains(":5433/") || url.contains(":5432/")) && !"true".equalsIgnoreCase(System.getProperty("rewit.test.allow-shared-postgres"))) {
+        if (url.contains(":5433/") || url.contains(":5432/")) {
             throw new IllegalStateException("Uso acidental da porta 5432/5433 (PostgreSQL compartilhado) detectado em teste de integração! " +
                     "Use uma instância descartável (ex: porta 55432).");
         }

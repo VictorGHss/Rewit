@@ -66,7 +66,7 @@ class RedisSerializationTest {
         // Para verificação de serialização sem tráfego de rede, usar a porta configurada de teste
         // ou 56379 (porta isolada), nunca o default compartilhado 6379.
         int port = (portProp != null && !portProp.isBlank()) ? Integer.parseInt(portProp) : 56379;
-        if (port == 6379 && !"true".equalsIgnoreCase(System.getProperty("rewit.test.allow-shared-redis"))) {
+        if (port == 6379) {
             throw new IllegalStateException("Uso acidental da porta 6379 (Redis compartilhado) detectado em teste de integração! " +
                     "Use uma instância descartável (ex: porta 56379).");
         }

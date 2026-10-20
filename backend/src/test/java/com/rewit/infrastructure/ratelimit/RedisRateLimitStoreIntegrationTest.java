@@ -59,7 +59,7 @@ class RedisRateLimitStoreIntegrationTest {
     }
 
     private static int validateSafeRedisPort(int port) {
-        if (port == 6379 && !"true".equalsIgnoreCase(System.getProperty("rewit.test.allow-shared-redis"))) {
+        if (port == 6379) {
             throw new IllegalStateException("Uso acidental da porta 6379 (Redis compartilhado) detectado em teste de integração! " +
                     "Use uma instância descartável (ex: porta 56379).");
         }
