@@ -26,11 +26,15 @@ class PendingPlaceRegistration {
   final File? photoFile;
   final String? userId;
 
+  /// O arquivo local da fotografia não existe mais: a retomada exige nova foto para o MESMO local.
+  final bool photoUnavailable;
+
   const PendingPlaceRegistration({
     required this.place,
     required this.uploadIdempotencyKey,
     this.photoFile,
     this.userId,
+    this.photoUnavailable = false,
   });
 }
 

@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -8,6 +10,8 @@ import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart
 import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
 import 'package:rewit_mobile/features/notifications/presentation/state/notifications_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
@@ -32,6 +36,12 @@ class HomeScreen extends StatefulWidget {
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
 
+  /// Operações pendentes de cadastro de local, com escopo por usuário (MB-1c/MB-1d).
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
+
+  /// Seletor da fotografia do cadastro manual; nulo usa a câmera/galeria do dispositivo.
+  final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+
   const HomeScreen({
     super.key,
     required this.authNotifier,
@@ -45,6 +55,8 @@ class HomeScreen extends StatefulWidget {
     this.userProfileRepository,
     this.notificationRepository,
     this.notificationsNotifier,
+    this.pendingRegistrationStore,
+    this.onPickManualPlacePhoto,
   });
 
   @override
@@ -55,10 +67,28 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   NotificationsNotifier? _notificationsNotifier;
   bool _internalNotificationsNotifier = false;
+  String? _sessionUserId;
+
+  String? _authenticatedUserId() {
+    final state = widget.authNotifier.state;
+    return state is Authenticated ? state.user.id : null;
+  }
+
+  /// Avisos de pendência pertencem à conta que os exibiu: o ScaffoldMessenger do app sobrevive à troca de
+  /// conta, então eles são fechados quando a identidade muda ou a Home autenticada é desmontada.
+  void _onAuthChanged() {
+    final userId = _authenticatedUserId();
+    if (userId != _sessionUserId) {
+      _sessionUserId = userId;
+      PendingRegistrationNotices.closeAllExcept(userId);
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _sessionUserId = _authenticatedUserId();
+    widget.authNotifier.addListener(_onAuthChanged);
     if (widget.notificationsNotifier != null) {
       _notificationsNotifier = widget.notificationsNotifier;
       _internalNotificationsNotifier = false;
@@ -70,7 +100,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.authNotifier != widget.authNotifier) {
+      oldWidget.authNotifier.removeListener(_onAuthChanged);
+      widget.authNotifier.addListener(_onAuthChanged);
+      _onAuthChanged();
+    }
+  }
+
+  @override
   void dispose() {
+    widget.authNotifier.removeListener(_onAuthChanged);
+    PendingRegistrationNotices.closeAllExcept(null);
     if (_internalNotificationsNotifier) {
       _notificationsNotifier?.dispose();
     }
@@ -311,6 +353,8 @@ class _HomeScreenState extends State<HomeScreen> {
             searchRepository: widget.searchRepository,
             placeRepository: widget.placeRepository,
             authNotifier: widget.authNotifier,
+            pendingRegistrationStore: widget.pendingRegistrationStore,
+            onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
           ),
           ReviewCreateScreen(
             repository: widget.reviewCreationRepository,
@@ -319,6 +363,9 @@ class _HomeScreenState extends State<HomeScreen> {
             locationService: widget.locationService,
             searchRepository: widget.searchRepository,
             placeRepository: widget.placeRepository,
+            authNotifier: widget.authNotifier,
+            pendingRegistrationStore: widget.pendingRegistrationStore,
+            onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
             onReviewCreated: (createdReview) async {
               widget.feedNotifier?.refresh();
               final result = await Navigator.of(context).pushNamed(

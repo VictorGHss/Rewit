@@ -8,6 +8,7 @@ import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
+import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
@@ -27,6 +28,9 @@ class TargetSearchSelectorWidget extends StatefulWidget {
   final String? currentUserId;
   final AuthNotifier? authNotifier;
 
+  /// Store das operações pendentes; o app real injeta o persistente (ver `main.dart`).
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
+
   const TargetSearchSelectorWidget({
     super.key,
     required this.searchRepository,
@@ -40,6 +44,7 @@ class TargetSearchSelectorWidget extends StatefulWidget {
     this.onPickManualPlacePhoto,
     this.currentUserId,
     this.authNotifier,
+    this.pendingRegistrationStore,
   });
 
   @override
@@ -62,28 +67,30 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   final Map<String, List<SearchResultItem>> _queryCache = {};
   PendingPlaceRegistration? _pendingRegistration;
   String? _scopedUserId;
+  int _pendingLoadGeneration = 0;
+
+  PendingPlaceRegistrationStore get _store =>
+      widget.pendingRegistrationStore ?? PendingPlaceRegistrationStore.processLocal;
 
   @override
   void initState() {
     super.initState();
     _scopedUserId = _getCurrentUserId();
-    if (_scopedUserId != null) {
-      _pendingRegistration = PendingPlaceRegistrationStore.get(_scopedUserId);
-    }
     widget.authNotifier?.addListener(_onAuthChanged);
+    _reloadPending();
   }
 
   @override
   void didUpdateWidget(covariant TargetSearchSelectorWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.currentUserId != widget.currentUserId || oldWidget.authNotifier != widget.authNotifier) {
-      final newUserId = _getCurrentUserId();
-      if (newUserId != _scopedUserId) {
-        setState(() {
-          _scopedUserId = newUserId;
-          _pendingRegistration = PendingPlaceRegistrationStore.get(newUserId);
-        });
-      }
+    if (oldWidget.authNotifier != widget.authNotifier) {
+      oldWidget.authNotifier?.removeListener(_onAuthChanged);
+      widget.authNotifier?.addListener(_onAuthChanged);
+    }
+    if (oldWidget.currentUserId != widget.currentUserId ||
+        oldWidget.authNotifier != widget.authNotifier ||
+        oldWidget.pendingRegistrationStore != widget.pendingRegistrationStore) {
+      _onIdentityMaybeChanged(force: oldWidget.pendingRegistrationStore != widget.pendingRegistrationStore);
     }
   }
 
@@ -96,14 +103,29 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     return null;
   }
 
-  void _onAuthChanged() {
+  void _onAuthChanged() => _onIdentityMaybeChanged();
+
+  /// Troca de identidade descarta imediatamente o estado exibido e recarrega o da nova conta.
+  void _onIdentityMaybeChanged({bool force = false}) {
     final newUserId = _getCurrentUserId();
-    if (newUserId != _scopedUserId) {
-      setState(() {
-        _scopedUserId = newUserId;
-        _pendingRegistration = PendingPlaceRegistrationStore.get(newUserId);
-      });
-    }
+    if (!force && newUserId == _scopedUserId) return;
+    setState(() {
+      _scopedUserId = newUserId;
+      _pendingRegistration = null;
+    });
+    _reloadPending();
+  }
+
+  /// Carrega a operação pendente da conta atual. Resultados de leituras anteriores (outra conta ou
+  /// leitura superada) são descartados: nada da sessão anterior é restaurado na atual (MB-1d).
+  Future<void> _reloadPending() async {
+    final generation = ++_pendingLoadGeneration;
+    final userId = _scopedUserId;
+    final loaded = userId == null ? null : await _store.loadLatest(userId);
+    if (!mounted || generation != _pendingLoadGeneration || userId != _getCurrentUserId()) return;
+    setState(() {
+      _pendingRegistration = loaded;
+    });
   }
 
   @override
@@ -232,7 +254,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     final postWaitUid = _getCurrentUserId();
     if (postWaitUid != currentUid) return;
 
-    _handleRegistrationResult(result, currentUid);
+    await _handleRegistrationResult(result, currentUid);
   }
 
   Future<void> _resumePendingRegistration() async {
@@ -242,10 +264,12 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     final pending = _pendingRegistration!;
 
     File? photoToUse = pending.photoFile;
-    if (photoToUse != null && !photoToUse.existsSync()) {
+    if (pending.photoUnavailable || (photoToUse != null && !photoToUse.existsSync())) {
       photoToUse = null;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        PendingRegistrationNotices.show(
+          context,
+          currentUid,
           SnackBar(
             content: Text(
               'A fotografia anterior do local "${pending.place.name}" não está mais disponível no dispositivo. Selecione uma nova foto.',
@@ -273,10 +297,10 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     final postWaitUid = _getCurrentUserId();
     if (postWaitUid != currentUid) return;
 
-    _handleRegistrationResult(result, currentUid);
+    await _handleRegistrationResult(result, currentUid);
   }
 
-  void _handleRegistrationResult(ManualPlaceRegistrationResult result, String? currentUid) {
+  Future<void> _handleRegistrationResult(ManualPlaceRegistrationResult result, String? currentUid) async {
     if (result.isPhotoPending) {
       final pending = PendingPlaceRegistration(
         place: result.place,
@@ -284,19 +308,26 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
         photoFile: result.photoFile,
         userId: currentUid,
       );
+      // Gravada sob a conta que iniciou a operação, mesmo que a sessão mude durante a gravação
       if (currentUid != null && currentUid.isNotEmpty) {
-        PendingPlaceRegistrationStore.save(currentUid, pending);
+        await _store.save(currentUid, pending);
       }
+      if (!mounted || _getCurrentUserId() != currentUid) return;
+      _pendingLoadGeneration++;
       setState(() {
         _pendingRegistration = pending;
       });
     } else {
+      // Concluída: remove somente a operação deste local; outras pendências da conta continuam
       if (currentUid != null && currentUid.isNotEmpty) {
-        PendingPlaceRegistrationStore.clear(currentUid);
+        await _store.clear(currentUid, placeId: result.place.id);
       }
+      if (!mounted || _getCurrentUserId() != currentUid) return;
       setState(() {
         _pendingRegistration = null;
       });
+      await _reloadPending();
+      if (!mounted || _getCurrentUserId() != currentUid) return;
     }
 
     final createdItem = SearchResultItem(
@@ -318,18 +349,18 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
       ];
     }
 
+    // Sem ação no aviso: o local criado vira o alvo e este seletor é desmontado em seguida, então a
+    // retomada fica no aviso de pendência do seletor (botão "Trocar" do alvo ou nova avaliação).
     if (result.isPhotoPending && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      PendingRegistrationNotices.show(
+        context,
+        currentUid,
         SnackBar(
           content: Text(
-            'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente.',
+            'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente. '
+            'Retome o envio pelo aviso de pendência na busca de alvos.',
           ),
           backgroundColor: Colors.orange.shade800,
-          action: SnackBarAction(
-            label: 'Retomar',
-            textColor: Colors.white,
-            onPressed: () => _resumePendingRegistration(),
-          ),
         ),
       );
     }
@@ -403,7 +434,13 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Envio de fotografia pendente para "${_pendingRegistration!.place.name}".',
+                    _pendingRegistration!.photoUnavailable
+                        ? 'A fotografia de "${_pendingRegistration!.place.name}" não está mais disponível neste dispositivo. '
+                            'Retome o cadastro selecionando uma nova foto para o mesmo local.'
+                        : 'Envio de fotografia pendente para "${_pendingRegistration!.place.name}".',
+                    key: _pendingRegistration!.photoUnavailable
+                        ? const Key('target_pending_photo_unavailable_text')
+                        : const Key('target_pending_photo_pending_text'),
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.orange.shade900,

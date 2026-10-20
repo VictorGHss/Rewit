@@ -13,6 +13,8 @@ import 'package:rewit_mobile/features/feed/data/repositories/feed_repository_imp
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/place/data/repositories/place_commercial_repository_impl.dart';
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
+import 'package:rewit_mobile/features/place/data/services/secure_pending_place_registration_persistence.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/notifications/data/repositories/notification_repository_impl.dart';
@@ -62,6 +64,10 @@ void main() async {
   final notificationRepository = NotificationRepositoryImpl(httpClient: httpClient);
   final businessRepository = BusinessRepositoryImpl(httpClient: httpClient);
   final businessResponseRepository = BusinessResponseRepositoryImpl(httpClient: httpClient);
+  // Cadastros de local com foto pendente sobrevivem a logout e reinício, com escopo por usuário
+  final pendingRegistrationStore = PendingPlaceRegistrationStore(
+    persistence: SecurePendingPlaceRegistrationPersistence(),
+  );
 
   authNotifier = AuthNotifier(authRepository: authRepository);
   final feedNotifier = FeedNotifier(feedRepository: feedRepository);
@@ -87,6 +93,7 @@ void main() async {
     notificationRepository: notificationRepository,
     businessRepository: businessRepository,
     businessResponseRepository: businessResponseRepository,
+    pendingRegistrationStore: pendingRegistrationStore,
   );
 
 

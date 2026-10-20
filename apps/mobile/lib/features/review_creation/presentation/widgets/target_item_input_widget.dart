@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import '../../domain/entities/review_creation_input.dart';
@@ -29,6 +30,7 @@ class TargetItemInputWidget extends StatefulWidget {
 
   final String? currentUserId;
   final AuthNotifier? authNotifier;
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
   const TargetItemInputWidget({
     super.key,
@@ -49,6 +51,7 @@ class TargetItemInputWidget extends StatefulWidget {
     this.onPickManualPlacePhoto,
     this.currentUserId,
     this.authNotifier,
+    this.pendingRegistrationStore,
   });
 
   @override
@@ -162,6 +165,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                 onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
                 currentUserId: widget.currentUserId,
                 authNotifier: widget.authNotifier,
+                pendingRegistrationStore: widget.pendingRegistrationStore,
               ),
             ] else ...[
               // Fallback para inserção direta de UUID quando searchRepository não for injetado

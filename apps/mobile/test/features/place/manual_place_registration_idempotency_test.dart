@@ -144,9 +144,11 @@ void main() {
     late Directory tempDir;
     late File testPhotoFile1;
     late File testPhotoFile2;
+    late PendingPlaceRegistrationStore store;
 
     setUp(() {
       repo = _RecordingPlaceRepository();
+      store = PendingPlaceRegistrationStore();
       tempDir = Directory.systemTemp.createTempSync('rewit_test_');
       testPhotoFile1 = File('${tempDir.path}/mock_photo_1.jpg');
       testPhotoFile1.writeAsBytesSync(Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46]));
@@ -628,6 +630,7 @@ void main() {
             searchRepository: _StubSearchRepository(),
             placeRepository: repo,
             authNotifier: authNotifier,
+            pendingRegistrationStore: store,
             onPickManualPlacePhoto: (source) async => testPhotoFile1,
           ),
         ),
@@ -724,6 +727,7 @@ void main() {
             searchRepository: _StubSearchRepository(),
             placeRepository: repo,
             authNotifier: authNotifier,
+            pendingRegistrationStore: store,
             onPickManualPlacePhoto: (source) async => testPhotoFile1,
           ),
         ),
@@ -888,6 +892,7 @@ void main() {
               placeRepository: repo,
               targetIndex: 0,
               authNotifier: authNotifier,
+              pendingRegistrationStore: store,
               onTargetSelected: (_) {},
               onPickManualPlacePhoto: (source) async => testPhotoFile1,
             ),
@@ -948,6 +953,7 @@ void main() {
                 searchRepository: _StubSearchRepository(),
                 placeRepository: repo,
                 authNotifier: authNotifier,
+                pendingRegistrationStore: store,
                 currentUserId: 'user-caller-123',
                 onTargetIdChanged: (_) {},
                 onRatingChanged: (_) {},
@@ -979,7 +985,7 @@ void main() {
 
       // Banner é exibido e salvo na store indexado pelo usuário caller
       expect(find.byKey(const Key('target_pending_registration_banner')), findsOneWidget);
-      final stored = PendingPlaceRegistrationStore.get('user-caller-123');
+      final stored = (await store.loadLatest('user-caller-123'));
       expect(stored, isNotNull);
       expect(stored?.place.name, 'Mercado Caller');
     });
@@ -1002,6 +1008,7 @@ void main() {
               placeRepository: repo,
               targetIndex: 0,
               authNotifier: authNotifier,
+              pendingRegistrationStore: store,
               onTargetSelected: (_) {},
               onPickManualPlacePhoto: (source) async => testPhotoFile1,
             ),
@@ -1039,8 +1046,8 @@ void main() {
 
       // Usuário B NÃO vê banner de pendência do usuário A
       expect(find.byKey(const Key('target_pending_registration_banner')), findsNothing);
-      expect(PendingPlaceRegistrationStore.get('user-b-2'), isNull);
-      expect(PendingPlaceRegistrationStore.get('user-a-1'), isNotNull);
+      expect((await store.loadLatest('user-b-2')), isNull);
+      expect((await store.loadLatest('user-a-1')), isNotNull);
     });
 
     testWidgets('17. MB-1d: Usuário A ao retornar recupera a operação com mesmo local e mesmo UUID de upload', (tester) async {
@@ -1061,6 +1068,7 @@ void main() {
               placeRepository: repo,
               targetIndex: 0,
               authNotifier: authNotifier,
+              pendingRegistrationStore: store,
               onTargetSelected: (_) {},
               onPickManualPlacePhoto: (source) async => testPhotoFile1,
             ),
@@ -1084,7 +1092,7 @@ void main() {
       await tester.tap(find.byKey(const Key('manual_place_close_button')));
       await tester.pumpAndSettle();
 
-      final firstPending = PendingPlaceRegistrationStore.get('user-a-persisted');
+      final firstPending = (await store.loadLatest('user-a-persisted'));
       final originalIdempotencyKey = firstPending?.uploadIdempotencyKey;
       expect(originalIdempotencyKey, isNotNull);
 
@@ -1097,6 +1105,7 @@ void main() {
               placeRepository: repo,
               targetIndex: 0,
               authNotifier: authNotifier,
+              pendingRegistrationStore: store,
               onTargetSelected: (_) {},
               onPickManualPlacePhoto: (source) async => testPhotoFile1,
             ),
@@ -1120,7 +1129,7 @@ void main() {
       // Local criado não foi duplicado (apenas 1 criação) e a chave UUID original foi preservada
       expect(repo.createPlaceCalls, 1);
       expect(repo.uploadArguments.last['idempotencyKey'], originalIdempotencyKey);
-      expect(PendingPlaceRegistrationStore.get('user-a-persisted'), isNull);
+      expect((await store.loadLatest('user-a-persisted')), isNull);
     });
 
     testWidgets('18. MB-1d: Fotografia local excluída gera aviso explicito e permite nova foto sem duplicar local', (tester) async {
@@ -1145,6 +1154,7 @@ void main() {
               placeRepository: repo,
               targetIndex: 0,
               authNotifier: authNotifier,
+              pendingRegistrationStore: store,
               onTargetSelected: (_) {},
               onPickManualPlacePhoto: (source) async => fileToBeDeleted,
             ),

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import '../../domain/entities/search_entities.dart';
 import '../../domain/entities/search_filter.dart';
@@ -39,6 +41,9 @@ class SearchScreen extends StatefulWidget {
   final AuthNotifier? authNotifier;
   final String? currentUserId;
 
+  /// Store das operações pendentes; o app real injeta o persistente (ver `main.dart`).
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
+
   const SearchScreen({
     super.key,
     this.searchRepository,
@@ -49,6 +54,7 @@ class SearchScreen extends StatefulWidget {
     this.onPickManualPlacePhoto,
     this.authNotifier,
     this.currentUserId,
+    this.pendingRegistrationStore,
   });
 
   @override
@@ -65,6 +71,10 @@ class _SearchScreenState extends State<SearchScreen>
 
   PendingPlaceRegistration? _pendingRegistration;
   String? _scopedUserId;
+  int _pendingLoadGeneration = 0;
+
+  PendingPlaceRegistrationStore get _store =>
+      widget.pendingRegistrationStore ?? PendingPlaceRegistrationStore.processLocal;
 
   PendingPlaceRegistration? get pendingRegistration => _pendingRegistration;
 
@@ -87,6 +97,18 @@ class _SearchScreenState extends State<SearchScreen>
     _scrollController.addListener(_onScroll);
     _scopedUserId = _getCurrentUserId();
     widget.authNotifier?.addListener(_onAuthChanged);
+    _reloadPending();
+  }
+
+  /// Carrega a operação pendente da conta atual; leituras superadas ou de outra conta são descartadas.
+  Future<void> _reloadPending() async {
+    final generation = ++_pendingLoadGeneration;
+    final userId = _scopedUserId;
+    final loaded = userId == null ? null : await _store.loadLatest(userId);
+    if (!mounted || generation != _pendingLoadGeneration || userId != _getCurrentUserId()) return;
+    setState(() {
+      _pendingRegistration = loaded;
+    });
   }
 
   String? _getCurrentUserId() {
@@ -105,6 +127,7 @@ class _SearchScreenState extends State<SearchScreen>
         _scopedUserId = newUserId;
         _pendingRegistration = null;
       });
+      _reloadPending();
     }
   }
 
@@ -151,7 +174,7 @@ class _SearchScreenState extends State<SearchScreen>
       initialName: initialPending != null ? initialPending.place.name : (initialQuery ?? '').trim(),
       initialPendingPlace: initialPending?.place,
       initialUploadIdempotencyKey: initialPending?.uploadIdempotencyKey,
-      initialPhoto: initialPending?.photoFile,
+      initialPhoto: (initialPending?.photoUnavailable ?? false) ? null : initialPending?.photoFile,
       currentUserId: currentUid,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
@@ -163,17 +186,26 @@ class _SearchScreenState extends State<SearchScreen>
     if (postWaitUid != currentUid) return;
 
     if (result.isPhotoPending) {
+      final pending = PendingPlaceRegistration(
+        place: result.place,
+        uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
+        photoFile: result.photoFile,
+        userId: currentUid,
+      );
+      // Gravada sob a conta que iniciou a operação, mesmo que a sessão mude durante a gravação
+      if (currentUid != null && currentUid.isNotEmpty) {
+        await _store.save(currentUid, pending);
+      }
+      if (!mounted || _getCurrentUserId() != currentUid) return;
+      _pendingLoadGeneration++;
       setState(() {
         _scopedUserId = currentUid;
-        _pendingRegistration = PendingPlaceRegistration(
-          place: result.place,
-          uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
-          photoFile: result.photoFile,
-          userId: currentUid,
-        );
+        _pendingRegistration = pending;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        PendingRegistrationNotices.show(
+          context,
+          currentUid,
           SnackBar(
             content: Text(
               'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente.',
@@ -182,7 +214,11 @@ class _SearchScreenState extends State<SearchScreen>
             action: SnackBarAction(
               label: 'Retomar',
               textColor: Colors.white,
-              onPressed: () => _resumePendingRegistration(),
+              onPressed: () {
+                // O aviso pode sobreviver à tela ou à sessão que o exibiu
+                if (!mounted || _getCurrentUserId() != currentUid) return;
+                _resumePendingRegistration();
+              },
             ),
           ),
         );
@@ -190,9 +226,16 @@ class _SearchScreenState extends State<SearchScreen>
       return;
     }
 
+    // Concluída: remove somente a operação deste local; outras pendências da conta continuam
+    if (currentUid != null && currentUid.isNotEmpty) {
+      await _store.clear(currentUid, placeId: result.place.id);
+    }
+    if (!mounted || _getCurrentUserId() != currentUid) return;
     setState(() {
       _pendingRegistration = null;
     });
+    await _reloadPending();
+    if (!mounted || _getCurrentUserId() != currentUid) return;
 
     if (widget.onManualPlaceRegistered != null) {
       widget.onManualPlaceRegistered!(result);
@@ -354,7 +397,12 @@ class _SearchScreenState extends State<SearchScreen>
                           style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          'O local foi criado. Toque para concluir o envio da fotografia.',
+                          _pendingRegistration!.photoUnavailable
+                              ? 'A fotografia não está mais disponível neste dispositivo. Retome selecionando uma nova foto para o mesmo local.'
+                              : 'O local foi criado. Toque para concluir o envio da fotografia.',
+                          key: _pendingRegistration!.photoUnavailable
+                              ? const Key('search_pending_photo_unavailable_text')
+                              : const Key('search_pending_photo_pending_text'),
                           style: theme.textTheme.bodySmall,
                         ),
                       ],

@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
@@ -35,6 +36,7 @@ class ReviewCreateScreen extends StatefulWidget {
 
   final AuthNotifier? authNotifier;
   final String? currentUserId;
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
   const ReviewCreateScreen({
     super.key,
@@ -54,6 +56,7 @@ class ReviewCreateScreen extends StatefulWidget {
     this.onPickManualPlacePhoto,
     this.authNotifier,
     this.currentUserId,
+    this.pendingRegistrationStore,
   });
 
   @override
@@ -376,6 +379,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
                     authNotifier: widget.authNotifier,
                     currentUserId: widget.currentUserId,
+                    pendingRegistrationStore: widget.pendingRegistrationStore,
                   );
                 }),
 

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -17,6 +18,7 @@ import 'package:rewit_mobile/features/notifications/presentation/state/notificat
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_commercial_repository.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/product/presentation/screens/product_detail_screen.dart';
@@ -74,6 +76,12 @@ class AppRouter {
   final BusinessRepository? businessRepository;
   final BusinessResponseRepository? businessResponseRepository;
 
+  /// Operações pendentes de cadastro de local, com escopo por usuário (MB-1c/MB-1d).
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
+
+  /// Seletor da fotografia do cadastro manual; nulo usa a câmera/galeria do dispositivo.
+  final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+
   const AppRouter({
     required this.authNotifier,
     this.feedNotifier,
@@ -92,6 +100,8 @@ class AppRouter {
     this.notificationsNotifier,
     this.businessRepository,
     this.businessResponseRepository,
+    this.pendingRegistrationStore,
+    this.onPickManualPlacePhoto,
   });
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -120,6 +130,8 @@ class AppRouter {
                   userProfileRepository: userProfileRepository,
                   notificationRepository: notificationRepository,
                   notificationsNotifier: notificationsNotifier,
+                  pendingRegistrationStore: pendingRegistrationStore,
+                  onPickManualPlacePhoto: onPickManualPlacePhoto,
                 );
               }
               return LoginScreen(authNotifier: authNotifier);
@@ -229,6 +241,8 @@ class AppRouter {
             searchRepository: searchRepository,
             placeRepository: placeRepository,
             authNotifier: authNotifier,
+            pendingRegistrationStore: pendingRegistrationStore,
+            onPickManualPlacePhoto: onPickManualPlacePhoto,
           ),
           settings: settings,
         );
@@ -313,6 +327,9 @@ class AppRouter {
             initialTargetType: initialTargetType,
             initialCategory: initialCategory,
             initialPhoto: initialPhoto,
+            authNotifier: authNotifier,
+            pendingRegistrationStore: pendingRegistrationStore,
+            onPickManualPlacePhoto: onPickManualPlacePhoto,
             onReviewCreated: (createdReview) {
               feedNotifier?.refresh();
               Navigator.of(context).pushReplacementNamed(
