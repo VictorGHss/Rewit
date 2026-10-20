@@ -29,29 +29,21 @@ class DatabaseDomainIntegrityTest {
             System.getenv().getOrDefault("TEST_APP_DB_PASSWORD", "rewit_app_local_password"));
 
     private static String resolveDbUrl() {
-        String sysUrl = System.getProperty("spring.datasource.url");
-        if (sysUrl != null && !sysUrl.isBlank()) {
-            return sysUrl;
-        }
         String sysTestUrl = System.getProperty("TEST_DATASOURCE_URL");
         if (sysTestUrl != null && !sysTestUrl.isBlank()) {
             return sysTestUrl;
-        }
-        String envUrl = System.getenv("SPRING_DATASOURCE_URL");
-        if (envUrl != null && !envUrl.isBlank()) {
-            return envUrl;
         }
         String testUrl = System.getenv("TEST_DATASOURCE_URL");
         if (testUrl != null && !testUrl.isBlank()) {
             return testUrl;
         }
+        String sysUrl = System.getProperty("spring.datasource.url");
+        if (sysUrl != null && !sysUrl.isBlank()) {
+            return sysUrl;
+        }
         String testPort = System.getProperty("TEST_POSTGRES_PORT", System.getenv("TEST_POSTGRES_PORT"));
         if (testPort == null || testPort.isBlank()) {
-            testPort = System.getProperty("postgres.port", System.getenv("POSTGRES_PORT"));
-        }
-        if (testPort == null || testPort.isBlank()) {
-            // Default seguro para infraestrutura isolada de teste (porta 55432 conforme application-local.yml)
-            testPort = "55432";
+            throw new IllegalStateException("TEST_POSTGRES_PORT ou TEST_DATASOURCE_URL obrigatória não definida para teste de integração isolado");
         }
         String host = System.getProperty("TEST_POSTGRES_HOST", System.getenv().getOrDefault("TEST_POSTGRES_HOST", "127.0.0.1"));
         String db = System.getProperty("TEST_POSTGRES_DB", System.getenv().getOrDefault("TEST_POSTGRES_DB", "rewit_db"));

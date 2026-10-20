@@ -61,10 +61,11 @@ class RedisSerializationTest {
     @DisplayName("RedisConfig deve instanciar RedisTemplate devidamente configurado com novo serializer")
     void shouldConfigureRedisTemplateProperly() {
         RedisConfig config = new RedisConfig();
-        String host = System.getProperty("spring.data.redis.host", System.getenv().getOrDefault("REDIS_HOST", "localhost"));
-        String portProp = System.getProperty("spring.data.redis.port", System.getenv("REDIS_PORT"));
-        // Para verificação de serialização sem tráfego de rede, usar a porta configurada de teste
-        // ou 56379 (porta isolada), nunca o default compartilhado 6379.
+        String host = System.getProperty("TEST_REDIS_HOST", System.getenv().getOrDefault("TEST_REDIS_HOST", "127.0.0.1"));
+        String portProp = System.getProperty("TEST_REDIS_PORT", System.getenv("TEST_REDIS_PORT"));
+        if (portProp == null || portProp.isBlank()) {
+            portProp = System.getProperty("spring.data.redis.port");
+        }
         int port = (portProp != null && !portProp.isBlank()) ? Integer.parseInt(portProp) : 56379;
         if (port == 6379) {
             throw new IllegalStateException("Uso acidental da porta 6379 (Redis compartilhado) detectado em teste de integração! " +

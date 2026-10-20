@@ -11,8 +11,8 @@ spring:
       idle-timeout: 10000
       max-lifetime: 30000
   flyway:
-    user: ${TEST_MIGRATION_DB_USER:${TEST_POSTGRES_USER:rewit_user}}
-    password: ${TEST_MIGRATION_DB_PASSWORD:${TEST_POSTGRES_PASSWORD:rewit_local_password}}
+    user: ${TEST_MIGRATION_DB_USER:rewit_user}
+    password: ${TEST_MIGRATION_DB_PASSWORD:rewit_local_password}
   data:
     redis:
       host: ${TEST_REDIS_HOST:127.0.0.1}
@@ -24,7 +24,7 @@ spring:
 
 rewit:
   minio:
-    endpoint: ${TEST_STORAGE_ENDPOINT:${OBJECT_STORAGE_ENDPOINT:http://127.0.0.1:58333}}
+    endpoint: ${TEST_STORAGE_ENDPOINT:http://127.0.0.1:58333}
     access-key: ${TEST_STORAGE_ACCESS_KEY:change-me}
     secret-key: ${TEST_STORAGE_SECRET_KEY:change-me}
     bucket-name: ${TEST_STORAGE_BUCKET:rewit-local}

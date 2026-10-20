@@ -1352,4 +1352,137 @@ class PlaceMediaServiceTest {
                         && a.getActorUserId() == null);
         assertTrue(hasAutoResolveAudit, "Deveria registrar auditoria AUTO_RESOLVE_REPORT com actor nulo para resolução automática do sistema");
     }
+
+    @Test
+    @DisplayName("40. RS-1: Moderador que também criou o local é classificado como MODERATOR")
+    void shouldClassifyAsModeratorWhenUserIsBothCreatorAndModerator() {
+        UUID modCreatorId = UUID.randomUUID();
+        User modUser = User.rehydrate(
+                modCreatorId, "mod@test.com", "hash", AuthProvider.LOCAL, null,
+                AccountStatus.ACTIVE, true, Role.MODERATOR, null, Instant.now(), Instant.now()
+        );
+        when(userRepository.findById(modCreatorId)).thenReturn(Optional.of(modUser));
+
+        Place createdPlace = new Place(
+                placeId, "Local Criado", "local-criado", "RESTAURANTE", "Desc", "End",
+                "100", "Bairro", "Curitiba", "PR", "BR", -25.4, -49.2, 50,
+                "USER", true, null, modCreatorId, "ACTIVE"
+        );
+        UUID otherAuthorId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, otherAuthorId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(createdPlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
+
+        placeMediaService.deleteMedia(modCreatorId, placeId, mediaId);
+
+        assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
+        assertEquals(com.rewit.domain.enums.RemovalSource.MODERATOR, media.getRemovalSource());
+    }
+
+    @Test
+    @DisplayName("41. RS-1: Moderador com vínculo comercial é classificado como MODERATOR")
+    void shouldClassifyAsModeratorWhenUserIsBothBusinessOwnerAndModerator() {
+        UUID modBusinessId = UUID.randomUUID();
+        User modUser = User.rehydrate(
+                modBusinessId, "modbiz@test.com", "hash", AuthProvider.LOCAL, null,
+                AccountStatus.ACTIVE, true, Role.MODERATOR, null, Instant.now(), Instant.now()
+        );
+        when(userRepository.findById(modBusinessId)).thenReturn(Optional.of(modUser));
+
+        UUID businessId = UUID.randomUUID();
+        Place claimedPlace = new Place(
+                placeId, "Local Claimed", "local-claimed", "RESTAURANTE", "Desc", "End",
+                "100", "Bairro", "Curitiba", "PR", "BR", -25.4, -49.2, 50,
+                "USER", true, businessId, UUID.randomUUID(), "ACTIVE"
+        );
+        UUID otherAuthorId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, otherAuthorId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        com.rewit.domain.model.BusinessAccount account = org.mockito.Mockito.mock(com.rewit.domain.model.BusinessAccount.class);
+        when(account.isAdministeredBy(modBusinessId)).thenReturn(true);
+        when(account.getVerificationStatus()).thenReturn(com.rewit.domain.enums.VerificationStatus.APPROVED);
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(claimedPlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(businessAccountRepository.findById(businessId)).thenReturn(Optional.of(account));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
+
+        placeMediaService.deleteMedia(modBusinessId, placeId, mediaId);
+
+        assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
+        assertEquals(com.rewit.domain.enums.RemovalSource.MODERATOR, media.getRemovalSource());
+    }
+
+    @Test
+    @DisplayName("42. RS-1: Criador do local não moderador é classificado como PLACE_MANAGER")
+    void shouldClassifyAsPlaceManagerWhenUserIsCreatorAndNotModerator() {
+        UUID creatorId = UUID.randomUUID();
+        User normalUser = User.rehydrate(
+                creatorId, "normal@test.com", "hash", AuthProvider.LOCAL, null,
+                AccountStatus.ACTIVE, true, Role.USER, null, Instant.now(), Instant.now()
+        );
+        when(userRepository.findById(creatorId)).thenReturn(Optional.of(normalUser));
+
+        Place createdPlace = new Place(
+                placeId, "Local Criado", "local-criado", "RESTAURANTE", "Desc", "End",
+                "100", "Bairro", "Curitiba", "PR", "BR", -25.4, -49.2, 50,
+                "USER", true, null, creatorId, "ACTIVE"
+        );
+        UUID otherAuthorId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, otherAuthorId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(createdPlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+        when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
+
+        placeMediaService.deleteMedia(creatorId, placeId, mediaId);
+
+        assertEquals(PlaceMediaStatus.REMOVED, media.getStatus());
+        assertEquals(com.rewit.domain.enums.RemovalSource.PLACE_MANAGER, media.getRemovalSource());
+    }
+
+    @Test
+    @DisplayName("43. RS-1: Usuário sem autorização recebe FORBIDDEN")
+    void shouldThrowForbiddenWhenUserHasNoRole() {
+        UUID strangerId = UUID.randomUUID();
+        User normalUser = User.rehydrate(
+                strangerId, "stranger@test.com", "hash", AuthProvider.LOCAL, null,
+                AccountStatus.ACTIVE, true, Role.USER, null, Instant.now(), Instant.now()
+        );
+        when(userRepository.findById(strangerId)).thenReturn(Optional.of(normalUser));
+
+        UUID otherAuthorId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        PlaceMedia media = new PlaceMedia(
+                mediaId, placeId, otherAuthorId, "places/" + placeId + "/" + mediaId + "/image.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
+        );
+
+        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
+        when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                placeMediaService.deleteMedia(strangerId, placeId, mediaId)
+        );
+        assertEquals("FORBIDDEN", ex.getErrorCode());
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+    }
 }

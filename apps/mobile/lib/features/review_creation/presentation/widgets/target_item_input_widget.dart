@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
@@ -26,6 +27,9 @@ class TargetItemInputWidget extends StatefulWidget {
   final ValueChanged<File>? onManualPlacePhotoSelected;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
+  final String? currentUserId;
+  final AuthNotifier? authNotifier;
+
   const TargetItemInputWidget({
     super.key,
     required this.index,
@@ -43,6 +47,8 @@ class TargetItemInputWidget extends StatefulWidget {
     this.isTargetSelectedElsewhere,
     this.onManualPlacePhotoSelected,
     this.onPickManualPlacePhoto,
+    this.currentUserId,
+    this.authNotifier,
   });
 
   @override
@@ -154,6 +160,8 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                 onManualTargetIdEntered: widget.onTargetIdChanged,
                 onManualPlacePhotoSelected: widget.onManualPlacePhotoSelected,
                 onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
+                currentUserId: widget.currentUserId,
+                authNotifier: widget.authNotifier,
               ),
             ] else ...[
               // Fallback para inserção direta de UUID quando searchRepository não for injetado

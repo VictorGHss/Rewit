@@ -16,40 +16,24 @@ import static org.junit.jupiter.api.Assertions.*;
 class SeaweedStorageIntegrationTest {
 
     private static final String STORAGE_ENDPOINT = resolveStorageEndpoint();
-    private static final String STORAGE_BUCKET = System.getProperty("rewit.storage.bucket",
+    private static final String STORAGE_BUCKET = System.getProperty("TEST_STORAGE_BUCKET",
             System.getProperty("rewit.minio.bucket-name",
-            System.getenv().getOrDefault("OBJECT_STORAGE_BUCKET",
-            System.getenv().getOrDefault("STORAGE_BUCKET", "rewit-local"))));
-    private static final String ACCESS_KEY = System.getProperty("rewit.storage.access-key",
+            System.getenv().getOrDefault("TEST_STORAGE_BUCKET", "rewit-local")));
+    private static final String ACCESS_KEY = System.getProperty("TEST_STORAGE_ACCESS_KEY",
             System.getProperty("rewit.minio.access-key",
-            System.getenv().getOrDefault("OBJECT_STORAGE_ACCESS_KEY",
-            System.getenv().getOrDefault("STORAGE_ACCESS_KEY", "change-me"))));
-    private static final String SECRET_KEY = System.getProperty("rewit.storage.secret-key",
+            System.getenv().getOrDefault("TEST_STORAGE_ACCESS_KEY", "change-me")));
+    private static final String SECRET_KEY = System.getProperty("TEST_STORAGE_SECRET_KEY",
             System.getProperty("rewit.minio.secret-key",
-            System.getenv().getOrDefault("OBJECT_STORAGE_SECRET_KEY",
-            System.getenv().getOrDefault("STORAGE_SECRET_KEY", "change-me"))));
+            System.getenv().getOrDefault("TEST_STORAGE_SECRET_KEY", "change-me")));
 
     private static String resolveStorageEndpoint() {
         String testEp = System.getenv("TEST_STORAGE_ENDPOINT");
         if (testEp != null && !testEp.isBlank()) return testEp.trim();
-        String ep = System.getProperty("OBJECT_STORAGE_ENDPOINT");
-        if (ep != null && !ep.isBlank()) return ep.trim();
-        ep = System.getProperty("rewit.storage.seaweed.endpoint");
-        if (ep != null && !ep.isBlank()) return ep.trim();
-        ep = System.getProperty("rewit.minio.endpoint");
-        if (ep != null && !ep.isBlank()) return ep.trim();
-        ep = System.getProperty("rewit.storage.endpoint");
-        if (ep != null && !ep.isBlank()) return ep.trim();
-        ep = System.getProperty("object.storage.endpoint");
-        if (ep != null && !ep.isBlank()) return ep.trim();
-        ep = System.getProperty("minio.endpoint");
-        if (ep != null && !ep.isBlank()) return ep.trim();
-        ep = System.getenv("OBJECT_STORAGE_ENDPOINT");
-        if (ep != null && !ep.isBlank()) return ep.trim();
-        ep = System.getenv("STORAGE_ENDPOINT");
-        if (ep != null && !ep.isBlank()) return ep.trim();
-        // Default seguro para infraestrutura isolada de teste (porta 58333 conforme application-local.yml)
-        return "http://127.0.0.1:58333";
+        String sysProp = System.getProperty("TEST_STORAGE_ENDPOINT");
+        if (sysProp != null && !sysProp.isBlank()) return sysProp.trim();
+        sysProp = System.getProperty("rewit.minio.endpoint");
+        if (sysProp != null && !sysProp.isBlank()) return sysProp.trim();
+        return "";
     }
 
     private MinioStorageAdapter storageAdapter;

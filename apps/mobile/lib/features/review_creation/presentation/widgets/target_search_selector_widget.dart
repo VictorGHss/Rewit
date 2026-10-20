@@ -6,6 +6,7 @@ import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
@@ -66,7 +67,24 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   void initState() {
     super.initState();
     _scopedUserId = _getCurrentUserId();
+    if (_scopedUserId != null) {
+      _pendingRegistration = PendingPlaceRegistrationStore.get(_scopedUserId);
+    }
     widget.authNotifier?.addListener(_onAuthChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant TargetSearchSelectorWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUserId != widget.currentUserId || oldWidget.authNotifier != widget.authNotifier) {
+      final newUserId = _getCurrentUserId();
+      if (newUserId != _scopedUserId) {
+        setState(() {
+          _scopedUserId = newUserId;
+          _pendingRegistration = PendingPlaceRegistrationStore.get(newUserId);
+        });
+      }
+    }
   }
 
   String? _getCurrentUserId() {
@@ -83,7 +101,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     if (newUserId != _scopedUserId) {
       setState(() {
         _scopedUserId = newUserId;
-        _pendingRegistration = null;
+        _pendingRegistration = PendingPlaceRegistrationStore.get(newUserId);
       });
     }
   }
@@ -223,13 +241,28 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     final currentUid = _getCurrentUserId();
     final pending = _pendingRegistration!;
 
+    File? photoToUse = pending.photoFile;
+    if (photoToUse != null && !photoToUse.existsSync()) {
+      photoToUse = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'A fotografia anterior do local "${pending.place.name}" não está mais disponível no dispositivo. Selecione uma nova foto.',
+            ),
+            backgroundColor: Colors.orange.shade900,
+          ),
+        );
+      }
+    }
+
     final result = await ManualPlaceRegistrationSheet.show(
       context,
       placeRepository: widget.placeRepository!,
       initialName: pending.place.name,
       initialPendingPlace: pending.place,
       initialUploadIdempotencyKey: pending.uploadIdempotencyKey,
-      initialPhoto: pending.photoFile,
+      initialPhoto: photoToUse,
       currentUserId: currentUid,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
@@ -245,15 +278,22 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
 
   void _handleRegistrationResult(ManualPlaceRegistrationResult result, String? currentUid) {
     if (result.isPhotoPending) {
+      final pending = PendingPlaceRegistration(
+        place: result.place,
+        uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
+        photoFile: result.photoFile,
+        userId: currentUid,
+      );
+      if (currentUid != null && currentUid.isNotEmpty) {
+        PendingPlaceRegistrationStore.save(currentUid, pending);
+      }
       setState(() {
-        _pendingRegistration = PendingPlaceRegistration(
-          place: result.place,
-          uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
-          photoFile: result.photoFile,
-          userId: currentUid,
-        );
+        _pendingRegistration = pending;
       });
     } else {
+      if (currentUid != null && currentUid.isNotEmpty) {
+        PendingPlaceRegistrationStore.clear(currentUid);
+      }
       setState(() {
         _pendingRegistration = null;
       });

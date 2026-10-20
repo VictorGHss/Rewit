@@ -140,6 +140,7 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
                 case "PENDING", "OPEN" -> "PENDING";
                 case "ACCEPTED", "RESOLVED" -> "ACCEPTED";
                 case "REJECTED", "DISMISSED" -> "REJECTED";
+                case "AUTO_RESOLVED" -> "AUTO_RESOLVED";
                 default -> throw new com.rewit.common.exception.BusinessException(
                         "Status de filtro de denúncia inválido: " + status,
                         org.springframework.http.HttpStatus.BAD_REQUEST,

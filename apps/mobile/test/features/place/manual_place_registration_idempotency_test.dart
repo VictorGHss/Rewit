@@ -15,6 +15,9 @@ import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_re
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
+import 'package:rewit_mobile/features/review_creation/presentation/widgets/target_item_input_widget.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/widgets/target_search_selector_widget.dart';
 
 class _RecordingPlaceRepository implements PlaceRepository {
@@ -917,6 +920,265 @@ void main() {
 
       // Banner não deve mais estar visível
       expect(find.byKey(const Key('target_pending_registration_banner')), findsNothing);
+    });
+
+    testWidgets('15. MB-1c: TargetItemInputWidget repassa authNotifier e currentUserId para TargetSearchSelectorWidget', (tester) async {
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERR', 'Falha no upload');
+      final authNotifier = _FakeAuthNotifier();
+      authNotifier.emit(
+        const Authenticated(
+          user: AuthUserDto(id: 'user-caller-123', handle: 'caller', email: 'c@test.com', displayName: 'Caller'),
+          tokens: AuthTokens(accessToken: 'token-c', refreshToken: 'ref-c'),
+        ),
+      );
+
+      const targetInput = CreateReviewTargetInput(
+        rateableTargetId: '',
+        rating: 4.0,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: TargetItemInputWidget(
+                index: 0,
+                target: targetInput,
+                canRemove: false,
+                searchRepository: _StubSearchRepository(),
+                placeRepository: repo,
+                authNotifier: authNotifier,
+                currentUserId: 'user-caller-123',
+                onTargetIdChanged: (_) {},
+                onRatingChanged: (_) {},
+                onSpecificCommentChanged: (_) {},
+                onRemove: () {},
+                onPickManualPlacePhoto: (source) async => testPhotoFile1,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Inicia cadastro manual de local pelo caminho de TargetItemInputWidget
+      await tester.enterText(find.byType(TextFormField).first, 'Mercado Caller');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua Caller, 10');
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      // Banner é exibido e salvo na store indexado pelo usuário caller
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsOneWidget);
+      final stored = PendingPlaceRegistrationStore.get('user-caller-123');
+      expect(stored, isNotNull);
+      expect(stored?.place.name, 'Mercado Caller');
+    });
+
+    testWidgets('16. MB-1d: Troca de conta impede que usuário B veja ou retome a operação de A', (tester) async {
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERR', 'Falha no upload');
+      final authNotifier = _FakeAuthNotifier();
+      authNotifier.emit(
+        const Authenticated(
+          user: AuthUserDto(id: 'user-a-1', handle: 'user_a', email: 'a@test.com', displayName: 'User A'),
+          tokens: AuthTokens(accessToken: 'token-a', refreshToken: 'ref-a'),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TargetSearchSelectorWidget(
+              searchRepository: _StubSearchRepository(),
+              placeRepository: repo,
+              targetIndex: 0,
+              authNotifier: authNotifier,
+              onTargetSelected: (_) {},
+              onPickManualPlacePhoto: (source) async => testPhotoFile1,
+            ),
+          ),
+        ),
+      );
+
+      // Usuário A cadastra e upload falha
+      await tester.enterText(find.byType(TextFormField).first, 'Café de A');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua A, 1');
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsOneWidget);
+
+      // Usuário B faz login
+      authNotifier.emit(
+        const Authenticated(
+          user: AuthUserDto(id: 'user-b-2', handle: 'user_b', email: 'b@test.com', displayName: 'User B'),
+          tokens: AuthTokens(accessToken: 'token-b', refreshToken: 'ref-b'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Usuário B NÃO vê banner de pendência do usuário A
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsNothing);
+      expect(PendingPlaceRegistrationStore.get('user-b-2'), isNull);
+      expect(PendingPlaceRegistrationStore.get('user-a-1'), isNotNull);
+    });
+
+    testWidgets('17. MB-1d: Usuário A ao retornar recupera a operação com mesmo local e mesmo UUID de upload', (tester) async {
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERR', 'Falha no upload');
+      final authNotifier = _FakeAuthNotifier();
+      authNotifier.emit(
+        const Authenticated(
+          user: AuthUserDto(id: 'user-a-persisted', handle: 'user_a', email: 'a@test.com', displayName: 'User A'),
+          tokens: AuthTokens(accessToken: 'token-a', refreshToken: 'ref-a'),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TargetSearchSelectorWidget(
+              searchRepository: _StubSearchRepository(),
+              placeRepository: repo,
+              targetIndex: 0,
+              authNotifier: authNotifier,
+              onTargetSelected: (_) {},
+              onPickManualPlacePhoto: (source) async => testPhotoFile1,
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(find.byType(TextFormField).first, 'Pizzaria A');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua A, 2');
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      final firstPending = PendingPlaceRegistrationStore.get('user-a-persisted');
+      final originalIdempotencyKey = firstPending?.uploadIdempotencyKey;
+      expect(originalIdempotencyKey, isNotNull);
+
+      // Simula usuário saindo da tela (desmontando widget) e voltando a montar
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TargetSearchSelectorWidget(
+              searchRepository: _StubSearchRepository(),
+              placeRepository: repo,
+              targetIndex: 0,
+              authNotifier: authNotifier,
+              onTargetSelected: (_) {},
+              onPickManualPlacePhoto: (source) async => testPhotoFile1,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Banner é automaticamente restaurado para o usuário A
+      expect(find.byKey(const Key('target_pending_registration_banner')), findsOneWidget);
+      expect(find.byKey(const Key('target_resume_pending_registration_button')), findsOneWidget);
+
+      // Clica em retomar e resolve o upload com sucesso
+      repo.uploadPhotoException = null;
+      await tester.tap(find.byKey(const Key('target_resume_pending_registration_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      // Local criado não foi duplicado (apenas 1 criação) e a chave UUID original foi preservada
+      expect(repo.createPlaceCalls, 1);
+      expect(repo.uploadArguments.last['idempotencyKey'], originalIdempotencyKey);
+      expect(PendingPlaceRegistrationStore.get('user-a-persisted'), isNull);
+    });
+
+    testWidgets('18. MB-1d: Fotografia local excluída gera aviso explicito e permite nova foto sem duplicar local', (tester) async {
+      repo.uploadPhotoException = _makeApiException(500, 'STORAGE_ERR', 'Falha no upload');
+      final authNotifier = _FakeAuthNotifier();
+      authNotifier.emit(
+        const Authenticated(
+          user: AuthUserDto(id: 'user-missing-file', handle: 'missing_file', email: 'm@test.com', displayName: 'M'),
+          tokens: AuthTokens(accessToken: 'token-m', refreshToken: 'ref-m'),
+        ),
+      );
+
+      // Cria um arquivo temporário exclusivo que será deletado
+      final fileToBeDeleted = File('${tempDir.path}/temp_deleted_photo.jpg');
+      fileToBeDeleted.writeAsBytesSync(Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0]));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TargetSearchSelectorWidget(
+              searchRepository: _StubSearchRepository(),
+              placeRepository: repo,
+              targetIndex: 0,
+              authNotifier: authNotifier,
+              onTargetSelected: (_) {},
+              onPickManualPlacePhoto: (source) async => fileToBeDeleted,
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(find.byType(TextFormField).first, 'Bistrô Ficheiro');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('register_manual_place_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua Ficheiro, 1');
+      await tester.tap(find.text('Câmera'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('manual_place_close_button')));
+      await tester.pumpAndSettle();
+
+      // Deleta fisicamente o arquivo do disco para simular limpeza de cache do OS
+      fileToBeDeleted.deleteSync();
+
+      // Clica em retomar
+      await tester.tap(find.byKey(const Key('target_resume_pending_registration_button')));
+      await tester.pumpAndSettle();
+
+      // Permite selecionar nova foto mantendo o local já criado mas sem a foto anterior apagada
+      expect(find.text('Bistrô Ficheiro'), findsWidgets);
+      expect(find.byKey(const Key('manual_place_partial_created_banner')), findsOneWidget);
+      expect(find.byKey(const Key('manual_place_photo_preview')), findsNothing);
     });
   });
 }

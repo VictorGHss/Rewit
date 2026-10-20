@@ -295,19 +295,15 @@ public class PlaceMediaService {
         }
 
         boolean isAuthor = media.getUserId().equals(actorUserId);
-        boolean isPlaceManager = false;
+        boolean isPlaceManager = (place.getCreatedByUserId() != null && place.getCreatedByUserId().equals(actorUserId));
         boolean isBusinessOwner = false;
-        if (!isAuthor) {
-            if (place.getCreatedByUserId() != null && place.getCreatedByUserId().equals(actorUserId)) {
-                isPlaceManager = true;
-            } else if (place.getClaimedByBusinessId() != null && businessAccountRepository != null) {
-                isBusinessOwner = businessAccountRepository.findById(place.getClaimedByBusinessId())
-                        .filter(acc -> acc.isAdministeredBy(actorUserId) && BusinessRepresentationPolicy.isApproved(acc))
-                        .isPresent();
-            }
+        if (place.getClaimedByBusinessId() != null && businessAccountRepository != null) {
+            isBusinessOwner = businessAccountRepository.findById(place.getClaimedByBusinessId())
+                    .filter(acc -> acc.isAdministeredBy(actorUserId) && BusinessRepresentationPolicy.isApproved(acc))
+                    .isPresent();
         }
         boolean isModerator = false;
-        if (!isAuthor && !isPlaceManager && !isBusinessOwner) {
+        if (userRepository != null) {
             isModerator = userRepository.findById(actorUserId)
                     .map(u -> u.getRole() == Role.MODERATOR || u.getRole() == Role.ADMIN)
                     .orElse(false);
@@ -327,34 +323,33 @@ public class PlaceMediaService {
                     if (!isAuthor) throw new BusinessException("Acesso restrito ao autor da fotografia", HttpStatus.FORBIDDEN, "FORBIDDEN");
                     effectiveSource = RemovalSource.AUTHOR;
                 }
-                case PLACE_MANAGER -> {
-                    if (!isPlaceManager) throw new BusinessException("Acesso restrito ao criador do local", HttpStatus.FORBIDDEN, "FORBIDDEN");
-                    effectiveSource = RemovalSource.PLACE_MANAGER;
+                case MODERATOR -> {
+                    if (!isModerator) throw new BusinessException("Acesso restrito a moderadores", HttpStatus.FORBIDDEN, "FORBIDDEN");
+                    effectiveSource = RemovalSource.MODERATOR;
                 }
                 case BUSINESS_OWNER -> {
                     if (!isBusinessOwner) throw new BusinessException("Acesso restrito ao representante comercial aprovado", HttpStatus.FORBIDDEN, "FORBIDDEN");
                     effectiveSource = RemovalSource.BUSINESS_OWNER;
                 }
-                case MODERATOR -> {
-                    if (!isModerator) throw new BusinessException("Acesso restrito a moderadores", HttpStatus.FORBIDDEN, "FORBIDDEN");
-                    effectiveSource = RemovalSource.MODERATOR;
+                case PLACE_MANAGER -> {
+                    if (!isPlaceManager) throw new BusinessException("Acesso restrito ao criador do local", HttpStatus.FORBIDDEN, "FORBIDDEN");
+                    effectiveSource = RemovalSource.PLACE_MANAGER;
                 }
                 default -> throw new BusinessException("Origem de remoção inválida", HttpStatus.BAD_REQUEST, "INVALID_REMOVAL_SOURCE");
             }
         } else {
-            // Inferência estrita com base no papel operacional exercido (RS-1)
+            // Inferência estrita com base no papel operacional exercido (RS-1):
+            // 1. Autor removendo a própria mídia sempre prevalece como AUTHOR.
+            // 2. Se não for o autor e o usuário for MODERATOR, a remoção tem prerrogativa e status de MODERATOR.
+            // 3. Caso contrário, representante comercial tem precedência sobre criador do local.
             if (isAuthor) {
                 effectiveSource = RemovalSource.AUTHOR;
-            } else if (isPlaceManager && !isModerator) {
-                effectiveSource = RemovalSource.PLACE_MANAGER;
-            } else if (isBusinessOwner && !isModerator) {
-                effectiveSource = RemovalSource.BUSINESS_OWNER;
             } else if (isModerator) {
                 effectiveSource = RemovalSource.MODERATOR;
-            } else if (isPlaceManager) {
-                effectiveSource = RemovalSource.PLACE_MANAGER;
-            } else {
+            } else if (isBusinessOwner) {
                 effectiveSource = RemovalSource.BUSINESS_OWNER;
+            } else {
+                effectiveSource = RemovalSource.PLACE_MANAGER;
             }
         }
 

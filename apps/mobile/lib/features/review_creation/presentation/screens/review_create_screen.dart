@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
@@ -32,6 +33,9 @@ class ReviewCreateScreen extends StatefulWidget {
   final File? initialPhoto;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
+  final AuthNotifier? authNotifier;
+  final String? currentUserId;
+
   const ReviewCreateScreen({
     super.key,
     this.repository,
@@ -48,6 +52,8 @@ class ReviewCreateScreen extends StatefulWidget {
     this.initialCategory,
     this.initialPhoto,
     this.onPickManualPlacePhoto,
+    this.authNotifier,
+    this.currentUserId,
   });
 
   @override
@@ -368,6 +374,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                       _notifier.removeTarget(index);
                     },
                     onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
+                    authNotifier: widget.authNotifier,
+                    currentUserId: widget.currentUserId,
                   );
                 }),
 

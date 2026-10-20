@@ -155,4 +155,102 @@ class TestInfrastructureIsolationTest {
         assertNull(env.getProperty("TEST_REDIS_PORT"));
         assertNull(env.getProperty("TEST_STORAGE_ENDPOINT"));
     }
+
+    @Test
+    @DisplayName("A-1c: Rejeita JDBC sem host e sem porta explícita (jdbc:postgresql:rewit_test)")
+    void shouldRejectDatasourceWithoutHostAndPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.datasource.url", "jdbc:postgresql:rewit_test");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("SEGURANÇA DE INFRAESTRUTURA DE TESTE VIOLADA"));
+    }
+
+    @Test
+    @DisplayName("A-1c: Rejeita JDBC com barra tripla e sem porta (jdbc:postgresql:///rewit_test)")
+    void shouldRejectDatasourceTripleSlashWithoutPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.datasource.url", "jdbc:postgresql:///rewit_test");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("SEGURANÇA DE INFRAESTRUTURA DE TESTE VIOLADA"));
+    }
+
+    @Test
+    @DisplayName("A-1c: Rejeita JDBC alternativo em spring.datasource.jdbc-url sem porta explícita")
+    void shouldRejectAlternativeDatasourcePropertyWithoutPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.datasource.jdbc-url", "jdbc:postgresql://localhost/rewit_test");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("não possui porta explícita") || ex.getMessage().contains("5432"));
+    }
+
+    @Test
+    @DisplayName("A-1c: Rejeita Redis Cluster com nó apontando para porta compartilhada 6379")
+    void shouldRejectRedisClusterWithForbiddenPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.data.redis.cluster.nodes", "127.0.0.1:56379,127.0.0.1:6379");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("6379"));
+        assertTrue(ex.getMessage().contains("spring.data.redis.cluster.nodes"));
+    }
+
+    @Test
+    @DisplayName("A-1c: Rejeita Redis Cluster com nó sem porta explícita")
+    void shouldRejectRedisClusterWithMissingPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.data.redis.cluster.nodes", "127.0.0.1:56379,127.0.0.1");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("sem porta explícita"));
+    }
+
+    @Test
+    @DisplayName("A-1c: Rejeita Redis Sentinel com nó apontando para porta compartilhada 6379")
+    void shouldRejectRedisSentinelWithForbiddenPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.data.redis.sentinel.nodes", "127.0.0.1:6379");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("6379"));
+        assertTrue(ex.getMessage().contains("spring.data.redis.sentinel.nodes"));
+    }
+
+    @Test
+    @DisplayName("A-1c: Rejeita redis.host isolado sem redis.port explícita")
+    void shouldRejectRedisHostWithoutExplicitPort() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.data.redis.host", "127.0.0.1");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                TestInfrastructureSafetyValidator.validateEnvironment(env)
+        );
+        assertTrue(ex.getMessage().contains("spring.data.redis.host configurado sem spring.data.redis.port"));
+    }
+
+    @Test
+    @DisplayName("A-1c: Aceita Redis Cluster e Sentinel com nós em portas isoladas de teste")
+    void shouldAcceptIsolatedClusterAndSentinelNodes() {
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.datasource.url", "jdbc:postgresql://127.0.0.1:55432/rewit_test");
+        env.setProperty("spring.data.redis.cluster.nodes", "127.0.0.1:56379,127.0.0.1:56380");
+        env.setProperty("spring.data.redis.sentinel.nodes", "127.0.0.1:26380");
+        env.setProperty("rewit.minio.endpoint", "http://127.0.0.1:58333");
+
+        assertDoesNotThrow(() -> TestInfrastructureSafetyValidator.validateEnvironment(env));
+    }
 }

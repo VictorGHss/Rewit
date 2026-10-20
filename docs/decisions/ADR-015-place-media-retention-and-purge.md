@@ -92,41 +92,57 @@ No catálogo de estabelecimentos físicos (`places/`), fotografias removidas por
      - Mídias removidas sem comprovação de ato deliberado posterior à última restauração (incluindo mídias que possuam apenas `REJECT_REPORT` ou sem nenhum log de remoção no ciclo corrente) são classificadas estritamente como `LEGACY`.
    - Mídias com `removal_source = 'LEGACY'` não possuem histórico de consentimento auditável completo e **nunca** podem ser restauradas por moderação (retorno HTTP 409 com código `CANNOT_RESTORE_LEGACY_REMOVED_MEDIA`).
 
-7. **Liberação Transacional de Análise (RELEASE_REVIEW) e Resoluções Automáticas (V36):**
+7. **Liberação Transacional de Análise (RELEASE_REVIEW) e Resoluções Automáticas (AU-1, AU-2, RS-1):**
    - **Fluxo de Liberação (R-1):** Fotografias em estado `UNDER_REVIEW` cujas denúncias foram todas rejeitadas ou encerradas sem deferimento não utilizam o endpoint de restauração (`/restore`, exclusivo para `REMOVED`). Em vez disso, são liberadas através do endpoint administrativo dedicado `POST /admin/place-media/{placeId}/{mediaId}/release-review`. A liberação transaciona o status para `ACTIVE`, reavalia a elegibilidade de capa e registra o evento `RELEASE_REVIEW` na trilha de auditoria.
-   - **Status `AUTO_RESOLVED` para Denúncias (AU-1):** Denúncias encerradas automaticamente em virtude da exclusão da fotografia pelo autor, pelo proprietário comercial ou por encerramento em cascata recebem o status inequívoco `AUTO_RESOLVED`, com `decided_by_user_id = NULL`. Uma check constraint no banco de dados (`chk_place_media_reports_decided_by`) garante que denúncias automáticas nunca recebam ID de operador, e que decisões humanas (`ACCEPTED`/`REJECTED`) sempre tenham operador associado.
+   - **Classificação Estrita de Remoções (RS-1):** A origem da remoção é determinada pela autoridade e rota operacional exercida:
+     1. Autor removendo a própria fotografia: `RemovalSource.AUTHOR` (inviolável, não restaurável por moderação).
+     2. Moderação administrativa (via endpoint `/admin/place-media/{placeId}/{mediaId}/remove` ou usuário com role `MODERATOR`/`ADMIN` exercendo remoção em foto de terceiro): `RemovalSource.MODERATOR`. Usuários com papéis acumulados exercendo moderação não sofrem degradação para `PLACE_MANAGER` ou `BUSINESS_OWNER`.
+     3. Representante comercial aprovado: `RemovalSource.BUSINESS_OWNER`.
+     4. Criador/responsável direto do local: `RemovalSource.PLACE_MANAGER`.
+   - **Status `AUTO_RESOLVED` para Denúncias (AU-1, AU-2):** Denúncias encerradas automaticamente em virtude da exclusão da fotografia recebem o status inequívoco `AUTO_RESOLVED`, com `decided_by_user_id = NULL`. O filtro administrativo `/api/v1/admin/place-media/reports?status=AUTO_RESOLVED` é suportado de ponta a ponta para inspeção e auditoria.
 
-8. **Isolamento de Credenciais de Banco e Defesa Append-Only (AO-1):**
+8. **Isolamento de Credenciais de Banco, Runtime e Defesa Append-Only (AO-1, AO-2, SEC-1):**
    - A execução da aplicação em runtime e das suítes de teste de integração opera sob a role de aplicação restrita `rewit_app`, sem privilégios de superuser e sem ownership sobre as tabelas.
    - O schema e as migrações pertencem exclusivamente à role de migração `rewit_user` (utilizada pelo Flyway).
    - Como non-owner, o PostgreSQL rejeita nativamente comandos DDL (como `ALTER TABLE ... DISABLE TRIGGER` ou `DROP TABLE`) disparados pela aplicação.
-   - Adicionalmente, comandos `UPDATE`, `DELETE` e `TRUNCATE` sobre `place_media_moderation_audit_logs` são revogados da role `rewit_app`, assegurando defesa em profundidade (DCL + triggers de integridade).
+   - Comandos `UPDATE`, `DELETE` e `TRUNCATE` sobre as tabelas de auditoria (`place_media_moderation_audit_logs`, `moderation_audit_logs`, `discussion_moderation_audit_logs`, `business_response_moderation_audit_logs`) e sobre `flyway_schema_history` são categoricamente vedados para `rewit_app`.
+   - **Provisionamento e Rotação de Credenciais Externas (SEC-1):** O provisionamento operacional de `rewit_app` deve ser efetuado através de segredos externos fornecidos pelo ambiente de deploy (`APP_DB_PASSWORD`), sem senhas fixas em migrations. Ambientes com volumes persistentes existentes devem executar a rotação de senhas através de scripts operacionais dedicados (`ALTER ROLE rewit_app WITH PASSWORD '...'`).
+   - **Bloqueio de Migração V36:** A verificação independente demonstrou que bases V35 históricas com denúncias resolvidas sem operador humano associado violam a check constraint da V36 na aplicação da migration. Qualquer alteração de dados históricos ou criação de V37 deve aguardar a reconciliação e decisão explícita do mantenedor sobre a V36.
 
-9. **Ordem de Locks e Revalidação Pessimista:**
+9. **Configuração Fail-Closed de Testes e Isolamento de Infraestrutura (A-1b, A-1c):**
+   - Todos os testes de integração operam exclusivamente contra serviços descartáveis em portas dedicadas (PostgreSQL 55432, Redis 56379, MinIO/SeaweedFS 58333).
+   - O validador `TestInfrastructureSafetyValidator` analisa as URLs JDBC PostgreSQL e nós de Redis (standalone, cluster e sentinel), rejeitando URLs sem porta explícita, portas padrão (5432, 5433, 6379, 8333) e variáveis genéricas de ambiente de desenvolvimento.
 
-   - Antes de efetuar o expurgo físico, o ciclo de GC adquire os locks pessimistas na ordem global:
+10. **Persistência Segura de Operações Pendentes Mobile (MB-1c, MB-1d):**
+    - A recuperação de cadastros manuais com falha de foto é gerenciada pela `PendingPlaceRegistrationStore`, indexada estritamente pelo `userId` autenticado.
+    - O seletor textual `TargetSearchSelectorWidget` recebe a identidade através de `TargetItemInputWidget` e `ReviewCreateScreen`, impedindo que trocas de conta vazem estados ou fotos entre usuários distintos.
+    - Se o arquivo físico desaparecer do armazenamento local, a retomada alerta o usuário e permite capturar uma nova fotografia mantendo o local já criado (sem criar duplicatas nem erro 409).
 
-     1. Local (`places`);
+11. **Ordem de Locks e Revalidação Pessimista:**
 
-     2. Mídia (`place_media`).
+    - Antes de efetuar o expurgo físico, o ciclo de GC adquire os locks pessimistas na ordem global:
 
-   - Sob lock, o GC revalida que:
+      1. Local (`places`);
 
-     - O status permanece `REMOVED`;
+      2. Mídia (`place_media`).
 
-     - `removed_at` somado a 24 horas é anterior ao instante atual (`now()`);
+    - Sob lock, o GC revalida que:
 
-     - `purged_at` ainda é nulo;
+      - O status permanece `REMOVED`;
 
-     - Não há nenhuma transação de restauração ou concorrência pendente.
+      - `removed_at` somado a 24 horas é anterior ao instante atual (`now()`);
 
-10. **Exclusão Física Idempotente e Registro Atômico:**
+      - `purged_at` ainda é nulo;
 
-   - A exclusão física no Object Storage é realizada exclusivamente pela porta autorizada de storage. `NOT_FOUND` no storage é tratado como idempotência com sucesso.
+      - Não há nenhuma transação de restauração ou concorrência pendente.
 
-   - Imediatamente após a confirmação da ausência do objeto físico no storage, `purged_at` é gravado no banco de dados como `now()`.
+12. **Exclusão Física Idempotente e Registro Atômico:**
 
-   - A linha de metadados da mídia e o log de auditoria nunca são deletados, garantindo rastreabilidade legal e integridade relacional.
+    - A exclusão física no Object Storage é realizada exclusivamente pela porta autorizada de storage. `NOT_FOUND` no storage é tratado como idempotência com sucesso.
+
+    - Imediatamente após a confirmação da ausência do objeto físico no storage, `purged_at` é gravado no banco de dados como `now()`.
+
+    - A linha de metadados da mídia e o log de auditoria nunca são deletados, garantindo rastreabilidade legal e integridade relacional.
 
 
 
