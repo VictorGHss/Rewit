@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence;
 
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.config.TestInfrastructureConfig;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -169,9 +170,9 @@ class AuditTrailRuntimeRoleIntegrityTest {
     }
 
     @Test
-    @DisplayName("Exclusão física de comentário, resposta e avaliação pelo runtime não alcança nenhuma trilha (sem cascata)")
-    void deletingParentsAsRuntimeKeepsEveryAuditRow() throws SQLException {
-        try (Connection app = app()) {
+    @DisplayName("P3-1: runtime não apaga avaliação, comentário nem resposta; exclusão administrativa cascateia sem alcançar as trilhas")
+    void parentsAreNotDeletableByRuntimeAndAdministrativeDeletionKeepsAudits() throws SQLException {
+        try (Connection app = app(); Connection owner = owner()) {
             Scenario s = seedAsRuntime(app);
             String before = auditFingerprint(app, s);
 
@@ -180,18 +181,21 @@ class AuditTrailRuntimeRoleIntegrityTest {
             assertEquals(s.review(), queryUuid(app, "SELECT review_id FROM business_response_moderation_audit_logs WHERE id = ?", s.responseAudit()));
             assertEquals(s.business(), queryUuid(app, "SELECT business_account_id FROM business_response_moderation_audit_logs WHERE id = ?", s.responseAudit()));
 
-            // Comentário: cascateia a resposta do comentário, nunca as auditorias
-            assertEquals(1, update(app, "DELETE FROM review_discussions WHERE id = ?", s.discussion()));
+            // Exclusão lógica no produto: a role de runtime não tem DELETE nessas entidades
+            assertDenied(app, "DELETE FROM review_discussions WHERE id = ?", s.discussion());
+            assertDenied(app, "DELETE FROM business_responses WHERE id = ?", s.responseOnReview());
+            assertDenied(app, "DELETE FROM reviews WHERE id = ?", s.review());
+            assertEquals(1, count(app, "SELECT count(*) FROM reviews WHERE id = ?", s.review()));
+            assertEquals(1, count(app, "SELECT count(*) FROM review_discussions WHERE id = ?", s.discussion()));
+            assertEquals(2, count(app, "SELECT count(*) FROM business_responses WHERE review_id = ?", s.review()));
+
+            // Exclusão administrativa: comentário cascateia sua resposta, nunca as auditorias
+            assertEquals(1, update(owner, "DELETE FROM review_discussions WHERE id = ?", s.discussion()));
             assertEquals(0, count(app, "SELECT count(*) FROM business_responses WHERE id = ?", s.responseOnDiscussion()));
             assertEquals(before, auditFingerprint(app, s), "Excluir o comentário não pode alterar auditorias");
-
-            // Resposta comercial
-            assertEquals(1, update(app, "DELETE FROM business_responses WHERE id = ?", s.responseOnReview()));
+            assertEquals(1, update(owner, "DELETE FROM business_responses WHERE id = ?", s.responseOnReview()));
             assertEquals(before, auditFingerprint(app, s), "Excluir a resposta não pode alterar auditorias");
-
-            // Avaliação (com review_targets e demais filhos em cascata)
-            assertEquals(1, update(app, "DELETE FROM reviews WHERE id = ?", s.review()));
-            assertEquals(0, count(app, "SELECT count(*) FROM reviews WHERE id = ?", s.review()));
+            assertEquals(1, update(owner, "DELETE FROM reviews WHERE id = ?", s.review()));
             assertEquals(before, auditFingerprint(app, s), "Excluir a avaliação não pode alterar auditorias");
 
             // Identificadores históricos permanecem interpretáveis mesmo sem a entidade operacional
@@ -220,8 +224,9 @@ class AuditTrailRuntimeRoleIntegrityTest {
             update(app, "UPDATE place_media SET status = 'REMOVED', removal_source = 'MODERATOR', removed_at = NOW() WHERE id = ?", s.media());
             // Troca de titular dispara as invalidações em lote de V28/V29
             update(app, "UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", s.place());
-            // Moderador rebaixado: a autoria das decisões já registradas permanece
-            update(app, "UPDATE users SET role = 'USER' WHERE id = ?", s.moderator());
+            // Rebaixar o moderador é administrativo (o runtime é recusado); a autoria registrada permanece
+            assertDenied(app, "UPDATE users SET role = 'USER' WHERE id = ?", s.moderator());
+            PrivilegedTestDatabase.assignRole(s.moderator(), "USER");
             update(app, "UPDATE reviews SET status = 'ACTIVE' WHERE id = ?", s.review());
 
             // TRUNCATE em cascata das tabelas pai é negado ao runtime
@@ -264,6 +269,29 @@ class AuditTrailRuntimeRoleIntegrityTest {
                     offenders.add(rs.getString(1));
                 }
                 assertTrue(offenders.isEmpty(), "Funções que mutam auditoria: " + offenders);
+            }
+
+            // P2-1: todas as funções de trigger com search_path fixo e pg_temp por último
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("""
+                         SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                         WHERE n.nspname = 'public' AND p.prorettype = 'trigger'::regtype
+                           AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                                           WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+                           AND NOT (COALESCE(p.proconfig, ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog, public, pg_temp'])
+                         """)) {
+                List<String> unpinned = new ArrayList<>();
+                while (rs.next()) {
+                    unpinned.add(rs.getString(1));
+                }
+                assertTrue(unpinned.isEmpty(), "Funções de trigger sem search_path fixo: " + unpinned);
+            }
+            assertEquals(0, count(conn, "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                    + "WHERE n.nspname = 'public' AND p.prosecdef"), "Nenhuma função SECURITY DEFINER no schema");
+            // P2-2 / P3-1: sem DELETE direto para o runtime
+            for (String table : List.of("place_media_reports", "reviews", "review_discussions", "business_responses")) {
+                assertFalse(bool(conn, "SELECT has_table_privilege(?, ?, 'DELETE')", INFRASTRUCTURE.appDbUser(), table),
+                        INFRASTRUCTURE.appDbUser() + " não pode ter DELETE em " + table);
             }
 
             for (String table : AUDIT_TABLES) {
@@ -418,11 +446,172 @@ class AuditTrailRuntimeRoleIntegrityTest {
         }
     }
 
+    // ------------------------------------------------------------------------------------------ P2-1
+
+    /** Tabelas temporárias com os nomes das reais, populadas com dados forjados que tentariam validar a fraude. */
+    private static void shadowWithTemporaryTables(Connection app, Scenario s, UUID fakeReview, UUID fakeModerator) throws SQLException {
+        try (Statement st = app.createStatement()) {
+            st.execute("CREATE TEMP TABLE reviews (id UUID PRIMARY KEY)");
+            st.execute("CREATE TEMP TABLE review_discussions (id UUID PRIMARY KEY, review_id UUID)");
+            st.execute("CREATE TEMP TABLE business_responses (id UUID PRIMARY KEY, review_id UUID, business_account_id UUID)");
+            st.execute("CREATE TEMP TABLE users (id UUID PRIMARY KEY, role VARCHAR(32))");
+        }
+        update(app, "INSERT INTO pg_temp.reviews (id) VALUES (?)", fakeReview);
+        UUID forgedContext = UUID.randomUUID();
+        update(app, "INSERT INTO pg_temp.review_discussions (id, review_id) VALUES (?, ?)", s.discussion(), forgedContext);
+        update(app, "INSERT INTO pg_temp.business_responses (id, review_id, business_account_id) VALUES (?, ?, ?)",
+                s.responseOnReview(), forgedContext, forgedContext);
+        update(app, "INSERT INTO pg_temp.users (id, role) VALUES (?, 'MODERATOR')", fakeModerator);
+    }
+
+    private static void assertTemporaryTablesCannotForgeReferences(Connection app, Scenario s) throws SQLException {
+        UUID fakeReview = UUID.randomUUID();
+        UUID fakeModerator = UUID.randomUUID();
+        UUID regular = insertUser(app, "USER");
+        // Fixtures gravadas antes do sombreamento (depois dele, "users" sem schema resolve na temporária)
+        UUID report = insertPendingReport(app, s.media());
+        String before = auditFingerprint(app, s);
+        shadowWithTemporaryTables(app, s, fakeReview, fakeModerator);
+
+        // Referência inexistente presente só na tabela temporária: rejeitada
+        assertDenied(app, "INSERT INTO moderation_audit_logs (review_id, moderator_user_id, action, decision, reason_code, justification, "
+                + "previous_review_status, new_review_status) VALUES (?, ?, 'REMOVE_REVIEW', 'ACCEPTED', 'SPAM', 'x', 'ACTIVE', 'REMOVED')",
+                fakeReview, s.moderator());
+
+        // Snapshots derivados da tabela real, não da temporária forjada
+        UUID discussionAudit = queryUuid(app, "INSERT INTO discussion_moderation_audit_logs (discussion_id, moderator_user_id, action, "
+                + "decision, reason_code, justification, previous_status, new_status) VALUES (?, ?, 'RESTORE_DISCUSSION', 'ACCEPTED', "
+                + "'APPEAL', 'Restauração', 'REMOVED', 'ACTIVE') RETURNING id", s.discussion(), s.moderator());
+        assertEquals(s.review(), queryUuid(app, "SELECT review_id FROM public.discussion_moderation_audit_logs WHERE id = ?", discussionAudit));
+        UUID responseAudit = queryUuid(app, "INSERT INTO business_response_moderation_audit_logs (response_id, moderator_user_id, action, "
+                + "reason_code, justification, previous_status, new_status) VALUES (?, ?, 'RESTORE_RESPONSE', 'APPEAL', 'Restauração', "
+                + "'REMOVED', 'ACTIVE') RETURNING id", s.responseOnReview(), s.moderator());
+        assertEquals(s.review(), queryUuid(app, "SELECT review_id FROM public.business_response_moderation_audit_logs WHERE id = ?", responseAudit));
+        assertEquals(s.business(), queryUuid(app, "SELECT business_account_id FROM public.business_response_moderation_audit_logs WHERE id = ?",
+                responseAudit));
+
+        // Decisão por "moderador" que só existe na tabela temporária, ou por usuário comum que ela promoveria: rejeitada
+        update(app, "INSERT INTO pg_temp.users (id, role) VALUES (?, 'MODERATOR')", regular);
+        assertDenied(app, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ?, decided_at = NOW() WHERE id = ?",
+                fakeModerator, report);
+        assertDenied(app, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ?, decided_at = NOW() WHERE id = ?",
+                regular, report);
+        assertEquals("PENDING", string(app, "SELECT status FROM public.place_media_reports WHERE id = ?", report));
+
+        // Fluxo legítimo continua funcionando na mesma sessão
+        assertEquals(1, update(app, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ?, decided_at = NOW() WHERE id = ?",
+                s.moderator(), report));
+        assertEquals(before, auditFingerprint(app, s), "Linhas históricas intactas");
+    }
+
+    @Test
+    @DisplayName("P2-1: tabelas temporárias homônimas não forjam referências, snapshots nem moderadores (conexão nova)")
+    void temporaryTablesCannotShadowReferencesOnFreshConnection() throws SQLException {
+        Scenario s;
+        try (Connection seed = app()) {
+            s = seedAsRuntime(seed);
+        }
+        try (Connection fresh = app()) {
+            assertTemporaryTablesCannotForgeReferences(fresh, s);
+        }
+    }
+
+    @Test
+    @DisplayName("P2-1: tabelas temporárias homônimas não forjam referências em conexão já usada (pool, planos em cache)")
+    void temporaryTablesCannotShadowReferencesOnReusedConnection() throws SQLException {
+        try (Connection pooled = app()) {
+            // Uso prévio da conexão: os triggers já executaram e têm planos em cache nesta sessão
+            Scenario s = seedAsRuntime(pooled);
+            UUID warmup = insertPendingReport(pooled, s.media());
+            update(pooled, "UPDATE place_media_reports SET status = 'REJECTED', decided_by_user_id = ?, decided_at = NOW() WHERE id = ?",
+                    s.moderator(), warmup);
+            assertTemporaryTablesCannotForgeReferences(pooled, s);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------ P2-2
+
+    @Test
+    @DisplayName("P2-2: decisões finais são imutáveis e denúncias não são apagadas diretamente pelo runtime")
+    void finalDecisionsAreImmutableAndReportsAreNotDeletable() throws SQLException {
+        try (Connection app = app()) {
+            ReportFixture f = seedReportFixture(app);
+            UUID accepted = insertPendingReport(app, f.media());
+            assertEquals(1, update(app, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ?, decided_at = NOW(), "
+                    + "decision_notes = 'procedente' WHERE id = ?", f.moderator(), accepted));
+            String acceptedRow = string(app, "SELECT md5(t::text) FROM place_media_reports t WHERE id = ?", accepted);
+
+            assertDenied(app, "UPDATE place_media_reports SET status = 'PENDING', decided_by_user_id = NULL, decided_at = NULL WHERE id = ?", accepted);
+            assertDenied(app, "UPDATE place_media_reports SET status = 'REJECTED' WHERE id = ?", accepted);
+            assertDenied(app, "UPDATE place_media_reports SET decided_at = decided_at - INTERVAL '10 days' WHERE id = ?", accepted);
+            UUID otherModerator = insertUser(app, "MODERATOR");
+            assertDenied(app, "UPDATE place_media_reports SET decided_by_user_id = ? WHERE id = ?", otherModerator, accepted);
+            assertDenied(app, "UPDATE place_media_reports SET decision_notes = 'reescrita' WHERE id = ?", accepted);
+            assertDenied(app, "DELETE FROM place_media_reports WHERE id = ?", accepted);
+            assertEquals(acceptedRow, string(app, "SELECT md5(t::text) FROM place_media_reports t WHERE id = ?", accepted));
+
+            UUID autoResolved = insertPendingReport(app, f.media());
+            assertEquals(1, update(app, "UPDATE place_media_reports SET status = 'AUTO_RESOLVED', decided_at = NOW() WHERE id = ?", autoResolved));
+            assertDenied(app, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ? WHERE id = ?", f.moderator(), autoResolved);
+
+            // Atualização sem mudança dos campos de decisão (ex.: merge do JPA) continua aceita
+            assertEquals(1, update(app, "UPDATE place_media_reports SET status = status, updated_at = updated_at WHERE id = ?", accepted));
+        }
+    }
+
+    @Test
+    @DisplayName("P2-2: exclusão da mídia-pai cascateia as denúncias sem DELETE direto e preserva a auditoria")
+    void parentMediaDeletionCascadesReportsWithoutDirectDeletePrivilege() throws SQLException {
+        try (Connection app = app()) {
+            ReportFixture f = seedReportFixture(app);
+            UUID report = insertPendingReport(app, f.media());
+            update(app, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ?, decided_at = NOW() WHERE id = ?",
+                    f.moderator(), report);
+            UUID audit = UUID.randomUUID();
+            UUID place = queryUuid(app, "SELECT place_id FROM place_media WHERE id = ?", f.media());
+            update(app, "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, actor_type, action, report_id) "
+                    + "VALUES (?, ?, ?, ?, 'USER', 'ACCEPT_REPORT', ?)", audit, f.media(), place, f.moderator(), report);
+            String auditRow = rowHash(app, "place_media_moderation_audit_logs", audit);
+
+            assertDenied(app, "DELETE FROM place_media_reports WHERE place_media_id = ?", f.media());
+            assertEquals(1, update(app, "DELETE FROM place_media WHERE id = ?", f.media()));
+            assertEquals(0, count(app, "SELECT count(*) FROM place_media_reports WHERE place_media_id = ?", f.media()));
+            assertEquals(auditRow, rowHash(app, "place_media_moderation_audit_logs", audit));
+        }
+    }
+
+    @Test
+    @DisplayName("P2-2: runtime não promove usuários nem cria usuários com papel administrativo")
+    void runtimeCannotAssignRoles() throws SQLException {
+        try (Connection app = app()) {
+            UUID user = insertUser(app, "USER");
+            assertDenied(app, "UPDATE users SET role = 'MODERATOR' WHERE id = ?", user);
+            assertDenied(app, "UPDATE users SET role = 'ADMIN' WHERE id = ?", user);
+            UUID newcomer = UUID.randomUUID();
+            assertDenied(app, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'MODERATOR')",
+                    newcomer, "audit." + newcomer + "@rewit.test");
+            assertEquals("USER", string(app, "SELECT role FROM users WHERE id = ?", user));
+            assertEquals(0, count(app, "SELECT count(*) FROM users WHERE id = ?", newcomer));
+
+            // Atualizações legítimas do perfil da conta seguem permitidas
+            assertEquals(1, update(app, "UPDATE users SET role = role, updated_at = NOW() WHERE id = ?", user));
+            assertDenied(app, "ALTER TABLE users DISABLE TRIGGER trg_guard_user_role_assignment");
+
+            // A promoção administrativa, fora do runtime, continua possível
+            PrivilegedTestDatabase.assignRole(user, "MODERATOR");
+            assertEquals("MODERATOR", string(app, "SELECT role FROM users WHERE id = ?", user));
+        }
+    }
+
     // ------------------------------------------------------------------------------------------ utilitários
 
+    /** O runtime grava o usuário (sempre USER); papel diferente é atribuído administrativamente (P2-2). */
     private static UUID insertUser(Connection conn, String role) throws SQLException {
         UUID id = UUID.randomUUID();
-        update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', ?)", id, "audit." + id + "@rewit.test", role);
+        update(conn, "INSERT INTO users (id, email, auth_provider) VALUES (?, ?, 'LOCAL')", id, "audit." + id + "@rewit.test");
+        if (!"USER".equals(role)) {
+            PrivilegedTestDatabase.assignRole(id, role);
+        }
         return id;
     }
 

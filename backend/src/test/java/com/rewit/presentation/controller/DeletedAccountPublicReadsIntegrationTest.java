@@ -12,6 +12,7 @@ import com.rewit.presentation.dto.auth.RegisterRequest;
 import com.rewit.presentation.dto.discussion.CreateDiscussionRequest;
 import com.rewit.presentation.dto.review.ReviewPresentationDtos.CreateReviewRequest;
 import com.rewit.presentation.dto.review.ReviewPresentationDtos.CreateReviewTargetRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -330,7 +331,7 @@ class DeletedAccountPublicReadsIntegrationTest {
 
     private TestUser admin() throws Exception {
         TestUser user = register("privacidade_admin");
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
         MvcResult result = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new LoginRequest(user.email(), user.password()))))
                 .andExpect(status().isOk())

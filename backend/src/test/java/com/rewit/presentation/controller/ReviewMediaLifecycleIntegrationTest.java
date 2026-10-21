@@ -10,6 +10,7 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Review;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -445,7 +446,7 @@ class ReviewMediaLifecycleIntegrationTest {
 
     private TestUser admin() throws Exception {
         TestUser user = register("midia_admin");
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
         MvcResult result = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new LoginRequest(user.email(), user.password()))))
                 .andExpect(status().isOk())

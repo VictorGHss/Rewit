@@ -32,6 +32,7 @@ import com.rewit.infrastructure.persistence.entity.ReviewJpaEntity;
 import com.rewit.infrastructure.persistence.repository.ModerationAuditLogJpaRepository;
 import com.rewit.infrastructure.persistence.repository.ReportJpaRepository;
 import com.rewit.infrastructure.persistence.repository.ReviewJpaRepository;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -91,11 +92,13 @@ class ModerateReviewIntegrationTest {
 
     private User createActiveUser(Role role) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
-        User user = new User(null, "user-" + suffix + "@rewit.com", "hash123", AuthProvider.LOCAL, null);
-        if (role != null) {
+        User user = userRepository.save(new User(null, "user-" + suffix + "@rewit.com", "hash123", AuthProvider.LOCAL, null));
+        // Papel é atribuição administrativa (a role de runtime não pode alterá-lo)
+        if (role != null && role != Role.USER) {
+            PrivilegedTestDatabase.assignRole(user.getId(), role.name());
             user.changeRole(role);
         }
-        return userRepository.save(user);
+        return user;
     }
 
     private RateableTarget createRateableTarget(TargetType type) {

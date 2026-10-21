@@ -12,6 +12,9 @@
 -- 6. is_legacy_decision é condição histórica fixada pela migração, inacessível ao
 --    runtime; decisões novas exigem moderador válido (LEG-1)
 -- 7. Privilégio mínimo da role rewit_app sem credencial versionada (SEC-1, AO-1)
+-- 8. S3-A.12: referências qualificadas e search_path fixo nas funções de trigger (P2-1), decisões
+--    finais imutáveis e sem DELETE direto (P2-2), atribuição de papel restrita a operações
+--    administrativas (P2-2) e entidades operacionais sem DELETE para o runtime (P3-1)
 -- Tabelas afetadas: place_media_moderation_audit_logs, place_media_reports, place_media,
 --                   moderation_audit_logs, discussion_moderation_audit_logs,
 --                   business_response_moderation_audit_logs, flyway_schema_history
@@ -225,14 +228,14 @@ ALTER TABLE moderation_audit_logs DROP CONSTRAINT IF EXISTS moderation_audit_log
 CREATE OR REPLACE FUNCTION fn_bind_moderation_audit_reference()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM 1 FROM reviews WHERE id = NEW.review_id FOR KEY SHARE;
+    PERFORM 1 FROM public.reviews WHERE id = NEW.review_id FOR KEY SHARE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'moderation_audit_logs: avaliação % inexistente', NEW.review_id
             USING ERRCODE = 'foreign_key_violation';
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_bind_moderation_audit_reference ON moderation_audit_logs;
 CREATE TRIGGER trg_bind_moderation_audit_reference
@@ -246,7 +249,7 @@ BEGIN
     RAISE EXCEPTION 'moderation_audit_logs é append-only: UPDATE e DELETE não são permitidos'
         USING ERRCODE = 'integrity_constraint_violation';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_prevent_moderation_audit_update ON moderation_audit_logs;
 CREATE TRIGGER trg_prevent_moderation_audit_update
@@ -266,7 +269,7 @@ BEGIN
     RAISE EXCEPTION 'moderation_audit_logs é append-only: TRUNCATE não é permitido'
         USING ERRCODE = 'integrity_constraint_violation';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_prevent_moderation_audit_truncate ON moderation_audit_logs;
 CREATE TRIGGER trg_prevent_moderation_audit_truncate
@@ -285,7 +288,7 @@ RETURNS TRIGGER AS $$
 DECLARE
     v_review_id UUID;
 BEGIN
-    SELECT review_id INTO v_review_id FROM review_discussions WHERE id = NEW.discussion_id FOR KEY SHARE;
+    SELECT review_id INTO v_review_id FROM public.review_discussions WHERE id = NEW.discussion_id FOR KEY SHARE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'discussion_moderation_audit_logs: comentário % inexistente', NEW.discussion_id
             USING ERRCODE = 'foreign_key_violation';
@@ -294,7 +297,7 @@ BEGIN
     NEW.review_id := v_review_id;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_bind_discussion_moderation_audit_reference ON discussion_moderation_audit_logs;
 CREATE TRIGGER trg_bind_discussion_moderation_audit_reference
@@ -308,7 +311,7 @@ BEGIN
     RAISE EXCEPTION 'discussion_moderation_audit_logs é append-only: UPDATE e DELETE não são permitidos'
         USING ERRCODE = 'integrity_constraint_violation';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_prevent_discussion_moderation_audit_delete ON discussion_moderation_audit_logs;
 CREATE TRIGGER trg_prevent_discussion_moderation_audit_delete
@@ -322,7 +325,7 @@ BEGIN
     RAISE EXCEPTION 'discussion_moderation_audit_logs é append-only: TRUNCATE não é permitido'
         USING ERRCODE = 'integrity_constraint_violation';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_prevent_discussion_moderation_audit_truncate ON discussion_moderation_audit_logs;
 CREATE TRIGGER trg_prevent_discussion_moderation_audit_truncate
@@ -346,7 +349,7 @@ DECLARE
     v_business_account_id UUID;
 BEGIN
     SELECT review_id, business_account_id INTO v_review_id, v_business_account_id
-    FROM business_responses WHERE id = NEW.response_id FOR KEY SHARE;
+    FROM public.business_responses WHERE id = NEW.response_id FOR KEY SHARE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'business_response_moderation_audit_logs: resposta % inexistente', NEW.response_id
             USING ERRCODE = 'foreign_key_violation';
@@ -355,7 +358,7 @@ BEGIN
     NEW.business_account_id := v_business_account_id;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_bind_business_response_audit_reference ON business_response_moderation_audit_logs;
 CREATE TRIGGER trg_bind_business_response_audit_reference
@@ -369,7 +372,7 @@ BEGIN
     RAISE EXCEPTION 'business_response_moderation_audit_logs é append-only: UPDATE e DELETE não são permitidos'
         USING ERRCODE = 'integrity_constraint_violation';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_prevent_business_response_audit_delete ON business_response_moderation_audit_logs;
 CREATE TRIGGER trg_prevent_business_response_audit_delete
@@ -383,7 +386,7 @@ BEGIN
     RAISE EXCEPTION 'business_response_moderation_audit_logs é append-only: TRUNCATE não é permitido'
         USING ERRCODE = 'integrity_constraint_violation';
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_prevent_business_response_audit_truncate ON business_response_moderation_audit_logs;
 CREATE TRIGGER trg_prevent_business_response_audit_truncate
@@ -423,6 +426,16 @@ BEGIN
             RAISE EXCEPTION 'place_media_reports: decisões legadas são imutáveis'
                 USING ERRCODE = 'insufficient_privilege';
         END IF;
+        -- Decisão final (aceite, rejeição ou resolução automática) não é reaberta nem reescrita: o produto
+        -- não tem reabertura de denúncia; um novo ciclo de moderação é uma nova denúncia.
+        IF OLD.status IN ('ACCEPTED', 'REJECTED', 'AUTO_RESOLVED')
+           AND (NEW.status IS DISTINCT FROM OLD.status
+                OR NEW.decided_by_user_id IS DISTINCT FROM OLD.decided_by_user_id
+                OR NEW.decided_at IS DISTINCT FROM OLD.decided_at
+                OR NEW.decision_notes IS DISTINCT FROM OLD.decision_notes) THEN
+            RAISE EXCEPTION 'place_media_reports: a decisão % é final e não pode ser alterada', OLD.status
+                USING ERRCODE = 'insufficient_privilege';
+        END IF;
     END IF;
 
     -- Decisão humana nova (ou troca de decisor) exige moderador/administrador existente
@@ -431,7 +444,7 @@ BEGIN
        AND (TG_OP = 'INSERT'
             OR NEW.status IS DISTINCT FROM OLD.status
             OR NEW.decided_by_user_id IS DISTINCT FROM OLD.decided_by_user_id) THEN
-        PERFORM 1 FROM users u
+        PERFORM 1 FROM public.users u
         WHERE u.id = NEW.decided_by_user_id AND u.role IN ('MODERATOR', 'ADMIN');
         IF NOT FOUND THEN
             RAISE EXCEPTION 'place_media_reports: decisão % exige moderador válido', NEW.status
@@ -440,13 +453,66 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_guard_place_media_report_decision ON place_media_reports;
 CREATE TRIGGER trg_guard_place_media_report_decision
     BEFORE INSERT OR UPDATE ON place_media_reports
     FOR EACH ROW
     EXECUTE FUNCTION fn_guard_place_media_report_decision();
+
+-- 6b. ATRIBUIÇÃO DE PAPEL SOMENTE POR OPERAÇÃO ADMINISTRATIVA (P2-2)
+-- Nenhum fluxo da aplicação altera users.role; papéis são atribuídos fora do runtime. Sem esta guarda,
+-- a role de runtime poderia promover um usuário a MODERATOR e satisfazer a checagem de moderador das
+-- decisões. Só o owner da tabela (ou superuser) atribui papel diferente de USER ou altera um papel.
+CREATE OR REPLACE FUNCTION fn_guard_user_role_assignment()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_privileged BOOLEAN;
+BEGIN
+    IF (TG_OP = 'INSERT' AND NEW.role IS DISTINCT FROM 'USER')
+       OR (TG_OP = 'UPDATE' AND NEW.role IS DISTINCT FROM OLD.role) THEN
+        SELECT r.rolsuper OR pg_catalog.pg_has_role(current_user, c.relowner, 'MEMBER')
+        INTO v_privileged
+        FROM pg_catalog.pg_class c, pg_catalog.pg_roles r
+        WHERE c.oid = TG_RELID AND r.rolname = current_user;
+        IF NOT COALESCE(v_privileged, FALSE) THEN
+            RAISE EXCEPTION 'users.role: atribuição de papel é exclusiva de operação administrativa'
+                USING ERRCODE = 'insufficient_privilege';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp;
+
+DROP TRIGGER IF EXISTS trg_guard_user_role_assignment ON users;
+CREATE TRIGGER trg_guard_user_role_assignment
+    BEFORE INSERT OR UPDATE ON users
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_guard_user_role_assignment();
+
+-- 6c. search_path FIXO EM TODAS AS FUNÇÕES DE TRIGGER DO SCHEMA (P2-1, defesa adicional)
+-- Tabelas temporárias são resolvidas antes das permanentes quando pg_temp não aparece no search_path;
+-- fixar "pg_catalog, public, pg_temp" impede que uma tabela temporária de mesmo nome substitua a real em
+-- funções de migrations anteriores, cujas referências não são qualificadas.
+DO $$
+DECLARE
+    f RECORD;
+BEGIN
+    FOR f IN
+        SELECT p.oid::regprocedure AS signature
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+          AND p.prorettype = 'trigger'::regtype
+          AND p.proowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+          -- Funções de extensões (ex.: PostGIS) pertencem à extensão e não são alteradas
+          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+    LOOP
+        EXECUTE format('ALTER FUNCTION %s SET search_path = pg_catalog, public, pg_temp', f.signature);
+    END LOOP;
+END
+$$;
 
 -- 7. PRIVILÉGIO MÍNIMO DA ROLE DE APLICAÇÃO (SEC-1, AO-1, AO-2, LEG-1)
 -- Login e senha da role são provisionados fora das migrations versionadas
@@ -486,6 +552,13 @@ GRANT INSERT (id, place_media_id, reporter_user_id, reason, detail, status, crea
     ON place_media_reports TO rewit_app;
 GRANT UPDATE (reason, detail, status, updated_at, decided_by_user_id, decided_at, decision_notes)
     ON place_media_reports TO rewit_app;
+
+-- Denúncias e entidades operacionais com exclusão lógica: o runtime não apaga diretamente (P2-2, P3-1).
+-- Cascatas de FK (ex.: place_media -> place_media_reports) executam com o owner da tabela e continuam válidas.
+REVOKE DELETE ON place_media_reports FROM rewit_app;
+REVOKE DELETE ON reviews FROM rewit_app;
+REVOKE DELETE ON review_discussions FROM rewit_app;
+REVOKE DELETE ON business_responses FROM rewit_app;
 
 -- Tabela de controle de migrations do Flyway: rewit_app NÃO pode modificar nem apagar
 DO $$
@@ -545,6 +618,24 @@ BEGIN
             RAISE EXCEPTION 'V36: guards append-only incompletos em %', t;
         END IF;
     END LOOP;
+
+    FOREACH t IN ARRAY ARRAY['place_media_reports', 'reviews', 'review_discussions', 'business_responses'] LOOP
+        IF has_table_privilege('rewit_app', t, 'DELETE') THEN
+            RAISE EXCEPTION 'V36: rewit_app mantém DELETE em %', t;
+        END IF;
+    END LOOP;
+
+    SELECT string_agg(p.proname, ', ')
+    INTO offending
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.prorettype = 'trigger'::regtype
+      AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+      AND NOT (COALESCE(p.proconfig, ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog, public, pg_temp']);
+    IF offending IS NOT NULL THEN
+        RAISE EXCEPTION 'V36: funções de trigger sem search_path fixo: %', offending;
+    END IF;
 
     IF has_column_privilege('rewit_app', 'place_media_reports', 'is_legacy_decision', 'UPDATE')
        OR has_column_privilege('rewit_app', 'place_media_reports', 'is_legacy_decision', 'INSERT') THEN

@@ -18,6 +18,7 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.PlaceMediaReport;
 import com.rewit.domain.model.User;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -98,11 +99,16 @@ class PlaceMediaConcurrencyTest {
     }
 
     private User createTestUser(String email, Role role) {
-        User user = User.rehydrate(
+        User user = userRepository.save(User.rehydrate(
                 UUID.randomUUID(), email, "hash123", AuthProvider.LOCAL, null,
-                com.rewit.domain.enums.AccountStatus.ACTIVE, true, role, null, Instant.now(), Instant.now()
-        );
-        return userRepository.save(user);
+                com.rewit.domain.enums.AccountStatus.ACTIVE, true, Role.USER, null, Instant.now(), Instant.now()
+        ));
+        // Papel é atribuição administrativa (a role de runtime não pode alterá-lo)
+        if (role != Role.USER) {
+            PrivilegedTestDatabase.assignRole(user.getId(), role.name());
+            user.changeRole(role);
+        }
+        return user;
     }
 
     private Place createTestPlace() {

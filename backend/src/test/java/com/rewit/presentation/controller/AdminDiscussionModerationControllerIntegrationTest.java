@@ -11,6 +11,7 @@ import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewDiscussion;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -132,7 +133,7 @@ class AdminDiscussionModerationControllerIntegrationTest {
         perform(get("/api/v1/admin/discussions/{id}", comment.getId()), moderator).andExpect(status().isOk());
 
         // Rebaixado no banco; o token continua dizendo MODERATOR
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
 
         // O @PreAuthorize aceita a autoridade do token; a recusa vem do caso de uso (ProblemDetail com code). Sem a
         // role no token, o @PreAuthorize responderia 403 sem corpo
@@ -155,7 +156,7 @@ class AdminDiscussionModerationControllerIntegrationTest {
         assertUntouched(comment.getId());
 
         // Cargo restabelecido no banco: o mesmo token antigo volta a moderar (a recusa era só a revalidação)
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.userId());
         moderate(comment.getId(), moderator, REMOVE_BODY)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.newStatus").value("REMOVED"))
@@ -180,7 +181,7 @@ class AdminDiscussionModerationControllerIntegrationTest {
         }
 
         // B. Rebaixado no banco, mesmo token: o @PreAuthorize aceita a role do token e o caso de uso recusa
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
         assertNoDiscussionData(queue(comment.getId(), moderator)
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("FORBIDDEN")), comment);
         assertNoDiscussionData(context(comment.getId(), moderator)
@@ -274,7 +275,7 @@ class AdminDiscussionModerationControllerIntegrationTest {
 
     /** Promove via JDBC e faz login de novo para obter um token com a role atualizada. */
     private Account promote(Account account, String role) throws Exception {
-        jdbcTemplate.update("UPDATE users SET role = ? WHERE id = ?", role, account.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = ? WHERE id = ?", role, account.userId());
         String body = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new LoginRequest(account.email(), PASSWORD))))
                 .andExpect(status().isOk())

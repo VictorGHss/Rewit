@@ -16,6 +16,7 @@ import com.rewit.domain.model.Product;
 import com.rewit.presentation.dto.admin.AdminModerationDtos.ModerateReviewRequest;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -241,7 +242,7 @@ class AdminReviewContextIntegrationTest {
                 .andExpect(jsonPath("$.review.experienceText").value("Texto da avaliação denunciada"));
 
         // Rebaixado no banco, mesmo token: o @PreAuthorize aceita a role do token e o caso de uso recusa
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
         assertNoContextData(mockMvc.perform(get("/api/v1/admin/reviews/{id}/context", reviewId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + moderator.accessToken()))
                 .andExpect(status().isForbidden())
@@ -334,7 +335,7 @@ class AdminReviewContextIntegrationTest {
     }
 
     private TestUser withRole(TestUser user, String role) throws Exception {
-        jdbcTemplate.update("UPDATE users SET role = ? WHERE id = ?", role, user.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = ? WHERE id = ?", role, user.userId());
         MvcResult res = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new LoginRequest(user.email(), user.password()))))
                 .andExpect(status().isOk())

@@ -29,6 +29,7 @@ import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.domain.model.BusinessResponseModerationAuditLog;
 import com.rewit.domain.model.ReviewDiscussion;
+import com.rewit.config.PrivilegedTestDatabase;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.DisplayName;
@@ -337,13 +338,13 @@ class BusinessResponsePersistenceIntegrationTest {
         // Administrador: a cascata users -> business_accounts esbarra no RESTRICT da resposta
         assertRejected("on table \"business_responses\"", "DELETE FROM users WHERE id = ?", f.businessAdmin());
 
-        jdbcTemplate.update("DELETE FROM review_discussions WHERE id = ?", f.rootDiscussion());
-        assertEquals(0, count("SELECT count(*) FROM business_responses WHERE id = ?", onDiscussion.getId()));
-        assertEquals(1, count("SELECT count(*) FROM business_responses WHERE id = ?", onReview.getId()));
-
-        jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", f.review());
-        assertEquals(0, count("SELECT count(*) FROM business_responses WHERE review_id = ?", f.review()));
-        // AO-2: a trilha de auditoria não acompanha a resposta excluída; mantém o identificador e o contexto
+        // P3-1: avaliações, comentários e respostas têm exclusão lógica; a role de runtime não os apaga.
+        // A cascata das exclusões administrativas e a retenção da auditoria são provadas em
+        // AuditTrailRuntimeRoleIntegrityTest (conexão administrativa sobre dados confirmados).
+        assertRejected("permission denied", "DELETE FROM review_discussions WHERE id = ?", f.rootDiscussion());
+        assertRejected("permission denied", "DELETE FROM business_responses WHERE id = ?", onDiscussion.getId());
+        assertRejected("permission denied", "DELETE FROM reviews WHERE id = ?", f.review());
+        assertEquals(1, count("SELECT count(*) FROM business_responses WHERE id = ?", onDiscussion.getId()));
         assertEquals(1, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ? AND review_id = ?",
                 onReview.getId(), f.review()));
     }
@@ -1287,10 +1288,9 @@ class BusinessResponsePersistenceIntegrationTest {
         return removed(filter).stream().map(view -> view.id()).toList();
     }
 
+    /** Moderador criado e confirmado administrativamente: também visível dentro de testes transacionais. */
     private UUID insertModerator() {
-        UUID moderator = insertUser();
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator);
-        return moderator;
+        return PrivilegedTestDatabase.createUser("c11.mod", "MODERATOR");
     }
 
     private static ModerateBusinessResponseCommand moderation(UUID responseId, UUID moderator,
@@ -1473,7 +1473,7 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     private void cleanup(Fixture f) {
-        jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", f.review());
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM reviews WHERE id = ?", f.review());
         jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place());
         jdbcTemplate.update("DELETE FROM places WHERE id = ?", f.place());
         jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", f.place());

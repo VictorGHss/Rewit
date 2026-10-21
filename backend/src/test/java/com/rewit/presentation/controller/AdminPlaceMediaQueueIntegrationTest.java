@@ -13,6 +13,7 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.PlaceMediaReport;
 import com.rewit.domain.model.User;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.time.Instant;
@@ -84,8 +84,8 @@ class AdminPlaceMediaQueueIntegrationTest {
 
         if (role != Role.USER) {
             User user = userRepository.findByEmail(email).orElseThrow();
-            user.changeRole(role);
-            userRepository.save(user);
+            // Papel é atribuição administrativa (a role de runtime não pode alterá-lo)
+            PrivilegedTestDatabase.assignRole(user.getId(), role.name());
         }
 
         MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
@@ -103,7 +103,7 @@ class AdminPlaceMediaQueueIntegrationTest {
 
     @Test
     @DisplayName("Moderador lista fila /under-review e /queue com fotos em revisão e denúncias agregadas")
-    @Transactional
+    // Sem transação de teste: o papel de moderador é atribuído administrativamente a um usuário já confirmado
     void shouldListUnderReviewQueueWithAggregatedReports() throws Exception {
         String modEmail = "mod.queue." + UUID.randomUUID() + "@rewit.com";
         String token = loginUser(modEmail, "Password123!", Role.MODERATOR);

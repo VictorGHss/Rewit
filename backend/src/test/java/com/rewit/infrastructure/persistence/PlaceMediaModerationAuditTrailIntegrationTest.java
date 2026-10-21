@@ -3,7 +3,6 @@ package com.rewit.infrastructure.persistence;
 import com.rewit.application.port.PlaceMediaModerationAuditLogRepository;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.UserRepository;
-import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.PlaceMediaModerationAction;
 import com.rewit.domain.enums.RemovalSource;
 import com.rewit.domain.enums.ReviewMediaType;
@@ -13,6 +12,7 @@ import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.PlaceMediaModerationAuditLog;
 import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.adapter.PlaceMediaRepositoryAdapter;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,10 +51,8 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
     private jakarta.persistence.EntityManager entityManager;
 
     private User createModerator() {
-        String email = "mod." + UUID.randomUUID() + "@rewit.com";
-        User mod = new User(null, email, "hash_mod", AuthProvider.LOCAL, null);
-        mod.changeRole(Role.MODERATOR);
-        return userRepository.save(mod);
+        // Papel é atribuição administrativa: moderador criado e confirmado fora do runtime (visível nos testes transacionais)
+        return userRepository.findById(PrivilegedTestDatabase.createUser("mod", Role.MODERATOR.name())).orElseThrow();
     }
 
     private Place createPlace() {

@@ -16,6 +16,7 @@ import com.rewit.domain.enums.PlaceClaimDecision;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Product;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -758,7 +759,7 @@ class PlaceProductOffersIntegrationTest {
 
     private void claimViaOfficialFlow(TestUser owner, UUID accountId, UUID placeId) throws Exception {
         UUID moderator = registerUser("t2_moderator").id();
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator);
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator);
         PlaceClaimView claim = requestPlaceClaim.execute(owner.id(), accountId, placeId, EVIDENCE);
         decidePlaceClaim.execute(moderator, claim.id(), PlaceClaimDecision.APPROVE, REASON, Instant.now());
     }

@@ -13,6 +13,7 @@ import com.rewit.application.usecase.PurgeEligibleAccountsUseCase.AccountPurgeRu
 import com.rewit.infrastructure.account.HmacEmailReservation;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -326,7 +327,7 @@ class AccountPurgeJobIntegrationTest {
 
     private TestUser admin() throws Exception {
         TestUser user = register("job_admin");
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.assignRole(user.id(), "ADMIN");
         MvcResult result = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new LoginRequest(user.email(), user.password()))))
                 .andExpect(status().isOk())
