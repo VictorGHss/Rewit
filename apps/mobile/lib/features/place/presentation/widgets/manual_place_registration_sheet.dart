@@ -386,6 +386,10 @@ class _ManualPlaceRegistrationSheetState
       _uploadIdempotencyKey ??= generateUuidV4();
       final operationKey = _uploadIdempotencyKey!;
       final photo = _selectedPhoto!;
+      // O local já existe no servidor: a retomada é gravada ANTES do upload, para sobreviver também ao
+      // encerramento do processo enquanto o envio está em andamento (S3-A.13). Só sai do store quando o
+      // envio conclui.
+      await _persistPendingOperation(place, operationKey, photo);
       final filename = photo.path.split(RegExp(r'[/\\]')).last;
       final String uploadedPhotoUrl;
       try {
@@ -396,8 +400,8 @@ class _ManualPlaceRegistrationSheetState
           idempotencyKey: operationKey,
         );
       } catch (_) {
-        // O local já existe: grava a retomada antes de qualquer verificação de montagem. Um 401 aqui expira a
-        // sessão e desmonta a Home; a pendência continua sob a conta que iniciou a operação.
+        // Segunda tentativa idempotente, caso a gravação anterior tenha falhado. Um 401 aqui expira a sessão e
+        // desmonta a Home; a pendência continua sob a conta que iniciou a operação.
         unawaited(_persistPendingOperation(place, operationKey, photo));
         rethrow;
       }

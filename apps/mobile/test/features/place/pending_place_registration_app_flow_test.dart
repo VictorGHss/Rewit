@@ -69,6 +69,9 @@ class _RecordingPlaceRepository implements PlaceRepository {
   final List<Map<String, String?>> uploads = [];
   bool failUploads = true;
 
+  /// Quando definido, o upload fica sem resposta até ser completado (processo encerrado durante o envio).
+  Completer<void>? uploadHang;
+
   @override
   Future<PlaceDetail> createPlace(CreatePlaceInput input) async {
     created.add(input);
@@ -93,6 +96,8 @@ class _RecordingPlaceRepository implements PlaceRepository {
     String? idempotencyKey,
   }) async {
     uploads.add({'placeId': placeId, 'idempotencyKey': idempotencyKey});
+    final hang = uploadHang;
+    if (hang != null) await hang.future;
     if (failUploads) {
       throw const ApiException(ProblemDetail(
           type: 'about:blank', title: 'Falha', status: 500, code: 'STORAGE_ERR', detail: 'Falha no upload'));
@@ -540,6 +545,106 @@ void main() {
     expect(pending!.place.name, 'Quiosque da Ana');
     expect(pending.uploadIdempotencyKey, places.uploads.single['idempotencyKey']);
     expect(await app.store.loadLatest(_userB.id), isNull);
+  });
+
+  testWidgets(
+      'S3-A.13: processo encerrado com o upload em andamento — a pendência já gravada sobrevive ao reinício e é '
+      'retomada sem novo createPlace, com a mesma chave, sem apagar outra pendência da conta',
+      (tester) async {
+    var app = await startApp(tester);
+    await login(tester, app, _userA);
+    await openReviewTab(tester);
+
+    // Pendência independente da mesma conta (upload falhou)
+    await registerPlaceWithFailingUpload(tester, 'Bistrô da Ana', 'Rua J, 10');
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Trocar'));
+    await tester.pumpAndSettle();
+    final independent = (await app.store.loadLatest(_userA.id))!;
+
+    // Novo cadastro: o servidor confirma o local e o upload fica sem resposta
+    places.uploadHang = Completer<void>();
+    await tester.enterText(searchField(), 'Café do Porto');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('register_manual_place_button')));
+    await tester.tap(find.byKey(const Key('register_manual_place_button')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua K, 11');
+    await tester.tap(find.text('Câmera'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(places.created, hasLength(2));
+    expect(places.uploads, hasLength(2), reason: 'O upload do segundo local começou e não respondeu');
+    final hangingKey = places.uploads.last['idempotencyKey'];
+    final hangingPlace = places.uploads.last['placeId'];
+
+    // "Processo encerrado": a árvore inteira é substituída sem que o upload termine
+    app = await startApp(tester);
+    await login(tester, app, _userA);
+    await openReviewTab(tester);
+
+    final all = await app.store.loadAll(_userA.id);
+    expect(all.map((p) => p.place.id).toSet(), {hangingPlace, independent.place.id});
+    final recovered = all.first;
+    expect(recovered.place.id, hangingPlace);
+    expect(recovered.uploadIdempotencyKey, hangingKey);
+    expect(recovered.photoUnavailable, isFalse);
+    expect(pendingBanner(), findsOneWidget);
+    expect(find.textContaining('Café do Porto'), findsWidgets);
+
+    // Retomada: nenhum createPlace, mesma chave; o sucesso limpa só esta operação
+    places.uploadHang = null;
+    places.failUploads = false;
+    await tester.tap(find.byKey(const Key('target_resume_pending_registration_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(places.created, hasLength(2), reason: 'A retomada não cria outro local');
+    expect(places.uploads.where((u) => u['placeId'] == hangingPlace).map((u) => u['idempotencyKey']).toSet(), {hangingKey});
+    final remaining = await app.store.loadAll(_userA.id);
+    expect(remaining.map((p) => p.place.id), [independent.place.id], reason: 'A outra pendência da conta continua');
+    expect(remaining.single.uploadIdempotencyKey, independent.uploadIdempotencyKey);
+
+    // Outra conta nunca vê as operações de A
+    await logoutThroughUi(tester);
+    await login(tester, app, _userB);
+    await openReviewTab(tester);
+    expect(pendingBanner(), findsNothing);
+    expect(await app.store.loadAll(_userB.id), isEmpty);
+  });
+
+  testWidgets('S3-A.13: upload concluído limpa a pendência gravada antes do envio', (tester) async {
+    final app = await startApp(tester);
+    await login(tester, app, _userA);
+    await openReviewTab(tester);
+    places.failUploads = false;
+    places.uploadHang = Completer<void>();
+    await tester.enterText(searchField(), 'Livraria Sol');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('register_manual_place_button')));
+    await tester.tap(find.byKey(const Key('register_manual_place_button')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua L, 12');
+    await tester.tap(find.text('Câmera'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    // Durante o envio a operação já está gravada para a conta de origem
+    final during = await app.store.loadLatest(_userA.id);
+    expect(during, isNotNull);
+    expect(during!.uploadIdempotencyKey, places.uploads.single['idempotencyKey']);
+
+    places.uploadHang!.complete();
+    await tester.pumpAndSettle();
+    expect(await app.store.loadLatest(_userA.id), isNull, reason: 'Concluído: nada a retomar');
+    expect(pendingBanner(), findsNothing);
   });
 
   group('PendingPlaceRegistrationStore', () {

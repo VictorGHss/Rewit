@@ -54,35 +54,73 @@ class PendingPlaceRegistrationStore {
   final bool Function(String path) _fileExists;
   final DateTime Function() _now;
 
-  /// Leituras e gravações executam na ordem de chamada: cada gravação é leitura-modificação-escrita, e uma
-  /// gravação disparada sem aguardar (ex.: na falha de upload) não pode ser sobreposta por outra mais antiga.
-  /// A cadeia existe só enquanto há operações em andamento e nasce na zona de quem chama (nunca de um
-  /// `Future` antigo criado em outra zona).
-  Future<void>? _tail;
-  int _inFlight = 0;
+  /// Prazo de cada operação, contado desde a chamada (inclui a espera na fila).
+  static const Duration defaultOperationTimeout = Duration(seconds: 10);
 
-  Future<T> _serialized<T>(Future<T> Function() operation) {
-    final previous = _tail;
-    _inFlight++;
-    final result = previous == null ? Future<T>.sync(operation) : previous.then((_) => operation());
-    final done = result.then<void>((_) {}, onError: (_) {});
-    _tail = done;
-    done.whenComplete(() {
-      _inFlight--;
-      if (_inFlight == 0 && identical(_tail, done)) {
-        _tail = null;
+  final Duration _operationTimeout;
+
+  /// Uma fila por conta (S3-A.13). Na mesma conta, leituras e gravações executam na ordem de chamada: cada
+  /// gravação é leitura-modificação-escrita, e uma gravação disparada sem aguardar (ex.: antes do upload)
+  /// não pode ser sobreposta por outra mais antiga. Contas diferentes nunca esperam umas pelas outras.
+  ///
+  /// Operação que não termina: a persistência não permite cancelar uma escrita em andamento. Quem chamou
+  /// recebe [PendingRegistrationStoreUnavailable] no prazo e a fila daquela conta não deixa nenhuma operação
+  /// posterior executar enquanto a escrita antiga não termina; as que vencerem o prazo nessa espera falham e
+  /// NUNCA executam depois. Assim uma escrita atrasada não é seguida, fora de ordem, por outra mais nova, e um
+  /// `clear` informado como concluído nunca é desfeito por um `save` anterior. Leituras vencidas devolvem
+  /// lista vazia (nada é exibido; os dados não são alterados).
+  ///
+  /// As filas existem só enquanto há operações em andamento e nascem na zona de quem chama (nunca de um
+  /// `Future` antigo criado em outra zona).
+  final Map<String, _OperationQueue> _queues = {};
+
+  Future<T> _serialized<T>(String user, Future<T> Function() operation) {
+    final queue = _queues.putIfAbsent(user, _OperationQueue.new);
+    final previous = queue.tail;
+    final result = Completer<T>();
+    var expired = false;
+    final deadline = Timer(_operationTimeout, () {
+      expired = true;
+      if (!result.isCompleted) {
+        result.completeError(const PendingRegistrationStoreUnavailable());
       }
     });
-    return result;
+
+    Future<void> run() async {
+      // Venceu na fila atrás de uma operação travada: não executa mais, para não reordenar escritas
+      if (expired) return;
+      try {
+        final value = await operation();
+        if (!result.isCompleted) result.complete(value);
+      } catch (error, stackTrace) {
+        if (!result.isCompleted) result.completeError(error, stackTrace);
+      } finally {
+        deadline.cancel();
+      }
+    }
+
+    // `settled` só completa quando a operação de fato termina (ou é descartada); nunca falha
+    final settled = previous == null ? run() : previous.then((_) => run());
+    queue.tail = settled;
+    queue.pending++;
+    settled.whenComplete(() {
+      queue.pending--;
+      if (queue.pending == 0 && identical(queue.tail, settled)) {
+        _queues.remove(user);
+      }
+    });
+    return result.future;
   }
 
   PendingPlaceRegistrationStore({
     PendingPlaceRegistrationPersistence? persistence,
     bool Function(String path)? fileExists,
     DateTime Function()? now,
+    Duration operationTimeout = defaultOperationTimeout,
   })  : _persistence = persistence ?? InMemoryPendingPlaceRegistrationPersistence(),
         _fileExists = fileExists ?? ((path) => File(path).existsSync()),
-        _now = now ?? DateTime.now;
+        _now = now ?? DateTime.now,
+        _operationTimeout = operationTimeout;
 
   /// Store de processo usado apenas quando nenhum é injetado (widgets montados isoladamente).
   /// O app real injeta um store com persistência segura a partir de `main.dart`.
@@ -101,7 +139,12 @@ class PendingPlaceRegistrationStore {
   Future<List<PendingPlaceRegistration>> loadAll(String? userId) async {
     final user = _normalizeUser(userId);
     if (user == null) return const [];
-    final records = await _serialized(() => _readRecords(user));
+    final List<Map<String, dynamic>> records;
+    try {
+      records = await _serialized(user, () => _readRecords(user));
+    } on PendingRegistrationStoreUnavailable {
+      return const [];
+    }
     return records.map((r) => _toRegistration(user, r)).toList(growable: false);
   }
 
@@ -135,7 +178,7 @@ class PendingPlaceRegistrationStore {
       'photoPath': pending.photoFile?.path,
       'savedAt': _now().toUtc().toIso8601String(),
     };
-    await _serialized(() async {
+    await _serialized(user, () async {
       final records = (await _readRecords(user))
           .where((r) => r['placeId'] != pending.place.id && r['operationKey'] != pending.uploadIdempotencyKey)
           .toList();
@@ -148,7 +191,7 @@ class PendingPlaceRegistrationStore {
   Future<void> clear(String? userId, {String? operationKey, String? placeId}) async {
     final user = _normalizeUser(userId);
     if (user == null || (operationKey == null && placeId == null)) return;
-    await _serialized(() async {
+    await _serialized(user, () async {
       final records = await _readRecords(user);
       final remaining = records
           .where((r) =>
@@ -165,7 +208,7 @@ class PendingPlaceRegistrationStore {
   Future<void> clearUser(String? userId) async {
     final user = _normalizeUser(userId);
     if (user == null) return;
-    await _serialized(() => _persistence.delete(_storageKey(user)));
+    await _serialized(user, () => _persistence.delete(_storageKey(user)));
   }
 
   Future<List<Map<String, dynamic>>> _readRecords(String user) async {
@@ -228,4 +271,19 @@ class PendingPlaceRegistrationStore {
       photoUnavailable: !available,
     );
   }
+}
+
+/// O armazenamento local não respondeu no prazo. Se a operação ainda esperava na fila, ela nunca será
+/// executada; se já estava em execução, pode concluir depois, mas sempre antes de qualquer operação posterior
+/// da mesma conta.
+class PendingRegistrationStoreUnavailable implements Exception {
+  const PendingRegistrationStoreUnavailable();
+
+  @override
+  String toString() => 'PendingRegistrationStoreUnavailable: armazenamento local de pendências indisponível';
+}
+
+class _OperationQueue {
+  Future<void>? tail;
+  int pending = 0;
 }
