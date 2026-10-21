@@ -16,6 +16,7 @@
 --   * Atributos privilegiados são removidos de forma explícita e a role não pode ser owner.
 --   * Privilégios de tabela são responsabilidade exclusiva das migrations (V36); este script não
 --     os concede, para não reabrir permissões retiradas (ex.: colunas de auditoria e decisão).
+--   * O nome da role é fixo (rewit_app), porque é a role que recebe os privilégios das migrations.
 -- ==============================================================================
 
 \set ON_ERROR_STOP on
@@ -36,6 +37,11 @@ BEGIN
     END IF;
     IF v_user = current_user OR v_user = 'postgres' OR v_user LIKE 'pg\_%' THEN
         RAISE EXCEPTION 'A role de runtime não pode ser a role administrativa nem uma role reservada: %', v_user;
+    END IF;
+    -- As migrations (V36) concedem os privilégios de runtime somente a rewit_app: outro nome produziria um
+    -- login sem privilégios que só falharia no primeiro acesso (P3-2). A configuração é recusada aqui.
+    IF v_user <> 'rewit_app' THEN
+        RAISE EXCEPTION 'APP_DB_USER/app_user=% não é suportado: a role de runtime é fixa (rewit_app), pois as migrations concedem privilégios somente a ela', v_user;
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_user) THEN

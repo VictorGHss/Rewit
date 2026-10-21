@@ -168,6 +168,16 @@ for variant in ausente vazia; do
 done
 
 # ------------------------------------------------------------------------------
+# 3b. APP_DB_USER diferente da role fixa rewit_app (P3-2): falha cedo, sem criar login inútil
+# ------------------------------------------------------------------------------
+c="$RUN_ID-alt-user"
+echo "== APP_DB_USER=rewit_alt"
+APP_DB_PASSWORD="Alt-$RUN_ID" start_pg "$c" -e APP_DB_PASSWORD -e APP_DB_USER=rewit_alt
+if wait_pg "$c"; then fail "init deve falhar com APP_DB_USER=rewit_alt"; else pass "init falha com APP_DB_USER=rewit_alt"; fi
+check "código de saída diferente de zero" "[ \"\$(docker inspect -f '{{.State.ExitCode}}' '$c')\" != 0 ]"
+check "mensagem explícita sobre a role fixa" "logs_contain '$c' 'a role de runtime é fixa (rewit_app)'"
+
+# ------------------------------------------------------------------------------
 # 4. Reprovisionamento, rotação, saneamento de role pré-existente e script administrativo
 # ------------------------------------------------------------------------------
 c="$RUN_ID-rotation"
@@ -231,6 +241,13 @@ if printf 'x\nx\n' | docker exec -i "$c" setsid -w psql -X -q -v ON_ERROR_STOP=1
 else
     pass "script administrativo recusa identificador inválido"
 fi
+if printf 'x\nx\n' | docker exec -i "$c" setsid -w psql -X -q -v ON_ERROR_STOP=1 -U "$ADMIN_USER" -d "$ADMIN_DB" \
+        -v app_user=rewit_alt -f /opt/rewit/postgres/provision-runtime-role.sql >/dev/null 2>&1; then
+    fail "script administrativo recusa role diferente de rewit_app"
+else
+    pass "script administrativo recusa role diferente de rewit_app"
+fi
+check "nenhuma role rewit_alt criada" "[ -z \"\$(admin_sql '$c' \"SELECT rolname FROM pg_roles WHERE rolname = 'rewit_alt'\")\" ]"
 check "superusers inalterados" "[ \"\$(superusers '$c')\" = '$ADMIN_USER' ]"
 
 for secret in "$PW1" "$PW2" "$PW3"; do

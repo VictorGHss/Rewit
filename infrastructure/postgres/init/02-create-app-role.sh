@@ -49,6 +49,9 @@ case "$APP_USER" in
         fail "APP_DB_USER não pode ser uma role reservada do PostgreSQL."
         ;;
 esac
+if [ "$APP_USER" != "rewit_app" ]; then
+    fail "APP_DB_USER=$APP_USER não é suportado: a role de runtime é fixa (rewit_app), pois as migrations concedem privilégios somente a ela."
+fi
 if [ "${#APP_USER}" -gt 63 ]; then
     fail "APP_DB_USER excede 63 caracteres."
 fi
