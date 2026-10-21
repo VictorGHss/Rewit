@@ -80,7 +80,7 @@ flutter run
 
 ## 4. Role de Runtime do PostgreSQL (`rewit_app`)
 
-O backend conecta como `rewit_app` (sem DDL, sem superuser). O nome é fixo: as migrations concedem os privilégios de runtime somente a ela, e o init recusa outro `APP_DB_USER`. Na criação do volume, o init do container a provisiona com a senha de `APP_DB_PASSWORD` — **obrigatória e sem valor padrão**: com ela vazia, ausente ou igual ao exemplo, o init falha com mensagem explícita.
+O backend conecta como `rewit_app` (sem DDL, sem superuser). O nome é fixo: as migrations concedem os privilégios de runtime somente a ela, e o init recusa outro `APP_DB_USER`. Os privilégios são explícitos (ADR-015): `DELETE` só nas tabelas com exclusão física legítima, PostGIS somente leitura, e uma tabela nova não nasce gravável pelo runtime; a migration que a cria concede o necessário e termina com `PERFORM rewit_assert_runtime_privileges();`. Na criação do volume, o init do container a provisiona com a senha de `APP_DB_PASSWORD` — **obrigatória e sem valor padrão**: com ela vazia, ausente ou igual ao exemplo, o init falha com mensagem explícita.
 
 Para provisionar de novo ou rotacionar a senha num banco existente, altere `APP_DB_PASSWORD` no `.env`, recrie o container (`docker compose up -d postgres`; o volume é preservado) e execute:
 ```powershell
@@ -100,7 +100,7 @@ Os testes de integração usam **somente** infraestrutura descartável declarada
 | :--- | :--- |
 | `TEST_DATASOURCE_URL` | `jdbc:postgresql://127.0.0.1:<porta>/<database>` do PostgreSQL descartável |
 | `TEST_APP_DB_USER` / `TEST_APP_DB_PASSWORD` | Role de runtime (`rewit_app`) provisionada no banco de teste |
-| `TEST_MIGRATION_DB_USER` / `TEST_MIGRATION_DB_PASSWORD` | Role de migração (owner do schema; precisa de `CREATEDB` para o teste de upgrade) |
+| `TEST_MIGRATION_DB_USER` / `TEST_MIGRATION_DB_PASSWORD` | Role de migração (owner do schema; precisa de `CREATEDB` e `CREATEROLE` para o teste de upgrade, que cria databases e roles descartáveis); é também a conexão administrativa das limpezas físicas de fixtures, que o runtime não pode fazer |
 | `TEST_REDIS_HOST` / `TEST_REDIS_PORT` | Redis descartável (`TEST_REDIS_PASSWORD` opcional) |
 | `TEST_STORAGE_ENDPOINT` | `http://127.0.0.1:<porta>` do S3 descartável (porta explícita) |
 | `TEST_STORAGE_ACCESS_KEY` / `TEST_STORAGE_SECRET_KEY` / `TEST_STORAGE_BUCKET` | Credenciais e bucket do S3 descartável |
