@@ -245,6 +245,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
       initialUploadIdempotencyKey: null,
       initialPhoto: null,
       currentUserId: currentUid,
+      pendingRegistrationStore: _store,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
 
@@ -288,6 +289,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
       initialUploadIdempotencyKey: pending.uploadIdempotencyKey,
       initialPhoto: photoToUse,
       currentUserId: currentUid,
+      pendingRegistrationStore: _store,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
 
@@ -308,20 +310,14 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
         photoFile: result.photoFile,
         userId: currentUid,
       );
-      // Gravada sob a conta que iniciou a operação, mesmo que a sessão mude durante a gravação
-      if (currentUid != null && currentUid.isNotEmpty) {
-        await _store.save(currentUid, pending);
-      }
+      // A operação já foi gravada pelo sheet sob a conta de origem, no instante da falha (P2-3)
       if (!mounted || _getCurrentUserId() != currentUid) return;
       _pendingLoadGeneration++;
       setState(() {
         _pendingRegistration = pending;
       });
     } else {
-      // Concluída: remove somente a operação deste local; outras pendências da conta continuam
-      if (currentUid != null && currentUid.isNotEmpty) {
-        await _store.clear(currentUid, placeId: result.place.id);
-      }
+      // Concluída: o sheet já removeu somente a operação deste local; outras pendências continuam
       if (!mounted || _getCurrentUserId() != currentUid) return;
       setState(() {
         _pendingRegistration = null;

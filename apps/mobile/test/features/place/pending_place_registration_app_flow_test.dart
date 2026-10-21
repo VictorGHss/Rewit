@@ -1,17 +1,23 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/core/network/http_client.dart';
+import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
@@ -166,7 +172,8 @@ void main() {
     } catch (_) {}
   });
 
-  Future<_AppRun> startApp(WidgetTester tester, {File? Function()? pickPhoto}) async {
+  Future<_AppRun> startApp(WidgetTester tester,
+      {File? Function()? pickPhoto, PlaceRepository Function(AuthNotifier auth)? placeRepository}) async {
     tester.view.physicalSize = const Size(1200, 3200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -177,7 +184,7 @@ void main() {
     final router = AppRouter(
       authNotifier: auth,
       searchRepository: _EmptySearchRepository(),
-      placeRepository: places,
+      placeRepository: placeRepository != null ? placeRepository(auth) : places,
       pendingRegistrationStore: store,
       onPickManualPlacePhoto: (_) async => (pickPhoto ?? () => photo1)(),
     );
@@ -406,6 +413,133 @@ void main() {
     final allA = await app.store.loadAll(_userA.id);
     expect(allA.map((p) => p.place.name), containsAll(['Mercado da Ana', 'Padaria da Ana']));
     expect(await app.store.loadAll(_userB.id), isEmpty);
+  });
+
+  testWidgets(
+      'P2-3: 401 no upload com o sheet aberto expira a sessão e desmonta a Home; a pendência fica com a conta de origem',
+      (tester) async {
+    const placeId = '0000000c-0000-4000-8000-00000000000c';
+    var placeCreations = 0;
+    var uploadStatus = 401;
+    final uploadKeys = <String?>[];
+    final backend = MockClient((request) async {
+      if (request.method == 'POST' && request.url.path == '/api/v1/places') {
+        placeCreations++;
+        return http.Response(
+            jsonEncode({'id': placeId, 'name': 'Empório da Ana', 'slug': 'emporio', 'addressText': 'Rua G, 7', 'status': 'ACTIVE'}),
+            201,
+            headers: {'content-type': 'application/json'});
+      }
+      if (request.method == 'POST' && request.url.path == '/api/v1/places/$placeId/media') {
+        uploadKeys.add(request.headers['Idempotency-Key']);
+        if (uploadStatus == 401) {
+          return http.Response(
+              jsonEncode({'type': 'about:blank', 'title': 'Não autorizado', 'status': 401, 'code': 'UNAUTHORIZED', 'detail': 'Sessão expirada'}),
+              401,
+              headers: {'content-type': 'application/problem+json'});
+        }
+        return http.Response(jsonEncode({'url': '/api/v1/places/$placeId/media/ok'}), 201,
+            headers: {'content-type': 'application/json'});
+      }
+      return http.Response('{}', 404);
+    });
+    // Cadeia real de produção: repositório -> RewitHttpClient -> onSessionExpired -> AuthNotifier
+    PlaceRepository realPlaces(AuthNotifier auth) => PlaceRepositoryImpl(
+          httpClient: RewitHttpClient(
+            baseUrl: 'http://api.rewit.test',
+            client: backend,
+            tokenStorage: InMemoryTokenStorage(initialAccessToken: 'access', initialRefreshToken: 'refresh'),
+            onSessionExpired: auth.handleSessionExpired,
+          ),
+        );
+
+    var app = await startApp(tester, placeRepository: realPlaces);
+    await login(tester, app, _userA);
+    await openReviewTab(tester);
+
+    await tester.enterText(searchField(), 'Empório da Ana');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('register_manual_place_button')));
+    await tester.tap(find.byKey(const Key('register_manual_place_button')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua G, 7');
+    await tester.tap(find.text('Câmera'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+    await tester.pumpAndSettle();
+
+    // O 401 expirou a sessão: a Home (e o seletor que abriu o sheet) foi desmontada, o sheet segue aberto
+    expect(app.auth.state, isA<Unauthenticated>());
+    expect(find.text('Avaliar'), findsNothing);
+    expect(find.byKey(const Key('manual_place_submit_button')), findsOneWidget);
+    expect(placeCreations, 1);
+    final keyA = uploadKeys.single;
+    expect(keyA, matches(_uuidV4));
+
+    // A pendência já está gravada para a conta de origem, antes de qualquer fechamento do sheet
+    final pendingA = await app.store.loadLatest(_userA.id);
+    expect(pendingA, isNotNull);
+    expect(pendingA!.place.id, placeId);
+    expect(pendingA.uploadIdempotencyKey, keyA);
+
+    // Fechar o sheet entrega o resultado a um seletor desmontado: nada é perdido nem regravado em outra conta
+    await tester.tap(find.byKey(const Key('manual_place_close_button')));
+    await tester.pumpAndSettle();
+
+    // Outra conta entra: não vê nem retoma a operação de A
+    await login(tester, app, _userB);
+    await openReviewTab(tester);
+    expect(pendingBanner(), findsNothing);
+    expect(find.textContaining('Empório da Ana'), findsNothing);
+    expect(await app.store.loadLatest(_userB.id), isNull);
+    await logoutThroughUi(tester);
+
+    // A conta original volta (inclusive após reinício) e retoma: mesmo local, mesma chave, sem novo createPlace
+    app = await startApp(tester, placeRepository: realPlaces);
+    await login(tester, app, _userA);
+    await openReviewTab(tester);
+    expect(pendingBanner(), findsOneWidget);
+    expect(find.textContaining('Empório da Ana'), findsWidgets);
+    uploadStatus = 201;
+    await tester.tap(find.byKey(const Key('target_resume_pending_registration_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(placeCreations, 1, reason: 'A retomada não cria outro local');
+    expect(uploadKeys, [keyA, keyA], reason: 'Todas as tentativas usam a chave UUID v4 original');
+    expect(await app.store.loadLatest(_userA.id), isNull);
+    expect(app.auth.state, isA<Authenticated>());
+  });
+
+  testWidgets('P2-3: sheet removido à força após a falha (sem fechamento pelo usuário) mantém a pendência da conta de origem',
+      (tester) async {
+    final app = await startApp(tester);
+    await login(tester, app, _userA);
+    await openReviewTab(tester);
+    await tester.enterText(searchField(), 'Quiosque da Ana');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('register_manual_place_button')));
+    await tester.tap(find.byKey(const Key('register_manual_place_button')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('manual_place_address_field')), 'Rua H, 8');
+    await tester.tap(find.text('Câmera'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('manual_place_submit_button')));
+    await tester.pumpAndSettle();
+
+    // Navegação reinicializada (ex.: expiração tratada no topo) remove o sheet sem resultado
+    tester.state<NavigatorState>(find.byType(Navigator).first).popUntil((route) => route.isFirst);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('manual_place_submit_button')), findsNothing);
+
+    final pending = await app.store.loadLatest(_userA.id);
+    expect(pending, isNotNull);
+    expect(pending!.place.name, 'Quiosque da Ana');
+    expect(pending.uploadIdempotencyKey, places.uploads.single['idempotencyKey']);
+    expect(await app.store.loadLatest(_userB.id), isNull);
   });
 
   group('PendingPlaceRegistrationStore', () {

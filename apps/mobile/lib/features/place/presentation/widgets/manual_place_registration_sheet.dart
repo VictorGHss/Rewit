@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import '../../domain/entities/place_detail.dart';
 import '../../domain/repositories/place_repository.dart';
+import '../../domain/services/pending_place_registration_store.dart';
 
 import 'dart:math';
 
@@ -71,6 +73,10 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
   final File? initialPhoto;
   final String? currentUserId;
 
+  /// Quando informado, a operação pendente é gravada para [currentUserId] no momento em que o upload falha
+  /// (e removida quando conclui), independentemente de o chamador ainda estar montado (P2-3).
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
+
   const ManualPlaceRegistrationSheet({
     super.key,
     required this.placeRepository,
@@ -82,6 +88,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
     this.initialUploadIdempotencyKey,
     this.initialPhoto,
     this.currentUserId,
+    this.pendingRegistrationStore,
   });
 
   @visibleForTesting
@@ -98,6 +105,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
     String? initialUploadIdempotencyKey,
     File? initialPhoto,
     String? currentUserId,
+    PendingPlaceRegistrationStore? pendingRegistrationStore,
   }) {
     return showModalBottomSheet<ManualPlaceRegistrationResult>(
       context: context,
@@ -116,6 +124,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
         initialUploadIdempotencyKey: initialUploadIdempotencyKey,
         initialPhoto: initialPhoto,
         currentUserId: currentUserId,
+        pendingRegistrationStore: pendingRegistrationStore,
       ),
     );
   }
@@ -147,9 +156,17 @@ class _ManualPlaceRegistrationSheetState
   bool _canPopNow = false;
   String? _errorMessage;
 
+  // Conta e store capturados na abertura: a gravação da pendência não depende do estado posterior da
+  // sessão nem de este widget (ou o chamador) continuar montado.
+  late final String? _ownerUserId;
+  late final PendingPlaceRegistrationStore? _store;
+
   @override
   void initState() {
     super.initState();
+    final owner = widget.currentUserId?.trim();
+    _ownerUserId = (owner == null || owner.isEmpty) ? null : owner;
+    _store = widget.pendingRegistrationStore;
     final initialNameTrimmed = widget.initialName.trim();
     _nameController = TextEditingController(text: initialNameTrimmed);
     _addressController = TextEditingController();
@@ -367,13 +384,24 @@ class _ManualPlaceRegistrationSheetState
       _pendingCreatedPlace = place;
 
       _uploadIdempotencyKey ??= generateUuidV4();
-      final filename = _selectedPhoto!.path.split(RegExp(r'[/\\]')).last;
-      final uploadedPhotoUrl = await widget.placeRepository.uploadPlacePhoto(
-        placeId: place.id,
-        fileBytes: photoBytes,
-        filename: filename.isNotEmpty ? filename : 'place.jpg',
-        idempotencyKey: _uploadIdempotencyKey,
-      );
+      final operationKey = _uploadIdempotencyKey!;
+      final photo = _selectedPhoto!;
+      final filename = photo.path.split(RegExp(r'[/\\]')).last;
+      final String uploadedPhotoUrl;
+      try {
+        uploadedPhotoUrl = await widget.placeRepository.uploadPlacePhoto(
+          placeId: place.id,
+          fileBytes: photoBytes,
+          filename: filename.isNotEmpty ? filename : 'place.jpg',
+          idempotencyKey: operationKey,
+        );
+      } catch (_) {
+        // O local já existe: grava a retomada antes de qualquer verificação de montagem. Um 401 aqui expira a
+        // sessão e desmonta a Home; a pendência continua sob a conta que iniciou a operação.
+        unawaited(_persistPendingOperation(place, operationKey, photo));
+        rethrow;
+      }
+      await _clearPendingOperation(place);
       final completedPlace = place.copyWith(photoUrl: uploadedPhotoUrl);
 
       if (!mounted) return;
@@ -435,6 +463,31 @@ class _ManualPlaceRegistrationSheetState
             : 'Falha de conexão ao cadastrar o local. Verifique sua internet e tente novamente.';
         _isSubmitting = false;
       });
+    }
+  }
+
+  Future<void> _persistPendingOperation(PlaceDetail place, String operationKey, File photo) async {
+    final store = _store;
+    final owner = _ownerUserId;
+    if (store == null || owner == null) return;
+    try {
+      await store.save(
+        owner,
+        PendingPlaceRegistration(place: place, uploadIdempotencyKey: operationKey, photoFile: photo, userId: owner),
+      );
+    } catch (_) {
+      // Falha local de armazenamento não substitui o erro do upload exibido ao usuário
+    }
+  }
+
+  Future<void> _clearPendingOperation(PlaceDetail place) async {
+    final store = _store;
+    final owner = _ownerUserId;
+    if (store == null || owner == null) return;
+    try {
+      await store.clear(owner, placeId: place.id);
+    } catch (_) {
+      // A retomada remanescente reaproveita o mesmo local e a mesma chave; nada é duplicado
     }
   }
 

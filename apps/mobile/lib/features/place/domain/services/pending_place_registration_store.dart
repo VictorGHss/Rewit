@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -53,6 +54,28 @@ class PendingPlaceRegistrationStore {
   final bool Function(String path) _fileExists;
   final DateTime Function() _now;
 
+  /// Leituras e gravações executam na ordem de chamada: cada gravação é leitura-modificação-escrita, e uma
+  /// gravação disparada sem aguardar (ex.: na falha de upload) não pode ser sobreposta por outra mais antiga.
+  /// A cadeia existe só enquanto há operações em andamento e nasce na zona de quem chama (nunca de um
+  /// `Future` antigo criado em outra zona).
+  Future<void>? _tail;
+  int _inFlight = 0;
+
+  Future<T> _serialized<T>(Future<T> Function() operation) {
+    final previous = _tail;
+    _inFlight++;
+    final result = previous == null ? Future<T>.sync(operation) : previous.then((_) => operation());
+    final done = result.then<void>((_) {}, onError: (_) {});
+    _tail = done;
+    done.whenComplete(() {
+      _inFlight--;
+      if (_inFlight == 0 && identical(_tail, done)) {
+        _tail = null;
+      }
+    });
+    return result;
+  }
+
   PendingPlaceRegistrationStore({
     PendingPlaceRegistrationPersistence? persistence,
     bool Function(String path)? fileExists,
@@ -78,7 +101,7 @@ class PendingPlaceRegistrationStore {
   Future<List<PendingPlaceRegistration>> loadAll(String? userId) async {
     final user = _normalizeUser(userId);
     if (user == null) return const [];
-    final records = await _readRecords(user);
+    final records = await _serialized(() => _readRecords(user));
     return records.map((r) => _toRegistration(user, r)).toList(growable: false);
   }
 
@@ -101,10 +124,7 @@ class PendingPlaceRegistrationStore {
     if (pending.place.id.trim().isEmpty) {
       throw ArgumentError('A operação precisa do identificador canônico do local');
     }
-    final records = (await _readRecords(user))
-        .where((r) => r['placeId'] != pending.place.id && r['operationKey'] != pending.uploadIdempotencyKey)
-        .toList();
-    records.insert(0, {
+    final record = {
       'operationKey': pending.uploadIdempotencyKey,
       'placeId': pending.place.id,
       'placeName': pending.place.name,
@@ -114,30 +134,38 @@ class PendingPlaceRegistrationStore {
       'placeStatus': pending.place.status,
       'photoPath': pending.photoFile?.path,
       'savedAt': _now().toUtc().toIso8601String(),
+    };
+    await _serialized(() async {
+      final records = (await _readRecords(user))
+          .where((r) => r['placeId'] != pending.place.id && r['operationKey'] != pending.uploadIdempotencyKey)
+          .toList();
+      records.insert(0, record);
+      await _writeRecords(user, records.take(_maxOperationsPerUser).toList());
     });
-    await _writeRecords(user, records.take(_maxOperationsPerUser).toList());
   }
 
   /// Remove a operação do usuário identificada pela chave e/ou pelo local canônico.
   Future<void> clear(String? userId, {String? operationKey, String? placeId}) async {
     final user = _normalizeUser(userId);
     if (user == null || (operationKey == null && placeId == null)) return;
-    final records = await _readRecords(user);
-    final remaining = records
-        .where((r) =>
-            !((operationKey != null && r['operationKey'] == operationKey) ||
-                (placeId != null && r['placeId'] == placeId)))
-        .toList();
-    if (remaining.length != records.length) {
-      await _writeRecords(user, remaining);
-    }
+    await _serialized(() async {
+      final records = await _readRecords(user);
+      final remaining = records
+          .where((r) =>
+              !((operationKey != null && r['operationKey'] == operationKey) ||
+                  (placeId != null && r['placeId'] == placeId)))
+          .toList();
+      if (remaining.length != records.length) {
+        await _writeRecords(user, remaining);
+      }
+    });
   }
 
   /// Remove todas as operações do usuário.
   Future<void> clearUser(String? userId) async {
     final user = _normalizeUser(userId);
     if (user == null) return;
-    await _persistence.delete(_storageKey(user));
+    await _serialized(() => _persistence.delete(_storageKey(user)));
   }
 
   Future<List<Map<String, dynamic>>> _readRecords(String user) async {
