@@ -501,6 +501,27 @@ class AuditTrailRuntimeRoleIntegrityTest {
         // Fluxo legítimo continua funcionando na mesma sessão
         assertEquals(1, update(app, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ?, decided_at = NOW() WHERE id = ?",
                 s.moderator(), report));
+
+        // Trilha de fotos (V37): fotografia, local e denúncia que só existem nas temporárias são rejeitados. Criadas por
+        // último e removidas em seguida: os comandos acima, sem schema, resolveriam nelas.
+        UUID fakeMedia = UUID.randomUUID();
+        UUID fakeReport = UUID.randomUUID();
+        UUID forgedPlace = UUID.randomUUID();
+        try (Statement st = app.createStatement()) {
+            st.execute("CREATE TEMP TABLE place_media (id UUID PRIMARY KEY, place_id UUID)");
+            st.execute("CREATE TEMP TABLE place_media_reports (id UUID PRIMARY KEY, place_media_id UUID)");
+        }
+        update(app, "INSERT INTO pg_temp.place_media (id, place_id) VALUES (?, ?), (?, ?)", fakeMedia, s.place(), s.media(), forgedPlace);
+        update(app, "INSERT INTO pg_temp.place_media_reports (id, place_media_id) VALUES (?, ?)", fakeReport, s.media());
+        assertDenied(app, "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, actor_type, action) "
+                + "VALUES (?, ?, ?, ?, 'USER', 'REMOVE')", UUID.randomUUID(), fakeMedia, s.place(), s.moderator());
+        assertDenied(app, "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, actor_type, action) "
+                + "VALUES (?, ?, ?, ?, 'USER', 'REMOVE')", UUID.randomUUID(), s.media(), forgedPlace, s.moderator());
+        assertDenied(app, "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, actor_type, action, report_id) "
+                + "VALUES (?, ?, ?, ?, 'USER', 'ACCEPT_REPORT', ?)", UUID.randomUUID(), s.media(), s.place(), s.moderator(), fakeReport);
+        try (Statement st = app.createStatement()) {
+            st.execute("DROP TABLE pg_temp.place_media, pg_temp.place_media_reports");
+        }
         assertEquals(before, auditFingerprint(app, s), "Linhas históricas intactas");
     }
 
@@ -560,7 +581,7 @@ class AuditTrailRuntimeRoleIntegrityTest {
     }
 
     @Test
-    @DisplayName("P2-2: exclusão da mídia-pai cascateia as denúncias sem DELETE direto e preserva a auditoria")
+    @DisplayName("P2-2 / S3-A.13: runtime não apaga mídia nem denúncia; a exclusão administrativa da mídia cascateia e preserva a auditoria")
     void parentMediaDeletionCascadesReportsWithoutDirectDeletePrivilege() throws SQLException {
         try (Connection app = app()) {
             ReportFixture f = seedReportFixture(app);
@@ -573,10 +594,212 @@ class AuditTrailRuntimeRoleIntegrityTest {
                     + "VALUES (?, ?, ?, ?, 'USER', 'ACCEPT_REPORT', ?)", audit, f.media(), place, f.moderator(), report);
             String auditRow = rowHash(app, "place_media_moderation_audit_logs", audit);
 
+            // Nem a denúncia nem a mídia-pai: a cascata não é um caminho de exclusão para o runtime
             assertDenied(app, "DELETE FROM place_media_reports WHERE place_media_id = ?", f.media());
-            assertEquals(1, update(app, "DELETE FROM place_media WHERE id = ?", f.media()));
+            assertDenied(app, "DELETE FROM place_media WHERE id = ?", f.media());
+            assertEquals(1, count(app, "SELECT count(*) FROM place_media_reports WHERE id = ?", report));
+
+            // Exclusão física administrativa (owner): cascateia as denúncias e nunca alcança a trilha
+            assertEquals(1, PrivilegedTestDatabase.jdbc().update("DELETE FROM place_media WHERE id = ?", f.media()));
             assertEquals(0, count(app, "SELECT count(*) FROM place_media_reports WHERE place_media_id = ?", f.media()));
             assertEquals(auditRow, rowHash(app, "place_media_moderation_audit_logs", audit));
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------ S3-A.13
+
+    @Test
+    @DisplayName("S3-A.13: runtime não exclui usuários, locais, alvos, mídias, avaliações, comentários, respostas nem denúncias, "
+            + "diretamente ou por cascata")
+    void runtimeCannotDeleteProtectedEntitiesDirectlyOrByCascade() throws SQLException {
+        try (Connection app = app()) {
+            Scenario s = seedAsRuntime(app);
+            UUID report = insertPendingReport(app, s.media());
+            update(app, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ?, decided_at = NOW() WHERE id = ?",
+                    s.moderator(), report);
+            String before = auditFingerprint(app, s);
+
+            assertDenied(app, "DELETE FROM users WHERE id = ?", s.author());
+            assertDenied(app, "DELETE FROM users WHERE id = ?", s.moderator());
+            assertDenied(app, "DELETE FROM rateable_targets WHERE id = ?", s.place());
+            assertDenied(app, "DELETE FROM places WHERE id = ?", s.place());
+            assertDenied(app, "DELETE FROM place_media WHERE id = ?", s.media());
+            assertDenied(app, "DELETE FROM reviews WHERE id = ?", s.review());
+            assertDenied(app, "DELETE FROM review_discussions WHERE id = ?", s.discussion());
+            assertDenied(app, "DELETE FROM business_responses WHERE id = ?", s.responseOnReview());
+            assertDenied(app, "DELETE FROM place_media_reports WHERE id = ?", report);
+            assertDenied(app, "DELETE FROM business_accounts WHERE id = ?", s.business());
+            for (String table : List.of("users", "places", "rateable_targets", "place_media", "reviews", "spatial_ref_sys")) {
+                assertDenied(app, "TRUNCATE TABLE " + table + " CASCADE");
+            }
+
+            assertEquals(1, count(app, "SELECT count(*) FROM users WHERE id = ?", s.author()));
+            assertEquals(1, count(app, "SELECT count(*) FROM reviews WHERE id = ?", s.review()));
+            assertEquals(1, count(app, "SELECT count(*) FROM review_discussions WHERE id = ?", s.discussion()));
+            assertEquals(2, count(app, "SELECT count(*) FROM business_responses WHERE review_id = ?", s.review()));
+            assertEquals(1, count(app, "SELECT count(*) FROM place_media_reports WHERE id = ?", report));
+            assertEquals(1, count(app, "SELECT count(*) FROM places WHERE id = ?", s.place()));
+            assertEquals(before, auditFingerprint(app, s));
+
+            // Exclusões físicas legítimas do runtime seguem possíveis (lista explícita da V37)
+            update(app, "INSERT INTO user_follows (follower_user_id, followed_user_id) VALUES (?, ?)", s.author(), s.moderator());
+            assertEquals(1, update(app, "DELETE FROM user_follows WHERE follower_user_id = ? AND followed_user_id = ?",
+                    s.author(), s.moderator()));
+        }
+    }
+
+    @Test
+    @DisplayName("S3-A.13: spatial_ref_sys é somente leitura para o runtime e consultas geográficas continuam disponíveis")
+    void spatialReferenceSystemsAreReadOnlyForRuntime() throws SQLException {
+        String distance = "SELECT round(ST_Distance(ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326)::geography, "
+                + "ST_SetSRID(ST_MakePoint(-49.28, -25.43), 4326)::geography))::bigint";
+        try (Connection app = app()) {
+            assertEquals(1, count(app, "SELECT count(*) FROM spatial_ref_sys WHERE srid = 4326"));
+            long meters = count(app, distance);
+            assertTrue(meters > 1000 && meters < 2000, "Distância geográfica de referência: " + meters);
+
+            assertDenied(app, "DELETE FROM spatial_ref_sys WHERE srid = 4326");
+            assertDenied(app, "UPDATE spatial_ref_sys SET proj4text = 'x' WHERE srid = 4326");
+            assertDenied(app, "INSERT INTO spatial_ref_sys (srid, auth_name, auth_srid, srtext, proj4text) VALUES (990001, 'x', 1, 'x', 'x')");
+            assertDenied(app, "TRUNCATE TABLE spatial_ref_sys");
+        }
+        // Conexão nova: nada foi alterado e a busca geográfica segue disponível
+        try (Connection app = app()) {
+            assertEquals(1, count(app, "SELECT count(*) FROM spatial_ref_sys WHERE srid = 4326"));
+            assertTrue(count(app, distance) > 1000);
+            assertEquals(1, count(app, "SELECT count(*) FROM (SELECT ST_Transform(ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 3857)) t"));
+        }
+    }
+
+    @Test
+    @DisplayName("S3-A.13: tabela nova criada pela role de migração não nasce gravável pelo runtime")
+    void tableCreatedByMigrationOwnerIsNotWritableByRuntime() throws SQLException {
+        String probe = "rewit_probe_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        try (Connection owner = owner()) {
+            owner.setAutoCommit(false);
+            try (Statement st = owner.createStatement()) {
+                st.execute("CREATE TABLE " + probe + " (id UUID PRIMARY KEY)");
+                // Privilégios padrão da role que executa as migrations
+                assertTrue(bool(owner, "SELECT has_table_privilege('" + INFRASTRUCTURE.appDbUser() + "', '" + probe + "', 'SELECT')"));
+                for (String privilege : List.of("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")) {
+                    assertFalse(bool(owner, "SELECT has_table_privilege('" + INFRASTRUCTURE.appDbUser() + "', '" + probe + "', '" + privilege + "')"),
+                            "Tabela nova não pode conceder " + privilege + " ao runtime por omissão");
+                }
+            } finally {
+                owner.rollback();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("S3-A.13: a verificação de privilégios aceita o estado instalado e detecta concessões indevidas introduzidas")
+    void runtimePrivilegeVerificationDetectsDeliberateViolations() throws SQLException {
+        try (Connection app = app()) {
+            assertDenied(app, "SELECT rewit_assert_runtime_privileges()");
+        }
+        Map<String, String> violations = Map.of(
+                "GRANT DELETE ON users TO rewit_app", "DELETE em users",
+                "GRANT UPDATE ON spatial_ref_sys TO rewit_app", "UPDATE em spatial_ref_sys",
+                "GRANT UPDATE ON place_media_moderation_audit_logs TO rewit_app", "UPDATE em place_media_moderation_audit_logs",
+                "GRANT INSERT ON place_media_reports TO rewit_app", "INSERT em place_media_reports",
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT ON TABLES TO rewit_app", "privilégios padrão de escrita",
+                "ALTER TABLE place_media_moderation_audit_logs DISABLE TRIGGER trg_bind_place_media_audit_reference",
+                "trg_bind_place_media_audit_reference",
+                "CREATE TABLE rewit_probe_cascade (id UUID REFERENCES auth_sessions(id) ON DELETE CASCADE)", "cascatas acionáveis");
+        try (Connection owner = owner()) {
+            try (Statement st = owner.createStatement()) {
+                st.execute("SELECT rewit_assert_runtime_privileges()");
+            }
+            owner.setAutoCommit(false);
+            for (Map.Entry<String, String> violation : violations.entrySet()) {
+                try (Statement st = owner.createStatement()) {
+                    st.execute(violation.getKey());
+                    SQLException detected = assertThrows(SQLException.class, () -> st.execute("SELECT rewit_assert_runtime_privileges()"),
+                            "Não detectou: " + violation.getKey());
+                    assertTrue(detected.getMessage().contains(violation.getValue()),
+                            () -> "Mensagem sem '" + violation.getValue() + "': " + detected.getMessage());
+                } finally {
+                    // A concessão nunca é confirmada: nenhuma outra sessão a enxerga
+                    owner.rollback();
+                }
+            }
+            owner.setAutoCommit(true);
+            try (Statement st = owner.createStatement()) {
+                st.execute("SELECT rewit_assert_runtime_privileges()");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("S3-A.13: trilha de fotos exige fotografia, local e denúncia reais; exclusão administrativa não altera o histórico")
+    void placeMediaAuditReferencesAreVerified() throws SQLException {
+        try (Connection app = app()) {
+            ReportFixture f = seedReportFixture(app);
+            ReportFixture other = seedReportFixture(app);
+            UUID place = queryUuid(app, "SELECT place_id FROM place_media WHERE id = ?", f.media());
+            UUID report = insertPendingReport(app, f.media());
+            UUID otherReport = insertPendingReport(app, other.media());
+            String insert = "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, actor_type, action, report_id) "
+                    + "VALUES (?, ?, ?, ?, 'USER', ?, ?)";
+
+            assertDenied(app, insert, UUID.randomUUID(), UUID.randomUUID(), place, f.moderator(), "ACCEPT_REPORT", report);
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), UUID.randomUUID(), f.moderator(), "REMOVE", null);
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), place, f.moderator(), "ACCEPT_REPORT", UUID.randomUUID());
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), place, f.moderator(), "ACCEPT_REPORT", otherReport);
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), place, f.moderator(), "REJECT_REPORT", null);
+            assertDenied(app, "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_type, action) "
+                    + "VALUES (?, ?, ?, 'SYSTEM', 'AUTO_RESOLVE_REPORT')", UUID.randomUUID(), f.media(), place);
+
+            UUID removal = UUID.randomUUID();
+            UUID decision = UUID.randomUUID();
+            assertEquals(1, update(app, insert, removal, f.media(), place, f.moderator(), "REMOVE", null));
+            assertEquals(1, update(app, insert, decision, f.media(), place, f.moderator(), "ACCEPT_REPORT", report));
+            assertEquals(place, queryUuid(app, "SELECT place_id FROM place_media_moderation_audit_logs WHERE id = ?", decision));
+            assertEquals(report, queryUuid(app, "SELECT report_id FROM place_media_moderation_audit_logs WHERE id = ?", decision));
+            String removalRow = rowHash(app, "place_media_moderation_audit_logs", removal);
+            String decisionRow = rowHash(app, "place_media_moderation_audit_logs", decision);
+
+            // Exclusão administrativa da mídia e do local: o histórico continua idêntico, com as referências gravadas
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", place);
+            assertEquals(0, count(app, "SELECT count(*) FROM place_media WHERE id = ?", f.media()));
+            assertEquals(removalRow, rowHash(app, "place_media_moderation_audit_logs", removal));
+            assertEquals(decisionRow, rowHash(app, "place_media_moderation_audit_logs", decision));
+            // ... e a trilha não aceita novos eventos para a mídia que deixou de existir
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), place, f.moderator(), "RESTORE", null);
+        }
+    }
+
+    @Test
+    @DisplayName("S3-A.13: denúncias nascem pendentes; motivo e detalhe congelam após a decisão final; updates sem mudança passam")
+    void reportsStartPendingAndFinalDecisionFreezesReasonAndDetail() throws SQLException {
+        try (Connection app = app()) {
+            ReportFixture f = seedReportFixture(app);
+            String insert = "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at) "
+                    + "VALUES (?, ?, ?, 'SPAM', ?, ?, ?)";
+            java.sql.Timestamp now = new java.sql.Timestamp(System.currentTimeMillis());
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), insertUser(app, "USER"), "ACCEPTED", f.moderator(), now);
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), insertUser(app, "USER"), "REJECTED", f.moderator(), now);
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), insertUser(app, "USER"), "AUTO_RESOLVED", null, now);
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), insertUser(app, "USER"), "PENDING", null, now);
+            assertDenied(app, insert, UUID.randomUUID(), f.media(), insertUser(app, "USER"), "PENDING", f.moderator(), null);
+
+            for (String finalStatus : List.of("ACCEPTED", "REJECTED", "AUTO_RESOLVED")) {
+                UUID report = insertPendingReport(app, f.media());
+                update(app, "UPDATE place_media_reports SET detail = 'antes da decisão' WHERE id = ?", report);
+                UUID decider = "AUTO_RESOLVED".equals(finalStatus) ? null : f.moderator();
+                assertEquals(1, update(app, "UPDATE place_media_reports SET status = ?, decided_by_user_id = ?, decided_at = NOW(), "
+                        + "updated_at = NOW() WHERE id = ?", finalStatus, decider, report));
+                String decided = rowHash(app, "place_media_reports", report);
+
+                assertDenied(app, "UPDATE place_media_reports SET reason = 'OUTRO' WHERE id = ?", report);
+                assertDenied(app, "UPDATE place_media_reports SET detail = 'reescrito' WHERE id = ?", report);
+                assertDenied(app, "UPDATE place_media_reports SET detail = NULL WHERE id = ?", report);
+                assertEquals(decided, rowHash(app, "place_media_reports", report), finalStatus);
+                // Como o Hibernate faz: todas as colunas regravadas com os mesmos valores
+                assertEquals(1, update(app, "UPDATE place_media_reports SET reason = reason, detail = detail, status = status, "
+                        + "decided_by_user_id = decided_by_user_id, decided_at = decided_at, decision_notes = decision_notes, "
+                        + "updated_at = updated_at WHERE id = ?", report));
+            }
         }
     }
 

@@ -11,6 +11,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -54,6 +55,29 @@ class DatabaseDomainIntegrityTest {
     private Connection getAppConnection() throws SQLException {
         return DriverManager.getConnection(INFRASTRUCTURE.datasourceUrl(),
                 INFRASTRUCTURE.appDbUser(), INFRASTRUCTURE.appDbPassword());
+    }
+
+    /** Local, fotografia e denúncia pendente reais: a trilha de fotos verifica as referências na inserção (V37). */
+    private record MediaFixture(UUID place, UUID media, UUID report) {
+    }
+
+    private MediaFixture insertMediaFixture() throws SQLException {
+        UUID user = UUID.randomUUID();
+        UUID place = UUID.randomUUID();
+        UUID media = UUID.randomUUID();
+        UUID report = UUID.randomUUID();
+        try (Connection conn = getMigrationConnection(); Statement st = conn.createStatement()) {
+            st.executeUpdate("INSERT INTO users (id, email, auth_provider) VALUES ('" + user + "', 'media." + user + "@rewit.com', 'LOCAL')");
+            st.executeUpdate("INSERT INTO rateable_targets (id, target_type) VALUES ('" + place + "', 'PLACE')");
+            st.executeUpdate("INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) VALUES ('" + place
+                    + "', 'Local " + place + "', 'slug-" + place + "', 'BAR', 'Rua " + place + "', 'Curitiba', 'PR', "
+                    + "ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))");
+            st.executeUpdate("INSERT INTO place_media (id, place_id, user_id, object_key, media_type, mime_type, size_bytes, width, height, status) "
+                    + "VALUES ('" + media + "', '" + place + "', '" + user + "', 'places/fixture-" + media + ".jpg', 'IMAGE', 'image/jpeg', 1024, 800, 600, 'ACTIVE')");
+            st.executeUpdate("INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason) VALUES ('" + report
+                    + "', '" + media + "', '" + user + "', 'SPAM')");
+        }
+        return new MediaFixture(place, media, report);
     }
 
     @Test
@@ -400,17 +424,17 @@ class DatabaseDomainIntegrityTest {
     void shouldDemonstrateAppendOnlyProtectionUnderEffectiveApplicationRole() throws SQLException {
         try (Connection conn = getConnection()) {
             UUID auditId = UUID.randomUUID();
-            UUID mediaId = UUID.randomUUID();
-            UUID placeId = UUID.randomUUID();
+            MediaFixture f = insertMediaFixture();
 
-            // 1. Inserir registro válido de auditoria com SYSTEM actor (V35)
+            // 1. Inserir registro válido de auditoria com SYSTEM actor (V35), vinculado à denúncia real (V37)
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO place_media_moderation_audit_logs " +
-                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at) " +
-                            "VALUES (?, ?, ?, NULL, 'SYSTEM', 'AUTO_RESOLVE_REPORT', 'Violação', 'Resolução automática', NOW())")) {
+                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, report_id, created_at) " +
+                            "VALUES (?, ?, ?, NULL, 'SYSTEM', 'AUTO_RESOLVE_REPORT', 'Violação', 'Resolução automática', ?, NOW())")) {
                 ps.setObject(1, auditId);
-                ps.setObject(2, mediaId);
-                ps.setObject(3, placeId);
+                ps.setObject(2, f.media());
+                ps.setObject(3, f.place());
+                ps.setObject(4, f.report());
                 assertEquals(1, ps.executeUpdate(), "Inserção de auditoria com SYSTEM actor e actor_user_id NULL deve suceder");
             }
 
@@ -453,8 +477,10 @@ class DatabaseDomainIntegrityTest {
     void shouldValidateAuditActorConstraintsAndAutoActions() throws SQLException {
         try (Connection conn = getConnection()) {
             UUID auditId = UUID.randomUUID();
-            UUID mediaId = UUID.randomUUID();
-            UUID placeId = UUID.randomUUID();
+            // Referências reais: as constraints de ator são avaliadas depois da verificação de referências (V37)
+            MediaFixture f = insertMediaFixture();
+            UUID mediaId = f.media();
+            UUID placeId = f.place();
 
             // 1. actor_type = 'USER' com actor_user_id NULL deve falhar
             SQLException exUserNull = assertThrows(SQLException.class, () -> {
@@ -504,8 +530,9 @@ class DatabaseDomainIntegrityTest {
     void shouldProveAppRoleCannotAlterAuditTableOrBypassTriggers() throws SQLException {
         try (Connection appConn = getAppConnection()) {
             UUID auditId = UUID.randomUUID();
-            UUID mediaId = UUID.randomUUID();
-            UUID placeId = UUID.randomUUID();
+            MediaFixture f = insertMediaFixture();
+            UUID mediaId = f.media();
+            UUID placeId = f.place();
 
             // 1. rewit_app consegue inserir registros de auditoria (DML INSERT permitido)
             try (PreparedStatement ps = appConn.prepareStatement(
@@ -596,31 +623,47 @@ class DatabaseDomainIntegrityTest {
                 ps.executeUpdate();
             }
 
-            // 1. AUTO_RESOLVED com decided_by_user_id NULL deve ser aceito pela constraint chk_place_media_reports_decided_by
+            // Denúncias nascem pendentes (V37): a decisão é sempre uma transição, nunca uma inserção já decidida
+            SQLException exInsertedDecided = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at, decision_notes) " +
+                                "VALUES (?, ?, ?, 'SPAM', 'AUTO_RESOLVED', NULL, NOW(), 'Encerrada pelo sistema')")) {
+                    ps.setObject(1, UUID.randomUUID());
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, reporterId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exInsertedDecided.getMessage().contains("nascem pendentes"), exInsertedDecided.getMessage());
+
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at, decision_notes) " +
-                            "VALUES (?, ?, ?, 'SPAM', 'AUTO_RESOLVED', NULL, NOW(), 'Encerrada pelo sistema')")) {
+                    "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason) VALUES (?, ?, ?, 'SPAM')")) {
                 ps.setObject(1, reportId);
                 ps.setObject(2, mediaId);
                 ps.setObject(3, reporterId);
                 assertEquals(1, ps.executeUpdate());
             }
 
-            // 2. AUTO_RESOLVED com decided_by_user_id preenchido deve ser rejeitado pela constraint
-            UUID invalidReportId = UUID.randomUUID();
+            // 1. AUTO_RESOLVED com decided_by_user_id preenchido deve ser rejeitado pela constraint
             SQLException exAutoResolvedWithDecidedBy = assertThrows(SQLException.class, () -> {
                 try (PreparedStatement ps = conn.prepareStatement(
-                        "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason, status, decided_by_user_id, decided_at, decision_notes) " +
-                                "VALUES (?, ?, ?, 'SPAM', 'AUTO_RESOLVED', ?, NOW(), 'Incorreto')")) {
-                    ps.setObject(1, invalidReportId);
-                    ps.setObject(2, mediaId);
-                    ps.setObject(3, reporterId);
-                    ps.setObject(4, moderatorId);
+                        "UPDATE place_media_reports SET status = 'AUTO_RESOLVED', decided_by_user_id = ?, decided_at = NOW(), "
+                                + "decision_notes = 'Incorreto' WHERE id = ?")) {
+                    ps.setObject(1, moderatorId);
+                    ps.setObject(2, reportId);
                     ps.executeUpdate();
                 }
             });
             assertTrue(exAutoResolvedWithDecidedBy.getMessage().contains("chk_place_media_reports_decided_by")
                     || exAutoResolvedWithDecidedBy.getMessage().contains("violates check constraint"));
+
+            // 2. AUTO_RESOLVED com decided_by_user_id NULL deve ser aceito pela constraint chk_place_media_reports_decided_by
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE place_media_reports SET status = 'AUTO_RESOLVED', decided_by_user_id = NULL, decided_at = NOW(), "
+                            + "decision_notes = 'Encerrada pelo sistema' WHERE id = ?")) {
+                ps.setObject(1, reportId);
+                assertEquals(1, ps.executeUpdate());
+            }
 
             // 3. RELEASE_REVIEW é aceito como ação válida na trilha de auditoria
             UUID auditId = UUID.randomUUID();

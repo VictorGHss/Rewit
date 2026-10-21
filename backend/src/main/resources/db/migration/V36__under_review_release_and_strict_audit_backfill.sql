@@ -15,10 +15,50 @@
 -- 8. S3-A.12: referências qualificadas e search_path fixo nas funções de trigger (P2-1), decisões
 --    finais imutáveis e sem DELETE direto (P2-2), atribuição de papel restrita a operações
 --    administrativas (P2-2) e entidades operacionais sem DELETE para o runtime (P3-1)
+-- 9. S3-A.13: pré-condição explícita de propriedade dos objetos alterados (upgrade com owner divergente)
 -- Tabelas afetadas: place_media_moderation_audit_logs, place_media_reports, place_media,
 --                   moderation_audit_logs, discussion_moderation_audit_logs,
 --                   business_response_moderation_audit_logs, flyway_schema_history
 -- ==============================================================================
+
+-- 0. PRÉ-CONDIÇÃO: A ROLE DE MIGRAÇÃO ADMINISTRA OS OBJETOS QUE ESTA VERSÃO ALTERA
+-- O modelo suportado é um único owner do schema (a role do Flyway) ou uma role da qual ela herda.
+-- Objetos de extensões (PostGIS) não são alterados e ficam fora da verificação. Falhar aqui, antes de
+-- qualquer DDL, dá a mensagem certa; a migração é transacional e nada é aplicado.
+DO $$
+DECLARE
+    offending TEXT;
+BEGIN
+    IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+        RETURN;
+    END IF;
+    SELECT string_agg(format('%s %s (owner %s)', o.kind, o.obj, pg_get_userbyid(o.owner)), ', ' ORDER BY o.kind, o.obj)
+    INTO offending
+    FROM (
+        SELECT 'tabela' AS kind, c.oid::regclass::text AS obj, c.relowner AS owner
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind IN ('r', 'p')
+          AND c.relname <> 'flyway_schema_history'
+          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
+        UNION ALL
+        SELECT 'função de trigger', p.oid::regprocedure::text, p.proowner
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+          AND p.prorettype = 'trigger'::regtype
+          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+    ) o
+    WHERE NOT pg_has_role(current_user, o.owner, 'USAGE');
+    IF offending IS NOT NULL THEN
+        RAISE EXCEPTION 'V36: a role de migração % não administra: %', current_user, offending
+            USING HINT = 'A V36 exige que a role de migração seja owner (ou herde a role owner) de todas as tabelas e '
+                         'funções de trigger do schema public. Transfira a propriedade (ALTER ... OWNER TO) ou execute '
+                         'com a role owner; nenhuma alteração foi aplicada.';
+    END IF;
+END
+$$;
 
 -- 1. SUPORTE À AÇÃO 'RELEASE_REVIEW' NA TRILHA DE AUDITORIA
 ALTER TABLE place_media_moderation_audit_logs
@@ -505,7 +545,7 @@ BEGIN
         JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public'
           AND p.prorettype = 'trigger'::regtype
-          AND p.proowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+          -- A pré-condição (seção 0) garante que a role de migração administra todas elas
           -- Funções de extensões (ex.: PostGIS) pertencem à extensão e não são alteradas
           AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
     LOOP

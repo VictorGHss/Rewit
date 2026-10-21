@@ -84,7 +84,7 @@ class CatalogSearchHardeningIntegrationTest {
     void cleanUp() {
         // Place e product são especializações de rateable_targets (ON DELETE CASCADE)
         for (UUID id : createdTargets) {
-            jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", id);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", id);
         }
     }
 

@@ -47,10 +47,13 @@ class DatabaseUpgradeMigrationTest {
     private static final String DATABASE_PREFIX = "rewit_migtest_";
     private static final Pattern DISPOSABLE_NAME = Pattern.compile("^rewit_migtest_[0-9a-f]{16}$");
     private static final String V16_INDEX = "idx_auth_sessions_replaced_by_session_id";
+    private static final Pattern DISPOSABLE_ROLE = Pattern.compile("^rewit_migtest_role_[0-9a-f]{16}$");
 
     private String database;
     private String marker;
     private String databaseUrl;
+    /** Roles de cluster criadas por este caso; removidas depois do database (são donas de objetos dele). */
+    private final java.util.List<String> createdRoles = new java.util.ArrayList<>();
 
     @BeforeEach
     void createDisposableDatabase() throws SQLException {
@@ -88,11 +91,20 @@ class DatabaseUpgradeMigrationTest {
             }
             try (Statement st = conn.createStatement()) {
                 st.execute("DROP DATABASE " + database + " WITH (FORCE)");
+                for (String role : createdRoles) {
+                    assertTrue(DISPOSABLE_ROLE.matcher(role).matches(), "Role fora do padrão descartável: " + role);
+                    st.execute("DROP ROLE IF EXISTS " + role);
+                }
             }
         }
     }
 
     private Flyway flyway(String target) {
+        return flyway(target, null);
+    }
+
+    /** {@code initSql} permite executar as migrations sob outra role (SET ROLE), como uma role de migração sem superuser. */
+    private Flyway flyway(String target, String initSql) {
         var config = Flyway.configure()
                 .dataSource(databaseUrl, INFRASTRUCTURE.migrationDbUser(), INFRASTRUCTURE.migrationDbPassword())
                 .locations("classpath:db/migration")
@@ -100,7 +112,19 @@ class DatabaseUpgradeMigrationTest {
         if (target != null) {
             config.target(target);
         }
+        if (initSql != null) {
+            config.initSql(initSql);
+        }
         return config.load();
+    }
+
+    private String createDisposableRole(Statement st) throws SQLException {
+        byte[] random = new byte[8];
+        new java.security.SecureRandom().nextBytes(random);
+        String role = "rewit_migtest_role_" + HexFormat.of().formatHex(random);
+        st.execute("CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT");
+        createdRoles.add(role);
+        return role;
     }
 
     private Connection owner() throws SQLException {
@@ -295,6 +319,83 @@ class DatabaseUpgradeMigrationTest {
             assertEquals(1, count(conn, "SELECT count(*) FROM discussion_moderation_audit_logs WHERE discussion_id = ?", f.discussion));
             assertEquals(1, count(conn, "SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ?", f.response));
         }
+    }
+
+    @Test
+    @DisplayName("S3-A.13: upgrade V35 -> V37 sob role de migração sem superuser falha antes de qualquer DDL se uma função de "
+            + "trigger tem outro owner, e conclui quando a role passa a administrá-la")
+    void upgradeWithDivergentTriggerFunctionOwnerFailsExplicitlyAndCompletesWhenAdministrable() throws SQLException {
+        flyway("35").migrate();
+        String executor;
+        String legacyOwner;
+        try (Connection conn = owner(); Statement st = conn.createStatement()) {
+            // Executor das migrations: role sem superuser que herda a role de migração (owner dos demais objetos)
+            executor = createDisposableRole(st);
+            st.execute("GRANT " + INFRASTRUCTURE.migrationDbUser() + " TO " + executor);
+            // Função de trigger de migration antiga com outro owner
+            legacyOwner = createDisposableRole(st);
+            st.execute("ALTER FUNCTION fn_prevent_rateable_target_type_change() OWNER TO " + legacyOwner);
+        }
+
+        org.flywaydb.core.api.FlywayException failure = assertThrows(org.flywaydb.core.api.FlywayException.class,
+                () -> flyway(null, "SET ROLE " + executor).migrate());
+        String message = String.valueOf(failure.getMessage());
+        assertTrue(message.contains("não administra") && message.contains("fn_prevent_rateable_target_type_change")
+                && message.contains(legacyOwner), "Mensagem explícita com objeto e owner: " + message);
+
+        try (Connection conn = owner()) {
+            // Rollback completo: nenhuma versão nova, nenhum objeto da V36 e a função antiga intocada
+            assertEquals("35", string(conn, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success"));
+            assertEquals(0, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE NOT success"));
+            assertEquals(0, count(conn, "SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_guard_user_role_assignment'"));
+            assertNull(string(conn, "SELECT array_to_string(proconfig, ',') FROM pg_proc WHERE proname = 'fn_prevent_rateable_target_type_change'"));
+            try (Statement st = conn.createStatement()) {
+                // Modelo suportado: a role de migração administra (herda) o owner da função
+                st.execute("GRANT " + legacyOwner + " TO " + executor);
+            }
+        }
+
+        assertTrue(flyway(null, "SET ROLE " + executor).migrate().success, "Sem flyway repair: a nova tentativa conclui");
+        try (Connection conn = owner(); Statement st = conn.createStatement()) {
+            assertEquals("37", string(conn, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success"));
+            assertEquals("search_path=pg_catalog, public, pg_temp",
+                    string(conn, "SELECT array_to_string(proconfig, ',') FROM pg_proc WHERE proname = 'fn_prevent_rateable_target_type_change'"));
+            st.execute("SELECT rewit_assert_runtime_privileges()");
+        }
+    }
+
+    @Test
+    @DisplayName("S3-A.13: instalação limpa e upgrade a partir da V35 terminam com os mesmos privilégios efetivos do runtime")
+    void cleanInstallAndUpgradeProduceSamePrivileges() throws SQLException {
+        String privileges = """
+                SELECT string_agg(format('%s:%s', c.relname, p.priv), ',' ORDER BY c.relname, p.priv)
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')) p(priv)
+                WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v') AND c.relname <> 'flyway_schema_history'
+                  AND has_table_privilege('rewit_app', c.oid, p.priv)
+                """;
+        flyway("35").migrate();
+        try (Connection conn = owner()) {
+            new Fixture(conn, Instant.now().minus(10, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS)).seed();
+        }
+        assertTrue(flyway(null).migrate().success);
+        String upgraded;
+        try (Connection conn = owner()) {
+            upgraded = string(conn, privileges);
+        }
+
+        String clean;
+        dropDisposableDatabase();
+        createDisposableDatabase();
+        assertTrue(flyway(null).migrate().success);
+        try (Connection conn = owner()) {
+            clean = string(conn, privileges);
+            assertFalse(clean.contains("spatial_ref_sys:DELETE") || clean.contains("spatial_ref_sys:UPDATE"));
+            assertFalse(clean.contains("users:DELETE") || clean.contains("place_media:DELETE") || clean.contains("places:DELETE")
+                    || clean.contains("rateable_targets:DELETE"));
+        }
+        assertEquals(clean, upgraded);
     }
 
     private void assertReport(Connection conn, UUID report, String status, boolean legacy, UUID decidedBy) throws SQLException {

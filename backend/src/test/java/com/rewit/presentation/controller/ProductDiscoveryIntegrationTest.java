@@ -2,6 +2,7 @@ package com.rewit.presentation.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProductRepository;
 import com.rewit.domain.model.Place;
@@ -76,7 +77,7 @@ class ProductDiscoveryIntegrationTest {
     void cleanUp() {
         // Place e product são especializações de rateable_targets (ON DELETE CASCADE: identificadores e presenças)
         for (UUID id : createdTargets) {
-            jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", id);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", id);
         }
     }
 

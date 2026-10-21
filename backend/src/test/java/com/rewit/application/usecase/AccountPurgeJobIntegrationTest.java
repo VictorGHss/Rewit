@@ -123,13 +123,14 @@ class AccountPurgeJobIntegrationTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).apply(springSecurity()).build();
-        jdbcTemplate.update("DELETE FROM users WHERE account_status = 'DELETED' AND email LIKE ?", FIXTURE_EMAIL_PATTERN);
+        // Exclusão física de fixtures é administrativa: o runtime não apaga usuários (V37)
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM users WHERE account_status = 'DELETED' AND email LIKE ?", FIXTURE_EMAIL_PATTERN);
     }
 
     @AfterEach
     void tearDown() {
         for (UUID id : createdUsers) {
-            jdbcTemplate.update("DELETE FROM users WHERE id = ?", id);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM users WHERE id = ?", id);
         }
     }
 

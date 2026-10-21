@@ -528,7 +528,7 @@ class FeedV2ControllerIntegrationTest {
 
     private void cleanupReview(UUID reviewId) {
         if (reviewId != null) {
-            jdbcTemplate.update("DELETE FROM review_targets WHERE review_id = ?", reviewId);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM review_targets WHERE review_id = ?", reviewId);
             PrivilegedTestDatabase.jdbc().update("DELETE FROM reviews WHERE id = ?", reviewId);
         }
     }
