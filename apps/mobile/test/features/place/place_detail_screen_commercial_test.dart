@@ -352,6 +352,22 @@ class _FakeCommercialRepository implements PlaceCommercialRepository {
     required String businessAccountId,
   }) async {}
 
+
+  @override
+  Future<PlaceDetail> getBusinessProfile(String placeId) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlaceDetail> updateBusinessProfile({
+    required String placeId,
+    required String businessAccountId,
+    String? description,
+    String? phone,
+    String? websiteUrl,
+    String? instagramUrl,
+    String? facebookUrl,
+  }) async =>
+      throw UnimplementedError();
 }
 
 void main() {

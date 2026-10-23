@@ -23,6 +23,10 @@ class PlaceDto {
   final bool isVerified;
   final String status;
   final String? photoUrl;
+  final String? phone;
+  final String? websiteUrl;
+  final String? instagramUrl;
+  final String? facebookUrl;
 
   const PlaceDto({
     required this.id,
@@ -43,6 +47,10 @@ class PlaceDto {
     required this.isVerified,
     required this.status,
     this.photoUrl,
+    this.phone,
+    this.websiteUrl,
+    this.instagramUrl,
+    this.facebookUrl,
   });
 
   factory PlaceDto.fromJson(Map<String, dynamic> json) {
@@ -54,6 +62,10 @@ class PlaceDto {
     final rawCity = (json['city'] as String?)?.trim();
     final rawState = (json['state'] as String?)?.trim();
     final rawPhotoUrl = (json['photoUrl'] as String?)?.trim();
+    final rawPhone = (json['phone'] as String?)?.trim();
+    final rawWebsiteUrl = (json['websiteUrl'] as String?)?.trim();
+    final rawInstagramUrl = (json['instagramUrl'] as String?)?.trim();
+    final rawFacebookUrl = (json['facebookUrl'] as String?)?.trim();
     return PlaceDto(
       id: rawId.trim(),
       name: rawName.trim(),
@@ -73,6 +85,10 @@ class PlaceDto {
       isVerified: json['isVerified'] as bool? ?? false,
       status: json['status'] as String? ?? 'ACTIVE',
       photoUrl: (rawPhotoUrl != null && rawPhotoUrl.isNotEmpty) ? rawPhotoUrl : null,
+      phone: (rawPhone != null && rawPhone.isNotEmpty) ? rawPhone : null,
+      websiteUrl: (rawWebsiteUrl != null && rawWebsiteUrl.isNotEmpty) ? rawWebsiteUrl : null,
+      instagramUrl: (rawInstagramUrl != null && rawInstagramUrl.isNotEmpty) ? rawInstagramUrl : null,
+      facebookUrl: (rawFacebookUrl != null && rawFacebookUrl.isNotEmpty) ? rawFacebookUrl : null,
     );
   }
 
@@ -96,6 +112,10 @@ class PlaceDto {
       'isVerified': isVerified,
       'status': status,
       if (photoUrl != null) 'photoUrl': photoUrl,
+      if (phone != null) 'phone': phone,
+      if (websiteUrl != null) 'websiteUrl': websiteUrl,
+      if (instagramUrl != null) 'instagramUrl': instagramUrl,
+      if (facebookUrl != null) 'facebookUrl': facebookUrl,
     };
   }
 
@@ -119,7 +139,41 @@ class PlaceDto {
       isVerified: isVerified,
       status: status,
       photoUrl: photoUrl,
+      phone: phone,
+      websiteUrl: websiteUrl,
+      instagramUrl: instagramUrl,
+      facebookUrl: facebookUrl,
     );
+  }
+}
+
+/// DTO de requisição para atualização do perfil comercial e contatos públicos (PUT /api/v1/places/{id}/business-profile).
+class UpdatePlaceBusinessProfileRequestDto {
+  final String businessAccountId;
+  final String? description;
+  final String? phone;
+  final String? websiteUrl;
+  final String? instagramUrl;
+  final String? facebookUrl;
+
+  const UpdatePlaceBusinessProfileRequestDto({
+    required this.businessAccountId,
+    this.description,
+    this.phone,
+    this.websiteUrl,
+    this.instagramUrl,
+    this.facebookUrl,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'businessAccountId': businessAccountId,
+      'description': (description != null && description!.trim().isNotEmpty) ? description!.trim() : null,
+      'phone': (phone != null && phone!.trim().isNotEmpty) ? phone!.trim() : null,
+      'websiteUrl': (websiteUrl != null && websiteUrl!.trim().isNotEmpty) ? websiteUrl!.trim() : null,
+      'instagramUrl': (instagramUrl != null && instagramUrl!.trim().isNotEmpty) ? instagramUrl!.trim() : null,
+      'facebookUrl': (facebookUrl != null && facebookUrl!.trim().isNotEmpty) ? facebookUrl!.trim() : null,
+    };
   }
 }
 

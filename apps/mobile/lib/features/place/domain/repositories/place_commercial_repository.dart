@@ -1,6 +1,7 @@
 import '../entities/place_commercial_entities.dart';
+import '../entities/place_detail.dart';
 
-/// Contrato de repositório para acesso aos dados comerciais de estabelecimentos (F2.1, F2.2, F2.3).
+/// Contrato de repositório para acesso aos dados comerciais de estabelecimentos (F2.1, F2.2, F2.3, F2.4).
 abstract class PlaceCommercialRepository {
   /// Obtém a grade de horários semanais de funcionamento (F2.1).
   Future<PlaceOpeningHours> getOpeningHours(String placeId);
@@ -46,5 +47,19 @@ abstract class PlaceCommercialRepository {
     required String placeId,
     required String productId,
     required String businessAccountId,
+  });
+
+  /// Obtém o perfil comercial e os contatos públicos do estabelecimento (F2.4).
+  Future<PlaceDetail> getBusinessProfile(String placeId);
+
+  /// Atualiza o perfil comercial e os contatos públicos do estabelecimento (F2.4).
+  Future<PlaceDetail> updateBusinessProfile({
+    required String placeId,
+    required String businessAccountId,
+    String? description,
+    String? phone,
+    String? websiteUrl,
+    String? instagramUrl,
+    String? facebookUrl,
   });
 }

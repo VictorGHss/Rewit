@@ -27,6 +27,7 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_commercial
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_business_profile_edit_screen.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/product/presentation/screens/product_detail_screen.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
@@ -68,6 +69,7 @@ class AppRouter {
   static const String placeOpeningHoursEdit = '/business/place-opening-hours-edit';
   static const String placeAmenitiesEdit = '/business/place-amenities-edit';
   static const String placeOffersManagement = '/business/place-offers-management';
+  static const String placeBusinessProfileEdit = '/business/place-business-profile-edit';
 
   static const String scanner = '/scanner';
 
@@ -534,6 +536,24 @@ class AppRouter {
             args: args,
             commercialRepository: placeCommercialRepository,
             searchRepository: searchRepository,
+          ),
+          settings: settings,
+        );
+
+      case placeBusinessProfileEdit:
+        final args = settings.arguments;
+        if (args is! PlaceBusinessProfileEditArgs) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Argumentos de perfil comercial ausentes.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => PlaceBusinessProfileEditScreen(
+            args: args,
+            commercialRepository: placeCommercialRepository,
           ),
           settings: settings,
         );

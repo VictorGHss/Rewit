@@ -9,6 +9,7 @@ import 'package:rewit_mobile/features/place/presentation/screens/place_media_gal
 import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_offers_management_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_business_profile_edit_screen.dart';
 
 
 class _FakeBusinessRepository implements BusinessRepository {
@@ -274,6 +275,47 @@ void main() {
       expect(capturedGalleryArgs!.placeId, 'place-abc');
       expect(capturedGalleryArgs!.businessAccountId, 'acc-def');
       expect(capturedGalleryArgs!.placeName, 'Livraria Central');
+    });
+
+    testWidgets('toque em "Perfil comercial" navega para a tela de edição do perfil comercial com argumentos corretos',
+        (tester) async {
+      const args = PlaceManagementArgs(
+        placeId: 'place-prof-123',
+        businessAccountId: 'acc-prof-456',
+        placeName: 'Empório Gourmet',
+        city: 'Curitiba',
+        state: 'PR',
+        status: 'APPROVED',
+      );
+
+      PlaceBusinessProfileEditArgs? capturedArgs;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          onGenerateRoute: (settings) {
+            if (settings.name == AppRouter.placeBusinessProfileEdit) {
+              capturedArgs = settings.arguments as PlaceBusinessProfileEditArgs?;
+              return MaterialPageRoute(
+                builder: (_) => const Scaffold(body: Text('Business Profile Edit Mock')),
+              );
+            }
+            return MaterialPageRoute(
+              builder: (_) => const PlaceManagementDashboardScreen(args: args),
+            );
+          },
+        ),
+      );
+
+      await tester.ensureVisible(find.byKey(const Key('manage_business_profile_option')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manage_business_profile_option')));
+      await tester.pumpAndSettle();
+
+      expect(capturedArgs, isNotNull);
+      expect(capturedArgs!.placeId, 'place-prof-123');
+      expect(capturedArgs!.businessAccountId, 'acc-prof-456');
+      expect(capturedArgs!.placeName, 'Empório Gourmet');
+      expect(capturedArgs!.isApproved, isTrue);
     });
 
     testWidgets('toque em "Ver perfil público" navega para a página pública do local',

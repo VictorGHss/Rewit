@@ -6,6 +6,7 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_commercial
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/state/place_opening_hours_edit_notifier.dart';
 
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 class _FakeCommercialRepository implements PlaceCommercialRepository {
   PlaceOpeningHours? openingHoursToReturn;
   Exception? exceptionToThrow;
@@ -98,6 +99,22 @@ class _FakeCommercialRepository implements PlaceCommercialRepository {
     required String businessAccountId,
   }) async {}
 
+
+  @override
+  Future<PlaceDetail> getBusinessProfile(String placeId) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlaceDetail> updateBusinessProfile({
+    required String placeId,
+    required String businessAccountId,
+    String? description,
+    String? phone,
+    String? websiteUrl,
+    String? instagramUrl,
+    String? facebookUrl,
+  }) async =>
+      throw UnimplementedError();
 }
 
 void main() {

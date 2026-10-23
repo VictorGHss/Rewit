@@ -7,6 +7,7 @@ import 'package:rewit_mobile/features/place/presentation/screens/place_media_gal
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_offers_management_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_business_profile_edit_screen.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
 /// Argumentos para inicialização do painel de gestão do estabelecimento.
@@ -137,6 +138,25 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                       Navigator.of(context).pushNamed(
                         AppRouter.placeOffersManagement,
                         arguments: PlaceOffersManagementArgs(
+                          placeId: args.placeId,
+                          businessAccountId: args.businessAccountId,
+                          placeName: args.placeName,
+                          isApproved: args.isApproved,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _buildActionCard(
+                    context,
+                    key: const Key('manage_business_profile_option'),
+                    icon: Icons.badge_outlined,
+                    title: 'Perfil comercial',
+                    subtitle: 'Atualize a descrição institucional e os contatos públicos do local',
+                    onTap: () {
+                      Navigator.of(context).pushNamed(
+                        AppRouter.placeBusinessProfileEdit,
+                        arguments: PlaceBusinessProfileEditArgs(
                           placeId: args.placeId,
                           businessAccountId: args.businessAccountId,
                           placeName: args.placeName,

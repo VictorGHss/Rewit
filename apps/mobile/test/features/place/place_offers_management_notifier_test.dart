@@ -6,6 +6,7 @@ import 'package:rewit_mobile/features/place/presentation/state/place_offers_mana
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 class _FakeCommercialRepository implements PlaceCommercialRepository {
   List<PlaceProductOffer> databaseOffers = [];
   Map<int, PlaceOffersPage> pagedResponses = {};
@@ -144,6 +145,22 @@ class _FakeCommercialRepository implements PlaceCommercialRepository {
     required String businessAccountId,
     required List<DaySchedule> days,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<PlaceDetail> getBusinessProfile(String placeId) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlaceDetail> updateBusinessProfile({
+    required String placeId,
+    required String businessAccountId,
+    String? description,
+    String? phone,
+    String? websiteUrl,
+    String? instagramUrl,
+    String? facebookUrl,
+  }) async =>
+      throw UnimplementedError();
 }
 
 class _FakeSearchRepository implements SearchRepository {

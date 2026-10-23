@@ -18,6 +18,10 @@ class PlaceDetail {
   final bool isVerified;
   final String status;
   final String? photoUrl;
+  final String? phone;
+  final String? websiteUrl;
+  final String? instagramUrl;
+  final String? facebookUrl;
 
   const PlaceDetail({
     required this.id,
@@ -38,17 +42,28 @@ class PlaceDetail {
     required this.isVerified,
     required this.status,
     this.photoUrl,
+    this.phone,
+    this.websiteUrl,
+    this.instagramUrl,
+    this.facebookUrl,
   });
 
   bool get hasCoordinates => latitude != null && longitude != null;
 
-  PlaceDetail copyWith({String? photoUrl}) {
+  PlaceDetail copyWith({
+    String? photoUrl,
+    String? description,
+    String? phone,
+    String? websiteUrl,
+    String? instagramUrl,
+    String? facebookUrl,
+  }) {
     return PlaceDetail(
       id: id,
       name: name,
       slug: slug,
       category: category,
-      description: description,
+      description: description ?? this.description,
       addressText: addressText,
       streetNumber: streetNumber,
       neighborhood: neighborhood,
@@ -62,6 +77,10 @@ class PlaceDetail {
       isVerified: isVerified,
       status: status,
       photoUrl: photoUrl ?? this.photoUrl,
+      phone: phone ?? this.phone,
+      websiteUrl: websiteUrl ?? this.websiteUrl,
+      instagramUrl: instagramUrl ?? this.instagramUrl,
+      facebookUrl: facebookUrl ?? this.facebookUrl,
     );
   }
 
