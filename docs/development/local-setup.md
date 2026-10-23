@@ -118,7 +118,18 @@ cd backend
 
 ## 6. Uso do Cloudflare Tunnel para Testes Externos
 
-O backend roda no Windows (Java 25, `mvnw`) e o `cloudflared` roda no container do profile `tunnel` do `docker-compose.yml`, encaminhando para `http://host.docker.internal:8080`. O Docker Desktop entrega essa conexão ao host como vinda de `127.0.0.1`, por isso a API publicada escuta só em loopback.
+O backend roda no Windows (Java 25, `mvnw`) e o `cloudflared` roda em container, encaminhando para `http://host.docker.internal:8080`. O Docker Desktop entrega essa conexão ao host como vinda de `127.0.0.1`, por isso a API publicada escuta só em loopback.
+
+O ambiente publicado nunca usa os serviços de desenvolvimento (`rewit-postgres`, `rewit-redis`, `rewit-seaweedfs`) nem o `.env`: tem infraestrutura própria em `docker-compose.external-test.yml` (projeto `rewit-external-test`) e arquivo de ambiente próprio, `.env.external-test` (ignorado pelo Git).
+
+| Recurso | Nome | Porta no host |
+| :--- | :--- | :--- |
+| PostgreSQL + PostGIS (banco `rewit_ext`, volume `rewit_ext_postgres_data`) | `rewit-ext-postgres` | `127.0.0.1:15432` |
+| Redis com senha (volume `rewit_ext_redis_data`) | `rewit-ext-redis` | `127.0.0.1:16379` |
+| SeaweedFS S3 (volume `rewit_ext_seaweedfs_data`) | `rewit-ext-seaweedfs` | `127.0.0.1:18333` |
+| Cloudflare Tunnel (profile `tunnel`, rede `rewit-ext-tunnel`, sem acesso aos dados) | `rewit-ext-cloudflared` | nenhuma |
+
+O banco nasce vazio e o schema é criado pelas migrations Flyway na primeira inicialização da API.
 
 ### Perfil `external-test`
 
@@ -127,20 +138,27 @@ Use sempre `SPRING_PROFILES_ACTIVE=external-test`, sem o perfil `local`:
 - toda credencial vem do ambiente, sem valor padrão (`DATABASE_URL`, `APP_DB_PASSWORD`, `POSTGRES_USER`/`POSTGRES_PASSWORD` ou `FLYWAY_DB_*`, `REDIS_HOST`, `REDIS_PORT`, `OBJECT_STORAGE_*`, `JWT_SECRET`, `RATE_LIMIT_KEY_SECRET`); variável ausente, vazia ou com valor de exemplo (`change-me`, fallbacks `rewit_local_*`) impede a inicialização com mensagem que cita a variável, nunca o valor;
 - API em `127.0.0.1:8080` (`SERVER_ADDRESS` sobrescreve) e Actuator em `127.0.0.1:8081`; o túnel encaminha somente a 8080;
 - IP do cliente gravado na sessão vem de `CF-Connecting-IP` e só quando a conexão chega de `127.0.0.1` (o `cloudflared`); `X-Forwarded-For` não é lido em nenhum perfil;
-- Swagger UI e OpenAPI desligados.
-
-As migrations Flyway pendentes são aplicadas no banco de `DATABASE_URL` na inicialização. Confirme o banco antes de apontar a API para ele.
+- Swagger UI e OpenAPI desligados;
+- as portas dos serviços compartilhados (PostgreSQL 5432/5433, Redis 6379, storage 8333) são recusadas: as migrations Flyway nunca rodam no banco de desenvolvimento.
 
 ### Inicialização
 
-Na raiz do repositório (o script carrega o `.env` só no próprio processo, sem exibir valores):
+Na raiz do repositório, uma única vez, gere o ambiente (credenciais aleatórias, nunca exibidas; o script não sobrescreve um arquivo existente):
 ```powershell
-docker compose up -d postgres redis seaweedfs
+.\scripts\new-external-test-env.ps1
+```
+Suba a infraestrutura isolada e a API (o script de inicialização só aceita arquivo com `REWIT_EXTERNAL_TEST_ENV=1` e carrega as variáveis só no próprio processo):
+```powershell
+docker compose -f docker-compose.external-test.yml --env-file .env.external-test up -d
 .\scripts\start-external-test.ps1
 ```
-Em outro terminal, com `CLOUDFLARE_TUNNEL_TOKEN` definido no `.env`:
+Em outro terminal, depois de preencher `CLOUDFLARE_TUNNEL_TOKEN` no `.env.external-test`:
 ```powershell
-docker compose --profile tunnel up -d cloudflared
+docker compose -f docker-compose.external-test.yml --env-file .env.external-test --profile tunnel up -d cloudflared
+```
+Para parar sem perder os dados de teste, use `stop` (o `down -v` apagaria os volumes `rewit_ext_*`):
+```powershell
+docker compose -f docker-compose.external-test.yml --env-file .env.external-test stop
 ```
 No painel Cloudflare, o hostname público do túnel aponta para o serviço `HTTP` `host.docker.internal:8080`, sem aplicação do Cloudflare Access (o app mobile não passa por SSO).
 

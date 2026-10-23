@@ -23,14 +23,14 @@ class ExternalTestEnvironmentValidatorTest {
     private static MockEnvironment validEnvironment() {
         MockEnvironment env = new MockEnvironment();
         env.setActiveProfiles(ExternalTestEnvironmentValidator.PROFILE);
-        env.setProperty("spring.datasource.url", "jdbc:postgresql://127.0.0.1:5433/rewit_db");
+        env.setProperty("spring.datasource.url", "jdbc:postgresql://127.0.0.1:15432/rewit_ext");
         env.setProperty("spring.datasource.username", "rewit_app");
         env.setProperty("spring.datasource.password", DB_PASSWORD);
         env.setProperty("spring.flyway.user", "rewit_user");
         env.setProperty("spring.flyway.password", "senha-migracao-Lw3!rT9d");
         env.setProperty("spring.data.redis.host", "localhost");
-        env.setProperty("spring.data.redis.port", "6379");
-        env.setProperty("rewit.minio.endpoint", "http://localhost:8333");
+        env.setProperty("spring.data.redis.port", "16379");
+        env.setProperty("rewit.minio.endpoint", "http://127.0.0.1:18333");
         env.setProperty("rewit.minio.access-key", "storage-access-4hJ8");
         env.setProperty("rewit.minio.secret-key", STORAGE_SECRET);
         env.setProperty("rewit.minio.bucket-name", "rewit-local");
@@ -125,6 +125,44 @@ class ExternalTestEnvironmentValidatorTest {
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> ExternalTestEnvironmentValidator.validate(env));
         assertTrue(error.getMessage().contains("spring.datasource.url precisa ser jdbc:postgresql://host:porta/database"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"jdbc:postgresql://127.0.0.1:5433/rewit_db", "jdbc:postgresql://localhost:5432/rewit_db",
+            "jdbc:postgresql://127.0.0.1:5433/rewit_ext?sslmode=disable"})
+    @DisplayName("Banco compartilhado de desenvolvimento (5432/5433) é recusado: as migrations rodariam nele")
+    void rejectsSharedDevelopmentDatabase(String url) {
+        MockEnvironment env = validEnvironment();
+        env.setProperty("spring.datasource.url", url);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> ExternalTestEnvironmentValidator.validate(env));
+        assertTrue(error.getMessage().contains("PostgreSQL compartilhado"));
+        assertTrue(error.getMessage().contains("docker-compose.external-test.yml"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"6379", "abc"})
+    @DisplayName("Redis compartilhado (6379) ou porta inválida é recusado")
+    void rejectsSharedDevelopmentRedis(String port) {
+        MockEnvironment env = validEnvironment();
+        env.setProperty("spring.data.redis.port", port);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> ExternalTestEnvironmentValidator.validate(env));
+        assertTrue(error.getMessage().contains("spring.data.redis.port"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://localhost:8333", "http://127.0.0.1", "nao e uma url"})
+    @DisplayName("Storage compartilhado (8333), sem porta explícita ou inválido é recusado")
+    void rejectsSharedDevelopmentStorage(String endpoint) {
+        MockEnvironment env = validEnvironment();
+        env.setProperty("rewit.minio.endpoint", endpoint);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> ExternalTestEnvironmentValidator.validate(env));
+        assertTrue(error.getMessage().contains("rewit.minio.endpoint"));
     }
 
     @Test

@@ -5,6 +5,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Profiles;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -63,7 +65,17 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
             "rewit_local_secret"
     );
 
-    private static final Pattern JDBC_URL_WITH_EXPLICIT_PORT = Pattern.compile("^jdbc:postgresql://[^/?#:]+:\\d+/[^/?#]+.*$");
+    private static final Pattern JDBC_URL_WITH_EXPLICIT_PORT = Pattern.compile("^jdbc:postgresql://[^/?#:]+:(\\d+)/[^/?#]+.*$");
+
+    /**
+     * Portas dos serviços compartilhados de desenvolvimento (docker-compose.yml e PostgreSQL nativo). O perfil publicado
+     * usa a infraestrutura isolada de docker-compose.external-test.yml: apontar para estas portas aplicaria as
+     * migrations Flyway e gravaria dados de teste externo nos serviços de desenvolvimento.
+     */
+    private static final Set<Integer> SHARED_POSTGRES_PORTS = Set.of(5432, 5433);
+    private static final int SHARED_REDIS_PORT = 6379;
+    private static final int SHARED_STORAGE_PORT = 8333;
+    private static final String ISOLATED_INFRASTRUCTURE = "use a infraestrutura isolada (docker-compose.external-test.yml)";
 
     /** Propriedades efetivas exigidas pelo perfil. */
     public static Set<String> requiredProperties() {
@@ -98,14 +110,50 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
             if (CREDENTIAL_PROPERTIES.contains(property) && INSECURE_VALUES.contains(value.trim().toLowerCase(Locale.ROOT))) {
                 errors.add(property + " usa valor de exemplo ou de desenvolvimento: defina " + variable + " com um segredo próprio");
             }
-            if ("spring.datasource.url".equals(property) && !JDBC_URL_WITH_EXPLICIT_PORT.matcher(value.trim()).matches()) {
-                errors.add(property + " precisa ser jdbc:postgresql://host:porta/database com porta explícita: corrija "
-                        + variable);
+            if ("spring.datasource.url".equals(property)) {
+                Matcher jdbc = JDBC_URL_WITH_EXPLICIT_PORT.matcher(value.trim());
+                if (!jdbc.matches()) {
+                    errors.add(property + " precisa ser jdbc:postgresql://host:porta/database com porta explícita: corrija "
+                            + variable);
+                } else if (SHARED_POSTGRES_PORTS.contains(Integer.parseInt(jdbc.group(1)))) {
+                    errors.add(property + " aponta para o PostgreSQL compartilhado de desenvolvimento (porta "
+                            + jdbc.group(1) + "): " + ISOLATED_INFRASTRUCTURE);
+                }
+            }
+            if ("spring.data.redis.port".equals(property) && !isIsolatedPort(value, SHARED_REDIS_PORT)) {
+                errors.add(property + " precisa ser uma porta diferente da do Redis compartilhado (" + SHARED_REDIS_PORT + "): "
+                        + ISOLATED_INFRASTRUCTURE);
+            }
+            if ("rewit.minio.endpoint".equals(property) && !isIsolatedPort(storagePort(value), SHARED_STORAGE_PORT)) {
+                errors.add(property + " precisa ser http(s)://host:porta com porta diferente da do storage compartilhado ("
+                        + SHARED_STORAGE_PORT + "): " + ISOLATED_INFRASTRUCTURE);
             }
         }
 
         if (!errors.isEmpty()) {
             throw new InvalidConfigurationException(errors);
+        }
+    }
+
+    /** Porta explícita, numérica e diferente da compartilhada. */
+    private static boolean isIsolatedPort(String port, int sharedPort) {
+        if (port == null) {
+            return false;
+        }
+        try {
+            return Integer.parseInt(port.trim()) != sharedPort;
+        } catch (NumberFormatException invalid) {
+            return false;
+        }
+    }
+
+    /** Porta explícita do endpoint S3, ou null quando ausente ou inválida. */
+    private static String storagePort(String endpoint) {
+        try {
+            int port = URI.create(endpoint.trim()).getPort();
+            return port == -1 ? null : String.valueOf(port);
+        } catch (IllegalArgumentException invalid) {
+            return null;
         }
     }
 

@@ -2,13 +2,13 @@
 # As variáveis do arquivo de ambiente entram só neste processo: nada é impresso nem passado na linha de comando.
 [CmdletBinding()]
 param(
-    # Arquivo de ambiente com os segredos (padrão: .env na raiz do repositório)
+    # Arquivo de ambiente isolado (padrão: .env.external-test, gerado por scripts/new-external-test-env.ps1)
     [string]$EnvFile
 )
 
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $EnvFile) {
-    $EnvFile = Join-Path $root ".env"
+    $EnvFile = Join-Path $root ".env.external-test"
 }
 
 Write-Host "==================================================" -ForegroundColor Cyan
@@ -16,7 +16,13 @@ Write-Host "   Iniciando API Rewit (perfil external-test)     " -ForegroundColor
 Write-Host "==================================================" -ForegroundColor Cyan
 
 if (-not (Test-Path $EnvFile)) {
-    Write-Error "Arquivo de ambiente não encontrado: $EnvFile"
+    Write-Error "Arquivo de ambiente não encontrado: $EnvFile (gere com scripts/new-external-test-env.ps1)"
+    exit 1
+}
+
+# O .env de desenvolvimento aponta para os serviços compartilhados: as migrations Flyway rodariam no banco deles
+if (-not (Select-String -Path $EnvFile -Pattern '^\s*REWIT_EXTERNAL_TEST_ENV\s*=\s*1\s*$' -Quiet)) {
+    Write-Error "$EnvFile não é um ambiente external-test (falta REWIT_EXTERNAL_TEST_ENV=1). Use o .env.external-test."
     exit 1
 }
 

@@ -1,0 +1,136 @@
+# ==============================================================================
+# REWIT - INFRAESTRUTURA ISOLADA DO PERFIL external-test (CLOUDFLARE TUNNEL)
+# ==============================================================================
+# Projeto Compose próprio (rewit-external-test): containers, redes e volumes não
+# compartilham nada com o docker-compose.yml de desenvolvimento. Portas só em 127.0.0.1.
+#
+# Sempre com o arquivo de ambiente próprio, gerado por scripts/new-external-test-env.ps1
+# (sem --env-file, o Compose leria o .env de desenvolvimento e a validação abaixo recusa):
+#   docker compose -f docker-compose.external-test.yml --env-file .env.external-test up -d
+#   docker compose -f docker-compose.external-test.yml --env-file .env.external-test --profile tunnel up -d cloudflared
+# ==============================================================================
+
+name: rewit-external-test
+
+x-env-guard: &env-guard
+  # Marcador presente só no .env.external-test
+  rewit.environment: ${REWIT_EXTERNAL_TEST_ENV:?use --env-file .env.external-test (gerado por scripts/new-external-test-env.ps1)}
+
+networks:
+  # Serviços de dados
+  rewit-ext-network:
+    driver: bridge
+    name: rewit-ext-network
+  # cloudflared sozinho: alcança só host.docker.internal, nunca o banco, o Redis ou o storage
+  rewit-ext-tunnel:
+    driver: bridge
+    name: rewit-ext-tunnel
+
+volumes:
+  postgres_data:
+    name: rewit_ext_postgres_data
+  redis_data:
+    name: rewit_ext_redis_data
+  seaweedfs_data:
+    name: rewit_ext_seaweedfs_data
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. POSTGRESQL 18 + POSTGIS 3.6 (banco limpo, schema criado pelas migrations Flyway)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgis/postgis:18-3.6
+    container_name: rewit-ext-postgres
+    restart: unless-stopped
+    labels: *env-guard
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      APP_DB_USER: rewit_app
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:?}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+      # Fonte única do SQL de provisionamento da role de runtime (usada pelo init e por rotação)
+      - ./infrastructure/postgres:/opt/rewit/postgres:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - rewit-ext-network
+
+  # ----------------------------------------------------------------------------
+  # 2. REDIS 8 (rate limiting), com senha própria
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:8-alpine
+    container_name: rewit-ext-redis
+    restart: unless-stopped
+    labels: *env-guard
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      # redis-cli do healthcheck autentica por esta variável, sem a senha na linha de comando
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:?}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - rewit-ext-network
+
+  # ----------------------------------------------------------------------------
+  # 3. SEAWEEDFS 4.47 (S3); só a API S3 é publicada, sem master/filer
+  # ----------------------------------------------------------------------------
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.47
+    container_name: rewit-ext-seaweedfs
+    restart: unless-stopped
+    labels: *env-guard
+    command: mini -dir=/data -s3.port=8333
+    environment:
+      AWS_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY:?}
+      AWS_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_KEY:?}
+      S3_BUCKET: ${OBJECT_STORAGE_BUCKET:?}
+    ports:
+      - "127.0.0.1:${OBJECT_STORAGE_PORT:?}:8333"
+    volumes:
+      - seaweedfs_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -s http://localhost:9333/cluster/status > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - rewit-ext-network
+
+  # ----------------------------------------------------------------------------
+  # 4. CLOUDFLARE TUNNEL - PROFILE tunnel (rota no painel: HTTP host.docker.internal:8080)
+  # ----------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.3
+    container_name: rewit-ext-cloudflared
+    restart: unless-stopped
+    profiles:
+      - tunnel
+    labels: *env-guard
+    command: tunnel --no-autoupdate run
+    environment:
+      # Vazio até o túnel ser criado no painel; o cloudflared recusa iniciar sem token
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    networks:
+      - rewit-ext-tunnel
