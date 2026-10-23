@@ -1,0 +1,86 @@
+# Perfil de testes externos pelo Cloudflare Tunnel (SPRING_PROFILES_ACTIVE=external-test, usado sem o perfil local).
+# Toda credencial vem do ambiente, sem valor padrão: ExternalTestEnvironmentValidator recusa a inicialização com
+# variável ausente, vazia ou com valor de exemplo, antes de qualquer conexão.
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${APP_DB_USER:rewit_app}
+    password: ${APP_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    user: ${FLYWAY_DB_USER:${POSTGRES_USER}}
+    password: ${FLYWAY_DB_PASSWORD:${POSTGRES_PASSWORD}}
+    baseline-on-migrate: true
+    validate-on-migrate: true
+    # Lock de sessão: migrations não transacionais (CREATE INDEX CONCURRENTLY, V16) esperariam
+    # a transação do próprio lock transacional do Flyway e nunca terminariam
+    postgresql:
+      transactional-lock: false
+
+  jpa:
+    open-in-view: false
+    database-platform: org.hibernate.spatial.dialect.postgis.PostgisPG95Dialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3000ms
+
+server:
+  # Só loopback: o cloudflared (container) chega por host.docker.internal, que o Docker Desktop entrega como
+  # 127.0.0.1; a rede local não alcança a API sem passar pela Cloudflare
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  # IP do cliente: CF-Connecting-IP (definido pela borda da Cloudflare) só é aceito quando o peer imediato é o
+  # cloudflared local; X-Forwarded-For não é lido
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      remote-ip-header: CF-Connecting-IP
+      internal-proxies: '127\.0\.0\.1'
+
+# Actuator (8081) fica em loopback e nunca é rota do túnel
+management:
+  server:
+    address: 127.0.0.1
+
+# Swagger UI e OpenAPI desligados no ambiente publicado
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+rewit:
+  minio:
+    endpoint: ${OBJECT_STORAGE_ENDPOINT}
+    access-key: ${OBJECT_STORAGE_ACCESS_KEY}
+    secret-key: ${OBJECT_STORAGE_SECRET_KEY}
+    bucket-name: ${OBJECT_STORAGE_BUCKET}
+  security:
+    jwt-secret: ${JWT_SECRET}
+    jwt-issuer: ${JWT_ISSUER:rewit-api}
+    jwt-audience: ${JWT_AUDIENCE:rewit-clients}
+    access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}
+    refresh-token-ttl-seconds: ${JWT_REFRESH_TOKEN_TTL_SECONDS:2592000}
+  rate-limit:
+    key-secret: ${RATE_LIMIT_KEY_SECRET}
+  spatial:
+    default-validation-radius-meters: 50
+  google:
+    places:
+      api-key: ${GOOGLE_PLACES_API_KEY:}
+      base-url: ${GOOGLE_PLACES_BASE_URL:https://places.googleapis.com}
+      connect-timeout-ms: 3000
+      read-timeout-ms: 5000

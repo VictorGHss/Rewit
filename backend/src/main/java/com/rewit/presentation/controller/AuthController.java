@@ -150,11 +150,12 @@ public class AuthController {
         );
     }
 
+    /**
+     * IP do cliente gravado na sessão. Headers de proxy enviados pelo cliente nunca são lidos aqui: atrás de um proxy
+     * confiável, o RemoteIpValve do Tomcat (server.tomcat.remoteip, perfil external-test) já substitui o remoteAddr,
+     * e só quando o peer imediato está na lista de proxies internos.
+     */
     private String extractClientIp(HttpServletRequest request) {
-        String xForwardedFor = request.getHeader("X-Forwarded-For");
-        if (xForwardedFor != null && !xForwardedFor.isBlank()) {
-            return xForwardedFor.split(",")[0].trim();
-        }
         return request.getRemoteAddr();
     }
 }

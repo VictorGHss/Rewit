@@ -133,7 +133,7 @@ Se um refresh token já revogado for apresentado:
 
 Um job agendado (`AuthSessionCleanupScheduler` → `CleanupAuthSessionsUseCase`) executa duas fases. Cada lote roda em transação própria, e as linhas são selecionadas com `FOR UPDATE SKIP LOCKED`.
 
-**1. Metadados técnicos.** `ip_address` e `user_agent` são gravados no login, no registro e no refresh, e não são lidos por nenhum código. O job os limpa (`NULL`) em sessões que deixaram de estar ativas: `revoked_at IS NOT NULL OR expires_at < now()`. Nenhum campo de segurança é alterado. Sessões ativas mantêm os metadados; a retenção nesse período é uma decisão de produto/jurídico pendente (ADR-011).
+**1. Metadados técnicos.** `ip_address` e `user_agent` são gravados no login, no registro e no refresh, e não são lidos por nenhum código. O IP é o `remoteAddr` da conexão: headers de proxy enviados pelo cliente (`X-Forwarded-For`) não são lidos; atrás do Cloudflare Tunnel (perfil `external-test`), o RemoteIpValve do Tomcat substitui o `remoteAddr` por `CF-Connecting-IP` só quando o peer é o `cloudflared` local (`127.0.0.1`). O job os limpa (`NULL`) em sessões que deixaram de estar ativas: `revoked_at IS NOT NULL OR expires_at < now()`. Nenhum campo de segurança é alterado. Sessões ativas mantêm os metadados; a retenção nesse período é uma decisão de produto/jurídico pendente (ADR-011).
 
 **2. Purge.** Uma sessão só é removida quando `expires_at < now() AND replaced_by_session_id IS NULL`:
 

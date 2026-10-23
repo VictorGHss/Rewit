@@ -8,7 +8,7 @@ Este guia orienta a preparação do ambiente de desenvolvimento local na máquin
 
 | Ferramenta | Versão Recomendada | Finalidade |
 | :--- | :--- | :--- |
-| **Java JDK** | 21 LTS (Temurin / Corretto) | Execução do Backend Spring Boot |
+| **Java JDK** | 25 (Temurin / Corretto; `java.version` do `pom.xml`) | Execução do Backend Spring Boot |
 | **Maven** | 3.9+ (ou `./mvnw`) | Build e gerenciamento do Java |
 | **Docker Desktop** | 26+ (com Compose v2) | Orquestração da infraestrutura de banco e cache |
 | **Node.js** | 20 LTS (LTS Iron) | Execução e build do Admin React |
@@ -116,11 +116,38 @@ cd backend
 
 ---
 
-## 6. Uso do Cloudflare Tunnel para Testes Móveis
+## 6. Uso do Cloudflare Tunnel para Testes Externos
 
-Para permitir que o aplicativo mobile rodando em um celular físico conectado na rede móvel 4G/5G acesse seu backend rodando no notebook:
-1. Instale o executável `cloudflared` ou utilize o profile Docker preparado no `docker-compose.yml`:
-   ```powershell
-   docker compose --profile tunnel up -d cloudflared
-   ```
-2. Configure seu token no arquivo `.env` sob `CLOUDFLARE_TUNNEL_TOKEN`.
+O backend roda no Windows (Java 25, `mvnw`) e o `cloudflared` roda no container do profile `tunnel` do `docker-compose.yml`, encaminhando para `http://host.docker.internal:8080`. O Docker Desktop entrega essa conexão ao host como vinda de `127.0.0.1`, por isso a API publicada escuta só em loopback.
+
+### Perfil `external-test`
+
+Use sempre `SPRING_PROFILES_ACTIVE=external-test`, sem o perfil `local`:
+
+- toda credencial vem do ambiente, sem valor padrão (`DATABASE_URL`, `APP_DB_PASSWORD`, `POSTGRES_USER`/`POSTGRES_PASSWORD` ou `FLYWAY_DB_*`, `REDIS_HOST`, `REDIS_PORT`, `OBJECT_STORAGE_*`, `JWT_SECRET`, `RATE_LIMIT_KEY_SECRET`); variável ausente, vazia ou com valor de exemplo (`change-me`, fallbacks `rewit_local_*`) impede a inicialização com mensagem que cita a variável, nunca o valor;
+- API em `127.0.0.1:8080` (`SERVER_ADDRESS` sobrescreve) e Actuator em `127.0.0.1:8081`; o túnel encaminha somente a 8080;
+- IP do cliente gravado na sessão vem de `CF-Connecting-IP` e só quando a conexão chega de `127.0.0.1` (o `cloudflared`); `X-Forwarded-For` não é lido em nenhum perfil;
+- Swagger UI e OpenAPI desligados.
+
+As migrations Flyway pendentes são aplicadas no banco de `DATABASE_URL` na inicialização. Confirme o banco antes de apontar a API para ele.
+
+### Inicialização
+
+Na raiz do repositório (o script carrega o `.env` só no próprio processo, sem exibir valores):
+```powershell
+docker compose up -d postgres redis seaweedfs
+.\scripts\start-external-test.ps1
+```
+Em outro terminal, com `CLOUDFLARE_TUNNEL_TOKEN` definido no `.env`:
+```powershell
+docker compose --profile tunnel up -d cloudflared
+```
+No painel Cloudflare, o hostname público do túnel aponta para o serviço `HTTP` `host.docker.internal:8080`, sem aplicação do Cloudflare Access (o app mobile não passa por SSO).
+
+### App mobile
+
+A URL base vem de `--dart-define=API_BASE_URL=<origem>`, sem `/api/v1` (as rotas já incluem o prefixo):
+```powershell
+cd apps/mobile
+flutter run --dart-define=API_BASE_URL=https://rewit-app.ctrls.dev.br
+```
