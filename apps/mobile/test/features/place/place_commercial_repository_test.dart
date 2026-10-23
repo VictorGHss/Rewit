@@ -359,6 +359,86 @@ void main() {
       expect(httpClient.requestedDeleteQueryParameters, {'businessAccountId': 'biz-1'});
     });
 
+    test('getBusinessProfile obtém perfil e contatos via ApiEndpoints.placeDetail', () async {
+      final jsonResponse = {
+        'id': 'place-uuid-1',
+        'name': 'Café Colonial',
+        'slug': 'cafe-colonial',
+        'category': 'ALIMENTACAO',
+        'description': 'Café colonial tradicional.',
+        'addressText': 'Estrada Velha, 100',
+        'city': 'Gramado',
+        'state': 'RS',
+        'country': 'BR',
+        'validationRadiusMeters': 50,
+        'origin': 'CLAIMED',
+        'isVerified': true,
+        'status': 'ACTIVE',
+        'phone': '+55 (54) 99999-8888',
+        'websiteUrl': 'https://cafecolonial.com.br',
+        'instagramUrl': 'https://instagram.com/cafecolonial',
+        'facebookUrl': 'https://facebook.com/cafecolonial',
+      };
+      httpClient.responseToReturn = http.Response(jsonEncode(jsonResponse), 200);
+
+      final result = await repository.getBusinessProfile('place-uuid-1');
+
+      expect(httpClient.requestedPath, ApiEndpoints.placeDetail('place-uuid-1'));
+      expect(result.id, 'place-uuid-1');
+      expect(result.name, 'Café Colonial');
+      expect(result.description, 'Café colonial tradicional.');
+      expect(result.phone, '+55 (54) 99999-8888');
+      expect(result.websiteUrl, 'https://cafecolonial.com.br');
+      expect(result.instagramUrl, 'https://instagram.com/cafecolonial');
+      expect(result.facebookUrl, 'https://facebook.com/cafecolonial');
+    });
+
+    test('updateBusinessProfile envia PUT para ApiEndpoints.placeBusinessProfile com payload completo', () async {
+      final jsonResponse = {
+        'id': 'place-uuid-1',
+        'name': 'Café Colonial',
+        'slug': 'cafe-colonial',
+        'category': 'ALIMENTACAO',
+        'description': 'Nova descrição do café.',
+        'addressText': 'Estrada Velha, 100',
+        'city': 'Gramado',
+        'state': 'RS',
+        'country': 'BR',
+        'validationRadiusMeters': 50,
+        'origin': 'CLAIMED',
+        'isVerified': true,
+        'status': 'ACTIVE',
+        'phone': '+55 (54) 91111-2222',
+        'websiteUrl': null,
+        'instagramUrl': 'https://instagram.com/cafecolonialnovo',
+        'facebookUrl': null,
+      };
+      httpClient.responseToReturn = http.Response(jsonEncode(jsonResponse), 200);
+
+      final result = await repository.updateBusinessProfile(
+        placeId: 'place-uuid-1',
+        businessAccountId: 'biz-acc-1',
+        description: 'Nova descrição do café.',
+        phone: '+55 (54) 91111-2222',
+        websiteUrl: null,
+        instagramUrl: 'https://instagram.com/cafecolonialnovo',
+        facebookUrl: '',
+      );
+
+      expect(httpClient.requestedPutPath, ApiEndpoints.placeBusinessProfile('place-uuid-1'));
+      final decodedBody = jsonDecode(httpClient.requestedPutBody as String) as Map<String, dynamic>;
+      expect(decodedBody['businessAccountId'], 'biz-acc-1');
+      expect(decodedBody['description'], 'Nova descrição do café.');
+      expect(decodedBody['phone'], '+55 (54) 91111-2222');
+      expect(decodedBody['websiteUrl'], isNull);
+      expect(decodedBody['instagramUrl'], 'https://instagram.com/cafecolonialnovo');
+      expect(decodedBody['facebookUrl'], isNull);
+
+      expect(result.description, 'Nova descrição do café.');
+      expect(result.phone, '+55 (54) 91111-2222');
+      expect(result.websiteUrl, isNull);
+    });
+
     test('repassa ApiException e falhas de formato', () async {
       httpClient.exceptionToThrow = const ApiException(
         ProblemDetail(

@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'package:rewit_mobile/core/network/api_endpoints.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import '../../domain/entities/place_commercial_entities.dart';
+import '../../domain/entities/place_detail.dart';
 import '../../domain/repositories/place_commercial_repository.dart';
 import '../models/place_commercial_dtos.dart';
+import '../models/place_dtos.dart';
 
 /// Implementação de [PlaceCommercialRepository] consumindo a API REST do Rewit via [RewitHttpClient].
 class PlaceCommercialRepositoryImpl implements PlaceCommercialRepository {
@@ -154,5 +156,45 @@ class PlaceCommercialRepositoryImpl implements PlaceCommercialRepository {
       ApiEndpoints.placeProductOffer(placeId, productId),
       queryParameters: {'businessAccountId': businessAccountId},
     );
+  }
+
+  @override
+  Future<PlaceDetail> getBusinessProfile(String placeId) async {
+    final response = await httpClient.get(ApiEndpoints.placeDetail(placeId));
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao obter perfil do local.');
+    }
+    return PlaceDto.fromJson(decoded).toEntity();
+  }
+
+  @override
+  Future<PlaceDetail> updateBusinessProfile({
+    required String placeId,
+    required String businessAccountId,
+    String? description,
+    String? phone,
+    String? websiteUrl,
+    String? instagramUrl,
+    String? facebookUrl,
+  }) async {
+    final payload = UpdatePlaceBusinessProfileRequestDto(
+      businessAccountId: businessAccountId,
+      description: description,
+      phone: phone,
+      websiteUrl: websiteUrl,
+      instagramUrl: instagramUrl,
+      facebookUrl: facebookUrl,
+    ).toJson();
+
+    final response = await httpClient.put(
+      ApiEndpoints.placeBusinessProfile(placeId),
+      body: jsonEncode(payload),
+    );
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao atualizar perfil comercial.');
+    }
+    return PlaceDto.fromJson(decoded).toEntity();
   }
 }

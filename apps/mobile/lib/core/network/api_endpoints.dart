@@ -110,7 +110,7 @@ class ApiEndpoints {
   static String businessResponse(String responseId) =>
       '/api/v1/business-responses/$responseId';
 
-  // Informações Comerciais de Estabelecimentos (F2.1, F2.2, F2.3)
+  // Informações Comerciais de Estabelecimentos (F2.1, F2.2, F2.3, F2.4)
   static String placeOpeningHours(String placeId) => '/api/v1/places/$placeId/opening-hours';
   static const String placeAmenityOptions = '/api/v1/places/amenity-options';
   static String placeAmenities(String placeId) => '/api/v1/places/$placeId/amenities';
@@ -118,4 +118,6 @@ class ApiEndpoints {
       '/api/v1/places/$placeId/offers/$productId';
   static String placeOffers(String placeId, {int page = 0, int size = 50}) =>
       '/api/v1/places/$placeId/offers?page=$page&size=$size';
+  static String placeBusinessProfile(String placeId) =>
+      '/api/v1/places/$placeId/business-profile';
 }
