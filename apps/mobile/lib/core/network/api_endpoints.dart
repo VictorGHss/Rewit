@@ -114,6 +114,8 @@ class ApiEndpoints {
   static String placeOpeningHours(String placeId) => '/api/v1/places/$placeId/opening-hours';
   static const String placeAmenityOptions = '/api/v1/places/amenity-options';
   static String placeAmenities(String placeId) => '/api/v1/places/$placeId/amenities';
+  static String placeProductOffer(String placeId, String productId) =>
+      '/api/v1/places/$placeId/offers/$productId';
   static String placeOffers(String placeId, {int page = 0, int size = 50}) =>
       '/api/v1/places/$placeId/offers?page=$page&size=$size';
 }

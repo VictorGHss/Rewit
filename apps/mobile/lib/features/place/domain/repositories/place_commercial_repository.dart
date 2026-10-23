@@ -31,4 +31,20 @@ abstract class PlaceCommercialRepository {
     int page = 0,
     int size = 50,
   });
+  /// Publica ou atualiza os termos comerciais da oferta de um produto no estabelecimento (F2.3).
+  Future<PlaceProductOffer> upsertOffer({
+    required String placeId,
+    required String productId,
+    required String businessAccountId,
+    required String availability,
+    double? price,
+    String currency = 'BRL',
+  });
+
+  /// Retira da vitrine a oferta comercial de um produto no estabelecimento (F2.3).
+  Future<void> deleteOffer({
+    required String placeId,
+    required String productId,
+    required String businessAccountId,
+  });
 }

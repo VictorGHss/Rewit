@@ -11,6 +11,7 @@ import 'package:rewit_mobile/features/business/presentation/screens/place_manage
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_offers_management_screen.dart';
 
 import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
@@ -66,6 +67,7 @@ class AppRouter {
   static const String placeMediaGallery = '/place/media-gallery';
   static const String placeOpeningHoursEdit = '/business/place-opening-hours-edit';
   static const String placeAmenitiesEdit = '/business/place-amenities-edit';
+  static const String placeOffersManagement = '/business/place-offers-management';
 
   static const String scanner = '/scanner';
 
@@ -440,6 +442,7 @@ class AppRouter {
             placeRepository: placeRepository,
             reviewMediaRepository: reviewMediaRepository,
             commercialRepository: placeCommercialRepository,
+            searchRepository: searchRepository,
           ),
           settings: settings,
         );
@@ -512,6 +515,25 @@ class AppRouter {
           builder: (context) => PlaceAmenitiesEditScreen(
             args: args,
             commercialRepository: placeCommercialRepository,
+          ),
+          settings: settings,
+        );
+
+      case placeOffersManagement:
+        final args = settings.arguments;
+        if (args is! PlaceOffersManagementArgs) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Argumentos de ofertas ausentes.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => PlaceOffersManagementScreen(
+            args: args,
+            commercialRepository: placeCommercialRepository,
+            searchRepository: searchRepository,
           ),
           settings: settings,
         );
