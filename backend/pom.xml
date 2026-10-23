@@ -21,6 +21,8 @@
         <java.version>25</java.version>
         <springdoc.version>2.6.0</springdoc.version>
         <minio.version>8.6.0</minio.version>
+        <!-- Mesma versão de OkHttp declarada pelo MinIO (minio-java#1670); revisar a cada upgrade do MinIO -->
+        <okhttp.version>5.1.0</okhttp.version>
     </properties>
 
     <dependencies>
@@ -61,7 +63,8 @@
                     <groupId>io.micrometer</groupId>
                     <artifactId>micrometer-registry-otlp</artifactId>
                 </exclusion>
-                <!-- O sender OkHttp traz okhttp-jvm 5.x, que duplica o pacote okhttp3 do okhttp 4.x usado pelo MinIO -->
+                <!-- Traces saem pelo sender do JDK; o sender OkHttp traria outra cópia do OkHttp, cuja versão
+                     acompanharia o OpenTelemetry e não o MinIO -->
                 <exclusion>
                     <groupId>io.opentelemetry</groupId>
                     <artifactId>opentelemetry-exporter-sender-okhttp</artifactId>
@@ -118,6 +121,19 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
             <version>${minio.version}</version>
+            <exclusions>
+                <!-- No Maven, okhttp 5.x é só o artefato de metadados Kotlin Multiplatform, sem classes: as classes
+                     de okhttp3 vêm de okhttp-jvm, declarado abaixo -->
+                <exclusion>
+                    <groupId>com.squareup.okhttp3</groupId>
+                    <artifactId>okhttp</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp-jvm</artifactId>
+            <version>${okhttp.version}</version>
         </dependency>
 
         <!-- Image Metadata & EXIF / GPS Handling -->

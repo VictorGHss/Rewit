@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.sdk.common.CompletableResultCode;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
-import javax.annotation.Nonnull;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -384,7 +384,7 @@ class ObservabilityTracingLoggingIntegrationTest {
         final List<SpanData> spans = new CopyOnWriteArrayList<>();
 
         @Override
-        public CompletableResultCode export(@Nonnull Collection<SpanData> batch) {
+        public CompletableResultCode export(@NonNull Collection<SpanData> batch) {
             spans.addAll(batch);
             return CompletableResultCode.ofSuccess();
         }
