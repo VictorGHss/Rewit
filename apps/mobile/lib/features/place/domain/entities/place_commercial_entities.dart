@@ -14,6 +14,30 @@ class TimeInterval {
   /// Retorna o intervalo formatado em português (ex: "08:00 às 18:00").
   String get formatted => '$openTime às $closeTime';
 
+  TimeInterval copyWith({
+    String? openTime,
+    String? closeTime,
+  }) {
+    return TimeInterval(
+      openTime: openTime ?? this.openTime,
+      closeTime: closeTime ?? this.closeTime,
+    );
+  }
+
+  /// Verifica se dois intervalos se sobrepõem no mesmo dia [openTime, closeTime).
+  bool overlapsWith(TimeInterval other) {
+    return _isTimeBefore(openTime, other.closeTime) &&
+        _isTimeBefore(other.openTime, closeTime);
+  }
+
+  static bool _isTimeBefore(String t1, String t2) {
+    final p1 = t1.split(':').map(int.parse).toList();
+    final p2 = t2.split(':').map(int.parse).toList();
+    if (p1[0] != p2[0]) return p1[0] < p2[0];
+    return p1[1] < p2[1];
+  }
+
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -40,6 +64,20 @@ class DaySchedule {
     required this.closed,
     this.intervals = const [],
   });
+
+  DaySchedule copyWith({
+    int? dayOfWeek,
+    String? dayName,
+    bool? closed,
+    List<TimeInterval>? intervals,
+  }) {
+    return DaySchedule(
+      dayOfWeek: dayOfWeek ?? this.dayOfWeek,
+      dayName: dayName ?? this.dayName,
+      closed: closed ?? this.closed,
+      intervals: intervals ?? this.intervals,
+    );
+  }
 
   /// Nome amigável em português do dia da semana.
   String get localizedDayName {

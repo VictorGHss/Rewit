@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_commercial_repository.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 
 /// Argumentos para inicialização do painel de gestão do estabelecimento.
@@ -30,12 +33,14 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
   final PlaceManagementArgs args;
   final PlaceRepository? placeRepository;
   final ReviewMediaRepository? reviewMediaRepository;
+  final PlaceCommercialRepository? commercialRepository;
 
   const PlaceManagementDashboardScreen({
     super.key,
     required this.args,
     this.placeRepository,
     this.reviewMediaRepository,
+    this.commercialRepository,
   });
 
   @override
@@ -75,6 +80,44 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                           placeId: args.placeId,
                           businessAccountId: args.businessAccountId,
                           placeName: args.placeName,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _buildActionCard(
+                    context,
+                    key: const Key('manage_opening_hours_option'),
+                    icon: Icons.access_time_outlined,
+                    title: 'Horários de funcionamento',
+                    subtitle: 'Configure os dias e períodos de atendimento do estabelecimento',
+                    onTap: () {
+                      Navigator.of(context).pushNamed(
+                        AppRouter.placeOpeningHoursEdit,
+                        arguments: PlaceOpeningHoursEditArgs(
+                          placeId: args.placeId,
+                          businessAccountId: args.businessAccountId,
+                          placeName: args.placeName,
+                          isApproved: args.isApproved,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _buildActionCard(
+                    context,
+                    key: const Key('manage_amenities_option'),
+                    icon: Icons.checklist_outlined,
+                    title: 'Comodidades',
+                    subtitle: 'Selecione as facilidades oferecidas aos clientes, como Wi-Fi e estacionamento',
+                    onTap: () {
+                      Navigator.of(context).pushNamed(
+                        AppRouter.placeAmenitiesEdit,
+                        arguments: PlaceAmenitiesEditArgs(
+                          placeId: args.placeId,
+                          businessAccountId: args.businessAccountId,
+                          placeName: args.placeName,
+                          isApproved: args.isApproved,
                         ),
                       );
                     },
@@ -278,7 +321,7 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Edição de horários, comodidades e ofertas de produtos serão integradas nos próximos passos de evolução do painel.',
+              'Catálogo de produtos e ofertas comerciais oficiais serão integradas nos próximos passos de evolução do painel.',
               style: TextStyle(
                 fontSize: 12,
                 color: theme.colorScheme.onSurface.withAlpha(160),
@@ -291,4 +334,3 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
     );
   }
 }
-

@@ -9,6 +9,9 @@ import 'package:rewit_mobile/features/business/domain/repositories/business_resp
 import 'package:rewit_mobile/features/business/presentation/screens/my_business_accounts_screen.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/place_management_dashboard_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
+
 import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
@@ -61,6 +64,9 @@ class AppRouter {
   static const String businessAccounts = '/settings/business-accounts';
   static const String placeManagement = '/business/place-management';
   static const String placeMediaGallery = '/place/media-gallery';
+  static const String placeOpeningHoursEdit = '/business/place-opening-hours-edit';
+  static const String placeAmenitiesEdit = '/business/place-amenities-edit';
+
   static const String scanner = '/scanner';
 
   final AuthNotifier authNotifier;
@@ -433,6 +439,7 @@ class AppRouter {
             args: args,
             placeRepository: placeRepository,
             reviewMediaRepository: reviewMediaRepository,
+            commercialRepository: placeCommercialRepository,
           ),
           settings: settings,
         );
@@ -469,6 +476,42 @@ class AppRouter {
                     );
                   }
                 : null,
+          ),
+          settings: settings,
+        );
+
+      case placeOpeningHoursEdit:
+        final args = settings.arguments;
+        if (args is! PlaceOpeningHoursEditArgs) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Argumentos de horários ausentes.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => PlaceOpeningHoursEditScreen(
+            args: args,
+            commercialRepository: placeCommercialRepository,
+          ),
+          settings: settings,
+        );
+
+      case placeAmenitiesEdit:
+        final args = settings.arguments;
+        if (args is! PlaceAmenitiesEditArgs) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Argumentos de comodidades ausentes.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => PlaceAmenitiesEditScreen(
+            args: args,
+            commercialRepository: placeCommercialRepository,
           ),
           settings: settings,
         );
