@@ -1,6 +1,8 @@
 package com.rewit.domain.model;
 
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.ReviewMediaStatus;
+import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.enums.VerificationStatus;
 import org.junit.jupiter.api.DisplayName;
@@ -118,5 +120,83 @@ class CatalogDomainInvariantsTest {
         assertEquals("AVAILABLE", presence.getStatus(), "Disponibilidade padrão deve ser AVAILABLE");
         assertNotNull(presence.getFirstDiscoveredAt());
         assertNotNull(presence.getLastConfirmedAt());
+    }
+
+    @Test
+    @DisplayName("Place: Deve permitir cadastro sem GPS (ambas coordenadas nulas) e rejeitar par incompleto")
+    void shouldValidatePlaceWithoutCoordinates() {
+        // Ambas coordenadas nulas é válido (cadastro manual sem GPS)
+        Place placeWithoutCoords = new Place(
+                null, "Pastel da Dona Ana", "pastel-da-dona-ana", "ALIMENTACAO", "Pastelaria tradicional",
+                "Rua das Palmeiras, 45", null, null, null, null, "BR",
+                null, null, 100, "MANUAL", false, null, "ACTIVE"
+        );
+        assertNull(placeWithoutCoords.getLatitude());
+        assertNull(placeWithoutCoords.getLongitude());
+        assertNull(placeWithoutCoords.getCity());
+        assertNull(placeWithoutCoords.getState());
+        assertFalse(placeWithoutCoords.hasCoordinates());
+
+        // Apenas latitude fornecida -> deve falhar
+        assertThrows(BusinessException.class, () -> new Place(
+                null, "Pastel", "pastel", "ALIMENTACAO", null,
+                "Rua 1", null, null, null, null, "BR",
+                -25.42, null, 100, "MANUAL", false, null, "ACTIVE"
+        ));
+
+        // Apenas longitude fornecida -> deve falhar
+        assertThrows(BusinessException.class, () -> new Place(
+                null, "Pastel", "pastel", "ALIMENTACAO", null,
+                "Rua 1", null, null, null, null, "BR",
+                null, -49.27, 100, "MANUAL", false, null, "ACTIVE"
+        ));
+    }
+
+    @Test
+    @DisplayName("PlaceMedia: Deve exigir placeId, objectKey, mimeType e dimensões válidas")
+    void shouldValidatePlaceMediaInvariants() {
+        UUID placeId = UUID.randomUUID();
+        UUID uploaderId = UUID.randomUUID();
+
+        // placeId nulo
+        assertThrows(BusinessException.class, () -> new PlaceMedia(
+                null, null, uploaderId, "places/p1/media.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600
+        ));
+
+        // objectKey nula ou em branco
+        assertThrows(BusinessException.class, () -> new PlaceMedia(
+                null, placeId, uploaderId, "   ",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600
+        ));
+
+        // mimeType nulo ou em branco
+        assertThrows(BusinessException.class, () -> new PlaceMedia(
+                null, placeId, uploaderId, "places/p1/media.jpg",
+                ReviewMediaType.IMAGE, "  ", 2048L, 800, 600
+        ));
+
+        // sizeBytes <= 0
+        assertThrows(BusinessException.class, () -> new PlaceMedia(
+                null, placeId, uploaderId, "places/p1/media.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 0L, 800, 600
+        ));
+
+        // Construção válida
+        PlaceMedia media = new PlaceMedia(
+                null, placeId, uploaderId, "places/p1/media.jpg",
+                ReviewMediaType.IMAGE, "image/jpeg", 2048L, 1024, 768
+        );
+        assertNotNull(media.getId());
+        assertEquals(placeId, media.getPlaceId());
+        assertEquals(uploaderId, media.getUserId());
+        assertEquals(ReviewMediaType.IMAGE, media.getMediaType());
+        assertEquals("places/p1/media.jpg", media.getObjectKey());
+        assertEquals("image/jpeg", media.getMimeType());
+        assertEquals(2048L, media.getSizeBytes());
+        assertEquals(1024, media.getWidth());
+        assertEquals(768, media.getHeight());
+        assertEquals(com.rewit.domain.enums.PlaceMediaStatus.ACTIVE, media.getStatus());
+        assertNotNull(media.getCreatedAt());
     }
 }

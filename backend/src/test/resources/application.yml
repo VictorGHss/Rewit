@@ -1,16 +1,30 @@
 # Configuração padrão de testes automatizados
-# Define porta do PostgreSQL para 5433 (ou POSTGRES_PORT do ambiente) e um segredo válido de teste
+# Exige configuração explícita de infraestrutura descartável de teste (A-1, A-1b): somente variáveis TEST_*,
+# sem valores padrão e sem fallback para variáveis de desenvolvimento. Variável ausente => o contexto não sobe
+# (TestInfrastructureSafetyValidator falha antes de qualquer conexão). Ver docs/development/local-setup.md.
 spring:
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/${POSTGRES_DB:rewit_db}}
-    username: ${POSTGRES_USER:rewit_user}
-    password: ${POSTGRES_PASSWORD:rewit_local_password}
-  jpa:
-    open-in-view: false
-  # Mesmo lock de sessão da aplicação: a V16 usa CREATE INDEX CONCURRENTLY (não transacional)
+    url: ${TEST_DATASOURCE_URL}
+    username: ${TEST_APP_DB_USER}
+    password: ${TEST_APP_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      idle-timeout: 10000
+      max-lifetime: 30000
   flyway:
+    user: ${TEST_MIGRATION_DB_USER}
+    password: ${TEST_MIGRATION_DB_PASSWORD}
     postgresql:
       transactional-lock: false
+  data:
+    redis:
+      host: ${TEST_REDIS_HOST}
+      port: ${TEST_REDIS_PORT}
+      password: ${TEST_REDIS_PASSWORD:}
+      timeout: 3000ms
+  jpa:
+    open-in-view: false
 
 # Observabilidade V1 (ADR-012): nenhum span é exportado nos testes; os testes de tracing religam a exportação
 # para um exportador em memória. Logs ficam em texto e o Actuator no default (só health na porta da aplicação).
@@ -23,38 +37,28 @@ rewit:
   outbox:
     # Poller desligado em TODOS os testes: o agendador @Scheduled não deve
     # disputar linhas do outbox com testes que seguram locks manualmente.
-    # O teste da Parte W invoca o poller diretamente (sem relógio real).
     poller-enabled: false
     # Purge desligado em TODOS os testes (Step 27.4, Parte T): nenhum DELETE
     # por relógio pode disputar com cenários que semeiam linhas antigas.
-    # O teste da Parte Q invoca o purge diretamente (sem relógio real).
     purge-enabled: false
-  # Cleanup de auth_sessions desligado em TODOS os testes: os testes do Step 29.3 chamam o use case diretamente.
   auth-session-cleanup:
     enabled: false
-  # GC de storage desligado em TODOS os testes: nenhum ciclo agendado toca o bucket compartilhado.
-  # Os testes do Step 28.5 montam o orquestrador diretamente, com objetos próprios.
   storage-gc:
     enabled: false
-  # Rate limiting usa o Redis de teste compartilhado. Segredo aleatório por contexto: as chaves mudam a cada
-  # execução e contexto, então contadores de execuções anteriores não interferem.
   rate-limit:
     key-secret: test-rate-limit-key-${random.uuid}
     auth:
       registration:
-        # A suíte cadastra centenas de usuários em sequência; o limite de cadastro é testado em contexto próprio
         limit: 1000000
-  # Gerado por contexto, como o do rate limiting: nenhum segredo fixo no repositório
   account:
     email-reservation-secret: ${random.uuid}${random.uuid}
-    # Job de purge desligado em TODOS os testes: nenhum purge por relógio disputa com cenários que excluem contas.
-    # Os testes do job montam a orquestração diretamente.
     purge:
       enabled: false
   minio:
-    endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:8333}
-    access-key: ${OBJECT_STORAGE_ACCESS_KEY:change-me}
-    secret-key: ${OBJECT_STORAGE_SECRET_KEY:change-me}
-    bucket-name: ${OBJECT_STORAGE_BUCKET:rewit-local}
+    endpoint: ${TEST_STORAGE_ENDPOINT}
+    access-key: ${TEST_STORAGE_ACCESS_KEY}
+    secret-key: ${TEST_STORAGE_SECRET_KEY}
+    bucket-name: ${TEST_STORAGE_BUCKET}
   security:
-    jwt-secret: ${JWT_SECRET:test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!}
+    # Segredo fixo de teste: não herda JWT_SECRET do ambiente de desenvolvimento
+    jwt-secret: test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!

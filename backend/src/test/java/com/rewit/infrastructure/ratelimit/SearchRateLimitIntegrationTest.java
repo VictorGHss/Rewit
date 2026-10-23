@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.ratelimit.RateLimitSubject;
 import com.rewit.application.ratelimit.RateLimitedAction;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.TestInfrastructureConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,8 +52,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SearchRateLimitIntegrationTest {
 
     private static final long WINDOW_WAIT_MILLIS = 2_300;
-    private static final String REDIS_HOST = envOrDefault("REDIS_HOST", "localhost");
-    private static final int REDIS_PORT = Integer.parseInt(envOrDefault("REDIS_PORT", "6379"));
+    // A-1b: endpoint explícito e validado (somente TEST_REDIS_HOST/TEST_REDIS_PORT, sem defaults)
+    private static final String REDIS_HOST = TestInfrastructureConfig.current().redisHost();
+    private static final int REDIS_PORT = TestInfrastructureConfig.current().redisPort();
 
     @Autowired
     private WebApplicationContext webApplicationContext;
@@ -169,8 +171,4 @@ class SearchRateLimitIntegrationTest {
 
     private record TestUser(UUID id, String accessToken) {}
 
-    private static String envOrDefault(String name, String fallback) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? fallback : value;
-    }
 }

@@ -26,6 +26,7 @@ import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewDiscussion;
 import com.rewit.domain.model.User;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -143,8 +144,8 @@ class ModerateDiscussionIntegrationTest {
     void conflictsOfInterestAreForbidden() {
         ReviewDiscussion comment = quarantinedComment();
         // Autor e denunciante também são moderadores atuais: passam pela política e são barrados pelo conflito
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id IN (?, ?)", commenter.getId(),
-                reporters.get(0).getId());
+        PrivilegedTestDatabase.assignRole(commenter.getId(), "MODERATOR");
+        PrivilegedTestDatabase.assignRole(reporters.get(0).getId(), "MODERATOR");
 
         BusinessException self = assertThrows(BusinessException.class,
                 () -> moderate(comment, commenter, DiscussionModerationAction.RESTORE_DISCUSSION));
@@ -351,8 +352,12 @@ class ModerateDiscussionIntegrationTest {
     private User createUser(String prefix, Role role) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         User candidate = new User(null, prefix + "." + suffix + "@rewit.test", "hash", AuthProvider.LOCAL, null);
-        candidate.changeRole(role);
         User user = userRepository.save(candidate);
+        // Papel é atribuição administrativa (a role de runtime não pode alterá-lo)
+        if (role != Role.USER) {
+            PrivilegedTestDatabase.assignRole(user.getId(), role.name());
+            user.changeRole(role);
+        }
         profileRepository.save(new Profile(null, user.getId(), "md_" + suffix, "Conta " + prefix, null, null));
         return user;
     }

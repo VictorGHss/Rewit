@@ -2,6 +2,7 @@ package com.rewit.presentation.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.presentation.dto.auth.RegisterRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -156,7 +157,7 @@ class CatalogControllerIntegrationTest {
         String slug = "slug-duplicado-" + UUID.randomUUID().toString().substring(0, 8);
 
         CreatePlaceRequest reqA = new CreatePlaceRequest(
-                "Lugar A", slug, "BAR", null, "Rua A", null, null, "Curitiba", "PR", "BR", -25.4, -49.2, 50
+                "Lugar A " + slug, slug, "BAR", null, "Rua A " + slug, null, null, "Curitiba", "PR", "BR", -25.4, -49.2, 50
         );
         mockMvc.perform(post("/api/v1/places")
                         .header("Authorization", "Bearer " + user.accessToken())
@@ -165,7 +166,7 @@ class CatalogControllerIntegrationTest {
                 .andExpect(status().isCreated());
 
         CreatePlaceRequest reqB = new CreatePlaceRequest(
-                "Lugar B", slug, "CAFE", null, "Rua B", null, null, "Curitiba", "PR", "BR", -25.5, -49.3, 50
+                "Lugar B " + slug, slug, "CAFE", null, "Rua B " + slug, null, null, "Curitiba", "PR", "BR", -25.5, -49.3, 50
         );
         MvcResult conflictResult = mockMvc.perform(post("/api/v1/places")
                         .header("Authorization", "Bearer " + user.accessToken())
@@ -1131,7 +1132,8 @@ class CatalogControllerIntegrationTest {
      * place é a especialização de {@code rateable_targets} (FK com ON DELETE CASCADE), então a remoção parte dele.
      */
     private void deleteNearbyFixtures() {
-        jdbcTemplate.update("""
+        // Exclusão física de fixtures é administrativa: o runtime não apaga alvos (V37)
+        PrivilegedTestDatabase.jdbc().update("""
                 DELETE FROM rateable_targets WHERE id IN (
                     SELECT id FROM places
                     WHERE (slug LIKE ? AND ST_DWithin(coordinates, ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography, 10000))

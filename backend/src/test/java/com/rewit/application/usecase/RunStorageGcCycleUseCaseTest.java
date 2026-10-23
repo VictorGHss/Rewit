@@ -14,11 +14,15 @@ import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObject;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
 import com.rewit.application.port.ObjectStorageDeletionPort;
 import com.rewit.application.port.ObjectStorageListingPort;
+import com.rewit.application.port.PlaceMediaRepository;
 import com.rewit.application.port.ReviewMediaRepository;
 import com.rewit.application.port.StorageGcExecutionLock;
 import com.rewit.application.storage.FixedStorageQuarantineGracePolicy;
 import com.rewit.domain.enums.ReviewMediaStatus;
+import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.StorageQuarantineStatus;
+import com.rewit.domain.model.PlaceMedia;
+import com.rewit.domain.model.PlaceMediaObjectKey;
 import com.rewit.domain.model.ReviewMedia;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +55,7 @@ class RunStorageGcCycleUseCaseTest {
 
     private final InMemoryStorageQuarantineRepository quarantine = new InMemoryStorageQuarantineRepository();
     private final InMemoryObjectStore store = new InMemoryObjectStore();
+    private final QuarantineBackedPlaceReferences placeReferences = new QuarantineBackedPlaceReferences(quarantine);
     private final MutableClock clock = new MutableClock(T0);
     private final List<StorageGcCycleReport> observed = new ArrayList<>();
     private StorageGcExecutionLock lock = new FreeLock();
@@ -369,10 +374,106 @@ class RunStorageGcCycleUseCaseTest {
         assertTrue(messages.stream().anyMatch(message -> message.contains("modo=DESTRUTIVO") && message.contains("removidos=1")));
     }
 
+    // ---------- reconciliação dual (reviews/ e places/) ----------
+
+    @Test
+    @DisplayName("Ciclo com ambos os namespaces reconcilia reviews/ e places/ e exclui órfãos confirmados de ambos")
+    void bothNamespacesReconciledInSameCycle() {
+        String reviewKey = store.add(managedKey());
+        String placeKey = store.add(managedPlaceKey());
+        RunStorageGcCycleUseCase gc = dryRunDual(limits(10, 10, 10, 10));
+
+        StorageGcCycleReport first = gc.runCycle();
+        assertEquals(2, first.candidatesObserved());
+        assertEquals(2, first.gracePending());
+        assertTrue(first.listingComplete());
+        assertEquals(StorageGcRunStatus.COMPLETED, first.status());
+
+        clock.set(T0.plus(GRACE));
+        RunStorageGcCycleUseCase destructiveGc = destructiveDual(limits(10, 10, 10, 10));
+        StorageGcCycleReport second = destructiveGc.runCycle();
+
+        assertEquals(2, second.confirmedOrphans());
+        assertEquals(2, second.deletesAttempted());
+        assertEquals(2, second.deleted());
+        assertTrue(store.deleteCalls.containsAll(List.of(reviewKey, placeKey)));
+        assertFalse(store.objects.containsKey(reviewKey));
+        assertFalse(store.objects.containsKey(placeKey));
+    }
+
+    @Test
+    @DisplayName("Reviews e places mantêm cursores independentes; ciclo é PARTIAL se algum tiver páginas restantes")
+    void independentPaginationForNamespaces() {
+        List<String> reviewKeys = new ArrayList<>();
+        List<String> placeKeys = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            reviewKeys.add(store.add(managedKey()));
+            placeKeys.add(store.add(managedPlaceKey()));
+        }
+        reviewKeys.sort(null);
+        placeKeys.sort(null);
+
+        // maxPages = 1 por namespace; cada página tem 2 itens (tamanho da página é 2)
+        RunStorageGcCycleUseCase gc = dryRunDual(limits(1, 10, 10, 10));
+
+        StorageGcCycleReport first = gc.runCycle();
+        assertFalse(first.listingComplete());
+        assertEquals(StorageGcRunStatus.PARTIAL, first.status());
+        assertNotNull(gc.reviewResumeMarker());
+        assertNotNull(gc.placeResumeMarker());
+
+        // Segundo ciclo: continua dos marcadores e conclui a listagem
+        StorageGcCycleReport second = gc.runCycle();
+        assertTrue(second.listingComplete());
+        assertNull(gc.reviewResumeMarker());
+        assertNull(gc.placeResumeMarker());
+    }
+
+    @Test
+    @DisplayName("Reconciliação de places/ não apaga mídia com referência ativa ou em revisão")
+    void reconciliationOfPlacesDoesNotDeleteActiveOrUnderReviewMedia() {
+        String activePlaceKey = store.add(managedPlaceKey());
+        quarantine.references.put(activePlaceKey, ReviewMediaStatus.ACTIVE);
+
+        RunStorageGcCycleUseCase gc = destructiveDual(limits(10, 10, 10, 10));
+        StorageGcCycleReport first = gc.runCycle();
+        assertEquals(0, first.candidatesObserved(), "mídia ativa não deve ser observada como candidata a órfão");
+
+        clock.set(T0.plus(GRACE));
+        StorageGcCycleReport second = gc.runCycle();
+        assertEquals(0, second.deletesAttempted());
+        assertTrue(store.objects.containsKey(activePlaceKey), "mídia ativa deve continuar intacta no storage");
+    }
+
+    @Test
+    @DisplayName("Falha em um namespace interrompe o ciclo com status FAILED sem corromper o outro marcador")
+    void failureInPlacesNamespaceFailsCycleAndPreservesState() {
+        store.add(managedKey());
+        store.add(managedPlaceKey());
+
+        ReconcilePlaceMediaStorageUseCase failingPlaces = new ReconcilePlaceMediaStorageUseCase(
+                store, placeReferences, quarantine, 2, 1) {
+            @Override
+            public com.rewit.application.dto.storage.StorageReconciliationDtos.StorageReconciliationReport reconcile(String startAfter, Instant now) {
+                throw new IllegalStateException("erro de listagem no namespace places/");
+            }
+        };
+
+        RunStorageGcCycleUseCase gc = RunStorageGcCycleUseCase.dryRun(
+                lock, reconcile(), failingPlaces, quarantine, recheck(), report -> observed.add(report), clock, limits(10, 10, 10, 10));
+
+        StorageGcCycleReport report = gc.runCycle();
+        assertEquals(StorageGcRunStatus.FAILED, report.status());
+    }
+
     // ---------- montagem ----------
 
     private RunStorageGcCycleUseCase dryRun(StorageGcLimits limits) {
         return RunStorageGcCycleUseCase.dryRun(lock, reconcile(), quarantine, recheck(), report -> observed.add(report), clock, limits);
+    }
+
+    private RunStorageGcCycleUseCase dryRunDual(StorageGcLimits limits) {
+        return RunStorageGcCycleUseCase.dryRun(lock, reconcile(), reconcilePlaces(), quarantine, recheck(), report -> observed.add(report), clock, limits);
     }
 
     private RunStorageGcCycleUseCase destructive(StorageGcLimits limits) {
@@ -380,8 +481,17 @@ class RunStorageGcCycleUseCaseTest {
                 new PurgeConfirmedOrphanStorageObjectUseCase(quarantine, store), report -> observed.add(report), clock, limits);
     }
 
+    private RunStorageGcCycleUseCase destructiveDual(StorageGcLimits limits) {
+        return RunStorageGcCycleUseCase.destructive(lock, reconcile(), reconcilePlaces(), quarantine, recheck(),
+                new PurgeConfirmedOrphanStorageObjectUseCase(quarantine, store), report -> observed.add(report), clock, limits);
+    }
+
     private ReconcileReviewMediaStorageUseCase reconcile() {
         return new ReconcileReviewMediaStorageUseCase(store, new QuarantineBackedReferences(quarantine), quarantine, 2, 1);
+    }
+
+    private ReconcilePlaceMediaStorageUseCase reconcilePlaces() {
+        return new ReconcilePlaceMediaStorageUseCase(store, placeReferences, quarantine, 2, 1);
     }
 
     private RecheckQuarantinedStorageObjectUseCase recheck() {
@@ -394,6 +504,10 @@ class RunStorageGcCycleUseCaseTest {
 
     private static String managedKey() {
         return "reviews/" + UUID.randomUUID() + "/" + UUID.randomUUID() + "/image.jpg";
+    }
+
+    private static String managedPlaceKey() {
+        return "places/" + UUID.randomUUID() + "/" + UUID.randomUUID() + "/image.jpg";
     }
 
     private void observeWithoutObject(String key, Instant observedAt) {
@@ -485,6 +599,43 @@ class RunStorageGcCycleUseCaseTest {
         public long countActiveByReviewId(UUID reviewId) {
             throw new UnsupportedOperationException();
         }
+    }
+
+    private static final class QuarantineBackedPlaceReferences implements PlaceMediaRepository {
+
+        private final InMemoryStorageQuarantineRepository quarantine;
+
+        QuarantineBackedPlaceReferences(InMemoryStorageQuarantineRepository quarantine) {
+            this.quarantine = quarantine;
+        }
+
+        @Override
+        public List<PlaceMedia> findByObjectKeyIn(List<String> objectKeys) {
+            return objectKeys.stream()
+                    .filter(key -> quarantine.references.containsKey(key))
+                    .map(key -> new PlaceMedia(
+                            UUID.randomUUID(),
+                            PlaceMediaObjectKey.placeIdOf(key),
+                            UUID.randomUUID(),
+                            key,
+                            ReviewMediaType.IMAGE,
+                            "image/jpeg",
+                            100L,
+                            100,
+                            100,
+                            quarantine.references.get(key),
+                            T0,
+                            T0))
+                    .toList();
+        }
+
+        @Override public PlaceMedia save(PlaceMedia media) { throw new UnsupportedOperationException(); }
+        @Override public Optional<PlaceMedia> findById(UUID id) { throw new UnsupportedOperationException(); }
+        @Override public List<PlaceMedia> findActiveByPlaceId(UUID placeId) { throw new UnsupportedOperationException(); }
+        @Override public long countActiveByPlaceId(UUID placeId) { throw new UnsupportedOperationException(); }
+        @Override public Optional<PlaceMedia> findPrimaryByPlaceId(UUID placeId) { throw new UnsupportedOperationException(); }
+        @Override public Optional<PlaceMedia> findFirstActiveByPlaceId(UUID placeId) { throw new UnsupportedOperationException(); }
+        @Override public Optional<PlaceMedia> findByIdempotencyKey(UUID userId, UUID placeId, String idempotencyKey) { throw new UnsupportedOperationException(); }
     }
 
     private static final class FreeLock implements StorageGcExecutionLock {

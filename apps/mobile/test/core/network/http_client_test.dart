@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/core/error/api_exception.dart';
@@ -341,6 +342,1123 @@ void main() {
         client.get('/disconnected'),
         throwsA(isA<NetworkException>()),
       );
+    });
+
+    group('Isolamento de autenticação por origem (Security Hotfix S1)', () {
+      const testJwt = 'test-only-fake-jwt-token';
+
+      setUp(() async {
+        await tokenStorage.saveTokens(
+          accessToken: testJwt,
+          refreshToken: 'test-only-fake-refresh-token',
+        );
+      });
+
+      test('1. requisição autenticada para a mesma origem (relativa e absoluta com porta padrão) inclui o token', () async {
+        final mockClient = MockBaseClient((request) async {
+          expect(request.headers['authorization'], 'Bearer $testJwt');
+          return http.StreamedResponse(Stream.value(utf8.encode('{"ok":true}')), 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await client.get('/api/v1/me', requiresAuth: true);
+        await client.get('https://api.rewit.test/api/v1/me', requiresAuth: true);
+        await client.get('https://API.REWIT.TEST:443/api/v1/me', requiresAuth: true);
+
+        expect(mockClient.recordedRequests, hasLength(3));
+        for (final req in mockClient.recordedRequests) {
+          expect(req.headers['authorization'], 'Bearer $testJwt');
+        }
+      });
+
+      test('2. requisição para outro host não transmite o token', () async {
+        final mockClient = MockBaseClient((request) async {
+          expect(request.headers.containsKey('authorization'), isFalse);
+          expect(request.headers.containsKey('Authorization'), isFalse);
+          return http.StreamedResponse(Stream.value([1, 2, 3, 4]), 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final bytes = await client.getBytes('https://cdn.other-host.test/assets/photo.png');
+        expect(bytes, equals([1, 2, 3, 4]));
+
+        await client.get('https://other-host.test/public-info', requiresAuth: false);
+
+        expect(mockClient.recordedRequests, hasLength(2));
+        for (final req in mockClient.recordedRequests) {
+          expect(req.headers.containsKey('authorization'), isFalse);
+        }
+      });
+
+      test('3. requisição para host com nome semelhante mas origem diferente não transmite o token', () async {
+        final mockClient = MockBaseClient((request) async {
+          expect(request.headers.containsKey('authorization'), isFalse);
+          return http.StreamedResponse(Stream.value([10, 20]), 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final lookalikeUrls = [
+          'https://api.rewit.test.evil.test/image.png',
+          'https://evil-api.rewit.test/image.png',
+          'https://sub.api.rewit.test/image.png',
+          'https://api.rewit.test@evil.test/image.png',
+          '//api.rewit.test.evil.test/image.png',
+        ];
+
+        for (final url in lookalikeUrls) {
+          expect(client.isSameOriginUrl(url), isFalse, reason: 'URL $url não deve ser considerada mesma origem');
+          await expectLater(
+            client.get(url, requiresAuth: true),
+            throwsA(isA<NetworkException>()),
+          );
+        }
+
+        // Nenhuma chamada autenticada para host semelhante chegou a ser emitida
+        expect(mockClient.recordedRequests, isEmpty);
+
+        // Mesmo em getBytes (fluxo público para origem externa), o token nunca é enviado
+        await client.getBytes('https://api.rewit.test.evil.test/image.png');
+        await client.getBytes('https://evil-api.rewit.test/image.png');
+        expect(mockClient.recordedRequests, hasLength(2));
+        for (final req in mockClient.recordedRequests) {
+          expect(req.headers.containsKey('authorization'), isFalse);
+        }
+      });
+
+      test('4. diferença de esquema ou porta aplica a regra de origem corretamente', () async {
+        final mockClient = MockBaseClient((request) async {
+          return http.StreamedResponse(Stream.value([42]), 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        // Esquema diferente (http vs https) e porta diferente (8443 vs 443)
+        expect(client.isSameOriginUrl('http://api.rewit.test/api/v1/me'), isFalse);
+        expect(client.isSameOriginUrl('https://api.rewit.test:8443/api/v1/me'), isFalse);
+        expect(client.isSameOriginUrl('https://api.rewit.test:443/api/v1/me'), isTrue);
+
+        // Exigindo autenticação em esquema/porta divergentes: bloqueia antes do envio
+        await expectLater(
+          client.get('http://api.rewit.test/api/v1/me', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.get('https://api.rewit.test:8443/api/v1/me', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        expect(mockClient.recordedRequests, isEmpty);
+
+        // Em getBytes sem forçar requiresAuth: baixa como público sem enviar token quando esquema ou porta divergem
+        await client.getBytes('http://api.rewit.test/public.png');
+        await client.getBytes('https://api.rewit.test:8443/public.png');
+        // E envia token quando esquema e porta efetiva coincidem (:443)
+        await client.getBytes('https://api.rewit.test:443/protected.png');
+
+        expect(mockClient.recordedRequests, hasLength(3));
+        expect(mockClient.recordedRequests[0].headers.containsKey('authorization'), isFalse);
+        expect(mockClient.recordedRequests[1].headers.containsKey('authorization'), isFalse);
+        expect(mockClient.recordedRequests[2].headers['authorization'], 'Bearer $testJwt');
+      });
+
+      test('5. carregamento público de uma imagem externa continua funcionando sem autenticação indevida', () async {
+        final pngBytes = [137, 80, 78, 71, 13, 10, 26, 10];
+        final mockClient = MockBaseClient((request) async {
+          expect(request.url.toString(), 'https://images.external-catalog.test/products/cafe.png');
+          expect(request.headers.containsKey('authorization'), isFalse);
+          return http.StreamedResponse(
+            Stream.value(pngBytes),
+            200,
+            headers: {'content-type': 'image/png'},
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final result = await client.getBytes(
+          'https://images.external-catalog.test/products/cafe.png',
+        );
+
+        expect(result, equals(pngBytes));
+        expect(mockClient.recordedRequests, hasLength(1));
+        expect(mockClient.recordedRequests.single.headers.containsKey('authorization'), isFalse);
+      });
+
+      test('6. URL externa que exija autenticação falha de forma explícita e segura sem transmitir o token', () async {
+        final mockClient = MockBaseClient((request) async {
+          fail('Nenhuma requisição de rede deve ser enviada quando origem externa exige autenticação');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('https://external.test/secret', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.post('https://external.test/secret', body: {'a': 1}, requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.put('https://external.test/secret', body: {'a': 1}, requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.patch('https://external.test/secret', body: {'a': 1}, requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.delete('https://external.test/secret', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.postMultipart(
+            'https://external.test/upload',
+            fieldName: 'file',
+            fileBytes: [1, 2, 3],
+            filename: 'a.png',
+            requiresAuth: true,
+          ),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.getBytes('https://external.test/private.png', requiresAuth: true),
+          throwsA(isA<NetworkException>()),
+        );
+        await expectLater(
+          client.get(
+            'https://external.test/custom-header',
+            requiresAuth: false,
+            headers: {'Authorization': 'Bearer $testJwt'},
+          ),
+          throwsA(isA<NetworkException>()),
+        );
+
+        expect(mockClient.recordedRequests, isEmpty);
+      });
+
+      test('7. redirecionamento para origem externa não encaminha o token ao destino externo', () async {
+        final imageBytes = [137, 80, 78, 71];
+        final mockClient = MockBaseClient((request) async {
+          expect(request.followRedirects, isFalse);
+
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/reviews/rev-1/media/med-1') {
+            expect(request.headers['authorization'], 'Bearer $testJwt');
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': 'https://cdn.external-storage.test/bucket/med-1.png'},
+            );
+          }
+
+          if (request.url.toString() == 'https://cdn.external-storage.test/bucket/med-1.png') {
+            expect(request.headers.containsKey('authorization'), isFalse);
+            expect(request.headers.containsKey('Authorization'), isFalse);
+            return http.StreamedResponse(
+              Stream.value(imageBytes),
+              200,
+              headers: {'content-type': 'image/png'},
+            );
+          }
+
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final result = await client.getBytes('/api/v1/reviews/rev-1/media/med-1');
+
+        expect(result, equals(imageBytes));
+        expect(mockClient.recordedRequests, hasLength(2));
+        expect(
+          mockClient.recordedRequests[0].headers['authorization'],
+          'Bearer $testJwt',
+        );
+        expect(
+          mockClient.recordedRequests[1].headers.containsKey('authorization'),
+          isFalse,
+        );
+      });
+
+      test('redirecionamento dentro da mesma origem preserva o token, mas bloqueia mutação não-GET redirecionada 307 para origem externa', () async {
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/old-endpoint') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': '/api/v1/new-endpoint'},
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/new-endpoint') {
+            expect(request.headers['authorization'], 'Bearer $testJwt');
+            return http.StreamedResponse(
+              Stream.value(utf8.encode('{"redirected":true}')),
+              200,
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/mutate') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              307,
+              headers: {'location': 'https://external.test/mutate'},
+            );
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final getResponse = await client.get('/api/v1/old-endpoint');
+        expect(getResponse.statusCode, 200);
+        expect(mockClient.recordedRequests, hasLength(2));
+        expect(mockClient.recordedRequests[1].headers['authorization'], 'Bearer $testJwt');
+
+        await expectLater(
+          client.post('/api/v1/mutate', body: {'x': 1}),
+          throwsA(isA<NetworkException>()),
+        );
+        // A requisição POST não foi reenviada ao host externo após o 307
+        expect(mockClient.recordedRequests, hasLength(3));
+      });
+    });
+
+    group('Endurecimento de transporte HTTP (Security S1.1)', () {
+      const testJwt = 'valid-jwt-token-s1-1';
+
+      setUp(() async {
+        await tokenStorage.saveTokens(
+          accessToken: testJwt,
+          refreshToken: 'refresh-token',
+        );
+      });
+
+      test('1. Timeout durante a leitura lenta do corpo cancela a inscrição do stream', () async {
+        final streamController = StreamController<List<int>>();
+        var subscriptionCancelled = false;
+        streamController.onCancel = () {
+          subscriptionCancelled = true;
+        };
+
+        final mockClient = MockBaseClient((request) async {
+          // Envia o cabeçalho 200 imediatamente, mas o corpo emite lentamente e não conclui
+          streamController.add(utf8.encode('{"partial":'));
+          return http.StreamedResponse(
+            streamController.stream,
+            200,
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          timeout: const Duration(milliseconds: 60),
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/slow-body'),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Tempo limite'),
+            ),
+          ),
+        );
+
+        // Aguarda ciclo de microtarefas para confirmar cancelamento do stream
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(subscriptionCancelled, isTrue);
+        await streamController.close();
+      });
+
+      test('2. Prazo total da operação excedido após múltiplos redirecionamentos', () async {
+        final mockClient = MockBaseClient((request) async {
+          await Future<void>.delayed(const Duration(milliseconds: 35));
+          if (request.url.path == '/hop1') {
+            return http.StreamedResponse(const Stream.empty(), 302, headers: {'location': '/hop2'});
+          }
+          if (request.url.path == '/hop2') {
+            return http.StreamedResponse(const Stream.empty(), 302, headers: {'location': '/hop3'});
+          }
+          if (request.url.path == '/hop3') {
+            return http.StreamedResponse(Stream.value(utf8.encode('{"done": true}')), 200);
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          timeout: const Duration(milliseconds: 60),
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/hop1'),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Tempo limite'),
+            ),
+          ),
+        );
+
+        // Atingiu no máximo 2 hops antes de estourar o timeout acumulado
+        expect(mockClient.recordedRequests.length, lessThanOrEqualTo(2));
+      });
+
+      test('3. Resposta de imagem que excede o limite de bytes interrompe o stream', () async {
+        final streamController = StreamController<List<int>>();
+        var subscriptionCancelled = false;
+        streamController.onCancel = () {
+          subscriptionCancelled = true;
+        };
+
+        final mockClient = MockBaseClient((request) async {
+          // Emite chunks totalizando 1500 bytes
+          streamController.add(List.filled(600, 1));
+          streamController.add(List.filled(900, 2));
+          return http.StreamedResponse(streamController.stream, 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.getBytes('/large-image.jpg', maxBytes: 1024),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('excede o limite permitido de 1024 bytes'),
+            ),
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(subscriptionCancelled, isTrue);
+        await streamController.close();
+      });
+
+      test('4. Redirecionamento 301/302 de PUT, PATCH e DELETE falha de forma explícita sem conversão para GET', () async {
+        for (final method in ['PUT', 'PATCH', 'DELETE']) {
+          final mockClient = MockBaseClient((request) async {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': '/target-resource'},
+            );
+          });
+
+          final client = RewitHttpClient(
+            baseUrl: 'https://api.rewit.test',
+            client: mockClient,
+            tokenStorage: tokenStorage,
+          );
+
+          Future<http.Response> execute() {
+            switch (method) {
+              case 'PUT':
+                return client.put('/item', body: {'val': 1});
+              case 'PATCH':
+                return client.patch('/item', body: {'val': 2});
+              case 'DELETE':
+                return client.delete('/item');
+              default:
+                throw UnimplementedError();
+            }
+          }
+
+          await expectLater(
+            execute(),
+            throwsA(
+              isA<NetworkException>().having(
+                (e) => e.message,
+                'message',
+                contains('Redirecionamento automático de método mutador ($method) não permitido'),
+              ),
+            ),
+          );
+
+          // Nenhuma requisição convertida para GET foi emitida ao /target-resource
+          expect(mockClient.recordedRequests, hasLength(1));
+          expect(mockClient.recordedRequests.first.method, method);
+        }
+      });
+
+      test('5. Remoção de Authorization, Cookie e Proxy-Authorization ao trocar de origem', () async {
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.host == 'api.rewit.test') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': 'https://external-cdn.test/image.png'},
+            );
+          }
+          if (request.url.host == 'external-cdn.test') {
+            return http.StreamedResponse(
+              Stream.value(Uint8List.fromList([1, 2, 3])),
+              200,
+            );
+          }
+          fail('Host inesperado: ${request.url.host}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final bytes = await client.getBytes(
+          '/api/v1/download',
+          headers: {
+            'Cookie': 'session_token=xyz987',
+            'Proxy-Authorization': 'Basic cHJveHk6c2VjcmV0',
+            'X-Custom-Client': 'MobileApp',
+          },
+        );
+
+        expect(bytes, equals(Uint8List.fromList([1, 2, 3])));
+        expect(mockClient.recordedRequests, hasLength(2));
+
+        // Primeiro salto (origem API)
+        final req1 = mockClient.recordedRequests[0];
+        expect(req1.headers['authorization'], 'Bearer $testJwt');
+        expect(req1.headers['cookie'], 'session_token=xyz987');
+        expect(req1.headers['proxy-authorization'], 'Basic cHJveHk6c2VjcmV0');
+        expect(req1.headers['x-custom-client'], 'MobileApp');
+
+        // Segundo salto (host externo)
+        final req2 = mockClient.recordedRequests[1];
+        expect(req2.headers.containsKey('authorization'), isFalse);
+        expect(req2.headers.containsKey('cookie'), isFalse);
+        expect(req2.headers.containsKey('proxy-authorization'), isFalse);
+        expect(req2.headers['x-custom-client'], 'MobileApp');
+      });
+
+      test('6. Cadeia A → externo → A não recupera credenciais automaticamente', () async {
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.toString() == 'https://api.rewit.test/hop1') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': 'https://tracker.external.test/hop2'},
+            );
+          }
+          if (request.url.toString() == 'https://tracker.external.test/hop2') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': 'https://api.rewit.test/hop3'},
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/hop3') {
+            return http.StreamedResponse(
+              Stream.value(utf8.encode('{"chain_done": true}')),
+              200,
+            );
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final response = await client.get('/hop1');
+        expect(response.statusCode, 200);
+        expect(mockClient.recordedRequests, hasLength(3));
+
+        // Hop 1 (origem inicial): possui Authorization
+        expect(mockClient.recordedRequests[0].headers['authorization'], 'Bearer $testJwt');
+
+        // Hop 2 (externo): despido de Authorization
+        expect(mockClient.recordedRequests[1].headers.containsKey('authorization'), isFalse);
+
+        // Hop 3 (retorno à origem A): NÃO recupera Authorization
+        expect(mockClient.recordedRequests[2].headers.containsKey('authorization'), isFalse);
+      });
+
+      test('7. URLs iniciais contendo userinfo são rejeitadas antes do envio', () async {
+        final mockClient = MockBaseClient((request) async {
+          fail('Nenhuma requisição HTTP deveria ter sido emitida.');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final invalidUrls = [
+          'https://user:password@api.rewit.test/path',
+          'http://admin:secret@external.test/resource',
+          '//user:secret@api.rewit.test/data',
+        ];
+
+        for (final url in invalidUrls) {
+          await expectLater(
+            client.get(url),
+            throwsA(
+              isA<NetworkException>().having(
+                (e) => e.message,
+                'message',
+                contains('userinfo'),
+              ),
+            ),
+          );
+        }
+
+        expect(mockClient.recordedRequests, isEmpty);
+      });
+
+      test('8. Redirecionamentos válidos de GET com Location relativo funcionam e preservam token', () async {
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/old-location') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              302,
+              headers: {'location': '/api/v1/new-location'},
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/new-location') {
+            return http.StreamedResponse(
+              const Stream.empty(),
+              301,
+              headers: {'location': 'subpath'},
+            );
+          }
+          if (request.url.toString() == 'https://api.rewit.test/api/v1/subpath') {
+            return http.StreamedResponse(
+              Stream.value(utf8.encode('{"success": true}')),
+              200,
+            );
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final response = await client.get('/api/v1/old-location');
+        expect(response.statusCode, 200);
+        expect(response.body, '{"success": true}');
+        expect(mockClient.recordedRequests, hasLength(3));
+
+        for (final req in mockClient.recordedRequests) {
+          expect(req.headers['authorization'], 'Bearer $testJwt');
+        }
+      });
+
+      test('9. Requisições autenticadas normais permanecem plenamente funcionais', () async {
+        final mockClient = MockBaseClient((request) async {
+          expect(request.headers['authorization'], 'Bearer $testJwt');
+          expect(request.headers['accept'], 'application/json');
+          return http.StreamedResponse(
+            Stream.value(utf8.encode('{"method": "${request.method}"}')),
+            200,
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final getRes = await client.get('/test');
+        expect(getRes.statusCode, 200);
+        expect(getRes.body, '{"method": "GET"}');
+
+        final postRes = await client.post('/test', body: {'x': 1});
+        expect(postRes.statusCode, 200);
+        expect(postRes.body, '{"method": "POST"}');
+
+        final putRes = await client.put('/test', body: {'x': 2});
+        expect(putRes.statusCode, 200);
+        expect(putRes.body, '{"method": "PUT"}');
+
+        final patchRes = await client.patch('/test', body: {'x': 3});
+        expect(patchRes.statusCode, 200);
+        expect(patchRes.body, '{"method": "PATCH"}');
+
+        final delRes = await client.delete('/test');
+        expect(delRes.statusCode, 200);
+        expect(delRes.body, '{"method": "DELETE"}');
+
+        expect(mockClient.recordedRequests, hasLength(5));
+      });
+    });
+
+    group('Aborto de transporte e descarte de sockets (Security S1.2)', () {
+      const testJwt = 'valid-jwt-token-s1-2';
+
+      setUp(() async {
+        await tokenStorage.saveTokens(
+          accessToken: testJwt,
+          refreshToken: 'refresh-token',
+        );
+      });
+
+      test('1. send() que nunca completa: trigger de aborto é ativado no timeout e chamador recebe erro previsível', () async {
+        var abortTriggerFired = false;
+        http.BaseRequest? capturedRequest;
+
+        final mockClient = MockBaseClient((request) async {
+          capturedRequest = request;
+          expect(request, isA<http.Abortable>());
+          final abortable = request as http.Abortable;
+          expect(abortable.abortTrigger, isNotNull);
+
+          final completer = Completer<http.StreamedResponse>();
+          abortable.abortTrigger!.then((_) {
+            abortTriggerFired = true;
+            if (!completer.isCompleted) {
+              completer.completeError(http.RequestAbortedException(request.url));
+            }
+          });
+          return completer.future;
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          timeout: const Duration(milliseconds: 50),
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/hang-send'),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Tempo limite'),
+            ),
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(capturedRequest, isNotNull);
+        expect(capturedRequest, isA<http.AbortableRequest>());
+        expect(abortTriggerFired, isTrue);
+      });
+
+      test('2. Multipart pendente é abortado via AbortableMultipartRequest no timeout', () async {
+        var abortTriggerFired = false;
+        http.BaseRequest? capturedRequest;
+
+        final mockClient = MockBaseClient((request) async {
+          capturedRequest = request;
+          expect(request, isA<http.AbortableMultipartRequest>());
+          final abortable = request as http.AbortableMultipartRequest;
+          expect(abortable.abortTrigger, isNotNull);
+
+          final completer = Completer<http.StreamedResponse>();
+          abortable.abortTrigger!.then((_) {
+            abortTriggerFired = true;
+            if (!completer.isCompleted) {
+              completer.completeError(http.RequestAbortedException(request.url));
+            }
+          });
+          return completer.future;
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          timeout: const Duration(milliseconds: 50),
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.postMultipart(
+            '/upload',
+            fieldName: 'file',
+            fileBytes: [1, 2, 3],
+            filename: 'test.jpg',
+          ),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Tempo limite'),
+            ),
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(capturedRequest, isNotNull);
+        expect(abortTriggerFired, isTrue);
+      });
+
+      test('3. Prazo esgotado imediatamente antes da leitura do corpo: stream é cancelado sem vazamento', () async {
+        var streamCancelled = false;
+        final streamController = StreamController<List<int>>();
+        streamController.onCancel = () {
+          streamCancelled = true;
+        };
+
+        final mockClient = MockBaseClient((request) async {
+          // send() conclui com sucesso imediatamente entregando os headers, mas o corpo não emite dados
+          return http.StreamedResponse(streamController.stream, 200);
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          timeout: const Duration(milliseconds: 30),
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/fast-send-no-body'),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Tempo limite'),
+            ),
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(streamCancelled, isTrue);
+        await streamController.close();
+      });
+
+      test('4. Fluxo normal não dispara abortTrigger em requisições bem-sucedidas', () async {
+        var abortTriggerFired = false;
+
+        final mockClient = MockBaseClient((request) async {
+          if (request is http.Abortable && request.abortTrigger != null) {
+            request.abortTrigger!.then((_) {
+              abortTriggerFired = true;
+            });
+          }
+          return http.StreamedResponse(
+            Stream.value(utf8.encode('{"status": "ok"}')),
+            200,
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          timeout: const Duration(seconds: 5),
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final response = await client.get('/normal-fast');
+        expect(response.statusCode, 200);
+        expect(response.body, '{"status": "ok"}');
+
+        // Aguarda ciclo de microtarefas para comprovar que o abortTrigger não foi acionado
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(abortTriggerFired, isFalse);
+      });
+
+      test('5. Redirecionamento 301, 303, 307 e 308 com método POST falha de forma fail-closed e cancela stream', () async {
+        for (final statusCode in [301, 303, 307, 308]) {
+          var streamCancelled = false;
+          final streamController = StreamController<List<int>>();
+          streamController.onCancel = () {
+            streamCancelled = true;
+          };
+
+          final mockClient = MockBaseClient((request) async {
+            streamController.add(utf8.encode('<html>Redirect</html>'));
+            return http.StreamedResponse(
+              streamController.stream,
+              statusCode,
+              headers: {'location': '/somewhere-else'},
+            );
+          });
+
+          final client = RewitHttpClient(
+            baseUrl: 'https://api.rewit.test',
+            client: mockClient,
+            tokenStorage: tokenStorage,
+          );
+
+          await expectLater(
+            client.post('/mutate-post', body: {'action': 'create'}),
+            throwsA(
+              isA<NetworkException>().having(
+                (e) => e.message,
+                'message',
+                contains('Redirecionamento automático de método mutador (POST) não permitido (HTTP $statusCode)'),
+              ),
+            ),
+          );
+
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          expect(streamCancelled, isTrue, reason: 'Stream 3xx de método mutador deve ser descartado no HTTP $statusCode');
+          await streamController.close();
+        }
+      });
+
+      test('6. Redirecionamento 303, 307 e 308 com PUT, PATCH e DELETE falha fail-closed', () async {
+        for (final method in ['PUT', 'PATCH', 'DELETE']) {
+          for (final code in [303, 307, 308]) {
+            final mockClient = MockBaseClient((request) async {
+              return http.StreamedResponse(
+                const Stream.empty(),
+                code,
+                headers: {'location': '/redirected-path'},
+              );
+            });
+
+            final client = RewitHttpClient(
+              baseUrl: 'https://api.rewit.test',
+              client: mockClient,
+              tokenStorage: tokenStorage,
+            );
+
+            Future<http.Response> execute() {
+              switch (method) {
+                case 'PUT':
+                  return client.put('/item', body: {'k': 'v'});
+                case 'PATCH':
+                  return client.patch('/item', body: {'k': 'v'});
+                case 'DELETE':
+                  return client.delete('/item');
+                default:
+                  throw UnimplementedError();
+              }
+            }
+
+            await expectLater(
+              execute(),
+              throwsA(
+                isA<NetworkException>().having(
+                  (e) => e.message,
+                  'message',
+                  contains('Redirecionamento automático de método mutador ($method) não permitido (HTTP $code)'),
+                ),
+              ),
+            );
+          }
+        }
+      });
+
+      test('7. Excesso de redirecionamentos (> 5 saltos) lança NetworkException e aborta', () async {
+        var hopCount = 0;
+        final mockClient = MockBaseClient((request) async {
+          hopCount++;
+          return http.StreamedResponse(
+            const Stream.empty(),
+            302,
+            headers: {'location': '/hop$hopCount'},
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/infinite-loop'),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Número máximo de redirecionamentos HTTP excedido.'),
+            ),
+          ),
+        );
+
+        expect(hopCount, 6);
+      });
+
+      test('8. 401 em destino externo público não dispara onSessionExpired', () async {
+        var sessionExpiredCalled = false;
+
+        final mockClient = MockBaseClient((request) async {
+          return http.StreamedResponse(
+            Stream.value(utf8.encode('{"error": "unauthorized external"}')),
+            401,
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+          onSessionExpired: () {
+            sessionExpiredCalled = true;
+          },
+        );
+
+        // GET para URL externa pública (requiresAuth = false)
+        await expectLater(
+          client.get('https://external-service.test/public-resource', requiresAuth: false),
+          throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401)),
+        );
+
+        expect(sessionExpiredCalled, isFalse);
+      });
+
+      test('9. Headers sensíveis em destino externo são rejeitados na inicialização', () async {
+        final mockClient = MockBaseClient((request) async {
+          fail('Requisição não deveria ter sido enviada');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get(
+            'https://external.test/api',
+            headers: {'Cookie': 'session=secret'},
+            requiresAuth: false,
+          ),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Cabeçalhos sensíveis de autenticação não são permitidos'),
+            ),
+          ),
+        );
+
+        await expectLater(
+          client.get(
+            'https://external.test/api',
+            headers: {'Proxy-Authorization': 'Basic test'},
+            requiresAuth: false,
+          ),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('Cabeçalhos sensíveis de autenticação não são permitidos'),
+            ),
+          ),
+        );
+      });
+
+      test('10. Userinfo em multipart é rejeitado antes de enviar', () async {
+        final mockClient = MockBaseClient((request) async {
+          fail('Requisição não deveria ter sido enviada');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.postMultipart(
+            'https://user:pass@api.rewit.test/upload',
+            fieldName: 'file',
+            fileBytes: [1, 2],
+            filename: 'a.png',
+          ),
+          throwsA(
+            isA<NetworkException>().having(
+              (e) => e.message,
+              'message',
+              contains('userinfo'),
+            ),
+          ),
+        );
+      });
+
+      test('11. Corpo 3xx intermediário extenso é drenado com limite sem esgotar memória', () async {
+        var streamCancelled = false;
+        final streamController = StreamController<List<int>>();
+        streamController.onCancel = () {
+          streamCancelled = true;
+        };
+
+        final mockClient = MockBaseClient((request) async {
+          if (request.url.path == '/step1') {
+            // Emite 30 KB em chunks
+            streamController.add(List.filled(10 * 1024, 1));
+            streamController.add(List.filled(10 * 1024, 2));
+            streamController.add(List.filled(10 * 1024, 3));
+            return http.StreamedResponse(
+              streamController.stream,
+              302,
+              headers: {'location': '/step2'},
+            );
+          }
+          if (request.url.path == '/step2') {
+            return http.StreamedResponse(
+              Stream.value(utf8.encode('{"ok": true}')),
+              200,
+            );
+          }
+          fail('URL inesperada: ${request.url}');
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final response = await client.get('/step1');
+        expect(response.statusCode, 200);
+        expect(response.body, '{"ok": true}');
+        expect(mockClient.recordedRequests, hasLength(2));
+
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(streamCancelled, isTrue);
+        await streamController.close();
+      });
     });
   });
 }

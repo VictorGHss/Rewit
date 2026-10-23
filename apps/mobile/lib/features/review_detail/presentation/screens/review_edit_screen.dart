@@ -49,6 +49,18 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
   bool get _canEnableAnonymous =>
       ReviewPrivacyRules.canSetAnonymous(value: true, visibility: _visibility);
 
+  /// Motivo de um botão de salvar desabilitado por privacidade, exposto em dica e leitor de tela.
+  Widget _explainDisabledSave(Widget button) {
+    if (_hasAllowedPrivacy) return button;
+    return Tooltip(
+      message: ReviewPrivacyRules.incompatibleCombinationMessage,
+      child: Semantics(
+        hint: ReviewPrivacyRules.incompatibleCombinationMessage,
+        child: button,
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -171,11 +183,11 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 ),
               )
             else
-              TextButton(
+              _explainDisabledSave(TextButton(
                 key: const Key('save_review_edit_button'),
                 onPressed: _canSubmit ? _submitEdit : null,
                 child: const Text('Salvar'),
-              ),
+              )),
           ],
         ),
         body: Form(
@@ -319,11 +331,14 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'ID: ${target.targetId}',
+                                  (target.targetName != null && target.targetName!.trim().isNotEmpty)
+                                      ? target.targetName!.trim()
+                                      : (target.targetType?.toUpperCase() == 'PRODUCT'
+                                          ? 'Produto avaliado'
+                                          : 'Local avaliado'),
                                   style: const TextStyle(
-                                    fontSize: 12,
-                                    fontFamily: 'monospace',
-                                    color: Colors.grey,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -414,7 +429,11 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                       value: 'FOLLOWERS',
                       isAnonymous: _isAnonymous,
                     ),
-                    child: const Text('Apenas seguidores'),
+                    // Opção desabilitada anuncia o motivo ao leitor de tela
+                    child: Semantics(
+                      hint: _isAnonymous ? ReviewPrivacyRules.followersUnavailableForAnonymous : null,
+                      child: const Text('Apenas seguidores'),
+                    ),
                   ),
                   const DropdownMenuItem(
                     value: 'PRIVATE',
@@ -473,7 +492,7 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
               const SizedBox(height: 32),
 
               // 7. Botão principal de salvar
-              FilledButton.icon(
+              _explainDisabledSave(FilledButton.icon(
                 key: const Key('submit_edit_button'),
                 onPressed: _canSubmit ? _submitEdit : null,
                 icon: _isSubmitting
@@ -490,7 +509,7 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
-              ),
+              )),
             ],
           ),
         ),

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
@@ -60,6 +61,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
   final List<SelectedMediaItem> _selectedMedia = [];
 
   String? _contextPlaceId;
+  String? _contextPlaceName;
   String? _experienceText;
   bool _isAnonymous = false;
   String _visibility = 'PUBLIC';
@@ -79,6 +81,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
     String? initialTargetName,
     String? initialTargetType,
     String? initialCategory,
+    File? initialPhoto,
   }) {
     if (initialTargetId != null && initialTargetId.isNotEmpty) {
       _targets[0] = CreateReviewTargetInput(
@@ -90,6 +93,16 @@ class ReviewCreateNotifier extends ChangeNotifier {
       );
       if (initialTargetType == 'PLACE' || initialTargetType == null) {
         _contextPlaceId = initialTargetId;
+        _contextPlaceName = initialTargetName;
+      }
+    }
+    if (initialPhoto != null) {
+      try {
+        if (initialPhoto.existsSync()) {
+          _selectedMedia.add(SelectedMediaItem.fromFile(initialPhoto));
+        }
+      } catch (_) {
+        // Ignora caso o arquivo de foto inicial não esteja acessível
       }
     }
   }
@@ -97,6 +110,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
   List<CreateReviewTargetInput> get targets => List.unmodifiable(_targets);
   List<SelectedMediaItem> get selectedMedia => List.unmodifiable(_selectedMedia);
   String? get contextPlaceId => _contextPlaceId;
+  String? get contextPlaceName => _contextPlaceName;
   String? get experienceText => _experienceText;
   bool get isAnonymous => _isAnonymous;
   String get visibility => _visibility;
@@ -155,7 +169,11 @@ class ReviewCreateNotifier extends ChangeNotifier {
   void removeTarget(int index) {
     if (_isDisposed || isSubmitting) return;
     if (_targets.length > 1 && index >= 0 && index < _targets.length) {
-      _targets.removeAt(index);
+      final removed = _targets.removeAt(index);
+      if (removed.rateableTargetId.isNotEmpty &&
+          removed.rateableTargetId == _contextPlaceId) {
+        _syncContextPlaceFromRemainingTargets();
+      }
       _safeNotifyListeners();
     }
   }
@@ -171,9 +189,11 @@ class ReviewCreateNotifier extends ChangeNotifier {
         targetType: item.rawTargetType,
         category: item.category,
       );
-      // Auto-preenche o estabelecimento de contexto se for um Local e ainda não estiver definido
-      if ((_contextPlaceId == null || _contextPlaceId!.isEmpty) && item.isPlace) {
+      // Atualiza o estabelecimento de contexto quando um Local é selecionado
+      if (item.isPlace &&
+          (_contextPlaceId == null || _contextPlaceId!.isEmpty || index == 0)) {
         _contextPlaceId = item.id;
+        _contextPlaceName = item.name;
       }
       _safeNotifyListeners();
     }
@@ -184,13 +204,31 @@ class ReviewCreateNotifier extends ChangeNotifier {
     if (_isDisposed || isSubmitting) return;
     if (index >= 0 && index < _targets.length) {
       final current = _targets[index];
+      final wasContextPlace = current.rateableTargetId.isNotEmpty &&
+          current.rateableTargetId == _contextPlaceId;
       _targets[index] = CreateReviewTargetInput(
         rateableTargetId: '',
         rating: current.rating,
         specificComment: current.specificComment,
       );
+      if (wasContextPlace) {
+        _syncContextPlaceFromRemainingTargets();
+      }
       _safeNotifyListeners();
     }
+  }
+
+  void _syncContextPlaceFromRemainingTargets() {
+    for (final target in _targets) {
+      if (target.rateableTargetId.isNotEmpty &&
+          target.targetType?.toUpperCase() == 'PLACE') {
+        _contextPlaceId = target.rateableTargetId;
+        _contextPlaceName = target.targetName;
+        return;
+      }
+    }
+    _contextPlaceId = null;
+    _contextPlaceName = null;
   }
 
   /// Verifica se um targetId já foi selecionado em outro item da avaliação.
@@ -235,6 +273,18 @@ class ReviewCreateNotifier extends ChangeNotifier {
   void setContextPlaceId(String? placeId) {
     if (_isDisposed || isSubmitting) return;
     _contextPlaceId = placeId?.trim().isEmpty ?? true ? null : placeId!.trim();
+    if (_contextPlaceId == null) {
+      _contextPlaceName = null;
+    } else {
+      String? matchedName;
+      for (final target in _targets) {
+        if (target.rateableTargetId == _contextPlaceId) {
+          matchedName = target.targetName;
+          break;
+        }
+      }
+      _contextPlaceName = matchedName;
+    }
     _safeNotifyListeners();
   }
 
@@ -382,6 +432,19 @@ class ReviewCreateNotifier extends ChangeNotifier {
       final toAdd = picked.take(remainingSlots);
       _selectedMedia.addAll(toAdd);
       _safeNotifyListeners();
+    }
+  }
+
+  /// Adiciona diretamente um arquivo de fotografia local aos anexos da avaliação.
+  void addPhotoFile(File file) {
+    if (_isDisposed || isSubmitting) return;
+    try {
+      if (file.existsSync() && _selectedMedia.length < SelectedMediaItem.maxItemsPerReview) {
+        _selectedMedia.add(SelectedMediaItem.fromFile(file));
+        _safeNotifyListeners();
+      }
+    } catch (_) {
+      // Ignora silenciosamente se o arquivo não puder ser lido
     }
   }
 
@@ -739,6 +802,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
     );
     _selectedMedia.clear();
     _contextPlaceId = null;
+    _contextPlaceName = null;
     _experienceText = null;
     _isAnonymous = false;
     _visibility = 'PUBLIC';

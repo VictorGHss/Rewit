@@ -46,6 +46,7 @@ public class RateLimitProperties {
             case DISCUSSION_CREATION -> content.discussionCreation;
             case MEDIA_UPLOAD -> content.mediaUpload;
             case BUSINESS_RESPONSE_CREATION -> content.businessResponseCreation;
+            case PLACE_CREATION -> content.placeCreation;
             case SEARCH -> query.search;
         };
     }
@@ -198,6 +199,8 @@ public class RateLimitProperties {
         private final Policy mediaUpload = new Policy(10, Duration.ofSeconds(60));
         /** Respostas oficiais por administrador de conta comercial (C11). */
         private final Policy businessResponseCreation = new Policy(10, Duration.ofSeconds(60));
+        /** Criação manual de locais por usuário (A-04). */
+        private final Policy placeCreation = new Policy(10, Duration.ofMinutes(60));
 
         public Policy getReportCreation() {
             return reportCreation;
@@ -213,6 +216,10 @@ public class RateLimitProperties {
 
         public Policy getBusinessResponseCreation() {
             return businessResponseCreation;
+        }
+
+        public Policy getPlaceCreation() {
+            return placeCreation;
         }
     }
 

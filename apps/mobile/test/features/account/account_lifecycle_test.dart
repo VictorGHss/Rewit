@@ -747,7 +747,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Verifica ícone de configurações
+      // Configurações ficam no menu "Mais opções" do AppBar (título centralizado com dois controles por lado)
+      await tester.tap(find.byTooltip('Mais opções'));
+      await tester.pumpAndSettle();
+
       final settingsIcon = find.byIcon(Icons.settings_outlined);
       expect(settingsIcon, findsOneWidget);
 

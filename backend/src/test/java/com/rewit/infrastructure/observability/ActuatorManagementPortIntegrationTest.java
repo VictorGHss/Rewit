@@ -47,7 +47,8 @@ import static org.junit.jupiter.api.Assertions.*;
                 "rewit.storage-gc.max-candidates=1",
                 "rewit.storage-gc.max-deletes=1",
                 "rewit.storage-gc.grace-period=30d",
-                "rewit.storage-gc.max-duration=1m"
+                "rewit.storage-gc.max-duration=1m",
+                "server.tomcat.basedir=target/tomcat-actuator-test"
         }
 )
 @ActiveProfiles("local")

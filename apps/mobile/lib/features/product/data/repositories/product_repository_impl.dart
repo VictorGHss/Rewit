@@ -125,7 +125,10 @@ class ProductRepositoryImpl implements ProductRepository {
 
   @override
   Future<Uint8List> getProductImageBytes(String imageUrl) async {
-    return httpClient.getBytes(imageUrl);
+    return httpClient.getBytes(
+      imageUrl,
+      requiresAuth: httpClient.isSameOriginUrl(imageUrl),
+    );
   }
 }
 

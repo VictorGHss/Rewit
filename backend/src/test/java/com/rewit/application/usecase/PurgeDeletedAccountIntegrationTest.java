@@ -26,6 +26,7 @@ import com.rewit.presentation.dto.report.CreateReportRequest;
 import com.rewit.presentation.dto.review.ReviewPresentationDtos.CreateReviewRequest;
 import com.rewit.presentation.dto.review.ReviewPresentationDtos.CreateReviewTargetRequest;
 import com.rewit.domain.enums.ReportReason;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -567,7 +568,7 @@ class PurgeDeletedAccountIntegrationTest {
 
     private TestUser admin() throws Exception {
         TestUser user = register("purge_admin");
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.assignRole(user.id(), "ADMIN");
         return login(user);
     }
 

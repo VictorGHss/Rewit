@@ -6,6 +6,7 @@ import com.rewit.application.dto.feed.FeedV2CandidatePage;
 import com.rewit.application.dto.feed.FeedV2PageProjection;
 import com.rewit.application.dto.feed.FeedV2Projection;
 import com.rewit.application.port.ProfileRepository;
+import com.rewit.application.port.RateableTargetRepository;
 import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
@@ -15,6 +16,7 @@ import com.rewit.domain.feed.RankedFeedCandidate;
 import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewTarget;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,6 +54,7 @@ public class FeedV2Hydrator {
     private final ProfileRepository profileRepository;
     private final ReviewReactionRepository reviewReactionRepository;
     private final UserRepository userRepository;
+    private final RateableTargetRepository rateableTargetRepository;
 
     public FeedV2Hydrator(
             ReviewRepository reviewRepository,
@@ -60,11 +63,24 @@ public class FeedV2Hydrator {
             ReviewReactionRepository reviewReactionRepository,
             UserRepository userRepository
     ) {
+        this(reviewRepository, reviewTargetRepository, profileRepository, reviewReactionRepository, userRepository, null);
+    }
+
+    @Autowired
+    public FeedV2Hydrator(
+            ReviewRepository reviewRepository,
+            ReviewTargetRepository reviewTargetRepository,
+            ProfileRepository profileRepository,
+            ReviewReactionRepository reviewReactionRepository,
+            UserRepository userRepository,
+            RateableTargetRepository rateableTargetRepository
+    ) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository is required");
         this.reviewTargetRepository = Objects.requireNonNull(reviewTargetRepository, "reviewTargetRepository is required");
         this.profileRepository = Objects.requireNonNull(profileRepository, "profileRepository is required");
         this.reviewReactionRepository = Objects.requireNonNull(reviewReactionRepository, "reviewReactionRepository is required");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository is required");
+        this.rateableTargetRepository = rateableTargetRepository;
     }
 
     /**
@@ -129,21 +145,42 @@ public class FeedV2Hydrator {
         }
 
         // 3. Batch: Targets de todas as avaliações ativas da página
-        Map<UUID, List<ReviewTargetView>> targetsByReviewId = reviewTargetRepository.findByReviewIdIn(activeReviewIds).stream()
+        List<ReviewTarget> rawTargets = reviewTargetRepository.findByReviewIdIn(activeReviewIds).stream()
                 .filter(Objects::nonNull)
+                .toList();
+
+        Set<UUID> targetIds = rawTargets.stream()
+                .map(t -> t.getTargetId())
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        Map<UUID, RateableTargetRepository.TargetDisplay> displaysById = (rateableTargetRepository != null && !targetIds.isEmpty())
+                ? rateableTargetRepository.findDisplaysByIds(targetIds).stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(d -> d.id(), d -> d, (a, b) -> a))
+                : Map.of();
+
+        Map<UUID, List<ReviewTargetView>> targetsByReviewId = rawTargets.stream()
                 .sorted(Comparator.comparing((ReviewTarget target) -> target.getCreatedAt(), Comparator.nullsLast(Comparator.naturalOrder()))
                         .thenComparing(target -> target.getId()))
                 .collect(Collectors.groupingBy(
                         target -> target.getReviewId(),
                         Collectors.mapping(
-                                t -> new ReviewTargetView(
-                                        t.getId(),
-                                        t.getReviewId(),
-                                        t.getTargetId(),
-                                        t.getRating(),
-                                        t.getSpecificComment(),
-                                        t.getCreatedAt()
-                                ),
+                                t -> {
+                                    RateableTargetRepository.TargetDisplay display = displaysById.get(t.getTargetId());
+                                    String targetType = display != null && display.type() != null ? display.type().name() : null;
+                                    String targetName = display != null ? display.displayName() : null;
+                                    return new ReviewTargetView(
+                                            t.getId(),
+                                            t.getReviewId(),
+                                            t.getTargetId(),
+                                            targetType,
+                                            targetName,
+                                            t.getRating(),
+                                            t.getSpecificComment(),
+                                            t.getCreatedAt()
+                                    );
+                                },
                                 Collectors.toList()
                         )
                 ));

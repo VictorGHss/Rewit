@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Rechecagem de um objeto em quarentena (Step 28.3). Separa três perguntas e responde só a elas:
@@ -47,8 +48,13 @@ public class RecheckQuarantinedStorageObjectUseCase {
      */
     public QuarantineRecheckResult recheck(String objectKey, Instant now) {
         Objects.requireNonNull(now, "now must not be null");
-        if (!ReviewMediaObjectKey.isManagedKey(objectKey)) {
-            throw new IllegalArgumentException("objectKey must be a managed review media key");
+        UUID entityId;
+        if (ReviewMediaObjectKey.isManagedKey(objectKey)) {
+            entityId = ReviewMediaObjectKey.reviewIdOf(objectKey);
+        } else if (com.rewit.domain.model.PlaceMediaObjectKey.isManagedKey(objectKey)) {
+            entityId = com.rewit.domain.model.PlaceMediaObjectKey.placeIdOf(objectKey);
+        } else {
+            throw new IllegalArgumentException("objectKey must be a managed review or place media key");
         }
         long startedAt = System.nanoTime();
 
@@ -66,7 +72,7 @@ public class RecheckQuarantinedStorageObjectUseCase {
         }
 
         QuarantineResolution resolution = quarantineRepository.resolveUnderCreationLock(
-                objectKey, ReviewMediaObjectKey.reviewIdOf(objectKey), firstObservedAt, now);
+                objectKey, entityId, firstObservedAt, now);
 
         QuarantineRecheckResult result = switch (resolution.kind()) {
             case ENTRY_CHANGED -> new QuarantineRecheckResult(objectKey, QuarantineRecheckOutcome.NOT_QUARANTINED,

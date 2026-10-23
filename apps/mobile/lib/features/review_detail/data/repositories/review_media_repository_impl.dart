@@ -50,6 +50,9 @@ class ReviewMediaRepositoryImpl implements ReviewMediaRepository {
 
   @override
   Future<Uint8List> getMediaBytes(String pathOrUrl) async {
-    return _client.getBytes(pathOrUrl);
+    return _client.getBytes(
+      pathOrUrl,
+      requiresAuth: _client.isSameOriginUrl(pathOrUrl),
+    );
   }
 }

@@ -3,3 +3,4 @@ export * from './auth';
 export * from './moderation';
 export * from './claims';
 export * from './businessResponses';
+export * from './placeMedia';

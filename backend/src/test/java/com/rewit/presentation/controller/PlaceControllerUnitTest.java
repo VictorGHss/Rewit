@@ -48,6 +48,9 @@ class PlaceControllerUnitTest {
     private ProductDiscoveryService productDiscoveryService;
 
     @Mock
+    private com.rewit.application.service.PlaceMediaService placeMediaService;
+
+    @Mock
     private Authentication authentication;
 
     @InjectMocks
@@ -549,5 +552,105 @@ class PlaceControllerUnitTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_NEARBY_LIMIT"))
                 .andExpect(jsonPath("$.detail").value("O limite de resultados deve ser entre 1 e 100"));
+    }
+
+    @Test
+    @DisplayName("19. POST /api/v1/places: Criação manual simplificada apenas com name e addressText preserva coordenadas e cidade/estado nulos (sem inventar 0.0) e retorna 201 Created com UUID canônico")
+    void shouldCreatePlaceWithSimplifiedPayloadAndReturnCanonicalUuid() throws Exception {
+        UUID placeId = UUID.randomUUID();
+        Place createdPlace = new Place(
+                placeId,
+                "Pastel da Dona Ana",
+                "pastel-da-dona-ana",
+                "GERAL",
+                null,
+                "Av. Brasil, 500 - Centro",
+                null,
+                null,
+                null,
+                null,
+                "BR",
+                null,
+                null,
+                100,
+                "USER",
+                false,
+                authenticatedUserId,
+                "ACTIVE"
+        );
+
+        when(catalogService.createPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class))).thenReturn(createdPlace);
+
+        Map<String, Object> simplifiedRequest = Map.of(
+                "name", "Pastel da Dona Ana",
+                "addressText", "Av. Brasil, 500 - Centro"
+        );
+
+        mockMvc.perform(post("/api/v1/places")
+                        .principal(createAuth())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(simplifiedRequest)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(placeId.toString()))
+                .andExpect(jsonPath("$.name").value("Pastel da Dona Ana"))
+                .andExpect(jsonPath("$.slug").value("pastel-da-dona-ana"))
+                .andExpect(jsonPath("$.addressText").value("Av. Brasil, 500 - Centro"))
+                .andExpect(jsonPath("$.latitude").doesNotExist())
+                .andExpect(jsonPath("$.longitude").doesNotExist())
+                .andExpect(jsonPath("$.city").doesNotExist())
+                .andExpect(jsonPath("$.state").doesNotExist())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        ArgumentCaptor<CreatePlaceCommand> captor = ArgumentCaptor.forClass(CreatePlaceCommand.class);
+        verify(catalogService).createPlace(eq(authenticatedUserId), captor.capture());
+        CreatePlaceCommand cmd = captor.getValue();
+        assertEquals("Pastel da Dona Ana", cmd.name());
+        assertNull(cmd.slug());
+        assertEquals("GERAL", cmd.category());
+        assertEquals("Av. Brasil, 500 - Centro", cmd.addressText());
+        assertNull(cmd.city());
+        assertNull(cmd.state());
+        assertEquals("BR", cmd.country());
+        assertNull(cmd.latitude());
+        assertNull(cmd.longitude());
+    }
+
+    @Test
+    @DisplayName("20. POST /api/v1/places: Retorna 409 Conflict (PLACE_ALREADY_EXISTS) quando local com mesmo nome e endereço já existir")
+    void shouldReturnConflictWhenManualPlaceAlreadyExists() throws Exception {
+        when(catalogService.createPlace(eq(authenticatedUserId), any(CreatePlaceCommand.class)))
+                .thenThrow(new BusinessException("Este local já está cadastrado no catálogo.",
+                        HttpStatus.CONFLICT, "PLACE_ALREADY_EXISTS"));
+
+        Map<String, Object> duplicateRequest = Map.of(
+                "name", "Pastel da Dona Ana",
+                "addressText", "Av. Brasil, 500 - Centro"
+        );
+
+        mockMvc.perform(post("/api/v1/places")
+                        .principal(createAuth())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(duplicateRequest)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PLACE_ALREADY_EXISTS"));
+    }
+
+    @Test
+    @DisplayName("21. GET /api/v1/places/{id}/media/{mediaId}: Download de foto retorna 200 com bytes e header Cache-Control no-cache private")
+    void shouldDownloadPlaceMediaWithPrivateNoCacheHeader() throws Exception {
+        UUID placeId = UUID.randomUUID();
+        UUID mediaId = UUID.randomUUID();
+        byte[] imageBytes = new byte[]{1, 2, 3, 4};
+
+        when(placeMediaService.downloadMedia(placeId, mediaId))
+                .thenReturn(new com.rewit.application.dto.media.MediaDtos.MediaDownloadResult(imageBytes, "image/jpeg", true));
+
+        mockMvc.perform(get("/api/v1/places/{id}/media/{mediaId}", placeId, mediaId))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "private, no-cache, no-store, must-revalidate"))
+                .andExpect(content().contentType(MediaType.IMAGE_JPEG))
+                .andExpect(content().bytes(imageBytes));
+
+        verify(placeMediaService).downloadMedia(placeId, mediaId);
     }
 }

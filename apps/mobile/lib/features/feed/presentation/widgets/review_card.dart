@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/review_privacy_rules.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/widgets/authenticated_image.dart';
@@ -155,12 +156,14 @@ class ReviewCard extends StatelessWidget {
             color: chipTextColor ?? (isPlace || isProduct || isService ? null : Colors.amber.shade700),
           ),
           const SizedBox(width: 4),
-          Text(
-            labelText,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: chipTextColor ?? theme.colorScheme.onSurface,
+          Flexible(
+            child: Text(
+              labelText,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: chipTextColor ?? theme.colorScheme.onSurface,
+              ),
             ),
           ),
           if (isNavigable) ...[
@@ -187,6 +190,52 @@ class ReviewCard extends StatelessWidget {
     }
 
     return chipWidget;
+  }
+
+  /// Visibilidade efetiva: `PRIVATE` nunca aparece como pública, e uma avaliação antiga anônima com `FOLLOWERS`
+  /// aparece como visível só para o autor, que é como o backend a trata.
+  Widget _buildVisibilityLabel(ThemeData theme) {
+    final label = ReviewPrivacyRules.visibilityLabel(
+      isAnonymous: review.isAnonymous,
+      visibility: review.visibility,
+    );
+    final description = ReviewPrivacyRules.visibilityDescription(
+      isAnonymous: review.isAnonymous,
+      visibility: review.visibility,
+    );
+    final effective = ReviewPrivacyRules.effectiveVisibility(
+      isAnonymous: review.isAnonymous,
+      visibility: review.visibility,
+    );
+    final icon = switch (effective) {
+      'FOLLOWERS' => Icons.group_outlined,
+      'PRIVATE' => Icons.lock_outline,
+      _ => Icons.public,
+    };
+    final color = theme.colorScheme.onSurface.withAlpha(140);
+
+    return Tooltip(
+      message: description,
+      child: Semantics(
+        label: description,
+        excludeSemantics: true,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label,
+                key: Key('review_card_visibility_${review.id}'),
+                style: TextStyle(fontSize: 11, color: color),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -296,12 +345,15 @@ class ReviewCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Timestamp Relativo
-                  Text(
-                    formatRelativeTime(review.createdAt),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withAlpha(140),
-                      fontSize: 11,
+                  // Timestamp Relativo: cede espaço ao autor e quebra a linha com fonte ampliada
+                  Flexible(
+                    child: Text(
+                      formatRelativeTime(review.createdAt),
+                      textAlign: TextAlign.end,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurface.withAlpha(140),
+                        fontSize: 11,
+                      ),
                     ),
                   ),
                 ],
@@ -322,12 +374,14 @@ class ReviewCard extends StatelessWidget {
                     children: [
                       Icon(Icons.verified, size: 14, color: Colors.green.shade700),
                       const SizedBox(width: 4),
-                      Text(
-                        'Presença confirmada no local',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.green.shade800,
-                          fontWeight: FontWeight.w600,
+                      Flexible(
+                        child: Text(
+                          'Presença confirmada no local',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.green.shade800,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
@@ -349,12 +403,14 @@ class ReviewCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      review.targets.length == 1
-                          ? '(${review.targets.length} item avaliado)'
-                          : '(${review.targets.length} itens avaliados)',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withAlpha(160),
+                    Flexible(
+                      child: Text(
+                        review.targets.length == 1
+                            ? '(${review.targets.length} item avaliado)'
+                            : '(${review.targets.length} itens avaliados)',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurface.withAlpha(160),
+                        ),
                       ),
                     ),
                   ],
@@ -428,55 +484,66 @@ class ReviewCard extends StatelessWidget {
               const Divider(height: 1, thickness: 0.5),
               const SizedBox(height: 6),
 
-              // Rodapé: Helpful interativo e Visibilidade
+              // Rodapé: Helpful interativo e Visibilidade. Cada lado ocupa só o espaço que sobra do outro, e o
+              // voto útil tem área de toque mínima de 48 dp, separada do toque no card
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: isHelpfulLoading ? null : onHelpfulTap,
-                      borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (isHelpfulLoading)
-                              const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            else
-                              Icon(
-                                review.isHelpfulByMe ? Icons.thumb_up : Icons.thumb_up_outlined,
-                                size: 16,
-                                color: review.isHelpfulByMe
-                                    ? theme.colorScheme.primary
-                                    : theme.colorScheme.onSurface.withAlpha(180),
-                              ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '${review.helpfulCount} ${review.helpfulCount == 1 ? 'útil' : 'úteis'}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: review.isHelpfulByMe
-                                    ? theme.colorScheme.primary
-                                    : theme.colorScheme.onSurface.withAlpha(180),
-                                fontWeight: review.isHelpfulByMe ? FontWeight.w600 : FontWeight.normal,
+                  Flexible(
+                    child: Tooltip(
+                      message: review.isHelpfulByMe ? 'Remover voto útil' : 'Marcar como útil',
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          key: Key('review_card_helpful_${review.id}'),
+                          onTap: isHelpfulLoading ? null : onHelpfulTap,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (isHelpfulLoading)
+                                    const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  else
+                                    Icon(
+                                      review.isHelpfulByMe ? Icons.thumb_up : Icons.thumb_up_outlined,
+                                      size: 16,
+                                      color: review.isHelpfulByMe
+                                          ? theme.colorScheme.primary
+                                          : theme.colorScheme.onSurface.withAlpha(180),
+                                    ),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      '${review.helpfulCount} ${review.helpfulCount == 1 ? 'útil' : 'úteis'}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: review.isHelpfulByMe
+                                            ? theme.colorScheme.primary
+                                            : theme.colorScheme.onSurface.withAlpha(180),
+                                        fontWeight: review.isHelpfulByMe ? FontWeight.w600 : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  Text(
-                    review.visibility == 'FOLLOWERS' ? 'Seguidores' : 'Público',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: theme.colorScheme.onSurface.withAlpha(140),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: _buildVisibilityLabel(theme),
                     ),
                   ),
                 ],

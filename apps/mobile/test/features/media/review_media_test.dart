@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
+import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
@@ -295,6 +296,39 @@ void main() {
         repo.deleteMedia(reviewId: 'rev-1', mediaId: 'med-1'),
         completes,
       );
+    });
+
+    test('getMediaBytes inclui token na mesma origem e omite token em URL externa', () async {
+      final tokenStorage = InMemoryTokenStorage();
+      await tokenStorage.saveTokens(
+        accessToken: 'fake-media-jwt',
+        refreshToken: 'fake-media-refresh',
+      );
+
+      final capturedAuthByHost = <String, String?>{};
+      final mockClient = MockClient((request) async {
+        capturedAuthByHost[request.url.host] = request.headers['authorization'];
+        return http.Response.bytes(
+          kTestPngBytes,
+          200,
+          headers: {'content-type': 'image/png'},
+        );
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: baseUrl,
+        client: mockClient,
+        tokenStorage: tokenStorage,
+      );
+      final repo = ReviewMediaRepositoryImpl(client: httpClient);
+
+      final apiBytes = await repo.getMediaBytes('/api/v1/reviews/rev-1/media/med-1');
+      final externalBytes = await repo.getMediaBytes('https://cdn.external-media.test/med-1.png');
+
+      expect(apiBytes, equals(kTestPngBytes));
+      expect(externalBytes, equals(kTestPngBytes));
+      expect(capturedAuthByHost['api.rewit.test'], 'Bearer fake-media-jwt');
+      expect(capturedAuthByHost['cdn.external-media.test'], isNull);
     });
   });
 

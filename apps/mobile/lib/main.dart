@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/app/app.dart';
 import 'package:rewit_mobile/app/config/app_config.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
+import 'package:rewit_mobile/core/network/session_refresher.dart';
+import 'package:rewit_mobile/core/network/token_refreshing_client.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -13,6 +18,8 @@ import 'package:rewit_mobile/features/feed/data/repositories/feed_repository_imp
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/place/data/repositories/place_commercial_repository_impl.dart';
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
+import 'package:rewit_mobile/features/place/data/services/secure_pending_place_registration_persistence.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/notifications/data/repositories/notification_repository_impl.dart';
@@ -33,17 +40,27 @@ void main() async {
 
   // 3. Inicializar cliente HTTP e repositórios
   late final AuthNotifier authNotifier;
+  late final AuthRepositoryImpl authRepository;
+
+  // Renovação única e compartilhada do access token (15 min): evita encerrar a sessão enquanto o refresh vale
+  final sessionRefresher = SessionRefresher(
+    refreshAccessToken: () async => (await authRepository.refreshTokens()).tokens.accessToken,
+  );
 
   final httpClient = RewitHttpClient(
     baseUrl: config.apiBaseUrl,
     timeout: config.timeout,
+    client: TokenRefreshingClient(
+      inner: http.Client(),
+      sessionRefresher: sessionRefresher,
+    ),
     tokenStorage: tokenStorage,
     onSessionExpired: () {
-      authNotifier.handleSessionExpired();
+      unawaited(authNotifier.handleSessionExpired());
     },
   );
 
-  final authRepository = AuthRepositoryImpl(
+  authRepository = AuthRepositoryImpl(
     httpClient: httpClient,
     tokenStorage: tokenStorage,
   );
@@ -62,8 +79,16 @@ void main() async {
   final notificationRepository = NotificationRepositoryImpl(httpClient: httpClient);
   final businessRepository = BusinessRepositoryImpl(httpClient: httpClient);
   final businessResponseRepository = BusinessResponseRepositoryImpl(httpClient: httpClient);
+  // Cadastros de local com foto pendente sobrevivem a logout e reinício, com escopo por usuário
+  final pendingRegistrationStore = PendingPlaceRegistrationStore(
+    persistence: SecurePendingPlaceRegistrationPersistence(),
+  );
 
-  authNotifier = AuthNotifier(authRepository: authRepository);
+  authNotifier = AuthNotifier(
+    authRepository: authRepository,
+    sessionRefresher: sessionRefresher,
+    clearLocalSession: tokenStorage.clearTokens,
+  );
   final feedNotifier = FeedNotifier(feedRepository: feedRepository);
 
   // 4. Verificar se há sessão previamente salva
@@ -87,6 +112,7 @@ void main() async {
     notificationRepository: notificationRepository,
     businessRepository: businessRepository,
     businessResponseRepository: businessResponseRepository,
+    pendingRegistrationStore: pendingRegistrationStore,
   );
 
 

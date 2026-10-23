@@ -131,7 +131,9 @@ void main() {
     testWidgets('diálogo de confirmação de logout chama notifier.logout ao confirmar', (tester) async {
       await tester.pumpWidget(buildSubject(notifier));
 
-      // Clica no ícone de logout no AppBar
+      // Sair fica no menu "Mais opções" do AppBar
+      await tester.tap(find.byTooltip('Mais opções'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.logout));
       await tester.pumpAndSettle();
 

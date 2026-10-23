@@ -23,7 +23,12 @@ class ApiEndpoints {
       '/api/v1/reviews/$reviewId/media/$mediaId';
   static String reviewHelpful(String id) => '/api/v1/reviews/$id/helpful';
   static const String places = '/api/v1/places';
+  static String placeMediaPrimary(String placeId, String mediaId) =>
+      '/api/v1/places/$placeId/media/$mediaId/primary';
   static String placeDetail(String id) => '/api/v1/places/$id';
+  static String placeMedia(String id) => '/api/v1/places/$id/media';
+  static String placeMediaItem(String placeId, String mediaId) =>
+      '/api/v1/places/$placeId/media/$mediaId';
   static String targetStats(String id) => '/api/v1/targets/$id/stats';
   static String targetReviewsPath(String id) => '/api/v1/targets/$id/reviews';
   static String targetReviews(

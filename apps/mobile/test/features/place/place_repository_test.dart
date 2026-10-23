@@ -1,19 +1,21 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/features/place/data/models/place_dtos.dart';
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 
 class _MockHttpBaseClient extends http.BaseClient {
-  http.Request? capturedRequest;
+  http.BaseRequest? capturedRequest;
   http.Response? responseToReturn;
   Exception? exceptionToThrow;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    capturedRequest = request as http.Request;
+    capturedRequest = request;
     if (exceptionToThrow != null) {
       throw exceptionToThrow!;
     }
@@ -52,6 +54,7 @@ void main() {
         'origin': 'USER',
         'isVerified': true,
         'status': 'ACTIVE',
+        'photoUrl': '/api/v1/places/place-uuid-1/media/media-1',
       };
 
       final dto = PlaceDto.fromJson(json);
@@ -64,10 +67,40 @@ void main() {
       expect(entity.description, 'Um café agradável com mesas ao ar livre.');
       expect(entity.latitude, -25.4284);
       expect(entity.longitude, -49.2733);
+      expect(entity.hasCoordinates, isTrue);
       expect(entity.validationRadiusMeters, 100);
       expect(entity.isVerified, isTrue);
       expect(entity.status, 'ACTIVE');
+      expect(entity.photoUrl, '/api/v1/places/place-uuid-1/media/media-1');
       expect(entity.formattedAddress, 'Rua das Flores, 123 - Centro - Curitiba, PR');
+    });
+
+    test('PlaceDto preserva null quando local manual não possui coordenadas nem cidade/estado', () {
+      final json = {
+        'id': 'place-manual-1',
+        'name': 'Pastel da Dona Ana',
+        'slug': 'pastel-da-dona-ana',
+        'category': 'GERAL',
+        'addressText': 'Rua das Palmeiras, 45 - Centro',
+        'city': null,
+        'state': null,
+        'country': 'BR',
+        'latitude': null,
+        'longitude': null,
+        'validationRadiusMeters': 100,
+        'origin': 'MANUAL',
+        'isVerified': false,
+        'status': 'ACTIVE',
+      };
+
+      final entity = PlaceDto.fromJson(json).toEntity();
+
+      expect(entity.city, isNull);
+      expect(entity.state, isNull);
+      expect(entity.latitude, isNull);
+      expect(entity.longitude, isNull);
+      expect(entity.hasCoordinates, isFalse);
+      expect(entity.formattedAddress, 'Rua das Palmeiras, 45 - Centro');
     });
 
     test('TargetStatsDto mapeia estatísticas agregadas e trata lastCalculatedAt nulo', () {
@@ -265,6 +298,163 @@ void main() {
       expect(page.pageNumber, 1);
       expect(page.totalElements, 15);
       expect(page.isLast, isTrue);
+    });
+
+    test('createPlace realiza POST /api/v1/places e retorna PlaceDetail com UUID canônico sem coordenadas artificiais', () async {
+      const canonicalUuid = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': canonicalUuid,
+          'name': 'Pastel da Dona Ana',
+          'slug': 'pastel-da-dona-ana',
+          'category': 'GERAL',
+          'addressText': 'Rua das Palmeiras, 45 - Centro',
+          'city': null,
+          'state': null,
+          'country': 'BR',
+          'latitude': null,
+          'longitude': null,
+          'validationRadiusMeters': 100,
+          'origin': 'MANUAL',
+          'isVerified': false,
+          'status': 'ACTIVE',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      final created = await repository.createPlace(
+        const CreatePlaceInput(
+          name: 'Pastel da Dona Ana',
+          addressText: 'Rua das Palmeiras, 45 - Centro',
+        ),
+      );
+
+      expect(innerClient.capturedRequest?.method, 'POST');
+      expect(innerClient.capturedRequest?.url.path, '/api/v1/places');
+      final sentBody = jsonDecode((innerClient.capturedRequest! as http.Request).body) as Map<String, dynamic>;
+      expect(sentBody['name'], 'Pastel da Dona Ana');
+      expect(sentBody['addressText'], 'Rua das Palmeiras, 45 - Centro');
+      expect(sentBody.containsKey('latitude'), isFalse);
+      expect(sentBody.containsKey('longitude'), isFalse);
+      expect(created.id, canonicalUuid);
+      expect(created.name, 'Pastel da Dona Ana');
+      expect(created.addressText, 'Rua das Palmeiras, 45 - Centro');
+      expect(created.city, isNull);
+      expect(created.state, isNull);
+      expect(created.latitude, isNull);
+      expect(created.longitude, isNull);
+      expect(created.hasCoordinates, isFalse);
+    });
+
+    test('createPlace lança ApiException quando recebe 409 Conflict (PLACE_ALREADY_EXISTS)', () async {
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'type': 'https://api.rewit.com/errors/place-already-exists',
+          'title': 'Conflict',
+          'status': 409,
+          'detail': 'Place already exists',
+          'code': 'PLACE_ALREADY_EXISTS',
+        }),
+        409,
+        headers: {'content-type': 'application/problem+json'},
+      );
+
+      expect(
+        () => repository.createPlace(
+          const CreatePlaceInput(
+            name: 'Pastel da Dona Ana',
+            addressText: 'Rua das Palmeiras, 45 - Centro',
+          ),
+        ),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 409)
+              .having((e) => e.errorCode, 'errorCode', 'PLACE_ALREADY_EXISTS'),
+        ),
+      );
+    });
+
+    test('createPlace rejeita resposta cujo id não seja um UUID canônico', () async {
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': 'id-invalido-nao-uuid',
+          'name': 'Pastel da Dona Ana',
+          'slug': 'pastel-da-dona-ana',
+          'category': 'GERAL',
+          'addressText': 'Rua das Palmeiras, 45',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      expect(
+        () => repository.createPlace(
+          const CreatePlaceInput(
+            name: 'Pastel da Dona Ana',
+            addressText: 'Rua das Palmeiras, 45',
+          ),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('uploadPlacePhoto realiza POST multipart /api/v1/places/{id}/media e retorna URL da mídia', () async {
+      const canonicalUuid = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': 'media-1',
+          'placeId': canonicalUuid,
+          'url': '/api/v1/places/$canonicalUuid/media/media-1',
+          'mediaType': 'IMAGE',
+          'mimeType': 'image/jpeg',
+          'sizeBytes': 1024,
+          'status': 'ACTIVE',
+          'createdAt': '2026-10-19T12:00:00Z',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      final url = await repository.uploadPlacePhoto(
+        placeId: canonicalUuid,
+        fileBytes: Uint8List.fromList([1, 2, 3, 4]),
+        filename: 'fachada.jpg',
+      );
+
+      expect(innerClient.capturedRequest?.method, 'POST');
+      expect(innerClient.capturedRequest?.url.path, '/api/v1/places/$canonicalUuid/media');
+      expect(innerClient.capturedRequest?.headers.containsKey('Idempotency-Key'), isFalse);
+      expect(url, '/api/v1/places/$canonicalUuid/media/media-1');
+    });
+
+    test('uploadPlacePhoto envia header Idempotency-Key para o backend quando fornecido', () async {
+      const canonicalUuid = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+      innerClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': 'media-1',
+          'placeId': canonicalUuid,
+          'url': '/api/v1/places/$canonicalUuid/media/media-1',
+          'mediaType': 'IMAGE',
+          'mimeType': 'image/jpeg',
+          'sizeBytes': 1024,
+          'status': 'ACTIVE',
+          'createdAt': '2026-10-19T12:00:00Z',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      final url = await repository.uploadPlacePhoto(
+        placeId: canonicalUuid,
+        fileBytes: Uint8List.fromList([1, 2, 3, 4]),
+        filename: 'fachada.jpg',
+        idempotencyKey: 'idem-test-key-42',
+      );
+
+      expect(innerClient.capturedRequest?.method, 'POST');
+      expect(innerClient.capturedRequest?.headers['Idempotency-Key'], 'idem-test-key-42');
+      expect(url, '/api/v1/places/$canonicalUuid/media/media-1');
     });
   });
 }

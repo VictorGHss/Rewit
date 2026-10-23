@@ -1,4 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import '../../domain/entities/review_creation_input.dart';
@@ -12,6 +17,7 @@ class TargetItemInputWidget extends StatefulWidget {
   final bool canRemove;
   final bool enabled;
   final SearchRepository? searchRepository;
+  final PlaceRepository? placeRepository;
   final ValueChanged<String> onTargetIdChanged;
   final ValueChanged<double> onRatingChanged;
   final ValueChanged<String> onSpecificCommentChanged;
@@ -19,6 +25,12 @@ class TargetItemInputWidget extends StatefulWidget {
   final ValueChanged<SearchResultItem>? onTargetSelected;
   final VoidCallback? onClearSelection;
   final bool Function(String targetId)? isTargetSelectedElsewhere;
+  final ValueChanged<File>? onManualPlacePhotoSelected;
+  final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+
+  final String? currentUserId;
+  final AuthNotifier? authNotifier;
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
   const TargetItemInputWidget({
     super.key,
@@ -27,6 +39,7 @@ class TargetItemInputWidget extends StatefulWidget {
     required this.canRemove,
     this.enabled = true,
     this.searchRepository,
+    this.placeRepository,
     required this.onTargetIdChanged,
     required this.onRatingChanged,
     required this.onSpecificCommentChanged,
@@ -34,6 +47,11 @@ class TargetItemInputWidget extends StatefulWidget {
     this.onTargetSelected,
     this.onClearSelection,
     this.isTargetSelectedElsewhere,
+    this.onManualPlacePhotoSelected,
+    this.onPickManualPlacePhoto,
+    this.currentUserId,
+    this.authNotifier,
+    this.pendingRegistrationStore,
   });
 
   @override
@@ -135,6 +153,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
             ] else if (widget.searchRepository != null) ...[
               TargetSearchSelectorWidget(
                 searchRepository: widget.searchRepository!,
+                placeRepository: widget.placeRepository,
                 targetIndex: widget.index,
                 enabled: widget.enabled,
                 isTargetSelectedElsewhere: widget.isTargetSelectedElsewhere,
@@ -142,6 +161,11 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                   widget.onTargetSelected?.call(item);
                 },
                 onManualTargetIdEntered: widget.onTargetIdChanged,
+                onManualPlacePhotoSelected: widget.onManualPlacePhotoSelected,
+                onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
+                currentUserId: widget.currentUserId,
+                authNotifier: widget.authNotifier,
+                pendingRegistrationStore: widget.pendingRegistrationStore,
               ),
             ] else ...[
               // Fallback para inserção direta de UUID quando searchRepository não for injetado
@@ -241,7 +265,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.target.targetName ?? widget.target.rateableTargetId,
+                  widget.target.targetName ?? 'Local selecionado',
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
@@ -279,16 +303,6 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                       ),
                     ],
                   ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'ID: ${widget.target.rateableTargetId}',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                    color: theme.colorScheme.onSurface.withAlpha(120),
-                  ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),

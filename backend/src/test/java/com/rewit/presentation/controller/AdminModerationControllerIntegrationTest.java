@@ -17,6 +17,7 @@ import com.rewit.domain.model.RateableTarget;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
 import com.rewit.presentation.dto.admin.AdminModerationDtos.ModerateReviewRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -111,7 +112,7 @@ class AdminModerationControllerIntegrationTest {
      * Promove um usuário para MODERATOR via JDBC e faz login para obter token com role atualizada.
      */
     private TestUser promoteToModerator(TestUser user) throws Exception {
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", user.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", user.userId());
         return loginAndRefreshToken(user);
     }
 
@@ -119,7 +120,7 @@ class AdminModerationControllerIntegrationTest {
      * Promove um usuário para ADMIN via JDBC e faz login para obter token com role atualizada.
      */
     private TestUser promoteToAdmin(TestUser user) throws Exception {
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.userId());
         return loginAndRefreshToken(user);
     }
 
@@ -520,7 +521,7 @@ class AdminModerationControllerIntegrationTest {
                 .andExpect(status().isOk());
 
         // Rebaixado no banco; o token continua dizendo MODERATOR
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
 
         // O @PreAuthorize aceita a autoridade do token; a recusa vem do caso de uso (ProblemDetail com code). Sem a
         // role no token, o @PreAuthorize responderia 403 sem corpo
@@ -538,7 +539,7 @@ class AdminModerationControllerIntegrationTest {
         assertReviewUntouched(reviewId);
 
         // Cargo restabelecido no banco: o mesmo token antigo volta a moderar (a recusa era só a revalidação)
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.userId());
         moderate(reviewId, moderator)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.newStatus").value("REMOVED"))
@@ -561,7 +562,7 @@ class AdminModerationControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].reviewId").value(reviewId.toString()));
 
         // B. Rebaixado no banco, mesmo token: o @PreAuthorize aceita a role do token e o caso de uso recusa
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.userId());
         assertNoReportData(reports(reviewId, moderator)
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"))

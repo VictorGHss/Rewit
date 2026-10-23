@@ -233,4 +233,40 @@ class FlywayMigrationScriptTest {
         assertNotNull(getClass().getResourceAsStream("/db/migration/V10__user_reputation.sql"), "V10 deve existir no classpath");
         assertNotNull(getClass().getResourceAsStream("/db/migration/V11__governance_roles_and_audit.sql"), "V11 deve existir no classpath");
     }
+
+    @Test
+    @DisplayName("V31 deve conter validação defensiva contra duplicatas sem desativação arbitrária e colunas de moderação")
+    void shouldValidateV31MigrationScriptContents() throws Exception {
+        InputStream is = getClass().getResourceAsStream("/db/migration/V31__place_security_and_storage_lifecycle.sql");
+        assertNotNull(is, "O script de migração Flyway V31 deve estar presente no classpath");
+
+        String sql = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+
+        // Validação defensiva com aborto se houver duplicatas legadas
+        assertTrue(sql.contains("DO $$"), "V31 deve conter bloco defensivo PL/pgSQL");
+        assertTrue(sql.contains("RAISE EXCEPTION"), "V31 deve abortar com RAISE EXCEPTION se houver duplicatas");
+        assertFalse(sql.contains("UPDATE places p\nSET status = 'INACTIVE'"),
+                "V31 não pode desativar arbitrariamente locais duplicados");
+        assertFalse(sql.contains("rd.rn > 1"), "V31 não pode usar CTE com rn > 1 para auto-desativação");
+
+        // Índice de unicidade normalizada
+        assertTrue(sql.contains("uq_places_active_normalized_name_address"),
+                "V31 deve criar índice de unicidade uq_places_active_normalized_name_address");
+
+        // Purge e ciclo de vida de mídias de local
+        assertTrue(sql.contains("purged_at TIMESTAMP WITH TIME ZONE"),
+                "V31 deve adicionar coluna purged_at em place_media para auditoria pós-purge");
+        assertTrue(sql.contains("CHECK (status IN ('ACTIVE', 'REMOVED', 'UNDER_REVIEW'))"),
+                "V31 deve conter constraint de status de place_media sem enum externo");
+
+        // Auditoria em denúncias
+        assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS place_media_reports"),
+                "V31 deve criar tabela place_media_reports");
+        assertTrue(sql.contains("decided_by_user_id UUID REFERENCES users(id)"),
+                "V31 deve registrar decided_by_user_id para decisões de moderação");
+        assertTrue(sql.contains("decided_at TIMESTAMP WITH TIME ZONE"),
+                "V31 deve registrar decided_at");
+        assertTrue(sql.contains("decision_notes VARCHAR(500)"),
+                "V31 deve registrar decision_notes");
+    }
 }

@@ -47,6 +47,7 @@ class FakeFullFeedRepo implements FeedRepository {
       FeedTarget(
         id: 'tgt-1',
         targetId: 'bistro-place',
+        targetName: 'Bistrô Place',
         rating: 4.8,
         specificComment: 'Atendimento excepcional e ambiente aconchegante',
         createdAt: DateTime.now().subtract(const Duration(hours: 1)),
@@ -233,7 +234,8 @@ void main() {
       expect(find.text('@gourmet'), findsOneWidget);
       expect(find.text('Presença confirmada no estabelecimento (Check-in validado)'), findsOneWidget);
       expect(find.text('Alvos da Avaliação'), findsOneWidget);
-      expect(find.text('Alvo: bistro-place'), findsOneWidget);
+      expect(find.text('Bistrô Place'), findsOneWidget);
+      expect(find.text('Alvo: bistro-place'), findsNothing);
       expect(find.text('Atendimento excepcional e ambiente aconchegante'), findsOneWidget);
       expect(find.text('4.8'), findsOneWidget);
       expect(find.text('O risoto de cogumelos estava perfeito e a sobremesa foi memorável.'), findsOneWidget);
@@ -1022,5 +1024,42 @@ void main() {
         expect(find.text('Texto Antigo Sobrescrito Indevidamente'), findsNothing);
       });
     });
+  });
+
+  group('ReviewDetailScreen em tela estreita (S3-B)', () {
+    for (final scale in [1.0, 1.6]) {
+      testWidgets('seção de voto útil não sobrepõe o botão em 320 dp com fonte $scale x', (tester) async {
+        tester.view.physicalSize = const Size(320, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final feedRepo = FakeFullFeedRepo();
+        final review = feedRepo.sampleReview.copyWith(helpfulCount: 1);
+        feedRepo.reviewToReturnOnGetById = review;
+
+        await tester.pumpWidget(MaterialApp(
+          theme: AppTheme.lightTheme,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
+            child: child!,
+          ),
+          home: ReviewDetailScreen(
+            reviewId: 'rev-screen-1',
+            initialReview: review,
+            feedRepository: feedRepo,
+            discussionRepository: FakeDiscussionRepoForDetail(),
+          ),
+        ));
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('1 pessoa achou útil'), findsOneWidget);
+
+        final counter = tester.getRect(find.text('1 pessoa achou útil'));
+        final button = tester.getRect(find.byKey(const Key('review_detail_helpful_button')));
+        expect(counter.overlaps(button), isFalse, reason: 'contador e botão não podem ocupar a mesma área');
+      });
+    }
   });
 }

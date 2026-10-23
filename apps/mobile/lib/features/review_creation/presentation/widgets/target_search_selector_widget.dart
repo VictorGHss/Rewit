@@ -1,6 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
+import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
@@ -9,20 +17,34 @@ import 'package:rewit_mobile/features/search/domain/repositories/search_reposito
 /// e distinção visual entre Local (Place) e Produto (Product).
 class TargetSearchSelectorWidget extends StatefulWidget {
   final SearchRepository searchRepository;
+  final PlaceRepository? placeRepository;
   final int targetIndex;
   final bool enabled;
   final ValueChanged<SearchResultItem> onTargetSelected;
   final bool Function(String targetId)? isTargetSelectedElsewhere;
   final ValueChanged<String>? onManualTargetIdEntered;
+  final ValueChanged<File>? onManualPlacePhotoSelected;
+  final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+  final String? currentUserId;
+  final AuthNotifier? authNotifier;
+
+  /// Store das operações pendentes; o app real injeta o persistente (ver `main.dart`).
+  final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
   const TargetSearchSelectorWidget({
     super.key,
     required this.searchRepository,
+    this.placeRepository,
     required this.targetIndex,
     this.enabled = true,
     required this.onTargetSelected,
     this.isTargetSelectedElsewhere,
     this.onManualTargetIdEntered,
+    this.onManualPlacePhotoSelected,
+    this.onPickManualPlacePhoto,
+    this.currentUserId,
+    this.authNotifier,
+    this.pendingRegistrationStore,
   });
 
   @override
@@ -43,10 +65,73 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
 
   // Cache em memória durante a sessão da tela para evitar requisições idênticas
   final Map<String, List<SearchResultItem>> _queryCache = {};
+  PendingPlaceRegistration? _pendingRegistration;
+  String? _scopedUserId;
+  int _pendingLoadGeneration = 0;
+
+  PendingPlaceRegistrationStore get _store =>
+      widget.pendingRegistrationStore ?? PendingPlaceRegistrationStore.processLocal;
+
+  @override
+  void initState() {
+    super.initState();
+    _scopedUserId = _getCurrentUserId();
+    widget.authNotifier?.addListener(_onAuthChanged);
+    _reloadPending();
+  }
+
+  @override
+  void didUpdateWidget(covariant TargetSearchSelectorWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.authNotifier != widget.authNotifier) {
+      oldWidget.authNotifier?.removeListener(_onAuthChanged);
+      widget.authNotifier?.addListener(_onAuthChanged);
+    }
+    if (oldWidget.currentUserId != widget.currentUserId ||
+        oldWidget.authNotifier != widget.authNotifier ||
+        oldWidget.pendingRegistrationStore != widget.pendingRegistrationStore) {
+      _onIdentityMaybeChanged(force: oldWidget.pendingRegistrationStore != widget.pendingRegistrationStore);
+    }
+  }
+
+  String? _getCurrentUserId() {
+    if (widget.currentUserId != null) return widget.currentUserId;
+    final authState = widget.authNotifier?.state;
+    if (authState is Authenticated) {
+      return authState.user.id;
+    }
+    return null;
+  }
+
+  void _onAuthChanged() => _onIdentityMaybeChanged();
+
+  /// Troca de identidade descarta imediatamente o estado exibido e recarrega o da nova conta.
+  void _onIdentityMaybeChanged({bool force = false}) {
+    final newUserId = _getCurrentUserId();
+    if (!force && newUserId == _scopedUserId) return;
+    setState(() {
+      _scopedUserId = newUserId;
+      _pendingRegistration = null;
+    });
+    _reloadPending();
+  }
+
+  /// Carrega a operação pendente da conta atual. Resultados de leituras anteriores (outra conta ou
+  /// leitura superada) são descartados: nada da sessão anterior é restaurado na atual (MB-1d).
+  Future<void> _reloadPending() async {
+    final generation = ++_pendingLoadGeneration;
+    final userId = _scopedUserId;
+    final loaded = userId == null ? null : await _store.loadLatest(userId);
+    if (!mounted || generation != _pendingLoadGeneration || userId != _getCurrentUserId()) return;
+    setState(() {
+      _pendingRegistration = loaded;
+    });
+  }
 
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    widget.authNotifier?.removeListener(_onAuthChanged);
     _searchController.dispose();
     _manualUuidController.dispose();
     super.dispose();
@@ -145,6 +230,145 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     });
   }
 
+  Future<void> _openManualPlaceRegistration({String? initialQuery}) async {
+    if (!widget.enabled || widget.placeRepository == null) return;
+
+    final currentUid = _getCurrentUserId();
+    final nameToUse = (initialQuery ?? _searchController.text).trim();
+
+    // MB-1b: Novo cadastro de local NUNCA herda estado pendente anterior
+    final result = await ManualPlaceRegistrationSheet.show(
+      context,
+      placeRepository: widget.placeRepository!,
+      initialName: nameToUse,
+      initialPendingPlace: null,
+      initialUploadIdempotencyKey: null,
+      initialPhoto: null,
+      currentUserId: currentUid,
+      pendingRegistrationStore: _store,
+      authNotifier: widget.authNotifier,
+      onPickPhoto: widget.onPickManualPlacePhoto,
+    );
+
+    if (!mounted || result == null) return;
+
+    // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado
+    final postWaitUid = _getCurrentUserId();
+    if (postWaitUid != currentUid) return;
+
+    await _handleRegistrationResult(result, currentUid);
+  }
+
+  Future<void> _resumePendingRegistration() async {
+    if (!widget.enabled || widget.placeRepository == null || _pendingRegistration == null) return;
+
+    final currentUid = _getCurrentUserId();
+    final pending = _pendingRegistration!;
+
+    File? photoToUse = pending.photoFile;
+    if (pending.photoUnavailable || (photoToUse != null && !photoToUse.existsSync())) {
+      photoToUse = null;
+      if (mounted) {
+        PendingRegistrationNotices.show(
+          context,
+          currentUid,
+          SnackBar(
+            content: Text(
+              'A fotografia anterior do local "${pending.place.name}" não está mais disponível no dispositivo. Selecione uma nova foto.',
+            ),
+            backgroundColor: Colors.orange.shade900,
+          ),
+        );
+      }
+    }
+
+    final result = await ManualPlaceRegistrationSheet.show(
+      context,
+      placeRepository: widget.placeRepository!,
+      initialName: pending.place.name,
+      initialPendingPlace: pending.place,
+      initialUploadIdempotencyKey: pending.uploadIdempotencyKey,
+      initialPhoto: photoToUse,
+      currentUserId: currentUid,
+      pendingRegistrationStore: _store,
+      authNotifier: widget.authNotifier,
+      onPickPhoto: widget.onPickManualPlacePhoto,
+    );
+
+    if (!mounted || result == null) return;
+
+    // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado
+    final postWaitUid = _getCurrentUserId();
+    if (postWaitUid != currentUid) return;
+
+    await _handleRegistrationResult(result, currentUid);
+  }
+
+  Future<void> _handleRegistrationResult(ManualPlaceRegistrationResult result, String? currentUid) async {
+    if (result.isPhotoPending) {
+      final pending = PendingPlaceRegistration(
+        place: result.place,
+        uploadIdempotencyKey: result.uploadIdempotencyKey ?? generateUuidV4(),
+        photoFile: result.photoFile,
+        userId: currentUid,
+      );
+      // A operação já foi gravada pelo sheet sob a conta de origem, no instante da falha (P2-3)
+      if (!mounted || _getCurrentUserId() != currentUid) return;
+      _pendingLoadGeneration++;
+      setState(() {
+        _pendingRegistration = pending;
+      });
+    } else {
+      // Concluída: o sheet já removeu somente a operação deste local; outras pendências continuam
+      if (!mounted || _getCurrentUserId() != currentUid) return;
+      setState(() {
+        _pendingRegistration = null;
+      });
+      await _reloadPending();
+      if (!mounted || _getCurrentUserId() != currentUid) return;
+    }
+
+    final createdItem = SearchResultItem(
+      id: result.place.id,
+      name: result.place.name,
+      slug: result.place.slug,
+      category: result.place.category,
+      targetType: TargetType.place,
+      rawTargetType: 'PLACE',
+      status: result.place.status,
+    );
+
+    final normalizedQuery = _searchController.text.trim().toLowerCase();
+    if (normalizedQuery.isNotEmpty) {
+      final existing = _queryCache[normalizedQuery] ?? const [];
+      _queryCache[normalizedQuery] = [
+        createdItem,
+        ...existing.where((e) => e.id != createdItem.id),
+      ];
+    }
+
+    // Sem ação no aviso: o local criado vira o alvo e este seletor é desmontado em seguida, então a
+    // retomada fica no aviso de pendência do seletor (botão "Trocar" do alvo ou nova avaliação).
+    if (result.isPhotoPending && mounted) {
+      PendingRegistrationNotices.show(
+        context,
+        currentUid,
+        SnackBar(
+          content: Text(
+            'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente. '
+            'Retome o envio pelo aviso de pendência na busca de alvos.',
+          ),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+    }
+
+    widget.onTargetSelected(createdItem);
+    if (result.photoFile != null) {
+      widget.onManualPlacePhotoSelected?.call(result.photoFile!);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -191,6 +415,47 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Banner de fotografia pendente para retomada explícita (MB-1b)
+        if (_pendingRegistration != null) ...[
+          Container(
+            key: const Key('target_pending_registration_banner'),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.shade300),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, size: 20, color: Colors.orange.shade800),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _pendingRegistration!.photoUnavailable
+                        ? 'A fotografia de "${_pendingRegistration!.place.name}" não está mais disponível neste dispositivo. '
+                            'Retome o cadastro selecionando uma nova foto para o mesmo local.'
+                        : 'Envio de fotografia pendente para "${_pendingRegistration!.place.name}".',
+                    key: _pendingRegistration!.photoUnavailable
+                        ? const Key('target_pending_photo_unavailable_text')
+                        : const Key('target_pending_photo_pending_text'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange.shade900,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  key: const Key('target_resume_pending_registration_button'),
+                  onPressed: widget.enabled ? _resumePendingRegistration : null,
+                  child: const Text('Retomar'),
+                ),
+              ],
+            ),
+          ),
+        ],
+
         // Campo de entrada da busca
         TextFormField(
           controller: _searchController,
@@ -373,36 +638,50 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  Icons.search_off_rounded,
-                  size: 20,
-                  color: theme.colorScheme.onSurface.withAlpha(150),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.search_off_rounded,
+                      size: 20,
+                      color: theme.colorScheme.onSurface.withAlpha(150),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Nenhum resultado para "${_searchController.text.trim()}".',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Verifique a digitação ou tente outro nome.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: theme.colorScheme.onSurface.withAlpha(150),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Nenhum resultado para "${_searchController.text.trim()}".',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Verifique a digitação ou tente outro nome.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: theme.colorScheme.onSurface.withAlpha(150),
-                        ),
-                      ),
-                    ],
+                if (widget.placeRepository != null) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    key: const Key('register_manual_place_button'),
+                    onPressed: widget.enabled ? _openManualPlaceRegistration : null,
+                    icon: const Icon(Icons.add_location_alt_outlined, size: 18),
+                    label: const Text('Cadastrar local manualmente'),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -442,6 +721,21 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               ),
             ),
           ),
+          if (widget.placeRepository != null) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('register_manual_place_footer_button'),
+                onPressed: widget.enabled ? _openManualPlaceRegistration : null,
+                icon: const Icon(Icons.add_location_alt_outlined, size: 16),
+                label: const Text(
+                  'Não encontrou o local? Cadastrar manualmente',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+          ],
         ],
       ],
     );

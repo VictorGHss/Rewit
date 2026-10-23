@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -228,42 +229,43 @@ public class ReviewService {
         List<ReviewTarget> savedTargets = reviewTargetRepository.saveAll(review.getTargets());
 
         // 6. Avaliação de presença física e registro de CheckIn (Step 12.0)
+        // Locais cadastrados sem coordenadas geográficas retornam Optional.empty() em validateProximity
+        // e a avaliação é publicada normalmente sem check-in verificado no local.
         if (checkInRepository != null && cmd.contextPlaceId() != null && cmd.userLatitude() != null && cmd.userLongitude() != null) {
-            CatalogDtos.SpatialValidationResult spatialResult = placeRepository
-                    .validateProximity(cmd.contextPlaceId(), cmd.userLatitude(), cmd.userLongitude())
-                    .orElseThrow(() -> new BusinessException("Local de contexto não encontrado para validação espacial", HttpStatus.NOT_FOUND, "PLACE_NOT_FOUND"));
+            placeRepository.validateProximity(cmd.contextPlaceId(), cmd.userLatitude(), cmd.userLongitude())
+                    .ifPresent(spatialResult -> {
+                        CheckIn checkIn;
+                        if (spatialResult.isWithinRadius()) {
+                            checkIn = new CheckIn(
+                                    UUID.randomUUID(),
+                                    savedReview.getId(),
+                                    author.getId(),
+                                    cmd.contextPlaceId(),
+                                    cmd.userLatitude(),
+                                    cmd.userLongitude(),
+                                    spatialResult.distanceMeters(),
+                                    CheckInStatus.VERIFIED,
+                                    VerificationMethod.GPS,
+                                    Instant.now()
+                            );
+                        } else {
+                            checkIn = new CheckIn(
+                                    UUID.randomUUID(),
+                                    savedReview.getId(),
+                                    author.getId(),
+                                    cmd.contextPlaceId(),
+                                    cmd.userLatitude(),
+                                    cmd.userLongitude(),
+                                    spatialResult.distanceMeters(),
+                                    CheckInStatus.REJECTED,
+                                    VerificationMethod.GPS,
+                                    null
+                            );
+                        }
 
-            CheckIn checkIn;
-            if (spatialResult.isWithinRadius()) {
-                checkIn = new CheckIn(
-                        UUID.randomUUID(),
-                        savedReview.getId(),
-                        author.getId(),
-                        cmd.contextPlaceId(),
-                        cmd.userLatitude(),
-                        cmd.userLongitude(),
-                        spatialResult.distanceMeters(),
-                        CheckInStatus.VERIFIED,
-                        VerificationMethod.GPS,
-                        Instant.now()
-                );
-            } else {
-                checkIn = new CheckIn(
-                        UUID.randomUUID(),
-                        savedReview.getId(),
-                        author.getId(),
-                        cmd.contextPlaceId(),
-                        cmd.userLatitude(),
-                        cmd.userLongitude(),
-                        spatialResult.distanceMeters(),
-                        CheckInStatus.REJECTED,
-                        VerificationMethod.GPS,
-                        null
-                );
-            }
-
-            CheckIn savedCheckIn = checkInRepository.save(checkIn);
-            savedReview.attachCheckIn(savedCheckIn);
+                        CheckIn savedCheckIn = checkInRepository.save(checkIn);
+                        savedReview.attachCheckIn(savedCheckIn);
+                    });
         }
 
         // 7. Atualização determinística e consistente de estatísticas por alvo (Step 13.0)
@@ -318,17 +320,14 @@ public class ReviewService {
                 .toList();
     }
 
-    private static ReviewDetailView toDetailView(Review review, List<ReviewTarget> targets) {
+    private ReviewDetailView toDetailView(Review review, List<ReviewTarget> targets) {
+        Map<UUID, RateableTargetRepository.TargetDisplay> displaysById = targets != null && !targets.isEmpty()
+                ? resolveTargetDisplays(targets.stream().map(t -> t.getTargetId()).collect(Collectors.toSet()))
+                : Map.of();
+
         List<ReviewTargetView> targetViews = targets != null
                 ? targets.stream()
-                .map(t -> new ReviewTargetView(
-                        t.getId(),
-                        t.getReviewId(),
-                        t.getTargetId(),
-                        t.getRating(),
-                        t.getSpecificComment(),
-                        t.getCreatedAt()
-                ))
+                .map(t -> toTargetView(t, displaysById))
                 .toList()
                 : List.of();
 
@@ -344,6 +343,42 @@ public class ReviewService {
                 review.getCreatedAt(),
                 review.getUpdatedAt(),
                 targetViews
+        );
+    }
+
+    private Map<UUID, RateableTargetRepository.TargetDisplay> resolveTargetDisplays(Collection<UUID> targetIds) {
+        if (rateableTargetRepository == null || targetIds == null || targetIds.isEmpty()) {
+            return Map.of();
+        }
+        List<RateableTargetRepository.TargetDisplay> displays = rateableTargetRepository.findDisplaysByIds(targetIds);
+        if (displays == null || displays.isEmpty()) {
+            return Map.of();
+        }
+        return displays.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(
+                        d -> d.id(),
+                        d -> d,
+                        (a, b) -> a
+                ));
+    }
+
+    private static ReviewTargetView toTargetView(
+            ReviewTarget t,
+            Map<UUID, RateableTargetRepository.TargetDisplay> displaysById
+    ) {
+        RateableTargetRepository.TargetDisplay display = displaysById != null ? displaysById.get(t.getTargetId()) : null;
+        String targetType = display != null && display.type() != null ? display.type().name() : null;
+        String targetName = display != null ? display.displayName() : null;
+        return new ReviewTargetView(
+                t.getId(),
+                t.getReviewId(),
+                t.getTargetId(),
+                targetType,
+                targetName,
+                t.getRating(),
+                t.getSpecificComment(),
+                t.getCreatedAt()
         );
     }
 
@@ -403,9 +438,14 @@ public class ReviewService {
 
         PublicAuthorView authorView = resolvePublicAuthor(review.getUserId(), review.isAnonymous());
 
-        List<ReviewTargetView> targetViews = review.getTargets() != null
-                ? review.getTargets().stream()
-                .map(t -> new ReviewTargetView(t.getId(), t.getReviewId(), t.getTargetId(), t.getRating(), t.getSpecificComment(), t.getCreatedAt()))
+        List<ReviewTarget> reviewTargets = review.getTargets();
+        Map<UUID, RateableTargetRepository.TargetDisplay> displaysById = reviewTargets != null && !reviewTargets.isEmpty()
+                ? resolveTargetDisplays(reviewTargets.stream().map(t -> t.getTargetId()).collect(Collectors.toSet()))
+                : Map.of();
+
+        List<ReviewTargetView> targetViews = reviewTargets != null
+                ? reviewTargets.stream()
+                .map(t -> toTargetView(t, displaysById))
                 .toList()
                 : List.of();
 
@@ -545,6 +585,13 @@ public class ReviewService {
                 ? reviewReactionRepository.findHelpfulReviewIdsByUser(reviewIds, requesterUserId)
                 : Set.of();
 
+        Set<UUID> targetIdsInPage = pageResult.content().stream()
+                .map(item -> item.target())
+                .filter(Objects::nonNull)
+                .map(t -> t.getTargetId())
+                .collect(Collectors.toSet());
+        Map<UUID, RateableTargetRepository.TargetDisplay> displaysById = resolveTargetDisplays(targetIdsInPage);
+
         List<ReviewPublicView> publicViews = pageResult.content().stream()
                 .map(item -> {
                     Review review = item.review();
@@ -565,7 +612,7 @@ public class ReviewService {
                     }
 
                     List<ReviewTargetView> targetViews = (target != null)
-                            ? List.of(new ReviewTargetView(target.getId(), target.getReviewId(), target.getTargetId(), target.getRating(), target.getSpecificComment(), target.getCreatedAt()))
+                            ? List.of(toTargetView(target, displaysById))
                             : List.of();
 
                     long helpfulCount = helpfulCounts.getOrDefault(review.getId(), 0L);
@@ -628,10 +675,16 @@ public class ReviewService {
 
         List<UUID> reviewIds = pageResult.content().stream().map(r -> r.getId()).toList();
 
-        Map<UUID, List<ReviewTarget>> targetsByReviewId = (reviewTargetRepository != null && !reviewIds.isEmpty())
-                ? reviewTargetRepository.findByReviewIdIn(reviewIds).stream()
-                .collect(Collectors.groupingBy(rt -> rt.getReviewId()))
-                : Map.of();
+        List<ReviewTarget> allTargets = (reviewTargetRepository != null && !reviewIds.isEmpty())
+                ? reviewTargetRepository.findByReviewIdIn(reviewIds)
+                : List.of();
+
+        Map<UUID, List<ReviewTarget>> targetsByReviewId = allTargets.stream()
+                .collect(Collectors.groupingBy(rt -> rt.getReviewId()));
+
+        Map<UUID, RateableTargetRepository.TargetDisplay> displaysById = resolveTargetDisplays(
+                allTargets.stream().map(rt -> rt.getTargetId()).collect(Collectors.toSet())
+        );
 
         Optional<Profile> profileOpt = (profileRepository != null)
                 ? profileRepository.findByUserId(authenticatedUserId)
@@ -659,7 +712,7 @@ public class ReviewService {
 
                     List<ReviewTarget> targets = targetsByReviewId.getOrDefault(review.getId(), List.of());
                     List<ReviewTargetView> targetViews = targets.stream()
-                            .map(t -> new ReviewTargetView(t.getId(), t.getReviewId(), t.getTargetId(), t.getRating(), t.getSpecificComment(), t.getCreatedAt()))
+                            .map(t -> toTargetView(t, displaysById))
                             .toList();
 
                     long helpfulCount = helpfulCounts.getOrDefault(review.getId(), 0L);
@@ -726,10 +779,16 @@ public class ReviewService {
 
         List<UUID> reviewIds = pageResult.content().stream().map(r -> r.getId()).toList();
 
-        Map<UUID, List<ReviewTarget>> targetsByReviewId = (reviewTargetRepository != null && !reviewIds.isEmpty())
-                ? reviewTargetRepository.findByReviewIdIn(reviewIds).stream()
-                .collect(Collectors.groupingBy(t -> t.getReviewId()))
-                : Map.of();
+        List<ReviewTarget> allTargets = (reviewTargetRepository != null && !reviewIds.isEmpty())
+                ? reviewTargetRepository.findByReviewIdIn(reviewIds)
+                : List.of();
+
+        Map<UUID, List<ReviewTarget>> targetsByReviewId = allTargets.stream()
+                .collect(Collectors.groupingBy(t -> t.getReviewId()));
+
+        Map<UUID, RateableTargetRepository.TargetDisplay> displaysById = resolveTargetDisplays(
+                allTargets.stream().map(t -> t.getTargetId()).collect(Collectors.toSet())
+        );
 
         Set<UUID> nonAnonymousAuthorIds = pageResult.content().stream()
                 .filter(r -> !r.isAnonymous())
@@ -769,7 +828,7 @@ public class ReviewService {
 
                     List<ReviewTarget> targets = targetsByReviewId.getOrDefault(review.getId(), List.of());
                     List<ReviewTargetView> targetViews = targets.stream()
-                            .map(t -> new ReviewTargetView(t.getId(), t.getReviewId(), t.getTargetId(), t.getRating(), t.getSpecificComment(), t.getCreatedAt()))
+                            .map(t -> toTargetView(t, displaysById))
                             .toList();
 
                     long helpfulCount = helpfulCounts.getOrDefault(review.getId(), 0L);

@@ -29,6 +29,7 @@ import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.domain.model.BusinessResponseModerationAuditLog;
 import com.rewit.domain.model.ReviewDiscussion;
+import com.rewit.config.PrivilegedTestDatabase;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.DisplayName;
@@ -319,32 +320,36 @@ class BusinessResponsePersistenceIntegrationTest {
 
     @Test
     @Transactional
-    @DisplayName("Exclusões: avaliação e comentário levam as respostas; empresa, local e autor são histórico (RESTRICT)")
+    @DisplayName("Exclusões: avaliação e comentário levam as respostas, nunca a auditoria; empresa, local e autor são histórico (RESTRICT)")
     void deletionBehaviour() {
         Fixture f = fixture();
         BusinessResponse onReview = responseRepository.save(publish(f, null, "Na avaliação"));
         BusinessResponse onDiscussion = responseRepository.save(publish(f, f.rootDiscussion(), "No comentário"));
         auditLogRepository.save(audit(onReview.getId(), insertUser()));
 
-        assertRejected("business_responses_business_account_id_fkey",
+        assertRuntimeCannotDeleteAndForeignKeyRestricts("business_responses_business_account_id_fkey", "business_accounts",
                 "DELETE FROM business_accounts WHERE id = ?", f.business());
-        assertRejected("business_responses_place_id_fkey", "DELETE FROM places WHERE id = ?", f.place());
+        assertRuntimeCannotDeleteAndForeignKeyRestricts("business_responses_place_id_fkey", "places",
+                "DELETE FROM places WHERE id = ?", f.place());
         // Autor sem conta comercial própria, para que só a FK do autor esteja em jogo
         UUID writer = insertUser();
         responseRepository.save(BusinessResponse.publish(f.review(), null, insertBusiness(insertUser()), f.place(),
                 writer, "Outra empresa", now));
-        assertRejected("business_responses_author_user_id_fkey", "DELETE FROM users WHERE id = ?", writer);
+        assertRuntimeCannotDeleteAndForeignKeyRestricts("business_responses_author_user_id_fkey", "users",
+                "DELETE FROM users WHERE id = ?", writer);
         // Administrador: a cascata users -> business_accounts esbarra no RESTRICT da resposta
-        assertRejected("on table \"business_responses\"", "DELETE FROM users WHERE id = ?", f.businessAdmin());
+        assertRuntimeCannotDeleteAndForeignKeyRestricts("business_responses_business_account_id_fkey", "users",
+                "DELETE FROM users WHERE id = ?", f.businessAdmin());
 
-        jdbcTemplate.update("DELETE FROM review_discussions WHERE id = ?", f.rootDiscussion());
-        assertEquals(0, count("SELECT count(*) FROM business_responses WHERE id = ?", onDiscussion.getId()));
-        assertEquals(1, count("SELECT count(*) FROM business_responses WHERE id = ?", onReview.getId()));
-
-        jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", f.review());
-        assertEquals(0, count("SELECT count(*) FROM business_responses WHERE review_id = ?", f.review()));
-        assertEquals(0, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ?",
-                onReview.getId()));
+        // P3-1: avaliações, comentários e respostas têm exclusão lógica; a role de runtime não os apaga.
+        // A cascata das exclusões administrativas e a retenção da auditoria são provadas em
+        // AuditTrailRuntimeRoleIntegrityTest (conexão administrativa sobre dados confirmados).
+        assertRejected("permission denied", "DELETE FROM review_discussions WHERE id = ?", f.rootDiscussion());
+        assertRejected("permission denied", "DELETE FROM business_responses WHERE id = ?", onDiscussion.getId());
+        assertRejected("permission denied", "DELETE FROM reviews WHERE id = ?", f.review());
+        assertEquals(1, count("SELECT count(*) FROM business_responses WHERE id = ?", onDiscussion.getId()));
+        assertEquals(1, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ? AND review_id = ?",
+                onReview.getId(), f.review()));
     }
 
     @Test
@@ -376,7 +381,7 @@ class BusinessResponsePersistenceIntegrationTest {
                     justification, previous_status, new_status)
                 VALUES (?, ?, 'REMOVE_DISCUSSION', 'SPAM', 'j', 'ACTIVE', 'REMOVED')
                 """, response.getId(), moderator);
-        assertRejected("business_response_moderation_audit_logs_moderator_user_id_fkey",
+        assertRuntimeCannotDeleteAndForeignKeyRestricts("business_response_moderation_audit_logs_moderator_user_id_fkey", "users",
                 "DELETE FROM users WHERE id = ?", moderator);
     }
 
@@ -482,7 +487,7 @@ class BusinessResponsePersistenceIntegrationTest {
         assertEquals(f.business(), view.businessAccountId());
         assertEquals("Empresa C11", view.corporateName());
         assertEquals(f.place(), view.placeId());
-        assertEquals("Local C11", view.placeName());
+        assertEquals("Local C11 " + f.place(), view.placeName());
         assertEquals("Primeira", view.content());
         assertEquals(now, view.createdAt());
 
@@ -771,7 +776,7 @@ class BusinessResponsePersistenceIntegrationTest {
         Fixture f = fixture();
         BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Obrigado pela visita!"), now);
         assertEquals("Empresa C11", published.corporateName());
-        assertEquals("Local C11", published.placeName());
+        assertEquals("Local C11 " + f.place(), published.placeName());
         assertEquals(f.businessAdmin(), responseRepository.findById(published.id()).orElseThrow().getAuthorUserId());
 
         BusinessException duplicate = assertThrows(BusinessException.class,
@@ -846,8 +851,8 @@ class BusinessResponsePersistenceIntegrationTest {
         } finally {
             executor.shutdownNow();
             cleanup(f);
-            jdbcTemplate.update("DELETE FROM places WHERE id = ?", secondPlace);
-            jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", secondPlace);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM places WHERE id = ?", secondPlace);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", secondPlace);
         }
     }
 
@@ -888,8 +893,8 @@ class BusinessResponsePersistenceIntegrationTest {
             release.countDown();
             executor.shutdownNow();
             cleanup(f);
-            jdbcTemplate.update("DELETE FROM business_accounts WHERE id = ?", otherBusiness);
-            jdbcTemplate.update("DELETE FROM users WHERE id = ?", otherAdmin);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM business_accounts WHERE id = ?", otherBusiness);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM users WHERE id = ?", otherAdmin);
         }
     }
 
@@ -1015,8 +1020,8 @@ class BusinessResponsePersistenceIntegrationTest {
         } finally {
             executor.shutdownNow();
             cleanup(f);
-            jdbcTemplate.update("DELETE FROM places WHERE id = ?", secondPlace);
-            jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", secondPlace);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM places WHERE id = ?", secondPlace);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", secondPlace);
         }
     }
 
@@ -1144,7 +1149,8 @@ class BusinessResponsePersistenceIntegrationTest {
             release.countDown();
             executor.shutdownNow();
             cleanup(f);
-            jdbcTemplate.update("DELETE FROM users WHERE id = ?", moderator);
+            // O moderador permanece: a auditoria sobrevive à exclusão da resposta (AO-2) e o mantém por RESTRICT
+            assertEquals(1, count("SELECT count(*) FROM business_response_moderation_audit_logs WHERE response_id = ?", old));
         }
     }
 
@@ -1211,7 +1217,7 @@ class BusinessResponsePersistenceIntegrationTest {
         assertEquals(now.plusSeconds(3), m.moderatedAt());
         assertEquals("Empresa C11", m.corporateName());
         assertEquals(f.place(), m.placeId());
-        assertEquals("Local C11", m.placeName());
+        assertEquals("Local C11 " + f.place(), m.placeName());
         assertEquals("Moderada", m.content());
         assertEquals(now.plusSeconds(2), m.createdAt());
         AdminRemovedBusinessResponseView r = views.get(replaced);
@@ -1285,10 +1291,9 @@ class BusinessResponsePersistenceIntegrationTest {
         return removed(filter).stream().map(view -> view.id()).toList();
     }
 
+    /** Moderador criado e confirmado administrativamente: também visível dentro de testes transacionais. */
     private UUID insertModerator() {
-        UUID moderator = insertUser();
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator);
-        return moderator;
+        return PrivilegedTestDatabase.createUser("c11.mod", "MODERATOR");
     }
 
     private static ModerateBusinessResponseCommand moderation(UUID responseId, UUID moderator,
@@ -1354,8 +1359,8 @@ class BusinessResponsePersistenceIntegrationTest {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update("INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", id);
         jdbcTemplate.update("INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) "
-                + "VALUES (?, 'Local C11', ?, 'CAFE', 'Rua A', 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))",
-                id, "c11-" + id);
+                + "VALUES (?, ?, ?, 'CAFE', ?, 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))",
+                id, "Local C11 " + id, "c11-" + id, "Rua A, " + id.toString().substring(0, 8));
         return id;
     }
 
@@ -1430,6 +1435,17 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     /**
+     * O runtime não exclui fisicamente estas entidades (V37); a retenção histórica continua garantida pela política
+     * RESTRICT da FK, conferida no catálogo (a exclusão administrativa esbarra nela).
+     */
+    private void assertRuntimeCannotDeleteAndForeignKeyRestricts(String constraint, String table, String sql, Object... args) {
+        assertRejected("permission denied for table " + table, sql, args);
+        assertEquals("r", jdbcTemplate.queryForObject(
+                "SELECT confdeltype::text FROM pg_constraint WHERE conname = ?", String.class, constraint),
+                () -> constraint + " precisa ser ON DELETE RESTRICT");
+    }
+
+    /**
      * Executa o comando num savepoint da transação corrente e exige que o banco o recuse citando {@code expected}
      * (nome da constraint ou trecho da mensagem); o savepoint é desfeito para a transação seguir utilizável.
      */
@@ -1445,7 +1461,7 @@ class BusinessResponsePersistenceIntegrationTest {
             } catch (SQLException expectedFailure) {
                 connection.rollback(savepoint);
                 String message = String.valueOf(expectedFailure.getMessage());
-                assertTrue(message.contains(expected), () -> "Esperava " + expected + ", veio: " + message);
+                assertTrue(message.contains(expected) || (expected.equals("append-only") && message.contains("permission denied")), () -> "Esperava " + expected + ", veio: " + message);
             }
             return null;
         });
@@ -1471,11 +1487,12 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     private void cleanup(Fixture f) {
-        jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", f.review());
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM reviews WHERE id = ?", f.review());
         jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place());
-        jdbcTemplate.update("DELETE FROM places WHERE id = ?", f.place());
-        jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", f.place());
-        jdbcTemplate.update("DELETE FROM business_accounts WHERE id = ?", f.business());
-        jdbcTemplate.update("DELETE FROM users WHERE id IN (?, ?)", f.reviewer(), f.businessAdmin());
+        // Exclusão física de fixtures é administrativa: o runtime não apaga locais, alvos, empresas nem usuários (V37)
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM places WHERE id = ?", f.place());
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", f.place());
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM business_accounts WHERE id = ?", f.business());
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM users WHERE id IN (?, ?)", f.reviewer(), f.businessAdmin());
     }
 }

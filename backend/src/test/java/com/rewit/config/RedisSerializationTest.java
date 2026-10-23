@@ -61,7 +61,10 @@ class RedisSerializationTest {
     @DisplayName("RedisConfig deve instanciar RedisTemplate devidamente configurado com novo serializer")
     void shouldConfigureRedisTemplateProperly() {
         RedisConfig config = new RedisConfig();
-        LettuceConnectionFactory factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration("localhost", 6379));
+        TestInfrastructureConfig infrastructure = TestInfrastructureConfig.current();
+        String host = infrastructure.redisHost();
+        int port = infrastructure.redisPort();
+        LettuceConnectionFactory factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(host, port));
         factory.afterPropertiesSet();
 
         RedisTemplate<String, Object> template = config.redisTemplate(factory);

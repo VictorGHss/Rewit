@@ -208,7 +208,7 @@ Por ciclo há um log de início e um resumo agregado (status, modo, duração, c
 
 - Somente `CONFIRMED_ORPHAN`, rechecado sob os locks, chega ao storage delete. A chave é revalidada antes de derivar o `reviewId`.
 - Nenhum tipo do GC é exposto pela API pública; não há endpoint, e o GC não aceita chave, prefixo ou bucket vindos de fora.
-- Domínio e aplicação não importam o SDK do MinIO. Testes de fronteira verificam isso e também que o storage delete só é chamado pela compensação do upload, pela exclusão de mídia e por `PurgeConfirmedOrphanStorageObjectUseCase`.
+- Domínio e aplicação não importam o SDK do MinIO. Testes de fronteira verificam isso e também que o storage delete só é chamado pela compensação do upload (`ReviewMediaService` e `PlaceMediaService`), pela exclusão de mídia e por `PurgeConfirmedOrphanStorageObjectUseCase`.
 - Relação com o Outbox: nenhuma. O GC é uma varredura direta (decisão do STEP 27.0); não gera nem consome `outbox_messages` e não compartilha métricas.
 
 ## 16. Rollout operacional seguro

@@ -246,18 +246,26 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     VoidCallback? onTap,
   }) {
     final theme = Theme.of(context);
+    // Cada contador recebe uma fração igual da largura: o número reduz se não couber e o rótulo quebra em até
+    // duas linhas, sem invadir o vizinho em tela estreita ou com fonte ampliada
     final content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          count.toString(),
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            count.toString(),
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
         const SizedBox(height: 2),
         Text(
           label,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurface.withAlpha(160),
           ),
@@ -265,20 +273,25 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       ],
     );
 
-    if (onTap != null) {
-      return InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: content,
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    final padded = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
       child: content,
+    );
+
+    return Expanded(
+      child: Semantics(
+        label: '$count $label',
+        button: onTap != null,
+        excludeSemantics: true,
+        onTap: onTap,
+        child: onTap != null
+            ? InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(8),
+                child: padded,
+              )
+            : padded,
+      ),
     );
   }
 
@@ -502,8 +515,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
           // Ações do Perfil
           if (!_isMyProfile && !isDeleted) ...[
-            SizedBox(
-              height: 44,
+            // Altura mínima, não fixa: com fonte ampliada o rótulo cresce em vez de ser cortado
+            ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 44),
               child: profile.isFollowing
                   ? OutlinedButton.icon(
                       onPressed: _isActionLoading ? null : _toggleFollow,

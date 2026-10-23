@@ -48,4 +48,39 @@ class ReviewPrivacyRules {
   static String messageForError(String? errorCode, String detail) {
     return errorCode == incompatibleCombinationErrorCode ? incompatibleCombinationMessage : detail;
   }
+
+  /// Visibilidade que vale de fato. Uma avaliação antiga anônima com `FOLLOWERS` é tratada pelo backend como
+  /// `PRIVATE` para terceiros, então só o autor a vê.
+  static String effectiveVisibility({required bool isAnonymous, required String visibility}) {
+    final normalized = visibility.toUpperCase();
+    if (isAnonymous && normalized == followersVisibility) return 'PRIVATE';
+    return normalized;
+  }
+
+  /// Rótulo curto da visibilidade efetiva, para cards e listas.
+  static String visibilityLabel({required bool isAnonymous, required String visibility}) {
+    switch (effectiveVisibility(isAnonymous: isAnonymous, visibility: visibility)) {
+      case 'FOLLOWERS':
+        return 'Seguidores';
+      case 'PRIVATE':
+        return 'Somente você';
+      default:
+        return 'Público';
+    }
+  }
+
+  /// Descrição completa da visibilidade efetiva, para leitores de tela e dicas.
+  static String visibilityDescription({required bool isAnonymous, required String visibility}) {
+    if (isAnonymous && visibility.toUpperCase() == followersVisibility) {
+      return 'Visível somente para você. Avaliações anônimas não podem ser restritas a seguidores.';
+    }
+    switch (effectiveVisibility(isAnonymous: isAnonymous, visibility: visibility)) {
+      case 'FOLLOWERS':
+        return 'Visível para quem segue o autor';
+      case 'PRIVATE':
+        return 'Visível somente para o autor';
+      default:
+        return 'Visível para todos';
+    }
+  }
 }

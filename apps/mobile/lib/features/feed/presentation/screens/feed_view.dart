@@ -160,7 +160,8 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
               key: const PageStorageKey('feed_list_view'),
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              // Folga inferior para o botão "Nova Avaliação" não cobrir o rodapé (voto útil) do último card
+              padding: const EdgeInsets.only(top: 8.0, bottom: 96.0),
               itemCount: reviews.length + (state.hasMore ? 1 : 0),
               itemBuilder: (context, index) {
                 // Item de review

@@ -7,6 +7,7 @@ import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.*;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -527,8 +528,8 @@ class FeedV2ControllerIntegrationTest {
 
     private void cleanupReview(UUID reviewId) {
         if (reviewId != null) {
-            jdbcTemplate.update("DELETE FROM review_targets WHERE review_id = ?", reviewId);
-            jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", reviewId);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM review_targets WHERE review_id = ?", reviewId);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM reviews WHERE id = ?", reviewId);
         }
     }
 

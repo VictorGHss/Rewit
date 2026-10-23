@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence;
 
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.application.port.ModerationAuditLogRepository;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.RateableTargetRepository;
@@ -74,28 +75,28 @@ class ModerationAuditLogPersistenceIntegrationTest {
     }
 
     @Test
-    @DisplayName("Persistir e atualizar roles MODERATOR e ADMIN com sucesso no PostgreSQL")
-    @Transactional
-    void shouldPersistAndRetrieveModeratorAndAdminRoles() {
+    @DisplayName("Roles MODERATOR e ADMIN atribuídas administrativamente são lidas; a role de runtime não as altera (P2-2)")
+    void shouldReadAdministrativeRolesAndForbidRuntimeRoleChanges() {
         String modEmail = "test.mod." + UUID.randomUUID() + "@rewit.com";
-        User modUser = new User(null, modEmail, "hash_mod", AuthProvider.LOCAL, null);
-        modUser.changeRole(Role.MODERATOR);
+        User savedMod = userRepository.save(new User(null, modEmail, "hash_mod", AuthProvider.LOCAL, null));
+        assertEquals(Role.USER, savedMod.getRole());
 
-        User savedMod = userRepository.save(modUser);
-        assertEquals(Role.MODERATOR, savedMod.getRole());
+        // Atribuição administrativa (fora do runtime) é refletida na leitura JPA
+        PrivilegedTestDatabase.assignRole(savedMod.getId(), Role.MODERATOR.name());
+        assertEquals(Role.MODERATOR, userRepository.findById(savedMod.getId()).orElseThrow().getRole());
 
-        Optional<User> foundMod = userRepository.findById(savedMod.getId());
-        assertTrue(foundMod.isPresent());
-        assertEquals(Role.MODERATOR, foundMod.get().getRole());
+        // A role de runtime não promove nem rebaixa: o banco recusa a alteração
+        User viaRuntime = userRepository.findById(savedMod.getId()).orElseThrow();
+        viaRuntime.changeRole(Role.ADMIN);
+        assertThrows(org.springframework.dao.DataAccessException.class, () -> userRepository.save(viaRuntime));
+        assertEquals(Role.MODERATOR, userRepository.findById(savedMod.getId()).orElseThrow().getRole());
 
-        // Alterar para ADMIN
-        savedMod.changeRole(Role.ADMIN);
-        User savedAdmin = userRepository.save(savedMod);
-        assertEquals(Role.ADMIN, savedAdmin.getRole());
+        User newcomer = new User(null, "test.admin." + UUID.randomUUID() + "@rewit.com", "hash", AuthProvider.LOCAL, null);
+        newcomer.changeRole(Role.ADMIN);
+        assertThrows(org.springframework.dao.DataAccessException.class, () -> userRepository.save(newcomer));
 
-        Optional<User> foundAdmin = userRepository.findById(savedAdmin.getId());
-        assertTrue(foundAdmin.isPresent());
-        assertEquals(Role.ADMIN, foundAdmin.get().getRole());
+        PrivilegedTestDatabase.assignRole(savedMod.getId(), Role.ADMIN.name());
+        assertEquals(Role.ADMIN, userRepository.findById(savedMod.getId()).orElseThrow().getRole());
     }
 
     @Test
@@ -117,10 +118,9 @@ class ModerationAuditLogPersistenceIntegrationTest {
     @Transactional
     void shouldPersistModerationAuditLogWithReferentialIntegrity() {
         // 1. Criar Moderador
-        String modEmail = "moderator." + UUID.randomUUID() + "@rewit.com";
-        User moderator = new User(null, modEmail, "hash_mod", AuthProvider.LOCAL, null);
-        moderator.changeRole(Role.MODERATOR);
-        User savedMod = userRepository.save(moderator);
+        // Moderador criado e confirmado administrativamente (papel não é atribuível pelo runtime)
+        User savedMod = userRepository.findById(PrivilegedTestDatabase.createUser("moderator", Role.MODERATOR.name()))
+                .orElseThrow();
 
         // 2. Criar Autor e Local para Review
         String authorEmail = "author." + UUID.randomUUID() + "@rewit.com";

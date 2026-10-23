@@ -19,6 +19,7 @@ import com.rewit.domain.model.RateableTarget;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewTarget;
 import com.rewit.domain.model.User;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -85,7 +86,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
     @AfterEach
     void removeCreatedReviews() {
         // ON DELETE CASCADE remove alvos e reações das reviews do teste
-        createdReviewIds.forEach(id -> jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", id));
+        createdReviewIds.forEach(id -> PrivilegedTestDatabase.jdbc().update("DELETE FROM reviews WHERE id = ?", id));
         createdReviewIds.clear();
     }
 

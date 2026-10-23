@@ -49,16 +49,16 @@ public class PlaceJpaEntity {
     @Column(name = "neighborhood", length = 128)
     private String neighborhood;
 
-    @Column(name = "city", nullable = false, length = 100)
+    @Column(name = "city", length = 100)
     private String city;
 
-    @Column(name = "state", nullable = false, length = 50)
+    @Column(name = "state", length = 50)
     private String state;
 
     @Column(name = "country", nullable = false, length = 10)
     private String country;
 
-    @Column(name = "coordinates", columnDefinition = "geography(Point, 4326)", nullable = false)
+    @Column(name = "coordinates", columnDefinition = "geography(Point, 4326)")
     private Point coordinates;
 
     @Column(name = "validation_radius_meters", nullable = false)
@@ -73,6 +73,9 @@ public class PlaceJpaEntity {
     @Column(name = "claimed_by_business_id")
     private UUID claimedByBusinessId;
 
+    @Column(name = "created_by_user_id")
+    private UUID createdByUserId;
+
     @Column(name = "status", nullable = false, length = 32)
     private String status = "ACTIVE";
 
@@ -85,14 +88,17 @@ public class PlaceJpaEntity {
     public PlaceJpaEntity() {
     }
 
-    public static Point toPoint(double latitude, double longitude) {
+    public static Point toPoint(Double latitude, Double longitude) {
+        if (latitude == null || longitude == null) {
+            return null;
+        }
         // WGS 84 / PostGIS: Coordinate(x, y) = Coordinate(longitude, latitude)
         return GEOMETRY_FACTORY.createPoint(new Coordinate(longitude, latitude));
     }
 
     public Place toDomain() {
-        double lat = coordinates != null ? coordinates.getY() : 0.0;
-        double lon = coordinates != null ? coordinates.getX() : 0.0;
+        Double lat = coordinates != null ? coordinates.getY() : null;
+        Double lon = coordinates != null ? coordinates.getX() : null;
 
         return new Place(
                 id,
@@ -112,6 +118,7 @@ public class PlaceJpaEntity {
                 origin,
                 isVerified,
                 claimedByBusinessId,
+                createdByUserId,
                 status
         );
     }
@@ -136,6 +143,7 @@ public class PlaceJpaEntity {
         entity.origin = domain.getOrigin();
         entity.isVerified = domain.isVerified();
         entity.claimedByBusinessId = domain.getClaimedByBusinessId();
+        entity.createdByUserId = domain.getCreatedByUserId();
         entity.status = domain.getStatus();
         entity.createdAt = domain.getCreatedAt() != null ? domain.getCreatedAt() : Instant.now();
         entity.updatedAt = domain.getUpdatedAt() != null ? domain.getUpdatedAt() : Instant.now();
@@ -159,6 +167,7 @@ public class PlaceJpaEntity {
         this.origin = domain.getOrigin();
         this.isVerified = domain.isVerified();
         this.claimedByBusinessId = domain.getClaimedByBusinessId();
+        this.createdByUserId = domain.getCreatedByUserId();
         this.status = domain.getStatus();
         this.updatedAt = Instant.now();
     }
@@ -290,6 +299,14 @@ public class PlaceJpaEntity {
 
     public void setClaimedByBusinessId(UUID claimedByBusinessId) {
         this.claimedByBusinessId = claimedByBusinessId;
+    }
+
+    public UUID getCreatedByUserId() {
+        return createdByUserId;
+    }
+
+    public void setCreatedByUserId(UUID createdByUserId) {
+        this.createdByUserId = createdByUserId;
     }
 
     public String getStatus() {

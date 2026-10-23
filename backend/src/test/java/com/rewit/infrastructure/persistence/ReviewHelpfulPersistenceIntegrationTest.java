@@ -12,6 +12,7 @@ import com.rewit.domain.model.Profile;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.User;
 import com.rewit.infrastructure.persistence.repository.ReviewReactionJpaRepository;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -312,7 +313,8 @@ class ReviewHelpfulPersistenceIntegrationTest {
         reviewReactionRepository.addHelpful(review.getId(), voter.getId());
         assertEquals(1L, reviewReactionRepository.countHelpful(review.getId()));
 
-        jdbcTemplate.update("DELETE FROM reviews WHERE id = ?", review.getId());
+        // Exclusão física é administrativa: a role de runtime não tem DELETE em reviews (P3-1)
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM reviews WHERE id = ?", review.getId());
 
         Long reactionsRemaining = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM review_reactions WHERE review_id = ?",
