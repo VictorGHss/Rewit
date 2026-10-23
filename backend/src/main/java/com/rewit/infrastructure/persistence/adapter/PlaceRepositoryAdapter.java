@@ -12,6 +12,8 @@ import com.rewit.application.dto.catalog.CatalogDtos;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceBusinessProfile;
+import com.rewit.domain.model.PlaceContactInfo;
 import com.rewit.infrastructure.persistence.entity.PlaceJpaEntity;
 import com.rewit.infrastructure.persistence.entity.RateableTargetJpaEntity;
 import com.rewit.infrastructure.persistence.repository.PlaceJpaRepository;
@@ -94,6 +96,26 @@ public class PlaceRepositoryAdapter implements PlaceRepository {
         Objects.requireNonNull(placeId, "placeId must not be null");
         Objects.requireNonNull(businessAccountId, "businessAccountId must not be null");
         return placeJpaRepository.assignClaimedBusiness(placeId, businessAccountId) == 1;
+    }
+
+    @Override
+    @Transactional
+    public Optional<Place> updateBusinessProfile(UUID placeId, PlaceBusinessProfile profile) {
+        Objects.requireNonNull(placeId, "placeId must not be null");
+        Objects.requireNonNull(profile, "profile must not be null");
+        PlaceContactInfo contact = profile.contact();
+        int updated = placeJpaRepository.updateBusinessProfile(placeId, profile.description(), contact.phone(),
+                contact.websiteUrl(), contact.instagramUrl(), contact.facebookUrl());
+        if (updated == 0) {
+            return Optional.empty();
+        }
+        // O UPDATE nativo não passa pelo contexto de persistência: a linha já carregada (travada) é recarregada
+        PlaceJpaEntity entity = entityManager.find(PlaceJpaEntity.class, placeId);
+        if (entity == null) {
+            return Optional.empty();
+        }
+        entityManager.refresh(entity);
+        return Optional.of(entity.toDomain());
     }
 
     @Override

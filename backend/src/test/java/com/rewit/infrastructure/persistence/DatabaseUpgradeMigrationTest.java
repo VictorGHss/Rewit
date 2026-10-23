@@ -356,8 +356,11 @@ class DatabaseUpgradeMigrationTest {
         }
 
         assertTrue(flyway(null, "SET ROLE " + executor).migrate().success, "Sem flyway repair: a nova tentativa conclui");
+        // A nova tentativa aplica a V37 e todas as posteriores; nenhuma fica pendente nem falha
+        assertEquals(0, flyway(null).info().pending().length);
         try (Connection conn = owner(); Statement st = conn.createStatement()) {
-            assertEquals("37", string(conn, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success"));
+            assertEquals(1, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE version = '37' AND success"));
+            assertEquals(0, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE NOT success"));
             assertEquals("search_path=pg_catalog, public, pg_temp",
                     string(conn, "SELECT array_to_string(proconfig, ',') FROM pg_proc WHERE proname = 'fn_prevent_rateable_target_type_change'"));
             st.execute("SELECT rewit_assert_runtime_privileges()");
@@ -396,6 +399,65 @@ class DatabaseUpgradeMigrationTest {
                     || clean.contains("rateable_targets:DELETE"));
         }
         assertEquals(clean, upgraded);
+    }
+
+    // ============================================================================================ V38
+
+    @Test
+    @DisplayName("V38: upgrade V37 -> V38 preserva os locais existentes, que ficam sem contatos; CHECKs e privilégios ativos")
+    void upgradeToV38KeepsExistingPlacesWithoutContacts() throws SQLException {
+        flyway("37").migrate();
+        UUID user = UUID.randomUUID();
+        UUID business = UUID.randomUUID();
+        UUID claimed = UUID.randomUUID();
+        UUID community = UUID.randomUUID();
+        String snapshot = """
+                SELECT string_agg(concat_ws('|', id, name, slug, category, description, address_text, city, state,
+                    ST_AsText(coordinates), status, claimed_by_business_id, created_by_user_id, is_verified, created_at,
+                    updated_at), ',' ORDER BY id)
+                FROM places WHERE id IN (?, ?)
+                """;
+        String before;
+        try (Connection conn = owner()) {
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'USER')",
+                    user, "v37." + user + "@rewit.test");
+            update(conn, "INSERT INTO business_accounts (id, user_id, corporate_name, tax_id, verification_status) "
+                    + "VALUES (?, ?, 'Empresa V37', ?, 'APPROVED')", business, user, "V37" + business.toString().substring(0, 8));
+            for (UUID place : new UUID[]{claimed, community}) {
+                update(conn, "INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", place);
+            }
+            update(conn, "INSERT INTO places (id, name, slug, category, description, address_text, city, state, "
+                    + "coordinates, claimed_by_business_id, created_by_user_id) VALUES (?, 'Local V37', ?, 'BAR', "
+                    + "'Descrição anterior à V38', 'Rua V37', 'Curitiba', 'PR', "
+                    + "ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), ?, ?)", claimed, "v37-" + claimed, business, user);
+            update(conn, "INSERT INTO places (id, name, slug, category, address_text, city, state) "
+                    + "VALUES (?, 'Local V37 sem descrição', ?, 'CAFE', 'Rua V37, 2', 'Curitiba', 'PR')",
+                    community, "v37-" + community);
+            before = string(conn, snapshot, claimed, community);
+        }
+
+        assertTrue(flyway(null).migrate().success);
+        try (Connection conn = owner(); Statement st = conn.createStatement()) {
+            assertEquals(1, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE version = '38' AND success"));
+            assertEquals(before, string(conn, snapshot, claimed, community), "Nenhum dado existente muda");
+            assertEquals(2, count(conn, "SELECT count(*) FROM places WHERE id IN (?, ?) AND phone IS NULL "
+                    + "AND website_url IS NULL AND instagram_url IS NULL AND facebook_url IS NULL", claimed, community));
+            assertEquals(4, count(conn, "SELECT count(*) FROM pg_constraint WHERE conrelid = 'places'::regclass AND conname IN "
+                    + "('chk_places_phone_format', 'chk_places_website_url_scheme', 'chk_places_instagram_url_scheme', "
+                    + "'chk_places_facebook_url_scheme')"));
+            // Privilégio de tabela da V36 já cobre as colunas novas; a política da V37 continua intacta
+            assertEquals("true", string(conn, "SELECT has_column_privilege('rewit_app', 'places', 'phone', 'UPDATE')::text"));
+            st.execute("SELECT rewit_assert_runtime_privileges()");
+        }
+    }
+
+    private static void update(Connection conn, String sql, Object... args) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (int i = 0; i < args.length; i++) {
+                ps.setObject(i + 1, args[i]);
+            }
+            ps.executeUpdate();
+        }
     }
 
     private void assertReport(Connection conn, UUID report, String status, boolean legacy, UUID decidedBy) throws SQLException {

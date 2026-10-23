@@ -145,7 +145,12 @@ public final class CatalogPresentationDtos {
             String origin,
             boolean isVerified,
             String status,
-            String photoUrl
+            String photoUrl,
+            // Contatos do perfil comercial; null quando não informados
+            String phone,
+            String websiteUrl,
+            String instagramUrl,
+            String facebookUrl
     ) {
         public PlaceResponse(
                 UUID id,
@@ -168,7 +173,35 @@ public final class CatalogPresentationDtos {
         ) {
             this(id, name, slug, category, description, addressText, streetNumber, neighborhood,
                     city, state, country, latitude, longitude, validationRadiusMeters, origin,
-                    isVerified, status, null);
+                    isVerified, status, null, null, null, null, null);
+        }
+
+        public static PlaceResponse of(com.rewit.domain.model.Place place, String photoUrl) {
+            com.rewit.domain.model.PlaceContactInfo contact = place.getContactInfo();
+            return new PlaceResponse(
+                    place.getId(),
+                    place.getName(),
+                    place.getSlug(),
+                    place.getCategory(),
+                    place.getDescription(),
+                    place.getAddressText(),
+                    place.getStreetNumber(),
+                    place.getNeighborhood(),
+                    place.getCity(),
+                    place.getState(),
+                    place.getCountry(),
+                    place.getLatitude(),
+                    place.getLongitude(),
+                    place.getValidationRadiusMeters(),
+                    place.getOrigin(),
+                    place.isVerified(),
+                    place.getStatus(),
+                    photoUrl,
+                    contact.phone(),
+                    contact.websiteUrl(),
+                    contact.instagramUrl(),
+                    contact.facebookUrl()
+            );
         }
     }
 

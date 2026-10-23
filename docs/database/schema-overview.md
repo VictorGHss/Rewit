@@ -148,6 +148,8 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 | `places` | `chk_places_radius` | CHECK | `validation_radius_meters > 0` |
 | `places` | `chk_places_status` | CHECK | `status IN ('ACTIVE', 'INACTIVE', 'CLOSED')` |
 | `places` | `uq_places_slug` | UNIQUE | `(slug)` |
+| `places` | `chk_places_phone_format` | CHECK | `phone IS NULL OR phone ~ '^\+?[0-9(][0-9 ().-]*[0-9]$'` (V38) |
+| `places` | `chk_places_website_url_scheme`, `chk_places_instagram_url_scheme`, `chk_places_facebook_url_scheme` | CHECK | coluna `IS NULL` ou `~* '^https?://[^[:space:]]+$'` (V38) |
 | `products` | `chk_products_status` | CHECK | `status IN ('ACTIVE', 'INACTIVE', 'DISCONTINUED')` |
 | `services` | `chk_services_status` | CHECK | `status IN ('ACTIVE', 'INACTIVE')` |
 | `events` | `chk_events_status` | CHECK | `status IN ('SCHEDULED', 'HAPPENING_NOW', 'FINISHED', 'CANCELLED')` |

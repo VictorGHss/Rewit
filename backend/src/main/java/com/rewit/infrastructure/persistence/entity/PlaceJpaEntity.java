@@ -1,6 +1,7 @@
 package com.rewit.infrastructure.persistence.entity;
 
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceContactInfo;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -85,6 +86,20 @@ public class PlaceJpaEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
+    // Contatos do perfil comercial (V38): só leitura pelo JPA. A única escrita é o UPDATE dedicado do perfil
+    // (PlaceJpaRepository.updateBusinessProfile), para que salvar o local por outro fluxo nunca os apague.
+    @Column(name = "phone", length = 32, insertable = false, updatable = false)
+    private String phone;
+
+    @Column(name = "website_url", length = 500, insertable = false, updatable = false)
+    private String websiteUrl;
+
+    @Column(name = "instagram_url", length = 500, insertable = false, updatable = false)
+    private String instagramUrl;
+
+    @Column(name = "facebook_url", length = 500, insertable = false, updatable = false)
+    private String facebookUrl;
+
     public PlaceJpaEntity() {
     }
 
@@ -119,7 +134,8 @@ public class PlaceJpaEntity {
                 isVerified,
                 claimedByBusinessId,
                 createdByUserId,
-                status
+                status,
+                new PlaceContactInfo(phone, websiteUrl, instagramUrl, facebookUrl)
         );
     }
 
