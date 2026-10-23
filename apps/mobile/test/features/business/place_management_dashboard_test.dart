@@ -8,6 +8,7 @@ import 'package:rewit_mobile/features/business/presentation/screens/place_manage
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_offers_management_screen.dart';
 
 
 class _FakeBusinessRepository implements BusinessRepository {
@@ -386,6 +387,47 @@ void main() {
       expect(capturedArgs!.placeId, 'place-amenities-1');
       expect(capturedArgs!.businessAccountId, 'acc-amenities-1');
       expect(capturedArgs!.placeName, 'Bistrô Conforto');
+      expect(capturedArgs!.isApproved, isTrue);
+    });
+
+    testWidgets('toque em "Ofertas e produtos" navega para a tela de gestao com argumentos corretos',
+        (tester) async {
+      const args = PlaceManagementArgs(
+        placeId: 'place-offers-1',
+        businessAccountId: 'acc-offers-1',
+        placeName: 'Empório Central',
+        city: 'Porto Alegre',
+        state: 'RS',
+        status: 'APPROVED',
+      );
+
+      PlaceOffersManagementArgs? capturedArgs;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          onGenerateRoute: (settings) {
+            if (settings.name == AppRouter.placeOffersManagement) {
+              capturedArgs = settings.arguments as PlaceOffersManagementArgs?;
+              return MaterialPageRoute(
+                builder: (_) => const Scaffold(body: Text('Offers Mock')),
+              );
+            }
+            return MaterialPageRoute(
+              builder: (_) => const PlaceManagementDashboardScreen(args: args),
+            );
+          },
+        ),
+      );
+
+      await tester.ensureVisible(find.byKey(const Key('manage_offers_option')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('manage_offers_option')));
+      await tester.pumpAndSettle();
+
+      expect(capturedArgs, isNotNull);
+      expect(capturedArgs!.placeId, 'place-offers-1');
+      expect(capturedArgs!.businessAccountId, 'acc-offers-1');
+      expect(capturedArgs!.placeName, 'Empório Central');
       expect(capturedArgs!.isApproved, isTrue);
     });
   });

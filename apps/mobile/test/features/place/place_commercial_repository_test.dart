@@ -12,6 +12,8 @@ class _FakeHttpClient implements RewitHttpClient {
   Map<String, dynamic>? requestedQueryParameters;
   String? requestedPutPath;
   Object? requestedPutBody;
+  String? requestedDeletePath;
+  Map<String, dynamic>? requestedDeleteQueryParameters;
   http.Response? responseToReturn;
   Exception? exceptionToThrow;
 
@@ -40,6 +42,20 @@ class _FakeHttpClient implements RewitHttpClient {
     requestedPutBody = body;
     if (exceptionToThrow != null) throw exceptionToThrow!;
     return responseToReturn ?? http.Response('{}', 200);
+  }
+
+  @override
+  Future<http.Response> delete(
+    String path, {
+    Object? body,
+    Map<String, String>? headers,
+    Map<String, dynamic>? queryParameters,
+    bool requiresAuth = true,
+  }) async {
+    requestedDeletePath = path;
+    requestedDeleteQueryParameters = queryParameters;
+    if (exceptionToThrow != null) throw exceptionToThrow!;
+    return responseToReturn ?? http.Response('', 204);
   }
 
   @override
@@ -241,6 +257,106 @@ void main() {
       expect(result.pageSize, 20);
       expect(result.isLast, isFalse);
       expect(result.content.first.product.name, 'Suco de Laranja');
+    });
+
+    test('upsertOffer envia PUT com payload correto e retorna oferta atualizada', () async {
+      httpClient.responseToReturn = http.Response(
+        jsonEncode({
+          'product': {
+            'id': 'prod-10',
+            'name': 'Pão de Queijo Tradicional',
+            'brand': 'Forno de Minas',
+            'model': 'Pacote 1kg',
+            'category': 'ALIMENTO',
+            'imageUrl': 'https://images.example.com/pao.jpg',
+          },
+          'availability': 'AVAILABLE',
+          'price': 24.90,
+          'currency': 'BRL',
+        }),
+        200,
+      );
+
+      final result = await repository.upsertOffer(
+        placeId: 'place-1',
+        productId: 'prod-10',
+        businessAccountId: 'biz-1',
+        availability: 'AVAILABLE',
+        price: 24.90,
+      );
+
+      expect(httpClient.requestedPutPath, ApiEndpoints.placeProductOffer('place-1', 'prod-10'));
+      expect(result.product.id, 'prod-10');
+      expect(result.product.name, 'Pão de Queijo Tradicional');
+      expect(result.isAvailable, isTrue);
+      expect(result.price, 24.90);
+      expect(result.formattedPrice, 'R\$ 24,90');
+
+      final sentPayload = jsonDecode(httpClient.requestedPutBody as String) as Map<String, dynamic>;
+      expect(sentPayload['businessAccountId'], 'biz-1');
+      expect(sentPayload['availability'], 'AVAILABLE');
+      expect(sentPayload['price'], 24.90);
+      expect(sentPayload['currency'], 'BRL');
+    });
+
+    test('upsertOffer lida com preço gratuito (0.0) e preço não divulgado (null)', () async {
+      // 1. Gratuito
+      httpClient.responseToReturn = http.Response(
+        jsonEncode({
+          'product': {'id': 'prod-free', 'name': 'Água da Casa', 'category': 'BEBIDA'},
+          'availability': 'AVAILABLE',
+          'price': 0.0,
+          'currency': 'BRL',
+        }),
+        200,
+      );
+
+      final freeOffer = await repository.upsertOffer(
+        placeId: 'place-1',
+        productId: 'prod-free',
+        businessAccountId: 'biz-1',
+        availability: 'AVAILABLE',
+        price: 0.0,
+      );
+      expect(freeOffer.formattedPrice, 'Gratuito');
+      var sentPayload = jsonDecode(httpClient.requestedPutBody as String) as Map<String, dynamic>;
+      expect(sentPayload['price'], 0.0);
+
+      // 2. Não divulgado
+      httpClient.responseToReturn = http.Response(
+        jsonEncode({
+          'product': {'id': 'prod-null', 'name': 'Item Especial', 'category': 'GERAL'},
+          'availability': 'OUT_OF_STOCK',
+          'price': null,
+          'currency': 'BRL',
+        }),
+        200,
+      );
+
+      final nullOffer = await repository.upsertOffer(
+        placeId: 'place-1',
+        productId: 'prod-null',
+        businessAccountId: 'biz-1',
+        availability: 'OUT_OF_STOCK',
+        price: null,
+      );
+      expect(nullOffer.formattedPrice, 'Preço não informado');
+      expect(nullOffer.isOutOfStock, isTrue);
+      sentPayload = jsonDecode(httpClient.requestedPutBody as String) as Map<String, dynamic>;
+      expect(sentPayload['price'], isNull);
+    });
+
+    test('deleteOffer envia DELETE com query parameter businessAccountId e lida com 204 No Content', () async {
+      httpClient.responseToReturn = http.Response('', 204);
+
+      await repository.deleteOffer(
+        placeId: 'place-1',
+        productId: 'prod-10',
+        businessAccountId: 'biz-1',
+      );
+
+      expect(httpClient.requestedDeletePath, ApiEndpoints.placeProductOffer('place-1', 'prod-10'));
+      expect(httpClient.requestedDeleteQueryParameters, {'businessAccountId': 'biz-1'});
     });
 
     test('repassa ApiException e falhas de formato', () async {

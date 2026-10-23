@@ -65,6 +65,35 @@ class _FakeCommercialRepository implements PlaceCommercialRepository {
   @override
   Future<PlaceOffersPage> getOffers(String placeId, {int page = 0, int size = 50}) async =>
       throw UnimplementedError();
+
+  @override
+  Future<PlaceProductOffer> upsertOffer({
+    required String placeId,
+    required String productId,
+    required String businessAccountId,
+    required String availability,
+    double? price,
+    String currency = 'BRL',
+  }) async {
+    return PlaceProductOffer(
+      product: OfferedProductSummary(
+        id: productId,
+        name: 'Produto $productId',
+        category: 'GERAL',
+      ),
+      availability: availability,
+      price: price,
+      currency: currency,
+    );
+  }
+
+  @override
+  Future<void> deleteOffer({
+    required String placeId,
+    required String productId,
+    required String businessAccountId,
+  }) async {}
+
 }
 
 void main() {

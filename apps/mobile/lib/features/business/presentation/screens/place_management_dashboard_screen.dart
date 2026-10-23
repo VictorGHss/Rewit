@@ -6,6 +6,8 @@ import 'package:rewit_mobile/features/place/presentation/screens/place_amenities
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_offers_management_screen.dart';
+import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
 /// Argumentos para inicialização do painel de gestão do estabelecimento.
 class PlaceManagementArgs {
@@ -34,6 +36,7 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
   final PlaceRepository? placeRepository;
   final ReviewMediaRepository? reviewMediaRepository;
   final PlaceCommercialRepository? commercialRepository;
+  final SearchRepository? searchRepository;
 
   const PlaceManagementDashboardScreen({
     super.key,
@@ -41,6 +44,7 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
     this.placeRepository,
     this.reviewMediaRepository,
     this.commercialRepository,
+    this.searchRepository,
   });
 
   @override
@@ -114,6 +118,25 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                       Navigator.of(context).pushNamed(
                         AppRouter.placeAmenitiesEdit,
                         arguments: PlaceAmenitiesEditArgs(
+                          placeId: args.placeId,
+                          businessAccountId: args.businessAccountId,
+                          placeName: args.placeName,
+                          isApproved: args.isApproved,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _buildActionCard(
+                    context,
+                    key: const Key('manage_offers_option'),
+                    icon: Icons.local_offer_outlined,
+                    title: 'Ofertas e produtos',
+                    subtitle: 'Gerencie os produtos do catálogo oferecidos na vitrine oficial',
+                    onTap: () {
+                      Navigator.of(context).pushNamed(
+                        AppRouter.placeOffersManagement,
+                        arguments: PlaceOffersManagementArgs(
                           placeId: args.placeId,
                           businessAccountId: args.businessAccountId,
                           placeName: args.placeName,
@@ -321,7 +344,7 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Catálogo de produtos e ofertas comerciais oficiais serão integradas nos próximos passos de evolução do painel.',
+              'Métricas de desempenho e relatórios comerciais serão integrados nos próximos passos de evolução do painel.',
               style: TextStyle(
                 fontSize: 12,
                 color: theme.colorScheme.onSurface.withAlpha(160),

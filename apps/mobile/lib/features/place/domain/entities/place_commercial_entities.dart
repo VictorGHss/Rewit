@@ -273,6 +273,21 @@ class PlaceProductOffer {
     this.currency = 'BRL',
   });
 
+  PlaceProductOffer copyWith({
+    OfferedProductSummary? product,
+    String? availability,
+    double? price,
+    bool clearPrice = false,
+    String? currency,
+  }) {
+    return PlaceProductOffer(
+      product: product ?? this.product,
+      availability: availability ?? this.availability,
+      price: clearPrice ? null : (price ?? this.price),
+      currency: currency ?? this.currency,
+    );
+  }
+
   bool get isAvailable => availability == 'AVAILABLE';
   bool get isOutOfStock => availability == 'OUT_OF_STOCK';
 

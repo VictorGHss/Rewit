@@ -116,4 +116,43 @@ class PlaceCommercialRepositoryImpl implements PlaceCommercialRepository {
     }
     return PlaceOffersPageDto.fromJson(decoded).toEntity();
   }
+  @override
+  Future<PlaceProductOffer> upsertOffer({
+    required String placeId,
+    required String productId,
+    required String businessAccountId,
+    required String availability,
+    double? price,
+    String currency = 'BRL',
+  }) async {
+    final payload = <String, dynamic>{
+      'businessAccountId': businessAccountId,
+      'availability': availability,
+      'price': price,
+      'currency': currency,
+    };
+
+    final response = await httpClient.put(
+      ApiEndpoints.placeProductOffer(placeId, productId),
+      body: jsonEncode(payload),
+    );
+
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao salvar oferta de produto.');
+    }
+    return PlaceProductOfferDto.fromJson(decoded).toEntity();
+  }
+
+  @override
+  Future<void> deleteOffer({
+    required String placeId,
+    required String productId,
+    required String businessAccountId,
+  }) async {
+    await httpClient.delete(
+      ApiEndpoints.placeProductOffer(placeId, productId),
+      queryParameters: {'businessAccountId': businessAccountId},
+    );
+  }
 }
