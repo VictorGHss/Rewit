@@ -50,6 +50,13 @@ class PlaceDetail {
 
   bool get hasCoordinates => latitude != null && longitude != null;
 
+  /// Indica se o estabelecimento possui ao menos um contato comercial preenchido.
+  bool get hasPublicContacts =>
+      (phone != null && phone!.trim().isNotEmpty) ||
+      (websiteUrl != null && websiteUrl!.trim().isNotEmpty) ||
+      (instagramUrl != null && instagramUrl!.trim().isNotEmpty) ||
+      (facebookUrl != null && facebookUrl!.trim().isNotEmpty);
+
   PlaceDetail copyWith({
     String? photoUrl,
     String? description,
