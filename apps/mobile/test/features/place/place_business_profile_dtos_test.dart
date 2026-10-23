@@ -113,6 +113,37 @@ void main() {
       expect(updated.facebookUrl, isNull);
     });
 
+    test('PlaceDetail hasPublicContacts retorna true apenas quando há ao menos um contato válido', () {
+      const placeWithoutContacts = PlaceDetail(
+        id: 'place-1',
+        name: 'Local',
+        slug: 'local',
+        category: 'GERAL',
+        addressText: 'Rua Um',
+        validationRadiusMeters: 50,
+        origin: 'USER',
+        isVerified: false,
+        status: 'ACTIVE',
+        phone: null,
+        websiteUrl: '   ',
+        instagramUrl: '',
+        facebookUrl: null,
+      );
+      expect(placeWithoutContacts.hasPublicContacts, isFalse);
+
+      final withPhone = placeWithoutContacts.copyWith(phone: '+55 11 99999-9999');
+      expect(withPhone.hasPublicContacts, isTrue);
+
+      final withWebsite = placeWithoutContacts.copyWith(websiteUrl: 'https://site.com');
+      expect(withWebsite.hasPublicContacts, isTrue);
+
+      final withInstagram = placeWithoutContacts.copyWith(instagramUrl: 'https://instagram.com/perfil');
+      expect(withInstagram.hasPublicContacts, isTrue);
+
+      final withFacebook = placeWithoutContacts.copyWith(facebookUrl: 'https://facebook.com/perfil');
+      expect(withFacebook.hasPublicContacts, isTrue);
+    });
+
     test('UpdatePlaceBusinessProfileRequestDto converte vazios/blanks em null mantendo integridade', () {
       const dto = UpdatePlaceBusinessProfileRequestDto(
         businessAccountId: 'acc-uuid-1',

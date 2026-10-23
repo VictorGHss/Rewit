@@ -17,8 +17,10 @@ import 'package:rewit_mobile/features/business/presentation/widgets/claim_place_
 import '../../domain/repositories/place_commercial_repository.dart';
 import '../state/place_commercial_notifier.dart';
 import '../widgets/place_opening_hours_section.dart';
+import '../../../../core/services/url_launcher_service.dart';
 import '../widgets/place_amenities_section.dart';
 import '../widgets/place_commercial_offers_section.dart';
+import '../widgets/place_public_contacts_section.dart';
 
 /// Tela completa de detalhe de um Local Físico (Place) no catálogo Rewit (C5.2).
 ///
@@ -33,6 +35,7 @@ class PlaceDetailScreen extends StatefulWidget {
   final PlaceCommercialRepository? commercialRepository;
   final PlaceCommercialNotifier? commercialNotifier;
   final ReviewMediaRepository? reviewMediaRepository;
+  final UrlLauncherService? urlLauncherService;
 
   const PlaceDetailScreen({
     super.key,
@@ -44,6 +47,7 @@ class PlaceDetailScreen extends StatefulWidget {
     this.commercialRepository,
     this.commercialNotifier,
     this.reviewMediaRepository,
+    this.urlLauncherService,
   });
 
   @override
@@ -515,7 +519,16 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
             ),
           ),
 
-          // 4.1 Informações Comerciais (Horários F2.1, Comodidades F2.2, Ofertas F2.3)
+          // 4.1 Contatos Comerciais e Redes Sociais Públicas (F2.5)
+          if (place.hasPublicContacts) ...[
+            const SizedBox(height: 12),
+            PlacePublicContactsSection(
+              place: place,
+              urlLauncherService: widget.urlLauncherService ?? const UrlLauncherServiceImpl(),
+            ),
+          ],
+
+          // 4.2 Informações Comerciais (Horários F2.1, Comodidades F2.2, Ofertas F2.3)
           if (_commercialNotifier != null) ...[
             ListenableBuilder(
               listenable: _commercialNotifier!,
