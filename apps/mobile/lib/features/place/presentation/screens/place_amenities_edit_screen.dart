@@ -261,8 +261,11 @@ class _PlaceAmenitiesEditScreenState extends State<PlaceAmenitiesEditScreen> {
   }
 
   Widget _buildActionRow(BuildContext context, ThemeData theme) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 4,
       children: [
         Text(
           '${_notifier.selectedCodes.length} selecionada(s)',
@@ -272,20 +275,15 @@ class _PlaceAmenitiesEditScreenState extends State<PlaceAmenitiesEditScreen> {
             color: theme.colorScheme.primary,
           ),
         ),
-        Row(
-          children: [
-            TextButton(
-              key: const Key('select_all_amenities_button'),
-              onPressed: _notifier.isSaving ? null : () => _notifier.selectAll(),
-              child: const Text('Marcar todas'),
-            ),
-            const SizedBox(width: 4),
-            TextButton(
-              key: const Key('clear_all_amenities_button'),
-              onPressed: _notifier.isSaving ? null : () => _notifier.clearAll(),
-              child: const Text('Limpar seleção'),
-            ),
-          ],
+        TextButton(
+          key: const Key('select_all_amenities_button'),
+          onPressed: _notifier.isSaving ? null : () => _notifier.selectAll(),
+          child: const Text('Marcar todas'),
+        ),
+        TextButton(
+          key: const Key('clear_all_amenities_button'),
+          onPressed: _notifier.isSaving ? null : () => _notifier.clearAll(),
+          child: const Text('Limpar seleção'),
         ),
       ],
     );

@@ -288,5 +288,31 @@ void main() {
       expect(find.text('2 selecionada(s)'), findsOneWidget);
       expect(notifier.selectedCodes, containsAll(['WIFI', 'PET_FRIENDLY']));
     });
+
+    testWidgets('layout responsivo da barra de ações não transborda em telas compactas (360dp)', (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          args: const PlaceAmenitiesEditArgs(
+            placeId: 'p-1',
+            businessAccountId: 'b-1',
+            placeName: 'Café Teste',
+            isApproved: true,
+          ),
+          notifier: notifier,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('select_all_amenities_button')), findsOneWidget);
+      expect(find.byKey(const Key('clear_all_amenities_button')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 }
