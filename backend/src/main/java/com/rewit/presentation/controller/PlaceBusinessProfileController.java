@@ -51,7 +51,9 @@ public class PlaceBusinessProfileController {
             Authentication authentication) {
         UUID actorUserId = extractAuthenticatedUserId(authentication);
         Place updated = updateBusinessProfileUseCase.execute(request.toCommand(actorUserId, placeId));
-        return ResponseEntity.ok(PlaceResponse.of(updated, placeMediaService.findPrimaryPhotoUrl(updated.getId())));
+        // Fluxo autorizado: o representante acabou de provar que representa o local e vê o que gravou
+        return ResponseEntity.ok(PlaceResponse.representativeView(updated,
+                placeMediaService.findPrimaryPhotoUrl(updated.getId())));
     }
 
     private UUID extractAuthenticatedUserId(Authentication authentication) {

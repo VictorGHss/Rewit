@@ -220,7 +220,14 @@ class PlaceCommercialDataOwnerChangeIntegrationTest {
                 "SELECT tgname FROM pg_trigger WHERE tgrelid = 'places'::regclass AND NOT tgisinternal", String.class)
                 .stream().collect(Collectors.toSet());
         assertEquals(Set.of("trg_validate_place_specialization", "trg_places_owner_change_invalidates_offers",
-                "trg_places_owner_change_invalidates_commercial_data"), triggers);
+                "trg_places_owner_change_invalidates_commercial_data",
+                "trg_places_owner_change_clears_business_contacts"), triggers);
+
+        // V39: zera só os contatos da própria linha; não apaga tabelas nem toca na descrição
+        String contacts = functionDefinition("fn_clear_place_business_contacts_on_owner_change");
+        assertTrue(contacts.contains("NEW.phone") && contacts.contains("NEW.website_url")
+                && contacts.contains("NEW.instagram_url") && contacts.contains("NEW.facebook_url"));
+        assertFalse(contacts.contains("DELETE") || contacts.contains("description"));
 
         String commercial = functionDefinition("fn_invalidate_place_commercial_data_on_owner_change");
         assertTrue(commercial.contains("place_opening_hours_schedules")

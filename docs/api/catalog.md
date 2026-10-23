@@ -94,7 +94,7 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 }
 ```
 
-Os contatos (`phone`, `websiteUrl`, `instagramUrl`, `facebookUrl`) vêm do perfil comercial (2.21) e são `null` enquanto não informados.
+Os contatos (`phone`, `websiteUrl`, `instagramUrl`, `facebookUrl`) vêm do perfil comercial (2.21) e são `null` enquanto não informados. Nas leituras do local (2.1, 2.2, 2.6, 2.7) só aparecem enquanto a representação atual for elegível; ver 2.21.
 
 ---
 
@@ -803,6 +803,8 @@ Um item no formato de 2.18 (`product`, `availability`, `price`, `currency`), tan
   * Local ativo (`404 PLACE_NOT_FOUND`) e reivindicado agora pela conta (`403 BUSINESS_NOT_RESPONSIBLE` se de outra conta ou sem titular).
 * **Concorrência**: A linha do local é travada (`SELECT ... FOR NO KEY UPDATE`) antes de conferir a representação e gravar. Uma troca de titular concorrente termina antes, e a conta que deixou de representar o local recebe `403` sem gravar.
 * **Persistência**: Colunas `phone`, `website_url`, `instagram_url` e `facebook_url` (V38), com CHECKs de formato. Não há histórico de alterações nem registro de autor; `updated_at` do local muda a cada gravação.
+* **Troca de titular (V39)**: quando `places.claimed_by_business_id` muda de fato (outra conta, local sem titular, inclusive pela exclusão da conta, ou primeira reivindicação), os quatro contatos são apagados no mesmo comando que muda o titular, por um trigger `BEFORE`; um rollback desfaz os dois juntos. A descrição não é apagada. A titular nova grava os próprios contatos; a anterior recebe `403`. Mesma regra de horários, comodidades (V29) e ofertas (V28).
+* **Visibilidade pública**: as leituras do local só expõem os contatos se a representação atual for elegível (conta aprovada, administrador operacional, local ativo vinculado à conta), como horários, comodidades e ofertas. Inelegibilidade temporária oculta os contatos sem apagá-los, e eles voltam quando a representação volta a ser elegível. A descrição nunca é ocultada. A resposta deste `PUT` traz os contatos gravados.
 
 #### Requisição
 ```json
