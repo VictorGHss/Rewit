@@ -292,6 +292,37 @@ class _FakeCommercialRepository implements PlaceCommercialRepository {
           isLast: false,
         );
   }
+
+  @override
+  Future<PlaceOpeningHours> updateOpeningHours({
+    required String placeId,
+    required String businessAccountId,
+    required List<DaySchedule> days,
+  }) async {
+    return PlaceOpeningHours(placeId: placeId, configured: true, days: days);
+  }
+
+  @override
+  Future<List<PlaceAmenityItem>> getAmenityOptions() async {
+    return const [
+      PlaceAmenityItem(code: 'WIFI', label: 'Wi-Fi para clientes'),
+      PlaceAmenityItem(code: 'PARKING', label: 'Estacionamento gratuito'),
+    ];
+  }
+
+  @override
+  Future<PlaceAmenities> updateAmenities({
+    required String placeId,
+    required String businessAccountId,
+    required List<String> amenityCodes,
+  }) async {
+    return PlaceAmenities(
+      placeId: placeId,
+      configured: true,
+      amenities: amenityCodes.map((c) => PlaceAmenityItem(code: c, label: c)).toList(),
+    );
+  }
+
 }
 
 void main() {

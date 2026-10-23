@@ -6,6 +6,9 @@ import 'package:rewit_mobile/features/business/domain/repositories/business_repo
 import 'package:rewit_mobile/features/business/presentation/screens/my_business_accounts_screen.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/place_management_dashboard_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
+
 
 class _FakeBusinessRepository implements BusinessRepository {
   List<BusinessAccount> accountsToReturn = [];
@@ -301,10 +304,89 @@ void main() {
         ),
       );
 
+      await tester.ensureVisible(find.byKey(const Key('view_public_profile_option')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('view_public_profile_option')));
       await tester.pumpAndSettle();
 
       expect(capturedPlaceId, 'place-xyz-789');
+    });
+    testWidgets('toque em "Horários de funcionamento" navega para a tela de edição com argumentos corretos',
+        (tester) async {
+      const args = PlaceManagementArgs(
+        placeId: 'place-hours-1',
+        businessAccountId: 'acc-hours-1',
+        placeName: 'Café da Esquina',
+        city: 'Curitiba',
+        state: 'PR',
+        status: 'APPROVED',
+      );
+
+      PlaceOpeningHoursEditArgs? capturedArgs;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          onGenerateRoute: (settings) {
+            if (settings.name == AppRouter.placeOpeningHoursEdit) {
+              capturedArgs = settings.arguments as PlaceOpeningHoursEditArgs?;
+              return MaterialPageRoute(
+                builder: (_) => const Scaffold(body: Text('Opening Hours Mock')),
+              );
+            }
+            return MaterialPageRoute(
+              builder: (_) => const PlaceManagementDashboardScreen(args: args),
+            );
+          },
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('manage_opening_hours_option')));
+      await tester.pumpAndSettle();
+
+      expect(capturedArgs, isNotNull);
+      expect(capturedArgs!.placeId, 'place-hours-1');
+      expect(capturedArgs!.businessAccountId, 'acc-hours-1');
+      expect(capturedArgs!.placeName, 'Café da Esquina');
+      expect(capturedArgs!.isApproved, isTrue);
+    });
+
+    testWidgets('toque em "Comodidades" navega para a tela de edição com argumentos corretos',
+        (tester) async {
+      const args = PlaceManagementArgs(
+        placeId: 'place-amenities-1',
+        businessAccountId: 'acc-amenities-1',
+        placeName: 'Bistrô Conforto',
+        city: 'Florianópolis',
+        state: 'SC',
+        status: 'APPROVED',
+      );
+
+      PlaceAmenitiesEditArgs? capturedArgs;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          onGenerateRoute: (settings) {
+            if (settings.name == AppRouter.placeAmenitiesEdit) {
+              capturedArgs = settings.arguments as PlaceAmenitiesEditArgs?;
+              return MaterialPageRoute(
+                builder: (_) => const Scaffold(body: Text('Amenities Mock')),
+              );
+            }
+            return MaterialPageRoute(
+              builder: (_) => const PlaceManagementDashboardScreen(args: args),
+            );
+          },
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('manage_amenities_option')));
+      await tester.pumpAndSettle();
+
+      expect(capturedArgs, isNotNull);
+      expect(capturedArgs!.placeId, 'place-amenities-1');
+      expect(capturedArgs!.businessAccountId, 'acc-amenities-1');
+      expect(capturedArgs!.placeName, 'Bistrô Conforto');
+      expect(capturedArgs!.isApproved, isTrue);
     });
   });
 }
