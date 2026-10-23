@@ -14,10 +14,14 @@ import 'package:rewit_mobile/features/review_detail/domain/repositories/review_m
 class _FakePlaceRepository implements PlaceRepository {
   List<PlaceMediaItem> mediaToReturn = [];
   Exception? errorToThrow;
+  Exception? uploadErrorToThrow;
+  PlaceMediaItem? uploadItemToReturn;
 
   bool wasSetPrimaryCalled = false;
   bool wasDeleteCalled = false;
   bool wasUploadCalled = false;
+  int uploadCallCount = 0;
+  String? lastUploadIdempotencyKey;
 
   @override
   Future<List<PlaceMediaItem>> getPlaceMedia(String placeId) async {
@@ -43,7 +47,11 @@ class _FakePlaceRepository implements PlaceRepository {
   }) async {
     wasDeleteCalled = true;
     if (errorToThrow != null) throw errorToThrow!;
+    final wasPrimary = mediaToReturn.any((m) => m.id == mediaId && m.isPrimary);
     mediaToReturn.removeWhere((m) => m.id == mediaId);
+    if (wasPrimary && mediaToReturn.isNotEmpty) {
+      mediaToReturn[0] = mediaToReturn[0].copyWith(isPrimary: true);
+    }
   }
 
   @override
@@ -55,7 +63,16 @@ class _FakePlaceRepository implements PlaceRepository {
     String? idempotencyKey,
   }) async {
     wasUploadCalled = true;
+    uploadCallCount++;
+    lastUploadIdempotencyKey = idempotencyKey;
+
+    if (uploadErrorToThrow != null) throw uploadErrorToThrow!;
     if (errorToThrow != null) throw errorToThrow!;
+
+    if (uploadItemToReturn != null) {
+      return uploadItemToReturn!;
+    }
+
     final created = PlaceMediaItem(
       id: 'media-uploaded-1',
       placeId: placeId,
@@ -176,8 +193,8 @@ void main() {
           placeId: 'place-test-1',
           url: '/url-2',
           mediaType: 'PHOTO',
-          mimeType: 'image/jpeg',
-          sizeBytes: 1024,
+          mimeType: 'image/png',
+          sizeBytes: 2048,
           status: 'ACTIVE',
           isPrimary: false,
           createdAt: DateTime.now(),
@@ -197,9 +214,8 @@ void main() {
 
       expect(find.text('Fotos ativas (2 de 5)'), findsOneWidget);
       expect(find.byKey(const Key('primary_badge_photo-1')), findsOneWidget);
+      expect(find.byKey(const Key('primary_badge_photo-2')), findsNothing);
       expect(find.byKey(const Key('set_primary_button_photo-2')), findsOneWidget);
-      expect(find.byKey(const Key('delete_media_button_photo-1')), findsOneWidget);
-      expect(find.byKey(const Key('delete_media_button_photo-2')), findsOneWidget);
     });
 
     testWidgets('toque em "Capa" define a fotografia indicada como principal', (tester) async {
@@ -239,13 +255,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final setPrimaryBtn = find.byKey(const Key('set_primary_button_photo-2'));
-      await tester.tap(setPrimaryBtn);
+      await tester.tap(find.byKey(const Key('set_primary_button_photo-2')));
       await tester.pumpAndSettle();
 
       expect(repository.wasSetPrimaryCalled, isTrue);
-      expect(find.byKey(const Key('primary_badge_photo-2')), findsOneWidget);
       expect(find.text('Foto de capa atualizada com sucesso!'), findsOneWidget);
+      expect(find.byKey(const Key('primary_badge_photo-2')), findsOneWidget);
     });
 
     testWidgets('exclusão exige confirmação em diálogo antes de chamar o backend', (tester) async {
@@ -278,19 +293,69 @@ void main() {
       await tester.tap(find.byKey(const Key('delete_media_button_photo-1')));
       await tester.pumpAndSettle();
 
-      // Diálogo de confirmação aberto
       expect(find.text('Excluir fotografia'), findsOneWidget);
       expect(find.byKey(const Key('cancel_delete_button')), findsOneWidget);
-      expect(find.byKey(const Key('confirm_delete_button_photo-1')), findsOneWidget);
 
-      // Clicar em Cancelar não remove
+      // Cancela
       await tester.tap(find.byKey(const Key('cancel_delete_button')));
       await tester.pumpAndSettle();
-
       expect(repository.wasDeleteCalled, isFalse);
-      expect(find.byKey(const Key('delete_media_button_photo-1')), findsOneWidget);
 
-      // Clica novamente e confirma
+      // Abre diálogo e confirma
+      await tester.tap(find.byKey(const Key('delete_media_button_photo-1')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('confirm_delete_button_photo-1')));
+      await tester.pumpAndSettle();
+
+      expect(repository.wasDeleteCalled, isTrue);
+      expect(find.text('Fotografia removida com sucesso!'), findsOneWidget);
+      expect(find.text('Nenhuma fotografia cadastrada'), findsOneWidget);
+    });
+
+    testWidgets('Correção A: excluir foto principal com múltiplas fotos promove a próxima como capa na UI', (tester) async {
+      final t1 = DateTime(2026, 10, 20, 10, 0);
+      final t2 = DateTime(2026, 10, 21, 10, 0);
+
+      repository.mediaToReturn = [
+        PlaceMediaItem(
+          id: 'photo-1',
+          placeId: 'place-test-1',
+          url: '/url-1',
+          mediaType: 'PHOTO',
+          mimeType: 'image/jpeg',
+          sizeBytes: 1024,
+          status: 'ACTIVE',
+          isPrimary: true,
+          createdAt: t1,
+        ),
+        PlaceMediaItem(
+          id: 'photo-2',
+          placeId: 'place-test-1',
+          url: '/url-2',
+          mediaType: 'PHOTO',
+          mimeType: 'image/jpeg',
+          sizeBytes: 1024,
+          status: 'ACTIVE',
+          isPrimary: false,
+          createdAt: t2,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PlaceMediaGalleryScreen(
+            args: args,
+            placeRepository: repository,
+            reviewMediaRepository: reviewMediaRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('primary_badge_photo-1')), findsOneWidget);
+
+      // Exclui photo-1 (capa)
       await tester.tap(find.byKey(const Key('delete_media_button_photo-1')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('confirm_delete_button_photo-1')));
@@ -298,7 +363,130 @@ void main() {
 
       expect(repository.wasDeleteCalled, isTrue);
       expect(find.text('Fotografia removida com sucesso!'), findsOneWidget);
+      // photo-2 agora é a capa visual!
+      expect(find.byKey(const Key('primary_badge_photo-2')), findsOneWidget);
+    });
+
+    testWidgets('Correção B: falha de upload exibe banner e permite tentar novamente com sucesso', (tester) async {
+      repository.mediaToReturn = [];
+      repository.uploadErrorToThrow = Exception('Network error');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PlaceMediaGalleryScreen(
+            args: args,
+            placeRepository: repository,
+            reviewMediaRepository: reviewMediaRepo,
+            onPickPhoto: (source) async => SelectedMediaItem(
+              id: 'item-1',
+              name: 'fachada.jpg',
+              sizeBytes: 1024,
+              mimeType: 'image/jpeg',
+              bytes: Uint8List.fromList([1, 2, 3]),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Inicia upload
+      await tester.tap(find.byKey(const Key('add_photo_fab')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pick_gallery_option')));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadCallCount, 1);
+      final firstKey = repository.lastUploadIdempotencyKey;
+      expect(find.byKey(const Key('pending_upload_banner')), findsOneWidget);
+      expect(find.textContaining('fachada.jpg'), findsWidgets);
+
+      // Recupera rede e tenta novamente
+      repository.uploadErrorToThrow = null;
+      await tester.tap(find.byKey(const Key('retry_upload_button')));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadCallCount, 2);
+      expect(repository.lastUploadIdempotencyKey, firstKey); // Mesma chave!
+      expect(find.byKey(const Key('pending_upload_banner')), findsNothing);
+      expect(find.text('Fotografia adicionada com sucesso!'), findsOneWidget);
+    });
+
+    testWidgets('Correção B: descarte do banner limpa operação pendente', (tester) async {
+      repository.mediaToReturn = [];
+      repository.uploadErrorToThrow = Exception('Network error');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PlaceMediaGalleryScreen(
+            args: args,
+            placeRepository: repository,
+            reviewMediaRepository: reviewMediaRepo,
+            onPickPhoto: (source) async => SelectedMediaItem(
+              id: 'item-1',
+              name: 'fachada.jpg',
+              sizeBytes: 1024,
+              mimeType: 'image/jpeg',
+              bytes: Uint8List.fromList([1, 2, 3]),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('add_photo_fab')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pick_gallery_option')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pending_upload_banner')), findsOneWidget);
+
+      // Descarta
+      await tester.tap(find.byKey(const Key('cancel_retry_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pending_upload_banner')), findsNothing);
+    });
+
+    testWidgets('Correção C: resposta de replay com status REMOVED não entra na galeria', (tester) async {
+      repository.mediaToReturn = [];
+      repository.uploadItemToReturn = PlaceMediaItem(
+        id: 'media-removed-1',
+        placeId: 'place-test-1',
+        url: '/url-removed',
+        mediaType: 'PHOTO',
+        mimeType: 'image/jpeg',
+        sizeBytes: 1024,
+        status: 'REMOVED',
+        isPrimary: false,
+        createdAt: DateTime.now(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PlaceMediaGalleryScreen(
+            args: args,
+            placeRepository: repository,
+            reviewMediaRepository: reviewMediaRepo,
+            onPickPhoto: (source) async => SelectedMediaItem(
+              id: 'item-1',
+              name: 'foto.jpg',
+              sizeBytes: 1024,
+              mimeType: 'image/jpeg',
+              bytes: Uint8List.fromList([1, 2, 3]),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('add_photo_fab')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pick_gallery_option')));
+      await tester.pumpAndSettle();
+
       expect(find.text('Nenhuma fotografia cadastrada'), findsOneWidget);
+      expect(find.textContaining('não está mais ativa'), findsOneWidget);
+      expect(find.byKey(const Key('pending_upload_banner')), findsNothing);
     });
 
     testWidgets('adiciona foto utilizando seletor e realiza upload com sucesso', (tester) async {
