@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/core/network/session_refresher.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
@@ -121,6 +122,13 @@ class _FakeAuthNotifier extends ChangeNotifier implements AuthNotifier {
     _state = newState;
     notifyListeners();
   }
+
+  // Sem renovação de sessão neste fake: nenhum 401 tem verificação associada
+  @override
+  int get sessionCheckSequence => 0;
+
+  @override
+  Future<SessionRefreshOutcome>? sessionCheckSince(int sequence) => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

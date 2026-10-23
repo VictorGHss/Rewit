@@ -45,6 +45,11 @@ const _refresh = 'POST /api/v1/auth/refresh';
 const _createPlace = 'POST /api/v1/places';
 const _upload = 'POST /api/v1/places/$_placeId/media';
 
+const _renewedMessage =
+    'A sessão foi renovada. Toque em "Reenviar Fotografia e Concluir" para enviar a foto novamente.';
+const _unverifiedMessage = 'Não foi possível verificar sua sessão agora. Tente novamente.';
+const _expiredMessage = 'Sua sessão expirou. Faça login novamente.';
+
 class _ApiCall {
   final String route;
   final String? authorization;
@@ -64,6 +69,9 @@ class _FakeRewitApi {
 
   /// O access token usado no cadastro vence logo em seguida: o upload seguinte recebe 401.
   bool expireTokenAfterCreatePlace = false;
+
+  /// Quando definido, o upload recebe 401 com este código, que não é o de token recusado.
+  String? uploadOtherUnauthorizedCode;
 
   final Set<String> _validAccessTokens = {};
   final Map<String, AuthUserDto> _refreshOwners = {};
@@ -111,6 +119,8 @@ class _FakeRewitApi {
             201,
             headers: {'content-type': 'application/json'});
       case _upload:
+        final otherCode = uploadOtherUnauthorizedCode;
+        if (otherCode != null) return _problem(401, otherCode, detail: 'Envio não autorizado para este local.');
         if (!_isValid(authorization)) return _problem(401, 'AUTHENTICATION_REQUIRED');
         return http.Response(jsonEncode({'url': '/api/v1/places/$_placeId/media/ok'}), 201,
             headers: {'content-type': 'application/json'});
@@ -133,10 +143,11 @@ class _FakeRewitApi {
         headers: {'content-type': 'application/json'});
   }
 
-  static http.Response _problem(int status, String code) => http.Response(
-      jsonEncode({'type': 'about:blank', 'title': 'Unauthorized', 'status': status, 'code': code, 'detail': code}),
+  static http.Response _problem(int status, String code, {String? detail}) => http.Response.bytes(
+      utf8.encode(jsonEncode(
+          {'type': 'about:blank', 'title': 'Unauthorized', 'status': status, 'code': code, 'detail': detail ?? code})),
       status,
-      headers: {'content-type': 'application/problem+json'});
+      headers: {'content-type': 'application/problem+json; charset=utf-8'});
 }
 
 class _EmptySearchRepository implements SearchRepository {
@@ -279,6 +290,12 @@ void main() {
   Finder sheetSubmit() => find.byKey(const Key('manual_place_submit_button'));
   Finder sheetError() => find.byKey(const Key('manual_place_error_banner'));
 
+  /// Texto do banner de erro do sheet (vazio se não houver banner).
+  String sheetErrorText(WidgetTester tester) => tester
+      .widgetList<Text>(find.descendant(of: sheetError(), matching: find.byType(Text)))
+      .map((t) => t.data ?? '')
+      .join(' ');
+
   testWidgets(
       'A: 401 no upload com refresh aceito — upload multipart não é repetido, sessão renovada continua, pendência da '
       'conta de origem é retomada com a mesma chave e sem novo createPlace', (tester) async {
@@ -309,9 +326,8 @@ void main() {
     expect(await app.tokens.getRefreshToken(), isNot(firstRefresh));
     expect(find.byType(LoginScreen), findsNothing);
     expect(sheetSubmit(), findsOneWidget);
-    // O sheet exibe o erro do upload. Hoje a mensagem do 401 diz que a sessão expirou, embora ela tenha sido
-    // renovada (ver relatório); o texto não é fixado aqui para não consolidar esse comportamento.
-    expect(sheetError(), findsOneWidget);
+    // A mensagem reflete a renovação confirmada, não a expiração
+    expect(sheetErrorText(tester), _renewedMessage);
 
     // A pendência gravada antes do upload continua da conta de origem, com a chave do envio que falhou
     final pending = await app.store.loadLatest(_userA.id);
@@ -366,6 +382,9 @@ void main() {
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.text('Avaliar'), findsNothing);
     expect(sheetSubmit(), findsNothing);
+    // Nenhuma mensagem concorrente sobrevive à expiração
+    expect(sheetError(), findsNothing);
+    expect(find.textContaining('A sessão foi renovada'), findsNothing);
 
     // A pendência sobrevive à desmontagem e pertence só à conta de origem
     final pending = await app.store.loadLatest(_userA.id);
@@ -425,7 +444,8 @@ void main() {
     expect(await app.tokens.getRefreshToken(), firstRefresh);
     expect(find.byType(LoginScreen), findsNothing);
     expect(sheetSubmit(), findsOneWidget);
-    expect(sheetError(), findsOneWidget);
+    // Nem renovada nem expirada: a verificação não foi possível
+    expect(sheetErrorText(tester), _unverifiedMessage);
 
     final pending = await app.store.loadLatest(_userA.id);
     expect(pending, isNotNull);
@@ -483,7 +503,7 @@ void main() {
     expect(await app.tokens.getAccessToken(), firstAccess);
     expect(await app.tokens.getRefreshToken(), firstRefresh);
     expect(find.byType(LoginScreen), findsNothing);
-    expect(sheetError(), findsOneWidget);
+    expect(sheetErrorText(tester), _unverifiedMessage);
     expect((await app.store.loadLatest(_userA.id))!.uploadIdempotencyKey, key);
     expect(await app.store.loadLatest(_userB.id), isNull);
 
@@ -495,9 +515,12 @@ void main() {
     expect(app.sessionExpiredCalls, 2);
     final renewedAccess = await app.tokens.getAccessToken();
     expect(renewedAccess, isNot(firstAccess));
+    expect(sheetErrorText(tester), _renewedMessage, reason: 'A mensagem anterior não fica presa');
 
     // Envio seguinte com o token renovado conclui a operação original
     await tester.tap(sheetSubmit());
+    await tester.pump();
+    expect(sheetError(), findsNothing, reason: 'O reenvio limpa a mensagem anterior');
     await tester.pumpAndSettle();
     expect(api.callsTo(_createPlace), hasLength(1));
     expect(api.callsTo(_upload).map((c) => c.idempotencyKey), [key, key, key]);
@@ -505,5 +528,61 @@ void main() {
     expect(sheetSubmit(), findsNothing, reason: 'Sheet fechado pelo sucesso');
     expect(await app.store.loadLatest(_userA.id), isNull);
     expect(app.clearLocalSessionCalls, 0);
+  });
+
+  testWidgets(
+      'A: refresh aceito — reenvio manual pelo mesmo sheet usa a chave original e o token renovado, sem novo '
+      'cadastro, e a mensagem anterior não fica presa', (tester) async {
+    final app = await startApp(tester);
+    await login(tester, app, _userA);
+    await openReviewTab(tester);
+
+    api.expireTokenAfterCreatePlace = true;
+    await submitNewRegistration(tester);
+    expect(app.auth.state, isA<Authenticated>());
+    expect(api.callsTo(_refresh), hasLength(1));
+    expect(sheetErrorText(tester), _renewedMessage);
+    final renewedAccess = await app.tokens.getAccessToken();
+    final key = api.callsTo(_upload).single.idempotencyKey;
+    expect((await app.store.loadLatest(_userA.id))!.uploadIdempotencyKey, key);
+
+    await tester.tap(sheetSubmit());
+    await tester.pump();
+    expect(sheetError(), findsNothing, reason: 'O reenvio limpa a mensagem anterior');
+    await tester.pumpAndSettle();
+
+    expect(api.routes, [_login, _createPlace, _upload, _refresh, _upload]);
+    expect(api.callsTo(_upload).map((c) => c.idempotencyKey), [key, key]);
+    expect(api.callsTo(_upload).last.authorization, 'Bearer $renewedAccess');
+    expect(sheetSubmit(), findsNothing, reason: 'Sheet fechado pelo sucesso');
+    expect(await app.store.loadLatest(_userA.id), isNull);
+    expect(app.sessionExpiredCalls, 1);
+    expect(app.clearLocalSessionCalls, 0);
+  });
+
+  testWidgets(
+      'D: 401 do upload com outra causa e refresh aceito — mostra o motivo do servidor, sem afirmar renovação nem '
+      'expiração', (tester) async {
+    final app = await startApp(tester);
+    await login(tester, app, _userA);
+    final firstAccess = await app.tokens.getAccessToken();
+    await openReviewTab(tester);
+
+    api.uploadOtherUnauthorizedCode = 'UNAUTHORIZED';
+    await submitNewRegistration(tester);
+
+    // O cliente ainda verifica a sessão (qualquer 401 autenticado aciona onSessionExpired) e ela é renovada
+    expect(api.routes, [_login, _createPlace, _upload, _refresh]);
+    expect(api.callsTo(_upload).single.authorization, 'Bearer $firstAccess');
+    expect(app.sessionExpiredCalls, 1);
+    expect(app.clearLocalSessionCalls, 0);
+    expect(app.auth.state, isA<Authenticated>());
+    // ...mas a recusa não era do token: a mensagem não atribui o erro à sessão
+    final message = sheetErrorText(tester);
+    expect(message, 'Envio não autorizado para este local.');
+    expect(message, isNot(contains('renovada')));
+    expect(message, isNot(_expiredMessage));
+    final key = api.callsTo(_upload).single.idempotencyKey;
+    expect((await app.store.loadLatest(_userA.id))!.uploadIdempotencyKey, key);
   });
 }

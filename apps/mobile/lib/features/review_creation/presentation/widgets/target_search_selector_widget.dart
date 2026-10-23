@@ -246,6 +246,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
       initialPhoto: null,
       currentUserId: currentUid,
       pendingRegistrationStore: _store,
+      authNotifier: widget.authNotifier,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
 
@@ -290,6 +291,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
       initialPhoto: photoToUse,
       currentUserId: currentUid,
       pendingRegistrationStore: _store,
+      authNotifier: widget.authNotifier,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
 

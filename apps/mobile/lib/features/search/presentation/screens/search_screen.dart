@@ -177,6 +177,7 @@ class _SearchScreenState extends State<SearchScreen>
       initialPhoto: (initialPending?.photoUnavailable ?? false) ? null : initialPending?.photoFile,
       currentUserId: currentUid,
       pendingRegistrationStore: _store,
+      authNotifier: widget.authNotifier,
       onPickPhoto: widget.onPickManualPlacePhoto,
     );
 

@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/core/network/session_refresher.dart';
+import 'package:rewit_mobile/core/network/token_refreshing_client.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import '../../domain/entities/place_detail.dart';
 import '../../domain/repositories/place_repository.dart';
 import '../../domain/services/pending_place_registration_store.dart';
@@ -77,6 +80,10 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
   /// (e removida quando conclui), independentemente de o chamador ainda estar montado (P2-3).
   final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
+  /// Quando informado, um 401 aguarda o resultado da verificação de sessão que ele disparou, para a mensagem
+  /// dizer se a sessão foi renovada, expirou ou não pôde ser verificada.
+  final AuthNotifier? authNotifier;
+
   const ManualPlaceRegistrationSheet({
     super.key,
     required this.placeRepository,
@@ -89,6 +96,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
     this.initialPhoto,
     this.currentUserId,
     this.pendingRegistrationStore,
+    this.authNotifier,
   });
 
   @visibleForTesting
@@ -106,6 +114,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
     File? initialPhoto,
     String? currentUserId,
     PendingPlaceRegistrationStore? pendingRegistrationStore,
+    AuthNotifier? authNotifier,
   }) {
     return showModalBottomSheet<ManualPlaceRegistrationResult>(
       context: context,
@@ -125,6 +134,7 @@ class ManualPlaceRegistrationSheet extends StatefulWidget {
         initialPhoto: initialPhoto,
         currentUserId: currentUserId,
         pendingRegistrationStore: pendingRegistrationStore,
+        authNotifier: authNotifier,
       ),
     );
   }
@@ -371,6 +381,7 @@ class _ManualPlaceRegistrationSheetState
       _errorMessage = null;
     });
 
+    final sessionCheckBefore = widget.authNotifier?.sessionCheckSequence;
     try {
       PlaceDetail place = _pendingCreatedPlace ??
           await widget.placeRepository.createPlace(
@@ -425,7 +436,8 @@ class _ManualPlaceRegistrationSheetState
             ? e.detail
             : 'Este local já está cadastrado com este nome e endereço.';
       } else if (e.isUnauthorized) {
-        message = 'Sua sessão expirou. Faça login novamente.';
+        message = await _unauthorizedMessage(e, sessionCheckBefore);
+        if (!mounted) return;
       } else if (e.isValidationError && e.hasFieldErrors) {
         message = e.allFieldErrors.values.join(' ');
       } else if (_pendingCreatedPlace != null) {
@@ -467,6 +479,28 @@ class _ManualPlaceRegistrationSheetState
             : 'Falha de conexão ao cadastrar o local. Verifique sua internet e tente novamente.';
         _isSubmitting = false;
       });
+    }
+  }
+
+  /// O 401 dispara a verificação da sessão em paralelo (onSessionExpired) e chega aqui antes do resultado dela.
+  /// A mensagem espera essa verificação: um 401 sozinho não prova que a sessão expirou.
+  Future<String> _unauthorizedMessage(ApiException e, int? sessionCheckBefore) async {
+    const expired = 'Sua sessão expirou. Faça login novamente.';
+    final check = sessionCheckBefore == null ? null : widget.authNotifier?.sessionCheckSince(sessionCheckBefore);
+    if (check == null) return expired;
+    switch (await check) {
+      case SessionRefreshOutcome.refreshed:
+        if (e.problemDetail.code != TokenRefreshingClient.tokenRejectedCode) {
+          // A sessão vale; a recusa teve outra causa
+          return e.detail.isNotEmpty ? e.detail : 'Não foi possível concluir a operação. Tente novamente.';
+        }
+        return _pendingCreatedPlace != null
+            ? 'A sessão foi renovada. Toque em "Reenviar Fotografia e Concluir" para enviar a foto novamente.'
+            : 'A sessão foi renovada. Toque em "Cadastrar e Avaliar Local" para tentar novamente.';
+      case SessionRefreshOutcome.unavailable:
+        return 'Não foi possível verificar sua sessão agora. Tente novamente.';
+      case SessionRefreshOutcome.rejected:
+        return expired;
     }
   }
 
