@@ -256,6 +256,9 @@ public class PlaceMediaService {
         placeMediaRepository.findPrimaryByPlaceId(placeId).ifPresent(oldPrimary -> {
             oldPrimary.setPrimary(false);
             placeMediaRepository.save(oldPrimary);
+            // uq_place_media_primary_active não é adiável: a capa antiga precisa ser desmarcada no banco antes de a
+            // nova ser gravada, senão o flush do commit pode gravar a nova primeiro
+            placeMediaRepository.flush();
         });
 
         media.setPrimary(true);

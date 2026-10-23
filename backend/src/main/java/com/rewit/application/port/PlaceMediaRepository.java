@@ -13,6 +13,13 @@ public interface PlaceMediaRepository {
 
     PlaceMedia save(PlaceMedia media);
 
+    /**
+     * Sincroniza com o banco as gravações pendentes, para que a próxima respeite índices únicos não adiáveis
+     * (uq_place_media_primary_active). Sem contexto de persistência, não há nada pendente.
+     */
+    default void flush() {
+    }
+
     Optional<PlaceMedia> findById(UUID id);
 
     default Optional<PlaceMedia> findByIdForUpdate(UUID id) {
