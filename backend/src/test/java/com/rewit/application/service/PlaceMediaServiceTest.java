@@ -430,8 +430,11 @@ class PlaceMediaServiceTest {
         assertTrue(result.isPrimary());
         assertEquals(newPrimaryId, result.id());
         assertFalse(oldPrimary.isPrimary());
-        verify(placeMediaRepository).save(oldPrimary);
-        verify(placeMediaRepository).save(newPrimary);
+        // A capa antiga chega ao banco antes da nova (uq_place_media_primary_active)
+        org.mockito.InOrder inOrder = inOrder(placeMediaRepository);
+        inOrder.verify(placeMediaRepository).save(oldPrimary);
+        inOrder.verify(placeMediaRepository).flush();
+        inOrder.verify(placeMediaRepository).save(newPrimary);
     }
 
     @Test

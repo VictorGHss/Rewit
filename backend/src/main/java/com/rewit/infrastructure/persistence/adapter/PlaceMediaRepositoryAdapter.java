@@ -40,6 +40,11 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
     }
 
     @Override
+    public void flush() {
+        entityManager.flush();
+    }
+
+    @Override
     public Optional<PlaceMedia> findById(UUID id) {
         if (id == null) {
             return Optional.empty();
