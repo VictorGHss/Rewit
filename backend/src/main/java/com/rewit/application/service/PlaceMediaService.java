@@ -917,11 +917,6 @@ public class PlaceMediaService {
     }
 
     private void saveAuditLog(UUID mediaId, UUID placeId, UUID actorUserId,
-                              PlaceMediaModerationAction action, String reason, String notes) {
-        saveAuditLog(mediaId, placeId, actorUserId, action, reason, notes, null);
-    }
-
-    private void saveAuditLog(UUID mediaId, UUID placeId, UUID actorUserId,
                               PlaceMediaModerationAction action, String reason, String notes, UUID reportId) {
         PlaceMediaModerationAuditLog.ActorType actorType = (actorUserId != null)
                 ? PlaceMediaModerationAuditLog.ActorType.USER
@@ -965,26 +960,6 @@ public class PlaceMediaService {
                 HttpStatus.FORBIDDEN,
                 "FORBIDDEN"
         );
-    }
-
-    private boolean isAuthorizedPlaceManager(UUID actorUserId, Place place) {
-        if (place.getCreatedByUserId() != null && place.getCreatedByUserId().equals(actorUserId)) {
-            return true;
-        }
-        if (place.getClaimedByBusinessId() != null && businessAccountRepository != null) {
-            boolean isBusinessRep = businessAccountRepository.findById(place.getClaimedByBusinessId())
-                    .filter(acc -> acc.isAdministeredBy(actorUserId) && BusinessRepresentationPolicy.isApproved(acc))
-                    .isPresent();
-            if (isBusinessRep) {
-                return true;
-            }
-        }
-        if (userRepository != null) {
-            return userRepository.findById(actorUserId)
-                    .map(u -> u.getRole() == Role.MODERATOR || u.getRole() == Role.ADMIN)
-                    .orElse(false);
-        }
-        return false;
     }
 
     private String computeSha256(byte[] data) {

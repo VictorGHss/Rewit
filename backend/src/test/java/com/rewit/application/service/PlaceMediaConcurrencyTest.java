@@ -72,9 +72,6 @@ class PlaceMediaConcurrencyTest {
     private com.rewit.application.port.ObjectStoragePort objectStoragePort;
 
     @Autowired
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
-
-    @Autowired
     private org.springframework.core.env.Environment environment;
 
     private void executeDdlAsMigrationUser(String sql) throws Exception {
@@ -290,6 +287,8 @@ class PlaceMediaConcurrencyTest {
         if (finalMedia.getStatus() == PlaceMediaStatus.REMOVED) {
             assertEquals(PlaceMediaReport.STATUS_ACCEPTED, r1.getStatus());
         }
+        // Rejeitada diretamente ou encerrada em cascata pelo aceite, a segunda denúncia nunca fica pendente
+        assertFalse(r2.isPending(), "A segunda denúncia não pode permanecer PENDING");
         var auditLogs = auditLogRepository.findByPlaceMediaId(media.getId());
         assertFalse(auditLogs.isEmpty(), "Auditoria deve conter registros das decisões");
         for (var log : auditLogs) {
@@ -610,9 +609,12 @@ class PlaceMediaConcurrencyTest {
         """);
 
         try {
-            assertThrows(org.springframework.dao.DataAccessException.class, () ->
+            var thrown = assertThrows(org.springframework.dao.DataAccessException.class, () ->
                     placeMediaService.decideReport(moderator1.getId(), report.getId(), "ACCEPT", "FAIL_AUDIT: causa rollback")
             );
+            String cause = String.valueOf(thrown.getMostSpecificCause().getMessage());
+            assertTrue(cause.contains("Falha forçada na auditoria para teste de rollback transacional"),
+                    "A falha deve vir do trigger de teste, não de outra violação: " + cause);
 
             // Valida no banco real de teste que houve ROLLBACK completo:
             PlaceMediaReport persistedReport = placeMediaReportRepository.findById(report.getId()).orElseThrow();

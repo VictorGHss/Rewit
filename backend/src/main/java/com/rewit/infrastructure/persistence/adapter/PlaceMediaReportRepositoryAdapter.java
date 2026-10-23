@@ -8,7 +8,6 @@ import com.rewit.infrastructure.persistence.repository.PlaceMediaReportJpaReposi
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,7 +27,6 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
     @jakarta.persistence.PersistenceContext
     private final jakarta.persistence.EntityManager entityManager;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public PlaceMediaReportRepositoryAdapter(PlaceMediaReportJpaRepository placeMediaReportJpaRepository,
                                              jakarta.persistence.EntityManager entityManager) {
         this.placeMediaReportJpaRepository = Objects.requireNonNull(placeMediaReportJpaRepository, "PlaceMediaReportJpaRepository must not be null");
@@ -133,35 +131,9 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
     @Override
     @Transactional(readOnly = true)
     public PageResult<PlaceMediaReport> findByStatusAndDecisionOrigin(String status, String decisionOrigin, int page, int size) {
-        String normalizedStatus = null;
-        if (status != null && !status.isBlank()) {
-            String trimmed = status.trim().toUpperCase();
-            normalizedStatus = switch (trimmed) {
-                case "PENDING", "OPEN" -> "PENDING";
-                case "ACCEPTED", "RESOLVED" -> "ACCEPTED";
-                case "REJECTED", "DISMISSED" -> "REJECTED";
-                case "AUTO_RESOLVED" -> "AUTO_RESOLVED";
-                default -> throw new com.rewit.common.exception.BusinessException(
-                        "Status de filtro de denúncia inválido: " + status,
-                        org.springframework.http.HttpStatus.BAD_REQUEST,
-                        "INVALID_REPORT_STATUS"
-                );
-            };
-        }
+        String normalizedStatus = normalizeStatusFilter(status);
 
-        String normalizedOrigin = null;
-        if (decisionOrigin != null && !decisionOrigin.isBlank()) {
-            normalizedOrigin = switch (decisionOrigin.trim().toUpperCase()) {
-                case PlaceMediaReport.DECISION_ORIGIN_MODERATOR -> PlaceMediaReport.DECISION_ORIGIN_MODERATOR;
-                case PlaceMediaReport.DECISION_ORIGIN_SYSTEM -> PlaceMediaReport.DECISION_ORIGIN_SYSTEM;
-                case PlaceMediaReport.DECISION_ORIGIN_LEGACY -> PlaceMediaReport.DECISION_ORIGIN_LEGACY;
-                default -> throw new com.rewit.common.exception.BusinessException(
-                        "Origem de decisão de denúncia inválida: " + decisionOrigin,
-                        org.springframework.http.HttpStatus.BAD_REQUEST,
-                        "INVALID_DECISION_ORIGIN"
-                );
-            };
-        }
+        String normalizedOrigin = normalizeDecisionOriginFilter(decisionOrigin);
 
         Pageable pageable = PageRequest.of(page, size);
         Page<PlaceMediaReportJpaEntity> jpaPage;
@@ -178,5 +150,38 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
                 .toList();
 
         return PageResult.of(content, jpaPage.getNumber(), jpaPage.getSize(), jpaPage.getTotalElements());
+    }
+
+    private static String normalizeStatusFilter(String status) {
+        if (status == null || status.isBlank()) {
+            return null;
+        }
+        return switch (status.trim().toUpperCase()) {
+            case "PENDING", "OPEN" -> "PENDING";
+            case "ACCEPTED", "RESOLVED" -> "ACCEPTED";
+            case "REJECTED", "DISMISSED" -> "REJECTED";
+            case "AUTO_RESOLVED" -> "AUTO_RESOLVED";
+            default -> throw new com.rewit.common.exception.BusinessException(
+                    "Status de filtro de denúncia inválido: " + status,
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "INVALID_REPORT_STATUS"
+            );
+        };
+    }
+
+    private static String normalizeDecisionOriginFilter(String decisionOrigin) {
+        if (decisionOrigin == null || decisionOrigin.isBlank()) {
+            return null;
+        }
+        return switch (decisionOrigin.trim().toUpperCase()) {
+            case PlaceMediaReport.DECISION_ORIGIN_MODERATOR -> PlaceMediaReport.DECISION_ORIGIN_MODERATOR;
+            case PlaceMediaReport.DECISION_ORIGIN_SYSTEM -> PlaceMediaReport.DECISION_ORIGIN_SYSTEM;
+            case PlaceMediaReport.DECISION_ORIGIN_LEGACY -> PlaceMediaReport.DECISION_ORIGIN_LEGACY;
+            default -> throw new com.rewit.common.exception.BusinessException(
+                    "Origem de decisão de denúncia inválida: " + decisionOrigin,
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "INVALID_DECISION_ORIGIN"
+            );
+        };
     }
 }

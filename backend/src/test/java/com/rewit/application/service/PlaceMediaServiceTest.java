@@ -1,7 +1,6 @@
 package com.rewit.application.service;
 
 import com.rewit.application.dto.common.PageResult;
-import com.rewit.application.dto.media.MediaDtos.MediaDownloadResult;
 import com.rewit.application.dto.media.MediaDtos.PlaceMediaView;
 import com.rewit.application.dto.media.MediaDtos.UploadPlaceMediaCommand;
 import com.rewit.application.port.BusinessAccountRepository;
@@ -15,7 +14,6 @@ import org.springframework.http.HttpStatus;
 import com.rewit.domain.enums.AccountStatus;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.PlaceMediaStatus;
-import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.Role;
 import com.rewit.domain.enums.VerificationStatus;
@@ -172,11 +170,13 @@ class PlaceMediaServiceTest {
 
         when(placeRepository.findByIdForUpdate(placeId)).thenReturn(Optional.of(activePlace));
         when(placeMediaRepository.countActiveByPlaceId(placeId)).thenReturn(0L);
-        when(placeMediaRepository.save(any(PlaceMedia.class))).thenThrow(new RuntimeException("DB failure"));
+        RuntimeException dbFailure = new RuntimeException("DB failure");
+        when(placeMediaRepository.save(any(PlaceMedia.class))).thenThrow(dbFailure);
 
-        assertThrows(RuntimeException.class, () ->
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
                 placeMediaService.uploadMedia(new UploadPlaceMediaCommand(placeId, userId, pngBytes, "fachada.png"))
         );
+        assertSame(dbFailure, thrown, "A falha original do banco deve ser propagada sem ser substituída");
 
         verify(objectStoragePort).put(startsWith("places/" + placeId + "/"), eq("image/png"), any(byte[].class));
         verify(objectStoragePort).delete(startsWith("places/" + placeId + "/"));
@@ -336,7 +336,7 @@ class PlaceMediaServiceTest {
         try {
             byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(sanitizedBytes);
             expectedHash = java.util.HexFormat.of().formatHex(digest);
-        } catch (Exception e) {
+        } catch (java.security.NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
 
@@ -468,17 +468,11 @@ class PlaceMediaServiceTest {
     @DisplayName("13. deleteMedia por moderador defere automaticamente denúncias pendentes (ACCEPTED)")
     void shouldAcceptPendingReportsWhenModeratorDeletesMedia() {
         UUID mediaId = UUID.randomUUID();
-        UUID modUserId = UUID.randomUUID();
 
         PlaceMedia media = new PlaceMedia(
                 mediaId, placeId, userId, "places/" + placeId + "/" + mediaId + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 2048L, 800, 600,
                 PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
-        );
-
-        User moderator = User.rehydrate(
-                modUserId, "mod@rewit.com", "hash", AuthProvider.LOCAL, null,
-                AccountStatus.ACTIVE, true, Role.MODERATOR, null, Instant.now(), Instant.now()
         );
 
         PlaceMediaReport report = new PlaceMediaReport(
@@ -882,12 +876,14 @@ class PlaceMediaServiceTest {
         when(placeMediaRepository.findByIdForUpdate(mediaId)).thenReturn(Optional.of(media));
         when(placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId)).thenReturn(List.of());
 
-        org.mockito.Mockito.doThrow(new org.springframework.dao.DataIntegrityViolationException("Violação de integridade na auditoria"))
+        var auditFailure = new org.springframework.dao.DataIntegrityViolationException("Violação de integridade na auditoria");
+        org.mockito.Mockito.doThrow(auditFailure)
                 .when(placeMediaModerationAuditLogRepository).save(any());
 
-        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () ->
+        var thrown = assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () ->
                 placeMediaService.removeMediaByModerator(modId, placeId, mediaId, "MOTIVO", "Notas")
         );
+        assertSame(auditFailure, thrown, "A falha da auditoria deve abortar a remoção sem ser substituída");
     }
 
     @Test

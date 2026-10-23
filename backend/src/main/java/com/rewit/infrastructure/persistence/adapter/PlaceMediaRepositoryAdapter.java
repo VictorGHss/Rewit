@@ -25,7 +25,6 @@ public class PlaceMediaRepositoryAdapter implements PlaceMediaRepository {
     @jakarta.persistence.PersistenceContext
     private final jakarta.persistence.EntityManager entityManager;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public PlaceMediaRepositoryAdapter(PlaceMediaJpaRepository placeMediaJpaRepository,
                                        jakarta.persistence.EntityManager entityManager) {
         this.placeMediaJpaRepository = Objects.requireNonNull(placeMediaJpaRepository, "PlaceMediaJpaRepository must not be null");

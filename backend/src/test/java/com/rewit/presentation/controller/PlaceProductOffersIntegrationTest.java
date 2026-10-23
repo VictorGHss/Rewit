@@ -3,7 +3,7 @@ package com.rewit.presentation.controller;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
 import com.rewit.application.dto.business.BusinessDtos.PlaceClaimView;
 import com.rewit.application.dto.catalog.PlaceProductOfferDtos.UpsertPlaceProductOfferCommand;
 import com.rewit.application.port.PlaceRepository;
@@ -20,6 +20,7 @@ import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -95,10 +96,10 @@ class PlaceProductOffersIntegrationTest {
     @Autowired private UpsertPlaceProductOfferUseCase upsertOffer;
 
     private MockMvc mockMvc;
-    // Decimais exatos: o JsonNodeFactory padrão remove zeros à direita e esconderia a escala enviada pela API.
+    // Decimais exatos: por padrão a árvore JSON remove zeros à direita e esconderia a escala enviada pela API.
     private final ObjectMapper objectMapper = new ObjectMapper()
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .setNodeFactory(JsonNodeFactory.withExactBigDecimals(true));
+            .configure(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES, false);
 
     private record TestUser(UUID id, String token) {}
 
@@ -538,11 +539,12 @@ class PlaceProductOffersIntegrationTest {
                 "SELECT * FROM place_product_offers WHERE place_id = ? ORDER BY id", placeId);
 
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
-        assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> {
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> {
             jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
             assertEquals(0, offerCount(placeId), "dentro da transação a troca já apagou as ofertas");
             throw new IllegalStateException("falha depois da troca de titular");
         }));
+        assertEquals("falha depois da troca de titular", failure.getMessage());
 
         assertEquals(accountA, jdbcTemplate.queryForObject(
                 "SELECT claimed_by_business_id FROM places WHERE id = ?", UUID.class, placeId));
@@ -562,7 +564,7 @@ class PlaceProductOffersIntegrationTest {
         Map<String, Object> before = offerRow(placeId, existing);
 
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
-        assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> {
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> {
             upsertOffer.execute(new UpsertPlaceProductOfferCommand(admin.id(), placeId, existing, accountId,
                     "OUT_OF_STOCK", new BigDecimal("1.00"), "BRL"));
             upsertOffer.execute(new UpsertPlaceProductOfferCommand(admin.id(), placeId, fresh, accountId,
@@ -570,6 +572,7 @@ class PlaceProductOffersIntegrationTest {
             assertEquals(2, offerCount(placeId));
             throw new IllegalStateException("falha depois de gravar");
         }));
+        assertEquals("falha depois de gravar", failure.getMessage());
 
         assertEquals(before, offerRow(placeId, existing));
         assertEquals(List.of(), offerRows(placeId, fresh));
@@ -689,13 +692,13 @@ class PlaceProductOffersIntegrationTest {
 
         String insert = "INSERT INTO place_product_offers (id, place_id, product_id, business_account_id, availability,"
                 + " price, currency, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(insert, UUID.randomUUID(),
+        assertViolates("chk_place_product_offer_price", () -> jdbcTemplate.update(insert, UUID.randomUUID(),
                 placeId, product("ACTIVE"), accountId, "AVAILABLE", new BigDecimal("-1.00"), "BRL", admin.id()));
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(insert, UUID.randomUUID(),
+        assertViolates("chk_place_product_offer_currency", () -> jdbcTemplate.update(insert, UUID.randomUUID(),
                 placeId, product("ACTIVE"), accountId, "AVAILABLE", null, "USD", admin.id()));
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(insert, UUID.randomUUID(),
+        assertViolates("chk_place_product_offer_availability", () -> jdbcTemplate.update(insert, UUID.randomUUID(),
                 placeId, product("ACTIVE"), accountId, "RESERVED", null, "BRL", admin.id()));
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(insert, UUID.randomUUID(),
+        assertViolates("uq_place_product_offer", () -> jdbcTemplate.update(insert, UUID.randomUUID(),
                 placeId, productId, accountId, "AVAILABLE", null, "BRL", admin.id()));
         assertEquals(1, offerCount(placeId));
     }
@@ -736,6 +739,13 @@ class PlaceProductOffersIntegrationTest {
         }
         fail("a gravação deveria estar esperando a trava de places, bloqueada por " + blockers);
         return -1;
+    }
+
+    /** Cada linha inválida deve ser recusada pela constraint específica, não por outra violação qualquer. */
+    private static void assertViolates(String constraint, Executable insert) {
+        DataIntegrityViolationException violation = assertThrows(DataIntegrityViolationException.class, insert);
+        String cause = String.valueOf(violation.getMostSpecificCause().getMessage());
+        assertTrue(cause.contains(constraint), "esperada violação de " + constraint + ", recebido: " + cause);
     }
 
     private static Object[] sqlArray(Object value) {
