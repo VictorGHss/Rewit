@@ -86,6 +86,7 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
   }
 
   Future<void> _openOfferForm({PlaceProductOffer? offer}) async {
+    _notifier.clearSearch();
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -100,8 +101,13 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
         existingOffer: offer,
       ),
     );
+    _notifier.clearSearch();
 
     if (!mounted || result != true) return;
+
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
 
     if (_notifier.successMessage != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -153,6 +159,9 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
     if (!mounted) return;
 
     if (success) {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(_notifier.successMessage ?? 'Oferta retirada da vitrine.'),
@@ -524,6 +533,10 @@ class _OfferFormSheetState extends State<_OfferFormSheet> {
 
   void _onSearchChanged(String query) {
     _debounceTimer?.cancel();
+    if (query.trim().length < 2) {
+      widget.notifier.clearSearch();
+      return;
+    }
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
       widget.notifier.searchProducts(query);
     });
@@ -560,12 +573,23 @@ class _OfferFormSheetState extends State<_OfferFormSheet> {
     } else if (_priceMode == _PriceMode.undisclosed) {
       finalPrice = null;
     } else {
-      final raw = _priceController.text.trim().replaceAll(',', '.');
-      if (raw.isEmpty) {
+      final text = _priceController.text.trim();
+      if (text.isEmpty) {
         setState(() => _priceError = 'Informe o valor do produto.');
         return;
       }
-      final parsed = double.tryParse(raw);
+      final normalized = text.replaceAll(',', '.');
+      final numericRegex = RegExp(r'^\d+(\.\d+)?$');
+      if (!numericRegex.hasMatch(normalized)) {
+        setState(() => _priceError = 'Informe um valor numérico válido.');
+        return;
+      }
+      final parts = normalized.split('.');
+      if (parts.length == 2 && parts[1].length > 2) {
+        setState(() => _priceError = 'O preço não pode ter mais de duas casas decimais.');
+        return;
+      }
+      final parsed = double.tryParse(normalized);
       if (parsed == null || parsed < 0) {
         setState(() => _priceError = 'Informe um valor válido.');
         return;
@@ -574,7 +598,7 @@ class _OfferFormSheetState extends State<_OfferFormSheet> {
         setState(() => _priceError = 'O preço excede o limite permitido.');
         return;
       }
-      finalPrice = double.parse(parsed.toStringAsFixed(2));
+      finalPrice = parsed;
     }
 
     setState(() => _priceError = null);

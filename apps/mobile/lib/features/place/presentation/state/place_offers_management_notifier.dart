@@ -8,10 +8,10 @@ import '../../domain/repositories/place_commercial_repository.dart';
 /// Notifier para gestão das ofertas comerciais oficiais de um estabelecimento (F2.3).
 ///
 /// Suporta:
-/// - Listagem paginada e reconciliação sem duplicação de produtos.
-/// - Publicação ou atualização de termos comerciais (disponibilidade, preço em BRL).
-/// - Retirada da vitrine via DELETE idempotente.
-/// - Busca de produtos globais elegíveis no catálogo unificado (Search V1).
+/// - Listagem paginada e sincronização consistente a partir da API real após mutações.
+/// - Publicação ou atualização de termos comerciais (disponibilidade, preço em BRL com validação decimal estrita).
+/// - Retirada da vitrine via DELETE idempotente e re-sincronização de offsets.
+/// - Busca de produtos globais elegíveis no catálogo unificado (Search V1) com cancelamento de buscas desatualizadas.
 class PlaceOffersManagementNotifier extends ChangeNotifier {
   final PlaceCommercialRepository repository;
   final SearchRepository? searchRepository;
@@ -28,6 +28,7 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
   int _currentPage = 0;
   int _totalElements = 0;
   bool _isLastPage = true;
+  int _loadSequence = 0;
 
   // Estado da busca de produtos globais
   List<SearchResultItem> _searchResults = [];
@@ -62,8 +63,12 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
   String get searchQuery => _searchQuery;
 
   /// Carrega as ofertas existentes do estabelecimento a partir da primeira página.
+  ///
+  /// Se [refresh] for verdadeiro, anula qualquer carregamento anterior e força uma nova busca da página 0.
   Future<void> loadOffers(String placeId, {bool refresh = false}) async {
-    if (_isLoading) return;
+    if (_isLoading && !refresh) return;
+
+    final currentSeq = ++_loadSequence;
     _isLoading = true;
     _errorMessage = null;
     _successMessage = null;
@@ -71,18 +76,23 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
 
     try {
       final page = await repository.getOffers(placeId, page: 0, size: 20);
+      if (currentSeq != _loadSequence) return;
+
       _offers.clear();
       _offers.addAll(page.content);
       _currentPage = page.pageNumber;
       _totalElements = page.totalElements;
       _isLastPage = page.isLast;
     } catch (e) {
+      if (currentSeq != _loadSequence) return;
       _errorMessage = e is ApiException
           ? e.detail
           : 'Falha ao carregar ofertas comerciais do estabelecimento.';
     } finally {
-      _isLoading = false;
-      _notifySafely();
+      if (currentSeq == _loadSequence) {
+        _isLoading = false;
+        _notifySafely();
+      }
     }
   }
 
@@ -90,6 +100,7 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
   Future<void> loadMoreOffers(String placeId) async {
     if (_isLoadingMore || _isLastPage || _isLoading) return;
 
+    final currentSeq = _loadSequence;
     _isLoadingMore = true;
     _notifySafely();
 
@@ -99,6 +110,8 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
         page: _currentPage + 1,
         size: 20,
       );
+
+      if (currentSeq != _loadSequence) return;
 
       for (final offer in nextPage.content) {
         final existingIndex = _offers.indexWhere((o) => o.product.id == offer.product.id);
@@ -113,16 +126,22 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
       _totalElements = nextPage.totalElements;
       _isLastPage = nextPage.isLast;
     } catch (e) {
+      if (currentSeq != _loadSequence) return;
       _errorMessage = e is ApiException
           ? e.detail
           : 'Falha ao carregar mais ofertas.';
     } finally {
-      _isLoadingMore = false;
-      _notifySafely();
+      if (currentSeq == _loadSequence) {
+        _isLoadingMore = false;
+        _notifySafely();
+      }
     }
   }
 
   /// Publica ou atualiza a oferta de um produto no estabelecimento.
+  ///
+  /// Valida estritamente a precisão decimal do preço (máximo 2 casas decimais).
+  /// Após persistência bem-sucedida, sincroniza a listagem com a API real reiniciando a paginação.
   Future<bool> upsertOffer({
     required String placeId,
     required String productId,
@@ -147,13 +166,21 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
         _notifySafely();
         return false;
       }
+      final roundedTo2 = double.parse(price.toStringAsFixed(2));
+      if ((price - roundedTo2).abs() > 1e-6) {
+        _errorMessage = 'O preço não pode ter mais de duas casas decimais.';
+        _notifySafely();
+        return false;
+      }
     }
 
     _isSaving = true;
+    final isExisting = _offers.any((o) => o.product.id == productId);
+    final currentLoadSeq = ++_loadSequence;
     _notifySafely();
 
     try {
-      final savedOffer = await repository.upsertOffer(
+      await repository.upsertOffer(
         placeId: placeId,
         productId: productId,
         businessAccountId: businessAccountId,
@@ -162,30 +189,37 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
         currency: currency,
       );
 
-      final index = _offers.indexWhere((o) => o.product.id == productId);
-      if (index != -1) {
-        _offers[index] = savedOffer;
-      } else {
-        _offers.insert(0, savedOffer);
-        _totalElements++;
+      // Sincroniza os dados reais do backend para manter ordenação e offsets consistentes
+      final freshPage = await repository.getOffers(placeId, page: 0, size: 20);
+      if (currentLoadSeq == _loadSequence) {
+        _offers.clear();
+        _offers.addAll(freshPage.content);
+        _currentPage = freshPage.pageNumber;
+        _totalElements = freshPage.totalElements;
+        _isLastPage = freshPage.isLast;
+        _successMessage = isExisting
+            ? 'Oferta atualizada com sucesso.'
+            : 'Oferta publicada com sucesso.';
       }
-
-      _successMessage = index != -1
-          ? 'Oferta atualizada com sucesso.'
-          : 'Oferta publicada com sucesso.';
       return true;
     } catch (e) {
-      _errorMessage = e is ApiException
-          ? e.detail
-          : 'Falha ao salvar oferta comercial.';
+      if (currentLoadSeq == _loadSequence) {
+        _errorMessage = e is ApiException
+            ? e.detail
+            : 'Falha ao salvar oferta comercial.';
+      }
       return false;
     } finally {
-      _isSaving = false;
-      _notifySafely();
+      if (currentLoadSeq == _loadSequence) {
+        _isSaving = false;
+        _notifySafely();
+      }
     }
   }
 
   /// Retira da vitrine a oferta comercial de um produto no estabelecimento.
+  ///
+  /// Após deleção na API real, sincroniza a listagem a partir da primeira página.
   Future<bool> deleteOffer({
     required String placeId,
     required String productId,
@@ -197,6 +231,7 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
     _successMessage = null;
     _isDeleting = true;
     _deletingProductId = productId;
+    final currentLoadSeq = ++_loadSequence;
     _notifySafely();
 
     try {
@@ -206,26 +241,36 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
         businessAccountId: businessAccountId,
       );
 
-      _offers.removeWhere((o) => o.product.id == productId);
-      if (_totalElements > 0) {
-        _totalElements--;
+      // Sincroniza os dados reais do backend reiniciando o cursor da listagem
+      final freshPage = await repository.getOffers(placeId, page: 0, size: 20);
+      if (currentLoadSeq == _loadSequence) {
+        _offers.clear();
+        _offers.addAll(freshPage.content);
+        _currentPage = freshPage.pageNumber;
+        _totalElements = freshPage.totalElements;
+        _isLastPage = freshPage.isLast;
+        _successMessage = 'Oferta retirada da vitrine.';
       }
-
-      _successMessage = 'Oferta retirada da vitrine.';
       return true;
     } catch (e) {
-      _errorMessage = e is ApiException
-          ? e.detail
-          : 'Falha ao retirar oferta da vitrine.';
+      if (currentLoadSeq == _loadSequence) {
+        _errorMessage = e is ApiException
+            ? e.detail
+            : 'Falha ao retirar oferta da vitrine.';
+      }
       return false;
     } finally {
-      _isDeleting = false;
-      _deletingProductId = null;
-      _notifySafely();
+      if (currentLoadSeq == _loadSequence) {
+        _isDeleting = false;
+        _deletingProductId = null;
+        _notifySafely();
+      }
     }
   }
 
   /// Busca produtos no catálogo unificado (Search V1), filtrando apenas alvos de tipo PRODUCT e status ACTIVE.
+  ///
+  /// Limpa resultados imediatamente para evitar apresentar dados de consultas anteriores durante digitação.
   Future<void> searchProducts(String query) async {
     _searchQuery = query;
     final currentSeq = ++_searchSequence;
@@ -238,6 +283,7 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
       return;
     }
 
+    _searchResults = [];
     _isSearching = true;
     _searchErrorMessage = null;
     _notifySafely();
@@ -256,7 +302,7 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
         size: 20,
       );
 
-      // Descarta resposta se uma busca mais recente tiver sido iniciada
+      // Descarta resposta se uma busca mais recente ou clearSearch tiver sido acionada
       if (currentSeq != _searchSequence) return;
 
       // Filtra estritamente alvos que são produtos e estão ativos no catálogo
@@ -277,8 +323,9 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
     }
   }
 
-  /// Limpa os resultados e o termo da busca de produtos.
+  /// Limpa os resultados e o termo da busca de produtos, invalidando requisições em trânsito.
   void clearSearch() {
+    _searchSequence++;
     _searchQuery = '';
     _searchResults = [];
     _searchErrorMessage = null;
@@ -313,4 +360,3 @@ class PlaceOffersManagementNotifier extends ChangeNotifier {
     super.dispose();
   }
 }
-

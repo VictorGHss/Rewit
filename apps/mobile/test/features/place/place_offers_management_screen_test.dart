@@ -179,9 +179,7 @@ void main() {
       isLast: true,
     );
 
-    // Carregamento assíncrono em andamento
     await tester.pumpWidget(_buildTestApp(args: validArgs, notifier: notifier));
-    // Sem settle, enquanto Future do loadOffers ainda está resolvendo
     expect(find.byKey(const Key('offers_loading_indicator')), findsOneWidget);
 
     await tester.pumpAndSettle();
@@ -267,71 +265,299 @@ void main() {
     expect(find.text('Sem estoque'), findsOneWidget);
   });
 
-  testWidgets('fluxo completo de adição de oferta: busca produto, define preço e salva', (tester) async {
-    commercialRepo.pageToReturn = const PlaceOffersPage(
-      content: [],
-      pageNumber: 0,
-      totalElements: 0,
-      isLast: true,
-    );
+  group('Validação estrita de preços no formulário de oferta', () {
+    Future<void> openFormAndSelectProduct(WidgetTester tester) async {
+      commercialRepo.pageToReturn = const PlaceOffersPage(content: [], isLast: true);
+      searchRepo.pageToReturn = const SearchPage(
+        items: [
+          SearchResultItem(
+            id: 'p-test',
+            name: 'Item de Teste',
+            category: 'Geral',
+            targetType: TargetType.product,
+            rawTargetType: 'PRODUCT',
+            status: 'ACTIVE',
+          ),
+        ],
+        pageNumber: 0,
+        pageSize: 20,
+        totalElements: 1,
+        totalPages: 1,
+        isLast: true,
+      );
 
-    searchRepo.pageToReturn = const SearchPage(
-      items: [
-        SearchResultItem(
-          id: 'prod-search-1',
-          name: 'Cappuccino Italiano',
-          category: 'Cafés Especiais',
-          targetType: TargetType.product,
-          rawTargetType: 'PRODUCT',
-          status: 'ACTIVE',
-        ),
-      ],
-      pageNumber: 0,
-      pageSize: 20,
-      totalElements: 1,
-      totalPages: 1,
-      isLast: true,
-    );
+      await tester.pumpWidget(_buildTestApp(args: validArgs, notifier: notifier));
+      await tester.pumpAndSettle();
 
-    await tester.pumpWidget(_buildTestApp(args: validArgs, notifier: notifier));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('add_offer_button')));
+      await tester.pumpAndSettle();
 
-    // Clica no botão de adicionar nova oferta
-    await tester.tap(find.byKey(const Key('add_offer_button')));
-    await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('product_search_input')), 'Item');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('offers_form_sheet')), findsOneWidget);
-    expect(find.byKey(const Key('product_search_input')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('product_search_item_p-test')));
+      await tester.pumpAndSettle();
+    }
 
-    // Digita no campo de busca de produto
-    await tester.enterText(find.byKey(const Key('product_search_input')), 'Cappuccino');
-    // Aguarda debounce de 300ms
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pumpAndSettle();
+    testWidgets('aceita preço com vírgula e ponto decimal com duas casas', (tester) async {
+      await openFormAndSelectProduct(tester);
 
-    // Seleciona o item encontrado
-    expect(find.byKey(const Key('product_search_item_prod-search-1')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('product_search_item_prod-search-1')));
-    await tester.pumpAndSettle();
+      // Com vírgula
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '14,50');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
 
-    // Verifica que o produto foi selecionado
-    expect(find.byKey(const Key('selected_product_card')), findsOneWidget);
-    expect(find.text('Cappuccino Italiano'), findsWidgets);
+      expect(commercialRepo.lastUpsertPrice, 14.50);
+      expect(find.byKey(const Key('offers_form_sheet')), findsNothing);
 
-    // Preenche preço praticado
-    await tester.enterText(find.byKey(const Key('offer_price_input')), '14,90');
-    await tester.pumpAndSettle();
+      // Abre novamente e testa com ponto decimal
+      await tester.tap(find.byKey(const Key('add_offer_button')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('product_search_input')), 'Item');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('product_search_item_p-test')));
+      await tester.pumpAndSettle();
 
-    // Clica em salvar
-    await tester.tap(find.byKey(const Key('save_offer_button')));
-    await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '19.85');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
 
-    // Modal deve ter sido fechado e a oferta enviada ao repositório
-    expect(find.byKey(const Key('offers_form_sheet')), findsNothing);
-    expect(commercialRepo.lastUpsertProductId, 'prod-search-1');
-    expect(commercialRepo.lastUpsertPrice, 14.90);
-    expect(commercialRepo.lastUpsertAvailability, 'AVAILABLE');
-    expect(find.text('Oferta publicada com sucesso.'), findsOneWidget);
+      expect(commercialRepo.lastUpsertPrice, 19.85);
+      expect(find.byKey(const Key('offers_form_sheet')), findsNothing);
+    });
+
+    testWidgets('aceita preço com zero e uma casa decimal', (tester) async {
+      await openFormAndSelectProduct(tester);
+
+      // Zero casas
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '25');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(commercialRepo.lastUpsertPrice, 25.0);
+
+      // Uma casa decimal
+      await tester.tap(find.byKey(const Key('add_offer_button')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('product_search_input')), 'Item');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('product_search_item_p-test')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '30,5');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(commercialRepo.lastUpsertPrice, 30.5);
+    });
+
+    testWidgets('rejeita preço com 3 casas decimais sem arredondar e preserva o texto digitado', (tester) async {
+      await openFormAndSelectProduct(tester);
+
+      commercialRepo.lastUpsertPrice = null;
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '12,999');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      // Modal NÃO fecha e repositório NÃO é chamado
+      expect(find.byKey(const Key('offers_form_sheet')), findsOneWidget);
+      expect(find.text('O preço não pode ter mais de duas casas decimais.'), findsOneWidget);
+      expect(commercialRepo.lastUpsertPrice, isNull);
+
+      // Texto digitado permanece no campo para correção do usuário
+      expect(find.text('12,999'), findsOneWidget);
+    });
+
+    testWidgets('rejeita valor negativo e caracteres inválidos', (tester) async {
+      await openFormAndSelectProduct(tester);
+
+      commercialRepo.lastUpsertPrice = null;
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '-5.00');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('offers_form_sheet')), findsOneWidget);
+      expect(find.text('Informe um valor numérico válido.'), findsOneWidget);
+      expect(commercialRepo.lastUpsertPrice, isNull);
+
+      // Caracteres não numéricos
+      await tester.enterText(find.byKey(const Key('offer_price_input')), 'abc');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Informe um valor numérico válido.'), findsOneWidget);
+      expect(commercialRepo.lastUpsertPrice, isNull);
+    });
+
+    testWidgets('rejeita campo vazio no modo de valor customizado', (tester) async {
+      await openFormAndSelectProduct(tester);
+
+      commercialRepo.lastUpsertPrice = null;
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '   ');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('offers_form_sheet')), findsOneWidget);
+      expect(find.text('Informe o valor do produto.'), findsOneWidget);
+      expect(commercialRepo.lastUpsertPrice, isNull);
+    });
+
+    testWidgets('aceita limite máximo 9999999999.99 e rejeita valor excedente', (tester) async {
+      await openFormAndSelectProduct(tester);
+
+      // Excedente
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '10000000000.00');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('offers_form_sheet')), findsOneWidget);
+      expect(find.text('O preço excede o limite permitido.'), findsOneWidget);
+      expect(commercialRepo.lastUpsertPrice, isNull);
+
+      // Limite máximo exato
+      await tester.enterText(find.byKey(const Key('offer_price_input')), '9999999999.99');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(commercialRepo.lastUpsertPrice, 9999999999.99);
+      expect(find.byKey(const Key('offers_form_sheet')), findsNothing);
+    });
+
+    testWidgets('suporta modo gratuito e modo preço não informado', (tester) async {
+      await openFormAndSelectProduct(tester);
+
+      // Gratuito
+      await tester.tap(find.byKey(const Key('price_mode_free')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('offer_price_input')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(commercialRepo.lastUpsertPrice, 0.0);
+
+      // Não informado
+      await tester.tap(find.byKey(const Key('add_offer_button')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('product_search_input')), 'Item');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('product_search_item_p-test')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('price_mode_undisclosed')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('offer_price_input')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('save_offer_button')));
+      await tester.pumpAndSettle();
+
+      expect(commercialRepo.lastUpsertPrice, isNull);
+    });
+  });
+
+  group('Invalidação e isolamento da busca no modal', () {
+    testWidgets('fechar e reabrir formulário limpa busca e resultados anteriores', (tester) async {
+      commercialRepo.pageToReturn = const PlaceOffersPage(content: [], isLast: true);
+      searchRepo.pageToReturn = const SearchPage(
+        items: [
+          SearchResultItem(
+            id: 'p-1',
+            name: 'Café Grão Especial',
+            category: 'Grãos',
+            targetType: TargetType.product,
+            rawTargetType: 'PRODUCT',
+            status: 'ACTIVE',
+          ),
+        ],
+        pageNumber: 0,
+        pageSize: 20,
+        totalElements: 1,
+        totalPages: 1,
+        isLast: true,
+      );
+
+      await tester.pumpWidget(_buildTestApp(args: validArgs, notifier: notifier));
+      await tester.pumpAndSettle();
+
+      // Abre formulário e pesquisa
+      await tester.tap(find.byKey(const Key('add_offer_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('product_search_input')), 'Café');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Café Grão Especial'), findsOneWidget);
+
+      // Fecha modal pelo X
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('offers_form_sheet')), findsNothing);
+
+      // Reabre modal
+      await tester.tap(find.byKey(const Key('add_offer_button')));
+      await tester.pumpAndSettle();
+
+      // Campo de busca e resultados devem estar limpos
+      expect(find.text('Café Grão Especial'), findsNothing);
+      final searchInput = tester.widget<TextField>(find.byKey(const Key('product_search_input')));
+      expect(searchInput.controller?.text, isEmpty);
+    });
+
+    testWidgets('limpar termo com menos de 2 caracteres esvazia resultados de busca', (tester) async {
+      commercialRepo.pageToReturn = const PlaceOffersPage(content: [], isLast: true);
+      searchRepo.pageToReturn = const SearchPage(
+        items: [
+          SearchResultItem(
+            id: 'p-1',
+            name: 'Pão Italiano',
+            category: 'Padaria',
+            targetType: TargetType.product,
+            rawTargetType: 'PRODUCT',
+            status: 'ACTIVE',
+          ),
+        ],
+        pageNumber: 0,
+        pageSize: 20,
+        totalElements: 1,
+        totalPages: 1,
+        isLast: true,
+      );
+
+      await tester.pumpWidget(_buildTestApp(args: validArgs, notifier: notifier));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('add_offer_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('product_search_input')), 'Pão');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pão Italiano'), findsOneWidget);
+
+      // Apaga o texto deixando 1 caractere
+      await tester.enterText(find.byKey(const Key('product_search_input')), 'P');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pão Italiano'), findsNothing);
+    });
   });
 
   testWidgets('fluxo de edição: abre modal pré-preenchido, altera disponibilidade e salva', (tester) async {
@@ -355,7 +581,6 @@ void main() {
     await tester.pumpWidget(_buildTestApp(args: validArgs, notifier: notifier));
     await tester.pumpAndSettle();
 
-    // Clica no botão de editar
     await tester.tap(find.byKey(const Key('edit_offer_button_prod-edit-1')));
     await tester.pumpAndSettle();
 
@@ -367,7 +592,6 @@ void main() {
     await tester.tap(find.text('Esgotado'));
     await tester.pumpAndSettle();
 
-    // Salva atualização
     await tester.tap(find.byKey(const Key('save_offer_button')));
     await tester.pumpAndSettle();
 
@@ -398,20 +622,18 @@ void main() {
     await tester.pumpWidget(_buildTestApp(args: validArgs, notifier: notifier));
     await tester.pumpAndSettle();
 
-    // Clica em retirar da vitrine
     await tester.tap(find.byKey(const Key('delete_offer_button_prod-del-1')));
     await tester.pumpAndSettle();
 
     expect(find.text('Retirar da vitrine?'), findsOneWidget);
 
-    // Cancela primeiro
     await tester.tap(find.byKey(const Key('cancel_delete_offer_button')));
     await tester.pumpAndSettle();
 
     expect(commercialRepo.lastDeleteProductId, isNull);
     expect(find.text('Suco de Laranja'), findsOneWidget);
 
-    // Abre novamente e confirma
+    // Confirma exclusão
     await tester.tap(find.byKey(const Key('delete_offer_button_prod-del-1')));
     await tester.pumpAndSettle();
 
@@ -423,4 +645,3 @@ void main() {
     expect(find.text('Oferta retirada da vitrine.'), findsOneWidget);
   });
 }
-
