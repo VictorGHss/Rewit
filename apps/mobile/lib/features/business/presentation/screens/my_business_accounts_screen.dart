@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
+import 'place_management_dashboard_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 import '../../domain/entities/business_entities.dart';
 import '../../domain/repositories/business_repository.dart';
@@ -389,6 +391,30 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (claim.isApproved) ...[
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            key: Key('manage_place_button_${claim.placeId}'),
+                            onPressed: () {
+                              Navigator.of(context).pushNamed(
+                                AppRouter.placeManagement,
+                                arguments: PlaceManagementArgs(
+                                  placeId: claim.placeId,
+                                  businessAccountId: claim.businessAccountId,
+                                  placeName: claim.placeName,
+                                  city: claim.city,
+                                  state: claim.state,
+                                  status: claim.status,
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.settings_outlined, size: 18),
+                            label: const Text('Gerenciar estabelecimento'),
+                          ),
+                        ),
+                      ],
                       if (claim.decisionReason != null && claim.decisionReason!.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Container(

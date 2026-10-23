@@ -90,6 +90,32 @@ class _FakePlaceRepository implements PlaceRepository {
       throw UnimplementedError();
 
   @override
+  Future<List<PlaceMediaItem>> getPlaceMedia(String placeId) async => [];
+
+  @override
+  Future<PlaceMediaItem> uploadPlaceMedia({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? mimeType,
+    String? idempotencyKey,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlaceMediaItem> setPrimaryPlaceMedia({
+    required String placeId,
+    required String mediaId,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deletePlaceMedia({
+    required String placeId,
+    required String mediaId,
+  }) async {}
+
+  @override
   Future<PlaceDetail> getPlaceById(String id) async {
     if (placeException != null) throw placeException!;
     return placeToReturn ??

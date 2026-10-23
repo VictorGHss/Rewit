@@ -7,6 +7,9 @@ import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart
 import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
 import 'package:rewit_mobile/features/business/domain/repositories/business_response_repository.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/my_business_accounts_screen.dart';
+import 'package:rewit_mobile/features/business/presentation/screens/place_management_dashboard_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
@@ -56,6 +59,8 @@ class AppRouter {
   static const String accountSettings = '/settings';
   static const String changePassword = '/settings/change-password';
   static const String businessAccounts = '/settings/business-accounts';
+  static const String placeManagement = '/business/place-management';
+  static const String placeMediaGallery = '/place/media-gallery';
   static const String scanner = '/scanner';
 
   final AuthNotifier authNotifier;
@@ -409,6 +414,61 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => ScannerScreen(
             productRepository: productRepository,
+          ),
+          settings: settings,
+        );
+
+      case placeManagement:
+        final args = settings.arguments;
+        if (args is! PlaceManagementArgs) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Argumentos de gestão de estabelecimento ausentes.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => PlaceManagementDashboardScreen(
+            args: args,
+            placeRepository: placeRepository,
+            reviewMediaRepository: reviewMediaRepository,
+          ),
+          settings: settings,
+        );
+
+      case placeMediaGallery:
+        final args = settings.arguments;
+        if (args is! PlaceMediaGalleryArgs) {
+          return MaterialPageRoute(
+            builder: (context) => const Scaffold(
+              body: Center(child: Text('Argumentos de galeria ausentes.')),
+            ),
+            settings: settings,
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => PlaceMediaGalleryScreen(
+            args: args,
+            placeRepository: placeRepository,
+            reviewMediaRepository: reviewMediaRepository,
+            onPickPhoto: onPickManualPlacePhoto != null
+                ? (source) async {
+                    final file = await onPickManualPlacePhoto!(source);
+                    if (file == null) return null;
+                    final bytes = await file.readAsBytes();
+                    final length = await file.length();
+                    final name = file.path.split(Platform.pathSeparator).last;
+                    final mime = name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+                    return SelectedMediaItem(
+                      id: DateTime.now().microsecondsSinceEpoch.toString(),
+                      name: name,
+                      sizeBytes: length,
+                      mimeType: mime,
+                      bytes: bytes,
+                    );
+                  }
+                : null,
           ),
           settings: settings,
         );

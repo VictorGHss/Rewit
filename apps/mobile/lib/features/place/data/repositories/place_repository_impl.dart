@@ -7,6 +7,7 @@ import '../../domain/entities/target_reviews_page.dart';
 import '../../domain/entities/target_stats.dart';
 import '../../domain/repositories/place_repository.dart';
 import '../models/place_dtos.dart';
+import '../models/place_media_dto.dart';
 
 /// Implementação de [PlaceRepository] consumindo a API REST do Rewit via [RewitHttpClient].
 class PlaceRepositoryImpl implements PlaceRepository {
@@ -43,6 +44,36 @@ class PlaceRepositoryImpl implements PlaceRepository {
     required String filename,
     String? idempotencyKey,
   }) async {
+    final media = await uploadPlaceMedia(
+      placeId: placeId,
+      fileBytes: fileBytes,
+      filename: filename,
+      idempotencyKey: idempotencyKey,
+    );
+    return media.url;
+  }
+
+  @override
+  Future<List<PlaceMediaItem>> getPlaceMedia(String placeId) async {
+    final response = await httpClient.get(ApiEndpoints.placeMedia(placeId));
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is List) {
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map((json) => PlaceMediaDto.fromJson(json).toEntity())
+          .toList();
+    }
+    return [];
+  }
+
+  @override
+  Future<PlaceMediaItem> uploadPlaceMedia({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? mimeType,
+    String? idempotencyKey,
+  }) async {
     final Map<String, String>? headers = (idempotencyKey != null && idempotencyKey.trim().isNotEmpty)
         ? {'Idempotency-Key': idempotencyKey.trim()}
         : null;
@@ -52,17 +83,37 @@ class PlaceRepositoryImpl implements PlaceRepository {
       fieldName: 'file',
       fileBytes: fileBytes,
       filename: filename,
+      mimeType: mimeType,
       headers: headers,
     );
     final dynamic decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Resposta inválida do servidor ao enviar fotografia do local.');
     }
-    final rawUrl = decoded['url'];
-    if (rawUrl is! String || rawUrl.trim().isEmpty) {
-      throw const FormatException('O servidor não retornou a URL da fotografia do local.');
+    return PlaceMediaDto.fromJson(decoded).toEntity();
+  }
+
+  @override
+  Future<PlaceMediaItem> setPrimaryPlaceMedia({
+    required String placeId,
+    required String mediaId,
+  }) async {
+    final response = await httpClient.put(
+      ApiEndpoints.placeMediaPrimary(placeId, mediaId),
+    );
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao definir foto principal.');
     }
-    return rawUrl.trim();
+    return PlaceMediaDto.fromJson(decoded).toEntity();
+  }
+
+  @override
+  Future<void> deletePlaceMedia({
+    required String placeId,
+    required String mediaId,
+  }) async {
+    await httpClient.delete(ApiEndpoints.placeMediaItem(placeId, mediaId));
   }
 
   @override

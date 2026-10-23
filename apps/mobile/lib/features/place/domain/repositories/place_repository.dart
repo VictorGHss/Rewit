@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 import '../entities/place_detail.dart';
+import '../entities/place_media_item.dart';
+export '../entities/place_media_item.dart';
 import '../entities/target_reviews_page.dart';
 import '../entities/target_stats.dart';
 
@@ -15,6 +17,31 @@ abstract class PlaceRepository {
     required Uint8List fileBytes,
     required String filename,
     String? idempotencyKey,
+  });
+
+  /// Lista as fotografias ativas vinculadas a um local físico (`GET /api/v1/places/{placeId}/media`).
+  Future<List<PlaceMediaItem>> getPlaceMedia(String placeId);
+
+  /// Realiza o upload de uma nova fotografia para o local (`POST /api/v1/places/{placeId}/media`),
+  /// retornando o [PlaceMediaItem] criado.
+  Future<PlaceMediaItem> uploadPlaceMedia({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? mimeType,
+    String? idempotencyKey,
+  });
+
+  /// Define a fotografia indicada como foto principal/capa do local (`PUT /api/v1/places/{placeId}/media/{mediaId}/primary`).
+  Future<PlaceMediaItem> setPrimaryPlaceMedia({
+    required String placeId,
+    required String mediaId,
+  });
+
+  /// Remove uma fotografia ativa do local (`DELETE /api/v1/places/{placeId}/media/{mediaId}`).
+  Future<void> deletePlaceMedia({
+    required String placeId,
+    required String mediaId,
   });
 
   /// Obtém os detalhes completos de um local pelo seu identificador único.
