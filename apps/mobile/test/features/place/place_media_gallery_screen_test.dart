@@ -440,11 +440,83 @@ void main() {
 
       expect(find.byKey(const Key('pending_upload_banner')), findsOneWidget);
 
+      // Botões de adicionar foto devem estar desabilitados enquanto houver upload pendente
+      final fabDuring = tester.widget<FloatingActionButton>(find.byKey(const Key('add_photo_fab')));
+      expect(fabDuring.onPressed, isNull);
+      final emptyBtnDuring = tester.widget<ElevatedButton>(find.byKey(const Key('empty_add_photo_button')));
+      expect(emptyBtnDuring.onPressed, isNull);
+
       // Descarta
       await tester.tap(find.byKey(const Key('cancel_retry_button')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('pending_upload_banner')), findsNothing);
+
+      // Após descarte, botões de adicionar foto devem estar habilitados novamente
+      final fabAfter = tester.widget<FloatingActionButton>(find.byKey(const Key('add_photo_fab')));
+      expect(fabAfter.onPressed, isNotNull);
+      final emptyBtnAfter = tester.widget<ElevatedButton>(find.byKey(const Key('empty_add_photo_button')));
+      expect(emptyBtnAfter.onPressed, isNotNull);
+    });
+
+    testWidgets('quando há fotos ativas e upload pendente, add_photo_fab permanece desabilitado até descarte ou sucesso', (tester) async {
+      repository.mediaToReturn = [
+        PlaceMediaItem(
+          id: 'photo-1',
+          placeId: 'place-test-1',
+          url: '/url-1',
+          mediaType: 'PHOTO',
+          mimeType: 'image/jpeg',
+          sizeBytes: 1024,
+          status: 'ACTIVE',
+          isPrimary: true,
+          createdAt: DateTime.now(),
+        ),
+      ];
+      repository.uploadErrorToThrow = Exception('Upload timeout');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PlaceMediaGalleryScreen(
+            args: args,
+            placeRepository: repository,
+            reviewMediaRepository: reviewMediaRepo,
+            onPickPhoto: (source) async => SelectedMediaItem(
+              id: 'item-2',
+              name: 'foto2.jpg',
+              sizeBytes: 1024,
+              mimeType: 'image/jpeg',
+              bytes: Uint8List.fromList([4, 5, 6]),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Fotos ativas (1 de 5)'), findsOneWidget);
+
+      // Inicia upload que falha
+      await tester.tap(find.byKey(const Key('add_photo_fab')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pick_gallery_option')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pending_upload_banner')), findsOneWidget);
+
+      // FAB deve estar desabilitado
+      final fab = tester.widget<FloatingActionButton>(find.byKey(const Key('add_photo_fab')));
+      expect(fab.onPressed, isNull);
+
+      // Ações do banner disponíveis
+      expect(find.byKey(const Key('retry_upload_button')), findsOneWidget);
+      expect(find.byKey(const Key('cancel_retry_button')), findsOneWidget);
+
+      // Descarte libera o FAB
+      await tester.tap(find.byKey(const Key('cancel_retry_button')));
+      await tester.pumpAndSettle();
+
+      final fabLiberado = tester.widget<FloatingActionButton>(find.byKey(const Key('add_photo_fab')));
+      expect(fabLiberado.onPressed, isNotNull);
     });
 
     testWidgets('Correção C: resposta de replay com status REMOVED não entra na galeria', (tester) async {

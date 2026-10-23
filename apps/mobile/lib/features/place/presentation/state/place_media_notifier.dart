@@ -137,6 +137,12 @@ class PlaceMediaNotifier extends ChangeNotifier {
       return false;
     }
 
+    if (_pendingUpload != null) {
+      _errorMessage = 'Existe um envio pendente. Tente novamente ou descarte a operação antes de adicionar outra foto.';
+      notifyListeners();
+      return false;
+    }
+
     final effectiveKey = idempotencyKey ??
         ((uuidGenerator != null) ? uuidGenerator!() : generateUuidV4());
 

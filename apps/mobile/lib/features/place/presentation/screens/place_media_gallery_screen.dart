@@ -112,6 +112,18 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
   }
 
   Future<void> _showPhotoSourcePicker(BuildContext context) async {
+    if (_notifier.hasPendingRetry) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Existe um envio pendente. Tente novamente ou descarte a operação antes de adicionar outra foto.',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     if (_notifier.isLimitReached) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -302,10 +314,11 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
         listenable: _notifier,
         builder: (context, _) {
           final isBusy = _notifier.isUploading || _notifier.operatingMediaId != null;
+          final isAddDisabled = isBusy || _notifier.hasPendingRetry;
 
           return FloatingActionButton.extended(
             key: const Key('add_photo_fab'),
-            onPressed: isBusy ? null : () => _showPhotoSourcePicker(context),
+            onPressed: isAddDisabled ? null : () => _showPhotoSourcePicker(context),
             icon: _notifier.isUploading
                 ? const SizedBox(
                     width: 18,
@@ -415,7 +428,11 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
             const SizedBox(height: 24),
             ElevatedButton.icon(
               key: const Key('empty_add_photo_button'),
-              onPressed: () => _showPhotoSourcePicker(context),
+              onPressed: (_notifier.isUploading ||
+                      _notifier.operatingMediaId != null ||
+                      _notifier.hasPendingRetry)
+                  ? null
+                  : () => _showPhotoSourcePicker(context),
               icon: const Icon(Icons.add_a_photo_outlined),
               label: const Text('Adicionar Primeira Fotografia'),
             ),
