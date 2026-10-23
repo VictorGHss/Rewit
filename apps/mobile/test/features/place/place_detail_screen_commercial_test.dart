@@ -18,6 +18,19 @@ import 'dart:typed_data';
 
 class _FakePlaceRepository implements PlaceRepository {
   @override
+  Future<PlaceDetail> createPlace(CreatePlaceInput input) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? idempotencyKey,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
   Future<PlaceDetail> getPlaceById(String id) async {
     return const PlaceDetail(
       id: 'place-comm-1',

@@ -13,15 +13,16 @@ class PlaceDto {
   final String addressText;
   final String? streetNumber;
   final String? neighborhood;
-  final String city;
-  final String state;
+  final String? city;
+  final String? state;
   final String? country;
-  final double latitude;
-  final double longitude;
+  final double? latitude;
+  final double? longitude;
   final int validationRadiusMeters;
   final String origin;
   final bool isVerified;
   final String status;
+  final String? photoUrl;
 
   const PlaceDto({
     required this.id,
@@ -32,36 +33,46 @@ class PlaceDto {
     required this.addressText,
     this.streetNumber,
     this.neighborhood,
-    required this.city,
-    required this.state,
+    this.city,
+    this.state,
     this.country,
-    required this.latitude,
-    required this.longitude,
+    this.latitude,
+    this.longitude,
     required this.validationRadiusMeters,
     required this.origin,
     required this.isVerified,
     required this.status,
+    this.photoUrl,
   });
 
   factory PlaceDto.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'];
+    final rawName = json['name'];
+    if (rawId is! String || rawId.trim().isEmpty || rawName is! String || rawName.trim().isEmpty) {
+      throw const FormatException('Resposta inválida do servidor: id ou nome do local ausente.');
+    }
+    final rawCity = (json['city'] as String?)?.trim();
+    final rawState = (json['state'] as String?)?.trim();
+    final rawPhotoUrl = (json['photoUrl'] as String?)?.trim();
     return PlaceDto(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      slug: json['slug'] as String,
-      category: json['category'] as String,
+      id: rawId.trim(),
+      name: rawName.trim(),
+      slug: (json['slug'] as String?)?.trim() ?? '',
+      category: (json['category'] as String?)?.trim() ?? 'GERAL',
       description: json['description'] as String?,
-      addressText: json['addressText'] as String,
+      addressText: (json['addressText'] as String?)?.trim() ?? '',
       streetNumber: json['streetNumber'] as String?,
       neighborhood: json['neighborhood'] as String?,
-      city: json['city'] as String,
-      state: json['state'] as String,
+      city: (rawCity != null && rawCity.isNotEmpty) ? rawCity : null,
+      state: (rawState != null && rawState.isNotEmpty) ? rawState : null,
       country: json['country'] as String?,
-      latitude: (json['latitude'] as num).toDouble(),
-      longitude: (json['longitude'] as num).toDouble(),
-      validationRadiusMeters: (json['validationRadiusMeters'] as num).toInt(),
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      validationRadiusMeters: (json['validationRadiusMeters'] as num?)?.toInt() ?? 50,
       origin: json['origin'] as String? ?? 'USER',
       isVerified: json['isVerified'] as bool? ?? false,
       status: json['status'] as String? ?? 'ACTIVE',
+      photoUrl: (rawPhotoUrl != null && rawPhotoUrl.isNotEmpty) ? rawPhotoUrl : null,
     );
   }
 
@@ -75,15 +86,16 @@ class PlaceDto {
       'addressText': addressText,
       if (streetNumber != null) 'streetNumber': streetNumber,
       if (neighborhood != null) 'neighborhood': neighborhood,
-      'city': city,
-      'state': state,
+      if (city != null) 'city': city,
+      if (state != null) 'state': state,
       if (country != null) 'country': country,
-      'latitude': latitude,
-      'longitude': longitude,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
       'validationRadiusMeters': validationRadiusMeters,
       'origin': origin,
       'isVerified': isVerified,
       'status': status,
+      if (photoUrl != null) 'photoUrl': photoUrl,
     };
   }
 
@@ -106,7 +118,69 @@ class PlaceDto {
       origin: origin,
       isVerified: isVerified,
       status: status,
+      photoUrl: photoUrl,
     );
+  }
+}
+
+/// DTO de requisição para criação de um novo Local Físico (`POST /api/v1/places`).
+class CreatePlaceRequestDto {
+  final String name;
+  final String addressText;
+  final String? category;
+  final String? description;
+  final String? streetNumber;
+  final String? neighborhood;
+  final String? city;
+  final String? state;
+  final String? country;
+  final double? latitude;
+  final double? longitude;
+
+  const CreatePlaceRequestDto({
+    required this.name,
+    required this.addressText,
+    this.category,
+    this.description,
+    this.streetNumber,
+    this.neighborhood,
+    this.city,
+    this.state,
+    this.country,
+    this.latitude,
+    this.longitude,
+  });
+
+  factory CreatePlaceRequestDto.fromEntity(CreatePlaceInput input) {
+    return CreatePlaceRequestDto(
+      name: input.name.trim(),
+      addressText: input.addressText.trim(),
+      category: input.category?.trim(),
+      description: input.description?.trim(),
+      streetNumber: input.streetNumber?.trim(),
+      neighborhood: input.neighborhood?.trim(),
+      city: input.city?.trim(),
+      state: input.state?.trim(),
+      country: input.country?.trim(),
+      latitude: input.latitude,
+      longitude: input.longitude,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'addressText': addressText,
+      if (category != null && category!.isNotEmpty) 'category': category,
+      if (description != null && description!.isNotEmpty) 'description': description,
+      if (streetNumber != null && streetNumber!.isNotEmpty) 'streetNumber': streetNumber,
+      if (neighborhood != null && neighborhood!.isNotEmpty) 'neighborhood': neighborhood,
+      if (city != null && city!.isNotEmpty) 'city': city,
+      if (state != null && state!.isNotEmpty) 'state': state,
+      if (country != null && country!.isNotEmpty) 'country': country,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+    };
   }
 }
 

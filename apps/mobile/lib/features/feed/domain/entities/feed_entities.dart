@@ -29,6 +29,7 @@ class FeedTarget {
   final String? specificComment;
   final DateTime? createdAt;
   final String? targetType;
+  final String? targetName;
 
   const FeedTarget({
     required this.id,
@@ -38,6 +39,7 @@ class FeedTarget {
     this.specificComment,
     this.createdAt,
     this.targetType,
+    this.targetName,
   });
 
   bool get isPlace => targetType?.toUpperCase() == 'PLACE';

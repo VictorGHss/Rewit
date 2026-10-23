@@ -1,7 +1,9 @@
 package com.rewit.infrastructure.storage;
 
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
+import com.rewit.config.TestInfrastructureConfig;
 import io.minio.MinioClient;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -14,13 +16,26 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integração de Storage: SeaweedFS Real (Step 21.0 - Requisito 28)")
 class SeaweedStorageIntegrationTest {
 
-    // JUnit cria uma instância por teste, então o adaptador continua isolado por método
-    private final MinioStorageAdapter storageAdapter = new MinioStorageAdapter(
-            MinioClient.builder()
-                    .endpoint("http://localhost:8333")
-                    .credentials("change-me", "change-me")
-                    .build(),
-            "rewit-local");
+    // A-1b: somente TEST_STORAGE_* explícitas e validadas, sem defaults nem variáveis de desenvolvimento
+    private static final TestInfrastructureConfig INFRASTRUCTURE = TestInfrastructureConfig.current();
+
+    private MinioStorageAdapter storageAdapter;
+
+    @BeforeEach
+    void setUpStorage() {
+        String endpoint = INFRASTRUCTURE.storageEndpoint();
+        try {
+            storageAdapter = new MinioStorageAdapter(
+                    MinioClient.builder()
+                            .endpoint(endpoint)
+                            .credentials(INFRASTRUCTURE.storageAccessKey(), INFRASTRUCTURE.storageSecretKey())
+                            .build(),
+                    INFRASTRUCTURE.storageBucket());
+            storageAdapter.exists("health-check-" + UUID.randomUUID());
+        } catch (Exception e) {
+            fail("SeaweedFS/S3 storage descartável não acessível em " + endpoint + ": " + e.getMessage(), e);
+        }
+    }
 
     @Test
     @DisplayName("Ciclo completo de put, get, exists e delete contra SeaweedFS local")

@@ -12,6 +12,7 @@ import com.rewit.domain.enums.PlaceClaimStatus;
 import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.Place;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -251,12 +252,12 @@ class PlaceClaimLifecycleIntegrationTest {
         assertCode("FORBIDDEN", 403, () -> decidePlaceClaim.execute(registerUser("decide_user"), claim.id(),
                 PlaceClaimDecision.APPROVE, REASON, Instant.now()));
 
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", owner);
+        PrivilegedTestDatabase.assignRole(owner, "ADMIN");
         assertCode("SELF_DECISION_FORBIDDEN", 403,
                 () -> decidePlaceClaim.execute(owner, claim.id(), PlaceClaimDecision.APPROVE, REASON, Instant.now()));
 
         UUID admin = registerUser("decide_admin");
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", admin);
+        PrivilegedTestDatabase.assignRole(admin, "ADMIN");
         assertCode("INVALID_DECISION_REASON", 400,
                 () -> decidePlaceClaim.execute(admin, claim.id(), PlaceClaimDecision.APPROVE, "curta", Instant.now()));
         assertCode("PLACE_CLAIM_NOT_FOUND", 404,
@@ -504,7 +505,7 @@ class PlaceClaimLifecycleIntegrationTest {
 
     private UUID moderator(String prefix) throws Exception {
         UUID user = registerUser(prefix);
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", user);
+        PrivilegedTestDatabase.assignRole(user, "MODERATOR");
         return user;
     }
 

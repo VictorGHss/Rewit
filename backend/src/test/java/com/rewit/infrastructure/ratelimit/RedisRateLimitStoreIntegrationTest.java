@@ -3,6 +3,7 @@ package com.rewit.infrastructure.ratelimit;
 import com.rewit.application.ratelimit.RateLimitPermit;
 import com.rewit.application.ratelimit.RateLimitSubject;
 import com.rewit.application.ratelimit.RateLimitedAction;
+import com.rewit.config.TestInfrastructureConfig;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,8 +39,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("Rate limiting: janela deslizante no Redis real")
 class RedisRateLimitStoreIntegrationTest {
 
-    private static final String REDIS_HOST = envOrDefault("REDIS_HOST", "localhost");
-    private static final int REDIS_PORT = Integer.parseInt(envOrDefault("REDIS_PORT", "6379"));
+    // A-1b: endpoint explícito e validado (somente TEST_REDIS_HOST/TEST_REDIS_PORT, sem defaults)
+    private static final String REDIS_HOST = TestInfrastructureConfig.current().redisHost();
+    private static final int REDIS_PORT = TestInfrastructureConfig.current().redisPort();
     private static final Duration WINDOW = Duration.ofMinutes(1);
 
     private final List<LettuceConnectionFactory> factories = new ArrayList<>();
@@ -232,8 +234,4 @@ class RedisRateLimitStoreIntegrationTest {
         return new StringRedisTemplate(factory);
     }
 
-    private static String envOrDefault(String name, String defaultValue) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? defaultValue : value;
-    }
 }

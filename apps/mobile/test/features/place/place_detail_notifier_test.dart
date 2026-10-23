@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
@@ -18,6 +19,19 @@ class _FakePlaceRepository implements PlaceRepository {
 
   int getReviewsCallCount = 0;
   int? lastPageRequested;
+
+  @override
+  Future<PlaceDetail> createPlace(CreatePlaceInput input) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? idempotencyKey,
+  }) async =>
+      throw UnimplementedError();
 
   @override
   Future<PlaceDetail> getPlaceById(String id) async {

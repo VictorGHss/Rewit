@@ -35,12 +35,16 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      APP_DB_USER: ${APP_DB_USER:-rewit_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
       PGDATA: /var/lib/postgresql/data
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+      # Fonte única do SQL de provisionamento da role de runtime (usada pelo init e por rotação)
+      - ./infrastructure/postgres:/opt/rewit/postgres:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -116,6 +120,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      APP_DB_USER: ${APP_DB_USER:-rewit_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       OBJECT_STORAGE_ENDPOINT: http://seaweedfs:8333

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RefreshRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -220,7 +221,7 @@ class AccountLifecycleIntegrationTest {
     void adminEndpointsAuthorization() throws Exception {
         TestUser admin = admin("autz_admin");
         TestUser moderator = register("autz_moderador");
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.id());
         moderator = login(moderator);
         TestUser user = register("autz_usuario");
         TestUser target = register("autz_alvo");
@@ -239,7 +240,7 @@ class AccountLifecycleIntegrationTest {
                 .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"));
 
         // Role rebaixada no banco: o JWT ainda diz ADMIN, o caso de uso confirma a role atual
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", admin.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", admin.id());
         adminAction(admin, target, "suspend")
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
@@ -324,7 +325,7 @@ class AccountLifecycleIntegrationTest {
 
     private TestUser admin(String prefix) throws Exception {
         TestUser user = register(prefix);
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
         return login(user);
     }
 

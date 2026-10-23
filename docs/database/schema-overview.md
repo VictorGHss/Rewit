@@ -231,3 +231,56 @@ Armazena as sessões e hashes de Refresh Tokens (Step 4):
 | `last_used_at` | `TIMESTAMPTZ` | `NULL` | Último uso da sessão |
 | `user_agent` | `TEXT` | `NULL` | Cabeçalho User-Agent para telemetria |
 | `ip_address` | `INET` | `NULL` | Endereço IP do cliente no momento da emissão |
+
+---
+
+## 9. Unicidade de Locais e Resolução de Duplicatas Legadas (V31)
+
+A migração `V31__place_security_and_storage_lifecycle.sql` estabelece unicidade persistente para locais com status `ACTIVE` baseando-se no nome e endereço normalizados (`uq_places_active_normalized_name_address`).
+
+### Política de Não Desativação Automática
+
+A migração **não** desativa nem funde registros automaticamente para evitar a perda de titularidade comercial (`claimed_by_business_id`), avaliações (`reviews`) ou dados comerciais (`place_opening_hours`, `place_amenities`, `place_product_offers`). Se existirem duplicatas ativas no momento da execução, a migração aborta com `RAISE EXCEPTION`, exibindo diagnóstico completo de cada conflito.
+
+### Procedimento de Diagnóstico e Resolução Operacional
+
+1. **Executar a consulta de diagnóstico:**
+```sql
+SELECT p.id,
+       p.slug,
+       p.name,
+       p.address_text,
+       p.created_at,
+       p.claimed_by_business_id,
+       p.is_verified,
+       (SELECT COUNT(DISTINCT rt.review_id) FROM review_targets rt WHERE rt.target_id = p.id) AS total_reviews,
+       (SELECT COUNT(*) FROM place_opening_hours_schedules oh WHERE oh.place_id = p.id) AS total_hours,
+       (SELECT COUNT(*) FROM place_amenity_configurations pa WHERE pa.place_id = p.id) AS total_amenities,
+       (SELECT COUNT(*) FROM place_product_offers po WHERE po.place_id = p.id) AS total_offers,
+       (SELECT COUNT(*) FROM place_media pm WHERE pm.place_id = p.id) AS total_media
+FROM places p
+WHERE p.status = 'ACTIVE'
+  AND (regexp_replace(btrim(rewit_search_normalize(p.name)), '\s+', ' ', 'g'),
+       regexp_replace(btrim(rewit_search_normalize(p.address_text)), '\s+', ' ', 'g')) IN (
+      SELECT regexp_replace(btrim(rewit_search_normalize(name)), '\s+', ' ', 'g'),
+             regexp_replace(btrim(rewit_search_normalize(address_text)), '\s+', ' ', 'g')
+      FROM places
+      WHERE status = 'ACTIVE' AND address_text IS NOT NULL AND btrim(address_text) <> ''
+      GROUP BY 1, 2
+      HAVING COUNT(*) > 1
+  )
+ORDER BY regexp_replace(btrim(rewit_search_normalize(p.name)), '\s+', ' ', 'g'),
+         p.claimed_by_business_id IS NOT NULL DESC,
+         p.is_verified DESC,
+         p.created_at ASC;
+```
+
+2. **Avaliação humana / operacional:**
+   - Priorizar o local que possua titularidade comercial (`claimed_by_business_id IS NOT NULL`), verificação (`is_verified = TRUE`), ou maior volume de avaliações e configurações comerciais.
+   - O local sem vínculos ou de cadastro não verificado deve ser marcado explicitamente como `INACTIVE`:
+```sql
+UPDATE places SET status = 'INACTIVE', updated_at = NOW() WHERE id = '<UUID_DO_LOCAL_DUPLICADO>';
+```
+
+3. **Reaplicar a migração:**
+   - Com as duplicatas resolvidas (deixando apenas um registro ativo por grupo de nome/endereço normalizado), o Flyway executará a migração com sucesso e criará o índice único `uq_places_active_normalized_name_address`.

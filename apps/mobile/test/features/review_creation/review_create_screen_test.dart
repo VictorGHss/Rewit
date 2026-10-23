@@ -1,8 +1,16 @@
+import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
+import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
+import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_privacy_rules.dart';
@@ -10,8 +18,110 @@ import 'package:rewit_mobile/features/review_creation/domain/repositories/review
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_notifier.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
+
+class MockPlaceRepositoryForReview implements PlaceRepository {
+  CreatePlaceInput? capturedInput;
+  PlaceDetail? placeToReturn;
+  Exception? exceptionToThrow;
+  Exception? uploadPhotoExceptionToThrow;
+  int createPlaceCallCount = 0;
+  int uploadPhotoCallCount = 0;
+  final List<String> uploadedPlacePhotos = [];
+
+  @override
+  Future<PlaceDetail> createPlace(CreatePlaceInput input) async {
+    createPlaceCallCount++;
+    capturedInput = input;
+    if (exceptionToThrow != null) {
+      throw exceptionToThrow!;
+    }
+    return placeToReturn ??
+        PlaceDetail(
+          id: 'd4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70',
+          name: input.name,
+          slug: 'pastel-da-dona-ana',
+          category: 'GERAL',
+          addressText: input.addressText,
+          city: null,
+          state: null,
+          country: 'BR',
+          latitude: null,
+          longitude: null,
+          validationRadiusMeters: 100,
+          origin: 'MANUAL',
+          isVerified: false,
+          status: 'ACTIVE',
+        );
+  }
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? idempotencyKey,
+  }) async {
+    uploadPhotoCallCount++;
+    if (uploadPhotoExceptionToThrow != null) {
+      throw uploadPhotoExceptionToThrow!;
+    }
+    uploadedPlacePhotos.add(filename);
+    return '/api/v1/places/$placeId/media/media-${uploadedPlacePhotos.length}';
+  }
+
+  @override
+  Future<PlaceDetail> getPlaceById(String placeId) => throw UnimplementedError();
+
+  @override
+  Future<TargetStats> getTargetStats(String targetId) => throw UnimplementedError();
+
+  @override
+  Future<TargetReviewsPage> getTargetReviews(
+    String targetId, {
+    int page = 0,
+    int size = 10,
+    String sort = 'newest',
+    bool verifiedOnly = false,
+  }) =>
+      throw UnimplementedError();
+}
+
+class MockReviewMediaRepository implements ReviewMediaRepository {
+  final List<String> uploadedFilenames = [];
+
+  @override
+  Future<List<ReviewMediaItem>> getReviewMedia(String reviewId) async => [];
+
+  @override
+  Future<ReviewMediaItem> uploadMedia({
+    required String reviewId,
+    required Uint8List bytes,
+    required String filename,
+    String? mimeType,
+  }) async {
+    uploadedFilenames.add(filename);
+    return ReviewMediaItem(
+      id: 'media-${uploadedFilenames.length}',
+      reviewId: reviewId,
+      url: '/api/v1/reviews/$reviewId/media/media-${uploadedFilenames.length}',
+      mediaType: 'IMAGE',
+      mimeType: mimeType ?? 'image/jpeg',
+      sizeBytes: bytes.length,
+      status: 'ACTIVE',
+      createdAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<void> deleteMedia({required String reviewId, required String mediaId}) async {}
+
+  @override
+  Future<Uint8List> getMediaBytes(String pathOrUrl) async => Uint8List(0);
+}
 
 class MockReviewCreationRepository implements ReviewCreationRepository {
   CreateReviewInput? capturedInput;
@@ -99,6 +209,8 @@ void main() {
   Widget buildSubject({
     required ReviewCreationRepository repository,
     SearchRepository? searchRepository,
+    PlaceRepository? placeRepository,
+    ReviewMediaRepository? mediaRepository,
     LocationService? locationService,
     ReviewCreateNotifier? notifier,
     ValueChanged<FeedReview>? onReviewCreated,
@@ -106,12 +218,16 @@ void main() {
     String? initialTargetName,
     String? initialTargetType,
     String? initialCategory,
+    File? initialPhoto,
+    Future<File?> Function(ImageSource source)? onPickManualPlacePhoto,
   }) {
     return MaterialApp(
       theme: AppTheme.lightTheme,
       home: ReviewCreateScreen(
         repository: repository,
         searchRepository: searchRepository,
+        placeRepository: placeRepository,
+        mediaRepository: mediaRepository,
         locationService: locationService,
         notifier: notifier,
         onReviewCreated: onReviewCreated,
@@ -119,6 +235,8 @@ void main() {
         initialTargetName: initialTargetName,
         initialTargetType: initialTargetType,
         initialCategory: initialCategory,
+        initialPhoto: initialPhoto,
+        onPickManualPlacePhoto: onPickManualPlacePhoto,
       ),
     );
   }
@@ -127,7 +245,12 @@ void main() {
     late MockReviewCreationRepository repository;
 
     setUp(() {
+      ManualPlaceRegistrationSheet.clearPendingRegistrations();
       repository = MockReviewCreationRepository();
+    });
+
+    tearDown(() {
+      ManualPlaceRegistrationSheet.clearPendingRegistrations();
     });
 
     testWidgets('renderiza todos os componentes do formulário de criação', (tester) async {
@@ -354,10 +477,11 @@ void main() {
       await tester.tap(find.text('Selecionar'));
       await tester.pumpAndSettle();
 
-      // Card de alvo selecionado aparece com botão Trocar
+      // Card de alvo selecionado aparece com botão Trocar e nome legível (sem exibir ID interno)
       expect(find.text('Pizzaria Bella Napoli'), findsOneWidget);
+      expect(find.text('Estabelecimento vinculado: Pizzaria Bella Napoli'), findsOneWidget);
       expect(find.text('Trocar'), findsOneWidget);
-      expect(find.text('ID: 55555555-5555-5555-5555-555555555555'), findsOneWidget);
+      expect(find.text('ID: 55555555-5555-5555-5555-555555555555'), findsNothing);
 
       // Preenche relato e publica
       final experienceField = find.widgetWithText(TextFormField, 'Conte sua experiência geral...');
@@ -368,6 +492,7 @@ void main() {
 
       expect(createdResult, isNotNull);
       expect(repository.capturedInput?.targets.first.rateableTargetId, '55555555-5555-5555-5555-555555555555');
+      expect(repository.capturedInput?.contextPlaceId, '55555555-5555-5555-5555-555555555555');
       expect(find.text('Avaliação publicada com sucesso!'), findsOneWidget);
     });
 
@@ -428,8 +553,9 @@ void main() {
       expect(find.text('Café do Bosque'), findsOneWidget);
       expect(find.text('Trocar'), findsOneWidget);
 
-      // Context place ID deve estar preenchido
-      expect(find.text('place-pre-selected-uuid'), findsOneWidget);
+      // Context place deve exibir o nome legível sem expor o identificador interno
+      expect(find.text('Estabelecimento vinculado: Café do Bosque'), findsOneWidget);
+      expect(find.text('place-pre-selected-uuid'), findsNothing);
 
       // Não deve exibir o input de busca enquanto estiver selecionado
       expect(find.text('O que você quer avaliar? *'), findsNothing);
@@ -994,6 +1120,241 @@ void main() {
         expect(repository.capturedInput?.isAnonymous, isTrue);
         expect(repository.capturedInput?.visibility, 'PUBLIC');
       });
+    });
+
+    group('Fluxo S3-A: Cadastro manual de local (Pastel da Dona Ana) e publicação com UUID canônico', () {
+      testWidgets(
+        '1. busca sem resultado permite cadastrar Pastel da Dona Ana com endereço e fotografia, exibe nome legível sem ID interno e publica avaliação com UUID canônico e foto anexada',
+        (tester) async {
+          tester.view.physicalSize = const Size(800, 2400);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+
+          final tempDir = Directory.systemTemp.createTempSync('rewit_s3a_review_');
+          final fakePhoto = File('${tempDir.path}/pastel_dona_ana.jpg');
+          fakePhoto.writeAsBytesSync(List<int>.filled(2048, 7));
+          addTearDown(() {
+            if (tempDir.existsSync()) {
+              tempDir.deleteSync(recursive: true);
+            }
+          });
+
+          final searchRepo = MockSearchRepository()..itemsToReturn = [];
+          final placeRepo = MockPlaceRepositoryForReview();
+          final mediaRepo = MockReviewMediaRepository();
+
+          await tester.pumpWidget(buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+            placeRepository: placeRepo,
+            mediaRepository: mediaRepo,
+            onPickManualPlacePhoto: (ImageSource source) async => fakePhoto,
+          ));
+
+          // 1. Digita "Pastel da Dona Ana" na busca de alvos
+          final searchField = find.widgetWithText(TextFormField, 'O que você quer avaliar? *');
+          await tester.enterText(searchField, 'Pastel da Dona Ana');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pumpAndSettle();
+
+          // 2. Nenhum resultado retornado -> botão de cadastro manual visível
+          expect(find.text('Nenhum resultado para "Pastel da Dona Ana".'), findsOneWidget);
+          final registerBtn = find.byKey(const Key('register_manual_place_button'));
+          expect(registerBtn, findsOneWidget);
+
+          await tester.tap(registerBtn);
+          await tester.pumpAndSettle();
+
+          // 3. Tenta submeter o modal sem endereço nem foto -> valida campos obrigatórios
+          final modalSubmitBtn = find.byKey(const Key('manual_place_submit_button'));
+          await tester.ensureVisible(modalSubmitBtn);
+          await tester.tap(modalSubmitBtn);
+          await tester.pumpAndSettle();
+
+          expect(find.text('Informe o endereço do local.'), findsOneWidget);
+
+          // 4. Preenche endereço, tenta submeter sem foto -> valida foto obrigatória
+          await tester.enterText(
+            find.byKey(const Key('manual_place_address_field')),
+            'Av. Brasil, 500 - Centro',
+          );
+          await tester.ensureVisible(modalSubmitBtn);
+          await tester.tap(modalSubmitBtn);
+          await tester.pumpAndSettle();
+
+          expect(find.text('Adicione uma fotografia do local para concluir o cadastro.'), findsOneWidget);
+
+          // 5. Anexa fotografia e conclui o cadastro do local
+          await tester.tap(find.byKey(const Key('manual_place_camera_button')));
+          await tester.pumpAndSettle();
+
+          await tester.ensureVisible(modalSubmitBtn);
+          await tester.tap(modalSubmitBtn);
+          await tester.pumpAndSettle();
+
+          // Verifica que o local foi criado no backend com nome e endereço e que a foto foi enviada para a mídia do local
+          expect(placeRepo.capturedInput?.name, 'Pastel da Dona Ana');
+          expect(placeRepo.capturedInput?.addressText, 'Av. Brasil, 500 - Centro');
+          expect(placeRepo.uploadedPlacePhotos, ['pastel_dona_ana.jpg']);
+
+          // 6. Verifica que na tela de criação o nome legível é exibido e que o UUID NÃO aparece como nome
+          const canonicalUuid = 'd4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70';
+          expect(find.text('Pastel da Dona Ana'), findsOneWidget);
+          expect(find.text('Estabelecimento vinculado: Pastel da Dona Ana'), findsOneWidget);
+          expect(find.textContaining('ID: $canonicalUuid'), findsNothing);
+
+          // 7. Preenche relato e publica a avaliação
+          final experienceField = find.widgetWithText(TextFormField, 'Conte sua experiência geral...');
+          await tester.enterText(experienceField, 'O pastel de carne com queijo da Dona Ana é sensacional!');
+
+          final publishBtn = find.widgetWithText(ElevatedButton, 'Publicar Avaliação');
+          await tester.ensureVisible(publishBtn);
+          await tester.tap(publishBtn);
+          await tester.pumpAndSettle();
+
+          // 8. Verifica que o payload enviado ao backend contém o UUID canônico e que a foto do local não foi duplicada como mídia da avaliação
+          expect(repository.callCount, 1);
+          expect(repository.capturedInput?.targets.first.rateableTargetId, canonicalUuid);
+          expect(repository.capturedInput?.contextPlaceId, canonicalUuid);
+          expect(mediaRepo.uploadedFilenames, isEmpty);
+          expect(find.text('Avaliação publicada com sucesso!'), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        '2. exibe erro amigável no modal quando o backend retorna 409 Conflict (local já cadastrado)',
+        (tester) async {
+          tester.view.physicalSize = const Size(800, 2400);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+
+          final tempDir = Directory.systemTemp.createTempSync('rewit_s3a_409_');
+          final fakePhoto = File('${tempDir.path}/pastel_409.jpg');
+          fakePhoto.writeAsBytesSync(List<int>.filled(1024, 1));
+          addTearDown(() {
+            if (tempDir.existsSync()) {
+              tempDir.deleteSync(recursive: true);
+            }
+          });
+
+          final searchRepo = MockSearchRepository()..itemsToReturn = [];
+          final placeRepo = MockPlaceRepositoryForReview()
+            ..exceptionToThrow = const ApiException(
+              ProblemDetail(
+                type: 'https://api.rewit.com/errors/place-already-exists',
+                title: 'Conflito',
+                status: 409,
+                detail: 'Este local já está cadastrado no catálogo.',
+                code: 'PLACE_ALREADY_EXISTS',
+              ),
+            );
+
+          await tester.pumpWidget(buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+            placeRepository: placeRepo,
+            onPickManualPlacePhoto: (ImageSource source) async => fakePhoto,
+          ));
+
+          await tester.enterText(find.widgetWithText(TextFormField, 'O que você quer avaliar? *'), 'Pastel da Dona Ana');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pumpAndSettle();
+
+          await tester.tap(find.byKey(const Key('register_manual_place_button')));
+          await tester.pumpAndSettle();
+
+          await tester.enterText(
+            find.byKey(const Key('manual_place_address_field')),
+            'Av. Brasil, 500 - Centro',
+          );
+          await tester.tap(find.byKey(const Key('manual_place_gallery_button')));
+          await tester.pumpAndSettle();
+
+          final modalSubmitBtn = find.byKey(const Key('manual_place_submit_button'));
+          await tester.ensureVisible(modalSubmitBtn);
+          await tester.tap(modalSubmitBtn);
+          await tester.pumpAndSettle();
+
+          expect(find.text('Este local já está cadastrado no catálogo.'), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        '3. trata falha parcial no upload da foto do local: preserva local criado e permite reenviar apenas a foto sem recriar o local',
+        (tester) async {
+          tester.view.physicalSize = const Size(800, 2400);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+
+          final tempDir = Directory.systemTemp.createTempSync('rewit_s3a_retry_');
+          final fakePhoto = File('${tempDir.path}/pastel_retry.jpg');
+          fakePhoto.writeAsBytesSync(List<int>.filled(1024, 9));
+          addTearDown(() {
+            if (tempDir.existsSync()) {
+              tempDir.deleteSync(recursive: true);
+            }
+          });
+
+          final searchRepo = MockSearchRepository()..itemsToReturn = [];
+          final placeRepo = MockPlaceRepositoryForReview()
+            ..uploadPhotoExceptionToThrow = const ApiException(
+              ProblemDetail(
+                type: 'https://api.rewit.com/errors/internal',
+                title: 'Erro temporário no upload',
+                status: 500,
+                detail: 'Falha temporária ao salvar a foto do local.',
+                code: 'MEDIA_UPLOAD_ERROR',
+              ),
+            );
+
+          await tester.pumpWidget(buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+            placeRepository: placeRepo,
+            onPickManualPlacePhoto: (ImageSource source) async => fakePhoto,
+          ));
+
+          await tester.enterText(find.widgetWithText(TextFormField, 'O que você quer avaliar? *'), 'Pastel da Dona Ana');
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.pumpAndSettle();
+
+          await tester.tap(find.byKey(const Key('register_manual_place_button')));
+          await tester.pumpAndSettle();
+
+          await tester.enterText(
+            find.byKey(const Key('manual_place_address_field')),
+            'Av. Brasil, 500 - Centro',
+          );
+          await tester.tap(find.byKey(const Key('manual_place_camera_button')));
+          await tester.pumpAndSettle();
+
+          final modalSubmitBtn = find.byKey(const Key('manual_place_submit_button'));
+          await tester.ensureVisible(modalSubmitBtn);
+          await tester.tap(modalSubmitBtn);
+          await tester.pumpAndSettle();
+
+          // Na primeira tentativa: local criado (1x), upload da foto falhou (1x), modal continua aberto com aviso de recuperação
+          expect(placeRepo.createPlaceCallCount, 1);
+          expect(placeRepo.uploadPhotoCallCount, 1);
+          expect(find.text('Falha temporária ao salvar a foto do local.'), findsOneWidget);
+          expect(find.text('Reenviar Fotografia e Concluir'), findsOneWidget);
+
+          // Corrige a falha de rede e clica em "Reenviar Fotografia e Concluir"
+          placeRepo.uploadPhotoExceptionToThrow = null;
+          await tester.ensureVisible(modalSubmitBtn);
+          await tester.tap(modalSubmitBtn);
+          await tester.pumpAndSettle();
+
+          // O local NÃO foi recriado (continua 1), apenas o upload da foto foi reexecutado (2) e o modal fechou vinculando o local
+          expect(placeRepo.createPlaceCallCount, 1);
+          expect(placeRepo.uploadPhotoCallCount, 2);
+          expect(placeRepo.uploadedPlacePhotos, ['pastel_retry.jpg']);
+          expect(find.text('Estabelecimento vinculado: Pastel da Dona Ana'), findsOneWidget);
+        },
+      );
     });
   });
 }

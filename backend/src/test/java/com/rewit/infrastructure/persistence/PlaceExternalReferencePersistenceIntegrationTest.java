@@ -2,6 +2,7 @@ package com.rewit.infrastructure.persistence;
 
 import com.rewit.application.port.PlaceExternalReferenceRepository;
 import com.rewit.application.port.PlaceRepository;
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceExternalReference;
 import org.junit.jupiter.api.DisplayName;
@@ -210,8 +211,10 @@ class PlaceExternalReferencePersistenceIntegrationTest {
 
         assertTrue(referenceRepository.existsByProviderAndExternalId("GOOGLE", externalId));
 
-        // Remove o local
-        placeJpaRepository.deleteById(place.getId());
+        // O runtime não apaga locais (V37: exclusão lógica); a exclusão física é administrativa e a FK cascateia
+        assertThrows(RuntimeException.class, () -> placeJpaRepository.deleteById(place.getId()));
+        assertTrue(referenceRepository.existsByProviderAndExternalId("GOOGLE", externalId));
+        PrivilegedTestDatabase.jdbc().update("DELETE FROM places WHERE id = ?", place.getId());
 
         // A referência deve ter sido excluída pela FK com ON DELETE CASCADE
         assertFalse(referenceRepository.existsByProviderAndExternalId("GOOGLE", externalId));

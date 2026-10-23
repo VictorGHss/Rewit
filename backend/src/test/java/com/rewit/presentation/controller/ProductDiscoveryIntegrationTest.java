@@ -2,6 +2,7 @@ package com.rewit.presentation.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.ProductRepository;
 import com.rewit.domain.model.Place;
@@ -76,7 +77,7 @@ class ProductDiscoveryIntegrationTest {
     void cleanUp() {
         // Place e product são especializações de rateable_targets (ON DELETE CASCADE: identificadores e presenças)
         for (UUID id : createdTargets) {
-            jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", id);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", id);
         }
     }
 
@@ -385,8 +386,9 @@ class ProductDiscoveryIntegrationTest {
     }
 
     private UUID place(String status) {
-        UUID id = placeRepository.save(new Place(null, "Mercado " + status + " " + suffix, "mercado-" + UUID.randomUUID(),
-                "MERCADO", "Descrição", "Rua Produto, 1", "Curitiba", "PR", "BR", -25.43, -49.27, 50, "USER", false,
+        String slug = "mercado-" + UUID.randomUUID();
+        UUID id = placeRepository.save(new Place(null, "Mercado " + status + " " + suffix, slug,
+                "MERCADO", "Descrição", "Rua Produto, " + slug, "Curitiba", "PR", "BR", -25.43, -49.27, 50, "USER", false,
                 null, status)).getId();
         createdTargets.add(id);
         return id;

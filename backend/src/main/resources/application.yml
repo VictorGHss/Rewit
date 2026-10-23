@@ -8,6 +8,10 @@ spring:
       enabled: true
   jpa:
     open-in-view: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
   web:
     error:
       include-message: always
@@ -136,6 +140,10 @@ rewit:
       business-response-creation:
         limit: 10
         window: PT60S
+      # Criação manual de locais por usuário (A-04)
+      place-creation:
+        limit: ${RATE_LIMIT_PLACE_CREATION_LIMIT:10}
+        window: ${RATE_LIMIT_PLACE_CREATION_WINDOW:PT1H}
     query:
       # Buscas por usuário (GET /api/v1/search); o app consulta com debounce de 350 ms
       search:

@@ -188,6 +188,19 @@ class MockDiscussionRepo implements DiscussionRepository {
 
 class MockPlaceRepo implements PlaceRepository {
   @override
+  Future<PlaceDetail> createPlace(CreatePlaceInput input) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? idempotencyKey,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
   Future<PlaceDetail> getPlaceById(String id) async => const PlaceDetail(
         id: 'place-burgers',
         name: 'Burger Place',

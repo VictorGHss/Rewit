@@ -205,6 +205,8 @@ public class ReviewController {
         return new ReviewTargetResponse(
                 t.id(),
                 t.targetId(),
+                t.targetType(),
+                t.targetName(),
                 t.rating(),
                 t.specificComment(),
                 t.createdAt()

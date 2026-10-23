@@ -11,6 +11,7 @@ import com.rewit.application.port.PlaceRepository;
 import com.rewit.domain.model.Place;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -182,7 +183,7 @@ class BusinessPlaceClaimSecurityIntegrationTest {
         TestUser owner = registerUser("sec_stale_owner");
         UUID claimId = requestClaim(owner, createAccount(owner), place());
         TestUser user = registerUser("sec_stale");
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
 
         mockMvc.perform(withToken(get("/api/v1/admin/place-claims"), user)).andExpect(status().isForbidden());
         mockMvc.perform(withToken(decision(claimId), user)).andExpect(status().isForbidden());
@@ -229,7 +230,7 @@ class BusinessPlaceClaimSecurityIntegrationTest {
         assertTrue(pendingQueueIds(moderator).contains(claimId.toString()));
 
         // Rebaixado no banco; o token continua dizendo MODERATOR
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.id());
 
         // A autoridade do token ainda satisfaz o @PreAuthorize; a recusa vem da revalidação da role atual no caso de
         // uso: 403 com o ProblemDetail das regras de negócio (o @PreAuthorize responderia 403 sem corpo)
@@ -243,7 +244,7 @@ class BusinessPlaceClaimSecurityIntegrationTest {
         assertEquals("PENDING", claimStatus(claimId), "a decisão não foi aplicada");
 
         // Restabelecida a role no banco, o mesmo token volta a consultar: a recusa acima era só a revalidação
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", moderator.id());
         assertTrue(pendingQueueIds(moderator).contains(claimId.toString()));
     }
 
@@ -393,7 +394,7 @@ class BusinessPlaceClaimSecurityIntegrationTest {
     }
 
     private TestUser withRole(TestUser user, String role) throws Exception {
-        jdbcTemplate.update("UPDATE users SET role = ? WHERE id = ?", role, user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = ? WHERE id = ?", role, user.id());
         return login(user);
     }
 

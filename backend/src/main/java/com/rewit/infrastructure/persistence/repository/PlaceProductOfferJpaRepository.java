@@ -5,13 +5,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-@Repository
 public interface PlaceProductOfferJpaRepository extends JpaRepository<PlaceProductOfferJpaEntity, UUID> {
 
     @Query("SELECT o FROM PlaceProductOfferJpaEntity o WHERE o.placeId = :placeId AND o.productId = :productId")

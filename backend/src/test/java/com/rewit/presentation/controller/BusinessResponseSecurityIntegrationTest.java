@@ -13,6 +13,7 @@ import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewDiscussion;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -439,7 +440,7 @@ class BusinessResponseSecurityIntegrationTest {
         UUID responseId = UUID.fromString(read(publishResult).get("id").asText());
 
         // Rebaixa cargo no banco enquanto o usuário mantém token JWT com claim MODERATOR
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.id());
 
         mockMvc.perform(withToken(
                 post("/api/v1/admin/business-responses/{responseId}/moderate", responseId)
@@ -537,8 +538,8 @@ class BusinessResponseSecurityIntegrationTest {
                 .andExpect(status().isOk());
 
         // Os tokens antigos continuam com o claim da emissão (MODERATOR e ADMIN)
-        jdbcTemplate.update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.id());
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", admin.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'USER' WHERE id = ?", moderator.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", admin.id());
 
         mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("size", "1"), moderator))
                 .andExpect(status().isForbidden())
@@ -552,7 +553,7 @@ class BusinessResponseSecurityIntegrationTest {
     @DisplayName("Promovido a MODERATOR no banco com token antigo de USER: barrado pelo papel do token (403) até um novo login")
     void promotedUserNeedsNewTokenToQueryRemovedResponses() throws Exception {
         TestUser user = registerUser("q_promoted");
-        jdbcTemplate.update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'MODERATOR' WHERE id = ?", user.id());
 
         mockMvc.perform(withToken(get(REMOVED_RESPONSES_PATH).param("size", "1"), user))
                 .andExpect(status().isForbidden());
@@ -728,7 +729,7 @@ class BusinessResponseSecurityIntegrationTest {
     }
 
     private TestUser withRole(TestUser user, String role) throws Exception {
-        jdbcTemplate.update("UPDATE users SET role = ? WHERE id = ?", role, user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = ? WHERE id = ?", role, user.id());
         return login(user);
     }
 

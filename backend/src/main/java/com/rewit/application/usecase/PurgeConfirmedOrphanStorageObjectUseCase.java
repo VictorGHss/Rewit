@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Exclusão física segura de um objeto CONFIRMED_ORPHAN (Step 28.4).
@@ -46,8 +47,13 @@ public class PurgeConfirmedOrphanStorageObjectUseCase {
     public StoragePurgeResult purge(String objectKey) {
         long startedAt = System.nanoTime();
 
-        // Validação refeita aqui: o reviewId do lock só é derivado de uma chave no formato gerenciado
-        if (!ReviewMediaObjectKey.isManagedKey(objectKey)) {
+        // Validação refeita aqui: o lock só é derivado de uma chave no formato gerenciado (review ou place)
+        UUID entityId;
+        if (ReviewMediaObjectKey.isManagedKey(objectKey)) {
+            entityId = ReviewMediaObjectKey.reviewIdOf(objectKey);
+        } else if (com.rewit.domain.model.PlaceMediaObjectKey.isManagedKey(objectKey)) {
+            entityId = com.rewit.domain.model.PlaceMediaObjectKey.placeIdOf(objectKey);
+        } else {
             return finish(new StoragePurgeResult(objectKey, StoragePurgeOutcome.INVALID_OBJECT_KEY, null, null), startedAt);
         }
 
@@ -61,7 +67,7 @@ public class PurgeConfirmedOrphanStorageObjectUseCase {
 
         QuarantinePurgeResolution resolution = quarantineRepository.purgeConfirmedOrphanUnderCreationLock(
                 objectKey,
-                ReviewMediaObjectKey.reviewIdOf(objectKey),
+                entityId,
                 quarantined.get().firstObservedAt(),
                 key -> deletionPort.delete(key));
 

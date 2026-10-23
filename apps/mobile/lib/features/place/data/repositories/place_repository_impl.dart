@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:rewit_mobile/core/network/api_endpoints.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import '../../domain/entities/place_detail.dart';
@@ -11,7 +12,58 @@ import '../models/place_dtos.dart';
 class PlaceRepositoryImpl implements PlaceRepository {
   final RewitHttpClient httpClient;
 
+  static final RegExp _uuidRegex = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
+
   PlaceRepositoryImpl({required this.httpClient});
+
+  @override
+  Future<PlaceDetail> createPlace(CreatePlaceInput input) async {
+    final requestDto = CreatePlaceRequestDto.fromEntity(input);
+    final response = await httpClient.post(
+      ApiEndpoints.places,
+      body: requestDto.toJson(),
+    );
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao cadastrar local.');
+    }
+    final entity = PlaceDto.fromJson(decoded).toEntity();
+    if (!_uuidRegex.hasMatch(entity.id)) {
+      throw const FormatException('O servidor retornou um identificador de local inválido.');
+    }
+    return entity;
+  }
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? idempotencyKey,
+  }) async {
+    final Map<String, String>? headers = (idempotencyKey != null && idempotencyKey.trim().isNotEmpty)
+        ? {'Idempotency-Key': idempotencyKey.trim()}
+        : null;
+
+    final response = await httpClient.postMultipart(
+      ApiEndpoints.placeMedia(placeId),
+      fieldName: 'file',
+      fileBytes: fileBytes,
+      filename: filename,
+      headers: headers,
+    );
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao enviar fotografia do local.');
+    }
+    final rawUrl = decoded['url'];
+    if (rawUrl is! String || rawUrl.trim().isEmpty) {
+      throw const FormatException('O servidor não retornou a URL da fotografia do local.');
+    }
+    return rawUrl.trim();
+  }
 
   @override
   Future<PlaceDetail> getPlaceById(String id) async {

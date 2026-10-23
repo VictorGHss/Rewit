@@ -36,11 +36,12 @@ public final class CatalogDtos {
             String city,
             String state,
             String country,
-            double latitude,
-            double longitude,
+            Double latitude,
+            Double longitude,
             Integer validationRadiusMeters,
             String origin,
             UUID claimedByBusinessId,
+            UUID createdByUserId,
             ExternalReferenceInput externalReference
     ) {
         public CreatePlaceCommand(
@@ -54,15 +55,44 @@ public final class CatalogDtos {
                 String city,
                 String state,
                 String country,
-                double latitude,
-                double longitude,
+                Double latitude,
+                Double longitude,
                 Integer validationRadiusMeters,
                 String origin,
                 UUID claimedByBusinessId
         ) {
             this(name, slug, category, description, addressText, streetNumber, neighborhood,
                     city, state, country, latitude, longitude, validationRadiusMeters, origin,
-                    claimedByBusinessId, null);
+                    claimedByBusinessId, null, null);
+        }
+
+        public CreatePlaceCommand(
+                String name,
+                String slug,
+                String category,
+                String description,
+                String addressText,
+                String streetNumber,
+                String neighborhood,
+                String city,
+                String state,
+                String country,
+                Double latitude,
+                Double longitude,
+                Integer validationRadiusMeters,
+                String origin,
+                UUID claimedByBusinessId,
+                ExternalReferenceInput externalReference
+        ) {
+            this(name, slug, category, description, addressText, streetNumber, neighborhood,
+                    city, state, country, latitude, longitude, validationRadiusMeters, origin,
+                    claimedByBusinessId, null, externalReference);
+        }
+
+        public CreatePlaceCommand withCreatedByUserId(UUID newCreatedByUserId) {
+            return new CreatePlaceCommand(name, slug, category, description, addressText,
+                    streetNumber, neighborhood, city, state, country, latitude, longitude,
+                    validationRadiusMeters, origin, claimedByBusinessId, newCreatedByUserId, externalReference);
         }
     }
 

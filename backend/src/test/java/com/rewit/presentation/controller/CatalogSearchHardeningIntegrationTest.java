@@ -9,6 +9,7 @@ import com.rewit.domain.model.Product;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.AssociateProductPresenceRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -83,7 +84,7 @@ class CatalogSearchHardeningIntegrationTest {
     void cleanUp() {
         // Place e product são especializações de rateable_targets (ON DELETE CASCADE)
         for (UUID id : createdTargets) {
-            jdbcTemplate.update("DELETE FROM rateable_targets WHERE id = ?", id);
+            PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", id);
         }
     }
 
@@ -286,7 +287,8 @@ class CatalogSearchHardeningIntegrationTest {
 
     private UUID place(String name, String category, String city) {
         String slug = "busca-" + UUID.randomUUID();
-        UUID id = placeRepository.save(new Place(null, name, slug, category, "Descrição", "Rua Busca, 1", city, "PR", "BR",
+        String address = "Rua Busca, " + slug;
+        UUID id = placeRepository.save(new Place(null, name, slug, category, "Descrição", address, city, "PR", "BR",
                 -25.43, -49.27, 50, "USER", false, null, "ACTIVE")).getId();
         createdTargets.add(id);
         return id;
@@ -341,7 +343,7 @@ class CatalogSearchHardeningIntegrationTest {
 
     private TestUser admin() throws Exception {
         TestUser user = register("busca_admin");
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
         MvcResult result = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new LoginRequest(user.email(), user.password()))))
                 .andExpect(status().isOk())

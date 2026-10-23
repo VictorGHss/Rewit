@@ -100,10 +100,22 @@ public final class ReviewPresentationDtos {
     public record ReviewTargetResponse(
             UUID id,
             UUID targetId,
+            String targetType,
+            String targetName,
             BigDecimal rating,
             String specificComment,
             Instant createdAt
-    ) {}
+    ) {
+        public ReviewTargetResponse(
+                UUID id,
+                UUID targetId,
+                BigDecimal rating,
+                String specificComment,
+                Instant createdAt
+        ) {
+            this(id, targetId, null, null, rating, specificComment, createdAt);
+        }
+    }
 
     public record ReviewResponse(
             UUID id,

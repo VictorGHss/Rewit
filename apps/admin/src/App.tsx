@@ -8,9 +8,10 @@ import { ReviewReportsQueue } from './features/reviews/ReviewReportsQueue';
 import { DiscussionReportsQueue } from './features/discussions/DiscussionReportsQueue';
 import { PlaceClaimsQueue } from './features/claims/PlaceClaimsQueue';
 import { RemovedBusinessResponsesQueue } from './features/businessResponses/RemovedBusinessResponsesQueue';
+import { PlaceMediaReportsQueue } from './features/placeMedia/PlaceMediaReportsQueue';
 import type { AuthUser } from './core/types';
 
-export type NavigationTab = 'dashboard' | 'reviews' | 'discussions' | 'claims' | 'business-responses';
+export type NavigationTab = 'dashboard' | 'reviews' | 'discussions' | 'claims' | 'business-responses' | 'place-media';
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => authApi.isAuthenticated());
@@ -108,6 +109,16 @@ export const App: React.FC = () => {
                   <span>Respostas Oficiais Removidas</span>
                 </button>
               </li>
+              <li>
+                <button
+                  type="button"
+                  className={`nav-item ${activeTab === 'place-media' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('place-media')}
+                >
+                  <span>🖼️</span>
+                  <span>Denúncias de Fotos de Locais</span>
+                </button>
+              </li>
             </ul>
           </nav>
         </div>
@@ -145,6 +156,7 @@ export const App: React.FC = () => {
         {activeTab === 'discussions' && <DiscussionReportsQueue />}
         {activeTab === 'claims' && <PlaceClaimsQueue />}
         {activeTab === 'business-responses' && <RemovedBusinessResponsesQueue />}
+        {activeTab === 'place-media' && <PlaceMediaReportsQueue />}
       </main>
     </div>
   );

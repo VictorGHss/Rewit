@@ -1,0 +1,4 @@
+# Scripts executados dentro de containers Linux precisam de LF independentemente de
+# core.autocrlf: um shebang com CR faz o entrypoint do PostgreSQL falhar com exit 127 (SEC-4).
+*.sh text eol=lf
+infrastructure/postgres/** text eol=lf

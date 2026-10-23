@@ -80,6 +80,15 @@ public class GlobalExceptionHandler {
             return problem;
         }
 
+        if (lowerDetail.contains("uq_places_active_normalized_name_address")) {
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Já existe um local ativo cadastrado com este nome e endereço");
+            problem.setTitle("Regra de Negócio Violada");
+            problem.setType(URI.create("https://api.rewit.app/errors/place_already_exists"));
+            problem.setProperty("code", "PLACE_ALREADY_EXISTS");
+            problem.setProperty("timestamp", Instant.now());
+            return problem;
+        }
+
         if (lowerDetail.contains("uq_product_identifier")) {
             ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Identificador de produto (código de barras) já cadastrado");
             problem.setTitle("Regra de Negócio Violada");

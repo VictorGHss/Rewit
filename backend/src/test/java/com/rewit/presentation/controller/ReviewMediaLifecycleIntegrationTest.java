@@ -10,6 +10,7 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.Review;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
+import com.rewit.config.PrivilegedTestDatabase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -67,10 +68,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ReviewMediaLifecycleIntegrationTest {
 
     @Autowired private WebApplicationContext webApplicationContext;
+    @Autowired private org.springframework.core.env.Environment environment;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private PlaceRepository placeRepository;
     @Autowired private ReviewRepository reviewRepository;
     @MockitoSpyBean private ObjectStoragePort objectStoragePort;
+
+    private void executeDdlAsMigrationUser(String sql) throws Exception {
+        String url = environment.getProperty("spring.datasource.url");
+        String user = environment.getProperty("spring.flyway.user", "rewit_user");
+        String pass = environment.getProperty("spring.flyway.password", "rewit_local_password");
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(url, user, pass);
+             java.sql.Statement stmt = conn.createStatement()) {
+            stmt.execute(sql);
+        }
+    }
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -269,7 +281,7 @@ class ReviewMediaLifecycleIntegrationTest {
         UUID mediaId = id(upload(author, reviewId, jpeg()));
         String objectKey = objectKey(mediaId);
 
-        jdbcTemplate.execute("""
+        executeDdlAsMigrationUser("""
                 CREATE OR REPLACE FUNCTION test_c4_reject_media_update() RETURNS trigger AS $$
                 BEGIN
                     IF NEW.id = '%s' THEN
@@ -277,14 +289,14 @@ class ReviewMediaLifecycleIntegrationTest {
                     END IF;
                     RETURN NEW;
                 END $$ LANGUAGE plpgsql""".formatted(mediaId));
-        jdbcTemplate.execute("CREATE TRIGGER test_c4_reject_media_update BEFORE UPDATE ON review_media "
+        executeDdlAsMigrationUser("CREATE TRIGGER test_c4_reject_media_update BEFORE UPDATE ON review_media "
                 + "FOR EACH ROW EXECUTE FUNCTION test_c4_reject_media_update()");
         try {
             MvcResult result = perform(delete("/api/v1/reviews/{r}/media/{m}", reviewId, mediaId), author).andReturn();
             assertNotEquals(204, result.getResponse().getStatus(), "a API não afirma uma exclusão que não foi confirmada");
         } finally {
-            jdbcTemplate.execute("DROP TRIGGER IF EXISTS test_c4_reject_media_update ON review_media");
-            jdbcTemplate.execute("DROP FUNCTION IF EXISTS test_c4_reject_media_update()");
+            executeDdlAsMigrationUser("DROP TRIGGER IF EXISTS test_c4_reject_media_update ON review_media");
+            executeDdlAsMigrationUser("DROP FUNCTION IF EXISTS test_c4_reject_media_update()");
         }
 
         assertEquals("ACTIVE", mediaStatus(mediaId));
@@ -303,7 +315,7 @@ class ReviewMediaLifecycleIntegrationTest {
         UUID reviewId = review(author, "PUBLIC", ReviewStatus.ACTIVE);
 
         // O INSERT de review_media só é executado no flush do commit, depois do upload no storage
-        jdbcTemplate.execute("""
+        executeDdlAsMigrationUser("""
                 CREATE OR REPLACE FUNCTION test_c4_reject_media() RETURNS trigger AS $$
                 BEGIN
                     IF NEW.review_id = '%s' THEN
@@ -311,14 +323,14 @@ class ReviewMediaLifecycleIntegrationTest {
                     END IF;
                     RETURN NEW;
                 END $$ LANGUAGE plpgsql""".formatted(reviewId));
-        jdbcTemplate.execute("CREATE TRIGGER test_c4_reject_media BEFORE INSERT ON review_media "
+        executeDdlAsMigrationUser("CREATE TRIGGER test_c4_reject_media BEFORE INSERT ON review_media "
                 + "FOR EACH ROW EXECUTE FUNCTION test_c4_reject_media()");
         try {
             MvcResult result = upload(author, reviewId, jpeg()).andReturn();
             assertNotEquals(201, result.getResponse().getStatus());
         } finally {
-            jdbcTemplate.execute("DROP TRIGGER IF EXISTS test_c4_reject_media ON review_media");
-            jdbcTemplate.execute("DROP FUNCTION IF EXISTS test_c4_reject_media()");
+            executeDdlAsMigrationUser("DROP TRIGGER IF EXISTS test_c4_reject_media ON review_media");
+            executeDdlAsMigrationUser("DROP FUNCTION IF EXISTS test_c4_reject_media()");
         }
 
         ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
@@ -434,7 +446,7 @@ class ReviewMediaLifecycleIntegrationTest {
 
     private TestUser admin() throws Exception {
         TestUser user = register("midia_admin");
-        jdbcTemplate.update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET role = 'ADMIN' WHERE id = ?", user.id());
         MvcResult result = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new LoginRequest(user.email(), user.password()))))
                 .andExpect(status().isOk())

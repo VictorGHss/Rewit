@@ -16,13 +16,33 @@ import com.rewit.infrastructure.persistence.entity.PlaceJpaEntity;
  */
 public interface PlaceJpaRepository extends JpaRepository<PlaceJpaEntity, UUID> {
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM PlaceJpaEntity p WHERE p.id = :id")
+    Optional<PlaceJpaEntity> findByIdForUpdate(@Param("id") UUID id);
+
     Optional<PlaceJpaEntity> findBySlug(String slug);
 
     boolean existsBySlug(String slug);
 
     @Query(value = """
+        SELECT EXISTS (
+            SELECT 1 FROM places p
+            WHERE p.status = 'ACTIVE'
+              AND regexp_replace(btrim(rewit_search_normalize(p.name)), '\\s+', ' ', 'g')
+                = regexp_replace(btrim(rewit_search_normalize(:name)), '\\s+', ' ', 'g')
+              AND regexp_replace(btrim(rewit_search_normalize(p.address_text)), '\\s+', ' ', 'g')
+                = regexp_replace(btrim(rewit_search_normalize(:addressText)), '\\s+', ' ', 'g')
+        )
+    """, nativeQuery = true)
+    boolean existsActiveByNormalizedNameAndAddress(
+            @Param("name") String name,
+            @Param("addressText") String addressText
+    );
+
+    @Query(value = """
         SELECT p.* FROM places p
-        WHERE ST_DWithin(p.coordinates, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography, :radiusMeters)
+        WHERE p.coordinates IS NOT NULL
+          AND ST_DWithin(p.coordinates, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography, :radiusMeters)
         ORDER BY ST_Distance(p.coordinates, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography) ASC
     """, nativeQuery = true)
     List<PlaceJpaEntity> findNearby(
@@ -73,6 +93,7 @@ public interface PlaceJpaRepository extends JpaRepository<PlaceJpaEntity, UUID> 
             ST_DWithin(p.coordinates, ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography, p.validation_radius_meters) AS is_within_radius
         FROM places p
         WHERE p.id = :placeId
+          AND p.coordinates IS NOT NULL
     """, nativeQuery = true)
     Optional<jakarta.persistence.Tuple> validateProximity(
             @Param("placeId") UUID placeId,
