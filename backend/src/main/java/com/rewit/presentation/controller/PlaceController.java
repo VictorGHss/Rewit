@@ -8,11 +8,13 @@ import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.dto.media.MediaDtos.MediaDownloadResult;
 import com.rewit.application.dto.media.MediaDtos.PlaceMediaView;
 import com.rewit.application.dto.media.MediaDtos.UploadPlaceMediaCommand;
+import com.rewit.application.service.BusinessRepresentationPolicy;
 import com.rewit.application.service.CatalogService;
 import com.rewit.application.service.PlaceMediaService;
 import com.rewit.application.service.ProductDiscoveryService;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceContactInfo;
 import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.Product;
 import com.rewit.presentation.dto.catalog.CatalogPresentationDtos.AdoptPlaceRequest;
@@ -50,19 +52,29 @@ public class PlaceController {
     private final CatalogService catalogService;
     private final ProductDiscoveryService productDiscoveryService;
     private final PlaceMediaService placeMediaService;
+    /** Decide os contatos visíveis na leitura pública; sem ela, nenhum contato é exposto. */
+    private final BusinessRepresentationPolicy representationPolicy;
 
     public PlaceController(CatalogService catalogService, ProductDiscoveryService productDiscoveryService) {
-        this(catalogService, productDiscoveryService, null);
+        this(catalogService, productDiscoveryService, null, null);
+    }
+
+    public PlaceController(CatalogService catalogService,
+                           ProductDiscoveryService productDiscoveryService,
+                           PlaceMediaService placeMediaService) {
+        this(catalogService, productDiscoveryService, placeMediaService, null);
     }
 
     @Autowired
     public PlaceController(CatalogService catalogService,
                            ProductDiscoveryService productDiscoveryService,
-                           PlaceMediaService placeMediaService) {
+                           PlaceMediaService placeMediaService,
+                           BusinessRepresentationPolicy representationPolicy) {
         this.catalogService = Objects.requireNonNull(catalogService, "CatalogService must not be null");
         this.productDiscoveryService = Objects.requireNonNull(productDiscoveryService,
                 "ProductDiscoveryService must not be null");
         this.placeMediaService = placeMediaService;
+        this.representationPolicy = representationPolicy;
     }
 
     @PostMapping
@@ -327,7 +339,10 @@ public class PlaceController {
 
     private PlaceResponse toResponse(Place place) {
         String photoUrl = placeMediaService != null ? placeMediaService.findPrimaryPhotoUrl(place.getId()) : null;
-        return PlaceResponse.of(place, photoUrl);
+        PlaceContactInfo visibleContact = representationPolicy != null
+                ? representationPolicy.publicContactInfo(place)
+                : PlaceContactInfo.EMPTY;
+        return PlaceResponse.publicView(place, photoUrl, visibleContact);
     }
 
     private UUID extractAuthenticatedUserId(Authentication authentication) {

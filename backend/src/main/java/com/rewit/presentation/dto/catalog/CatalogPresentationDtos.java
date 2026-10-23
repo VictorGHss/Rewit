@@ -176,8 +176,23 @@ public final class CatalogPresentationDtos {
                     isVerified, status, null, null, null, null, null);
         }
 
-        public static PlaceResponse of(com.rewit.domain.model.Place place, String photoUrl) {
-            com.rewit.domain.model.PlaceContactInfo contact = place.getContactInfo();
+        /**
+         * Leitura pública do local: os contatos são os que a política de representação libera
+         * ({@code BusinessRepresentationPolicy.publicContactInfo}), nunca os gravados diretamente.
+         */
+        public static PlaceResponse publicView(com.rewit.domain.model.Place place, String photoUrl,
+                                               com.rewit.domain.model.PlaceContactInfo visibleContact) {
+            return of(place, photoUrl, visibleContact != null ? visibleContact
+                    : com.rewit.domain.model.PlaceContactInfo.EMPTY);
+        }
+
+        /** Resposta do fluxo autorizado de edição do perfil: o representante vê os contatos que acabou de gravar. */
+        public static PlaceResponse representativeView(com.rewit.domain.model.Place place, String photoUrl) {
+            return of(place, photoUrl, place.getContactInfo());
+        }
+
+        private static PlaceResponse of(com.rewit.domain.model.Place place, String photoUrl,
+                                        com.rewit.domain.model.PlaceContactInfo contact) {
             return new PlaceResponse(
                     place.getId(),
                     place.getName(),

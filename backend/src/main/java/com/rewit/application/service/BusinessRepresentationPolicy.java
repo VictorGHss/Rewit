@@ -7,6 +7,7 @@ import com.rewit.domain.enums.BusinessRepresentationIneligibility;
 import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceContactInfo;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -124,6 +125,24 @@ public class BusinessRepresentationPolicy {
         boolean administratorOperational = account != null && accountStatusPolicy.isOperational(account.getUserId());
         Place place = placeId == null ? null : placeRepository.findById(placeId).orElse(null);
         return evaluate(account, administratorOperational, place);
+    }
+
+    /**
+     * Contatos do perfil comercial visíveis na leitura pública do local: os gravados, se a representação atual
+     * (titular de {@code places.claimed_by_business_id}) for elegível pelos mesmos critérios de {@link #evaluate};
+     * senão nenhum. Os valores gravados nunca são alterados aqui. Como a troca de titular apaga os contatos (V39),
+     * os que existem são sempre do titular atual.
+     */
+    public PlaceContactInfo publicContactInfo(Place place) {
+        if (place == null || place.getContactInfo().equals(PlaceContactInfo.EMPTY)
+                || place.getClaimedByBusinessId() == null) {
+            return PlaceContactInfo.EMPTY;
+        }
+        BusinessAccount account = businessAccountRepository.findById(place.getClaimedByBusinessId()).orElse(null);
+        boolean administratorOperational = account != null && accountStatusPolicy.isOperational(account.getUserId());
+        return evaluate(account, administratorOperational, place).isEmpty()
+                ? place.getContactInfo()
+                : PlaceContactInfo.EMPTY;
     }
 
     /** {@link #evaluate(boolean, boolean, boolean)} a partir da conta e do local carregados. */

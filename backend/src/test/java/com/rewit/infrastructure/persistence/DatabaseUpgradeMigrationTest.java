@@ -451,6 +451,51 @@ class DatabaseUpgradeMigrationTest {
         }
     }
 
+    // ============================================================================================ V39
+
+    @Test
+    @DisplayName("V39: upgrade V38 -> V39 preserva contatos e descrições existentes; depois, só a troca de titular apaga "
+            + "os contatos, sem tocar na descrição; privilégios do runtime intactos")
+    void upgradeToV39KeepsContactsUntilOwnerChanges() throws SQLException {
+        flyway("38").migrate();
+        UUID user = UUID.randomUUID();
+        UUID businessA = UUID.randomUUID();
+        UUID businessB = UUID.randomUUID();
+        UUID place = UUID.randomUUID();
+        String profile = "SELECT concat_ws('|', description, phone, website_url, instagram_url, facebook_url) "
+                + "FROM places WHERE id = ?";
+        String stored;
+        try (Connection conn = owner()) {
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'USER')",
+                    user, "v38." + user + "@rewit.test");
+            for (UUID business : new UUID[]{businessA, businessB}) {
+                update(conn, "INSERT INTO business_accounts (id, user_id, corporate_name, tax_id, verification_status) "
+                        + "VALUES (?, ?, 'Empresa V38', ?, 'APPROVED')", business, user,
+                        "V38" + business.toString().substring(0, 8));
+            }
+            update(conn, "INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", place);
+            update(conn, "INSERT INTO places (id, name, slug, category, description, address_text, city, state, "
+                    + "claimed_by_business_id, phone, website_url, instagram_url, facebook_url) VALUES (?, 'Local V38', ?, "
+                    + "'CAFE', 'Descrição V38', 'Rua V38', 'Curitiba', 'PR', ?, '+55 41 3333-4444', 'https://v38.example', "
+                    + "'https://instagram.com/v38', 'https://facebook.com/v38')", place, "v38-" + place, businessA);
+            stored = string(conn, profile, place);
+        }
+
+        assertTrue(flyway(null).migrate().success);
+        try (Connection conn = owner(); Statement st = conn.createStatement()) {
+            assertEquals(1, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE version = '39' AND success"));
+            assertEquals(stored, string(conn, profile, place), "A migração não apaga contatos já gravados");
+            assertEquals("search_path=pg_catalog, public, pg_temp", string(conn,
+                    "SELECT array_to_string(proconfig, ',') FROM pg_proc WHERE proname = 'fn_clear_place_business_contacts_on_owner_change'"));
+            st.execute("SELECT rewit_assert_runtime_privileges()");
+
+            update(conn, "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", businessA, place);
+            assertEquals(stored, string(conn, profile, place), "Mesmo titular: nada muda");
+            update(conn, "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", businessB, place);
+            assertEquals("Descrição V38", string(conn, profile, place), "Troca de titular: só a descrição permanece");
+        }
+    }
+
     private static void update(Connection conn, String sql, Object... args) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (int i = 0; i < args.length; i++) {

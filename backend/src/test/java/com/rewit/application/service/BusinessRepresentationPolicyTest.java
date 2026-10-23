@@ -11,6 +11,7 @@ import com.rewit.domain.enums.Role;
 import com.rewit.domain.enums.VerificationStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceContactInfo;
 import com.rewit.domain.model.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -317,5 +318,62 @@ class BusinessRepresentationPolicyTest {
         when(placeRepository.findById(missingPlace)).thenReturn(Optional.empty());
         assertEquals(Set.of(BusinessRepresentationIneligibility.PLACE_NOT_REPRESENTED),
                 policy.currentIneligibility(accountId, missingPlace));
+    }
+
+    // ------------------------------------------------------------------------------------- contatos na leitura pública
+
+    private static final PlaceContactInfo CONTACT = new PlaceContactInfo("+55 (41) 3333-4444",
+            "https://www.exemplo.com.br", null, null);
+
+    private static Place placeWithContact(UUID id, UUID claimedBy, String status, PlaceContactInfo contact) {
+        return new Place(id, "Local", "slug-" + id, "CAFE", "Descrição", "Rua A", null, null, "Curitiba", "PR", "BR",
+                -25.42, -49.27, 50, "USER", false, claimedBy, null, status, contact);
+    }
+
+    @Test
+    @DisplayName("Contatos públicos: representação atual elegível expõe os contatos gravados, sem alterá-los")
+    void publicContactsOfEligibleRepresentation() {
+        Place place = placeWithContact(UUID.randomUUID(), accountId, "ACTIVE", CONTACT);
+        when(businessAccountRepository.findById(accountId))
+                .thenReturn(Optional.of(account(accountId, actor, VerificationStatus.APPROVED)));
+
+        assertSame(CONTACT, policy.publicContactInfo(place));
+        assertSame(CONTACT, place.getContactInfo());
+    }
+
+    @Test
+    @DisplayName("Contatos públicos: conta pendente ou rejeitada, administrador inoperante, conta inexistente ou local "
+            + "inativo ocultam os contatos")
+    void publicContactsHiddenWhileRepresentationIsIneligible() {
+        UUID placeId = UUID.randomUUID();
+        Place active = placeWithContact(placeId, accountId, "ACTIVE", CONTACT);
+
+        for (VerificationStatus status : new VerificationStatus[]{VerificationStatus.PENDING, VerificationStatus.REJECTED}) {
+            when(businessAccountRepository.findById(accountId)).thenReturn(Optional.of(account(accountId, actor, status)));
+            assertEquals(PlaceContactInfo.EMPTY, policy.publicContactInfo(active), status.name());
+        }
+
+        when(businessAccountRepository.findById(accountId))
+                .thenReturn(Optional.of(account(accountId, actor, VerificationStatus.APPROVED)));
+        when(userRepository.findById(actor)).thenReturn(Optional.of(user(actor, AccountStatus.SUSPENDED, Role.USER)));
+        assertEquals(PlaceContactInfo.EMPTY, policy.publicContactInfo(active));
+
+        when(userRepository.findById(actor)).thenReturn(Optional.of(user(actor, AccountStatus.ACTIVE, Role.USER)));
+        assertEquals(PlaceContactInfo.EMPTY, policy.publicContactInfo(placeWithContact(placeId, accountId, "INACTIVE", CONTACT)));
+
+        when(businessAccountRepository.findById(accountId)).thenReturn(Optional.empty());
+        assertEquals(PlaceContactInfo.EMPTY, policy.publicContactInfo(active));
+    }
+
+    @Test
+    @DisplayName("Contatos públicos: sem contatos gravados ou sem titular não consulta conta nem administrador")
+    void publicContactsWithoutContactOrOwnerSkipLookups() {
+        assertEquals(PlaceContactInfo.EMPTY,
+                policy.publicContactInfo(placeWithContact(UUID.randomUUID(), accountId, "ACTIVE", PlaceContactInfo.EMPTY)));
+        assertEquals(PlaceContactInfo.EMPTY,
+                policy.publicContactInfo(placeWithContact(UUID.randomUUID(), null, "ACTIVE", CONTACT)));
+        assertEquals(PlaceContactInfo.EMPTY, policy.publicContactInfo(null));
+        verifyNoInteractions(businessAccountRepository, placeRepository);
+        verify(userRepository, never()).findById(any());
     }
 }
