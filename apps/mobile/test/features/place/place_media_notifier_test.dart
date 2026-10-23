@@ -10,6 +10,8 @@ import 'package:rewit_mobile/features/place/presentation/state/place_media_notif
 class _FakePlaceMediaRepository implements PlaceRepository {
   List<PlaceMediaItem> mediaToReturn = [];
   Exception? errorToThrow;
+  Exception? getMediaErrorToThrow;
+  PlaceMediaItem? uploadItemToReturn;
 
   String? lastGetPlaceId;
   String? lastPrimaryPlaceId;
@@ -21,12 +23,14 @@ class _FakePlaceMediaRepository implements PlaceRepository {
   String? lastUploadFilename;
   String? lastUploadMimeType;
   String? lastUploadIdempotencyKey;
+  int uploadCallCount = 0;
 
   @override
   Future<List<PlaceMediaItem>> getPlaceMedia(String placeId) async {
     lastGetPlaceId = placeId;
+    if (getMediaErrorToThrow != null) throw getMediaErrorToThrow!;
     if (errorToThrow != null) throw errorToThrow!;
-    return mediaToReturn;
+    return List.of(mediaToReturn);
   }
 
   @override
@@ -49,7 +53,11 @@ class _FakePlaceMediaRepository implements PlaceRepository {
     lastDeletePlaceId = placeId;
     lastDeleteMediaId = mediaId;
     if (errorToThrow != null) throw errorToThrow!;
+    final wasPrimary = mediaToReturn.any((m) => m.id == mediaId && m.isPrimary);
     mediaToReturn.removeWhere((m) => m.id == mediaId);
+    if (wasPrimary && mediaToReturn.isNotEmpty) {
+      mediaToReturn[0] = mediaToReturn[0].copyWith(isPrimary: true);
+    }
   }
 
   @override
@@ -60,6 +68,7 @@ class _FakePlaceMediaRepository implements PlaceRepository {
     String? mimeType,
     String? idempotencyKey,
   }) async {
+    uploadCallCount++;
     lastUploadPlaceId = placeId;
     lastUploadBytes = fileBytes;
     lastUploadFilename = filename;
@@ -67,7 +76,11 @@ class _FakePlaceMediaRepository implements PlaceRepository {
     lastUploadIdempotencyKey = idempotencyKey;
     if (errorToThrow != null) throw errorToThrow!;
 
-    return PlaceMediaItem(
+    if (uploadItemToReturn != null) {
+      return uploadItemToReturn!;
+    }
+
+    final created = PlaceMediaItem(
       id: 'media-new-99',
       placeId: placeId,
       url: '/api/v1/places/$placeId/media/media-new-99',
@@ -78,6 +91,8 @@ class _FakePlaceMediaRepository implements PlaceRepository {
       isPrimary: mediaToReturn.isEmpty,
       createdAt: DateTime.now(),
     );
+    mediaToReturn.add(created);
+    return created;
   }
 
   @override
@@ -107,12 +122,17 @@ void main() {
   group('PlaceMediaNotifier', () {
     late _FakePlaceMediaRepository repository;
     late PlaceMediaNotifier notifier;
+    int keyCounter = 0;
 
     setUp(() {
       repository = _FakePlaceMediaRepository();
+      keyCounter = 0;
       notifier = PlaceMediaNotifier(
         repository: repository,
-        uuidGenerator: () => 'fixed-test-uuid-v4',
+        uuidGenerator: () {
+          keyCounter++;
+          return 'generated-uuid-key-$keyCounter';
+        },
       );
     });
 
@@ -178,7 +198,6 @@ void main() {
     });
 
     test('define fotografia como principal e atualiza a capa visual', () async {
-      notifier = PlaceMediaNotifier(repository: repository);
       repository.mediaToReturn = [
         PlaceMediaItem(
           id: 'media-1',
@@ -217,173 +236,414 @@ void main() {
       expect(notifier.operatingMediaId, isNull);
     });
 
-    test('exclui fotografia com sucesso apenas após confirmação do backend', () async {
-      notifier = PlaceMediaNotifier(repository: repository);
-      repository.mediaToReturn = [
-        PlaceMediaItem(
-          id: 'media-1',
+    group('Correção A: Exclusão da foto principal e consistência da capa', () {
+      test('1. Excluir a foto principal quando há outras fotografias ativas promove a mais antiga', () async {
+        final t1 = DateTime(2026, 10, 20, 10, 0);
+        final t2 = DateTime(2026, 10, 21, 10, 0);
+
+        repository.mediaToReturn = [
+          PlaceMediaItem(
+            id: 'media-capa-velha',
+            placeId: 'place-1',
+            url: '/url-capa',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: true,
+            createdAt: t1,
+          ),
+          PlaceMediaItem(
+            id: 'media-restante',
+            placeId: 'place-1',
+            url: '/url-restante',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: false,
+            createdAt: t2,
+          ),
+        ];
+        await notifier.loadMedia('place-1');
+
+        final success = await notifier.deleteMedia(placeId: 'place-1', mediaId: 'media-capa-velha');
+
+        expect(success, isTrue);
+        expect(notifier.mediaList.length, 1);
+        expect(notifier.mediaList.first.id, 'media-restante');
+        expect(notifier.mediaList.first.isPrimary, isTrue);
+        expect(notifier.primaryMedia?.id, 'media-restante');
+      });
+
+      test('2. Próxima capa reconcilia com o estado real retornado pelo servidor', () async {
+        final t1 = DateTime(2026, 10, 20, 10, 0);
+        final t2 = DateTime(2026, 10, 21, 10, 0);
+
+        repository.mediaToReturn = [
+          PlaceMediaItem(
+            id: 'media-1',
+            placeId: 'place-1',
+            url: '/url-1',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: true,
+            createdAt: t1,
+          ),
+          PlaceMediaItem(
+            id: 'media-2',
+            placeId: 'place-1',
+            url: '/url-2',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: false,
+            createdAt: t2,
+          ),
+        ];
+        await notifier.loadMedia('place-1');
+
+        // Simulando que o servidor atualizou a lista e media-2 é primary
+        await notifier.deleteMedia(placeId: 'place-1', mediaId: 'media-1');
+
+        expect(notifier.mediaList.length, 1);
+        expect(notifier.primaryMedia?.id, 'media-2');
+        expect(notifier.primaryMedia?.isPrimary, isTrue);
+      });
+
+      test('3. Excluir a única fotografia deixa a galeria vazia e sem capa', () async {
+        repository.mediaToReturn = [
+          PlaceMediaItem(
+            id: 'media-unica',
+            placeId: 'place-1',
+            url: '/url-unica',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: true,
+            createdAt: DateTime.now(),
+          ),
+        ];
+        await notifier.loadMedia('place-1');
+
+        final success = await notifier.deleteMedia(placeId: 'place-1', mediaId: 'media-unica');
+
+        expect(success, isTrue);
+        expect(notifier.mediaList, isEmpty);
+        expect(notifier.primaryMedia, isNull);
+        expect(notifier.operatingMediaId, isNull);
+      });
+
+      test('4. Falha ao recarregar a lista após exclusão preserva a remoção confirmada', () async {
+        final t1 = DateTime(2026, 10, 20, 10, 0);
+        final t2 = DateTime(2026, 10, 21, 10, 0);
+
+        repository.mediaToReturn = [
+          PlaceMediaItem(
+            id: 'media-1',
+            placeId: 'place-1',
+            url: '/url-1',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: true,
+            createdAt: t1,
+          ),
+          PlaceMediaItem(
+            id: 'media-2',
+            placeId: 'place-1',
+            url: '/url-2',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: false,
+            createdAt: t2,
+          ),
+        ];
+        await notifier.loadMedia('place-1');
+
+        // Configura falha apenas no getPlaceMedia subsequente
+        repository.getMediaErrorToThrow = const ApiException(
+          ProblemDetail(type: 'about:blank', title: 'Erro', status: 500, detail: 'Falha de rede momentânea'),
+        );
+
+        final success = await notifier.deleteMedia(placeId: 'place-1', mediaId: 'media-1');
+
+        expect(success, isTrue);
+        expect(notifier.mediaList.length, 1);
+        expect(notifier.mediaList.first.id, 'media-2');
+        expect(notifier.mediaList.first.isPrimary, isTrue);
+        expect(notifier.operatingMediaId, isNull);
+      });
+
+      test('Falha na requisição de exclusão não remove a foto do estado local', () async {
+        repository.mediaToReturn = [
+          PlaceMediaItem(
+            id: 'media-1',
+            placeId: 'place-1',
+            url: '/url-1',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: true,
+            createdAt: DateTime.now(),
+          ),
+        ];
+        await notifier.loadMedia('place-1');
+
+        repository.errorToThrow = const ApiException(
+          ProblemDetail(
+            type: 'about:blank',
+            title: 'Proibido',
+            status: 403,
+            code: 'FORBIDDEN',
+            detail: 'Você não tem permissão para remover esta foto',
+          ),
+        );
+
+        final success = await notifier.deleteMedia(placeId: 'place-1', mediaId: 'media-1');
+
+        expect(success, isFalse);
+        expect(notifier.mediaList.length, 1);
+        expect(notifier.errorMessage, 'Você não tem permissão para remover esta foto');
+        expect(notifier.operatingMediaId, isNull);
+      });
+    });
+
+    group('Correção B: Idempotência estável durante retentativas', () {
+      test('5. Retentativa da mesma operação reutiliza a chave de idempotência original', () async {
+        final fakeBytes = Uint8List.fromList([1, 2, 3, 4]);
+
+        // 1ª tentativa falha por erro de rede
+        repository.errorToThrow = Exception('Network timeout');
+        final firstAttempt = await notifier.uploadMedia(
           placeId: 'place-1',
-          url: '/url-1',
+          bytes: fakeBytes,
+          filename: 'foto.jpg',
+        );
+
+        expect(firstAttempt, isFalse);
+        expect(repository.uploadCallCount, 1);
+        final originalKey = repository.lastUploadIdempotencyKey;
+        expect(originalKey, 'generated-uuid-key-1');
+        expect(notifier.hasPendingRetry, isTrue);
+        expect(notifier.pendingUpload?.idempotencyKey, originalKey);
+
+        // 2ª tentativa (retentativa explícita) tem sucesso
+        repository.errorToThrow = null;
+        final secondAttempt = await notifier.retryUpload();
+
+        expect(secondAttempt, isTrue);
+        expect(repository.uploadCallCount, 2);
+        expect(repository.lastUploadIdempotencyKey, originalKey); // Mesma chave!
+        expect(notifier.hasPendingRetry, isFalse);
+      });
+
+      test('6. Uma nova fotografia recebe uma chave diferente', () async {
+        final bytesA = Uint8List.fromList([10, 20]);
+        final bytesB = Uint8List.fromList([30, 40]);
+
+        await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: bytesA,
+          filename: 'fotoA.jpg',
+        );
+        final keyA = repository.lastUploadIdempotencyKey;
+        expect(keyA, 'generated-uuid-key-1');
+
+        await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: bytesB,
+          filename: 'fotoB.jpg',
+        );
+        final keyB = repository.lastUploadIdempotencyKey;
+        expect(keyB, 'generated-uuid-key-2');
+        expect(keyA, isNot(equals(keyB)));
+      });
+
+      test('7. Sucesso encerra a operação anterior', () async {
+        final success = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: Uint8List.fromList([1, 2]),
+          filename: 'foto.jpg',
+        );
+
+        expect(success, isTrue);
+        expect(notifier.hasPendingRetry, isFalse);
+        expect(notifier.pendingUpload, isNull);
+      });
+
+      test('8. Falha de transporte não cria nova chave automaticamente', () async {
+        repository.errorToThrow = Exception('Transport broken');
+
+        await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: Uint8List.fromList([1, 2]),
+          filename: 'foto.jpg',
+        );
+
+        expect(notifier.hasPendingRetry, isTrue);
+        expect(notifier.pendingUpload?.idempotencyKey, 'generated-uuid-key-1');
+      });
+
+      test('9. Reenvio continua protegido contra ações simultâneas', () async {
+        repository.errorToThrow = Exception('Network fail');
+        await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: Uint8List.fromList([1, 2]),
+          filename: 'foto.jpg',
+        );
+
+        expect(notifier.hasPendingRetry, isTrue);
+
+        // Dispara retry
+        repository.errorToThrow = null;
+        final retryFuture = notifier.retryUpload();
+        // Ação concorrente enquanto retryUpload está em curso
+        final simultaneousDelete = notifier.deleteMedia(placeId: 'place-1', mediaId: 'm-x');
+
+        final rDelete = await simultaneousDelete;
+        final rRetry = await retryFuture;
+
+        expect(rDelete, isFalse);
+        expect(rRetry, isTrue);
+      });
+    });
+
+    group('Correção C: Replay com mídia REMOVED', () {
+      test('10. Resposta REMOVED nunca é adicionada à galeria como foto ativa', () async {
+        repository.uploadItemToReturn = PlaceMediaItem(
+          id: 'media-removed-replay',
+          placeId: 'place-1',
+          url: '/url-removed',
           mediaType: 'PHOTO',
           mimeType: 'image/jpeg',
           sizeBytes: 1024,
-          status: 'ACTIVE',
-          isPrimary: true,
-          createdAt: DateTime.now(),
-        ),
-      ];
-      await notifier.loadMedia('place-1');
-
-      final success = await notifier.deleteMedia(placeId: 'place-1', mediaId: 'media-1');
-
-      expect(success, isTrue);
-      expect(repository.lastDeletePlaceId, 'place-1');
-      expect(repository.lastDeleteMediaId, 'media-1');
-      expect(notifier.mediaList, isEmpty);
-      expect(notifier.successMessage, 'Fotografia removida com sucesso!');
-      expect(notifier.operatingMediaId, isNull);
-    });
-
-    test('falha na exclusão não remove a foto do estado local', () async {
-      notifier = PlaceMediaNotifier(repository: repository);
-      repository.mediaToReturn = [
-        PlaceMediaItem(
-          id: 'media-1',
-          placeId: 'place-1',
-          url: '/url-1',
-          mediaType: 'PHOTO',
-          mimeType: 'image/jpeg',
-          sizeBytes: 1024,
-          status: 'ACTIVE',
-          isPrimary: true,
-          createdAt: DateTime.now(),
-        ),
-      ];
-      await notifier.loadMedia('place-1');
-
-      repository.errorToThrow = const ApiException(
-        ProblemDetail(
-          type: 'about:blank',
-          title: 'Proibido',
-          status: 403,
-          code: 'FORBIDDEN',
-          detail: 'Você não tem permissão para remover esta foto',
-        ),
-      );
-
-      final success = await notifier.deleteMedia(placeId: 'place-1', mediaId: 'media-1');
-
-      expect(success, isFalse);
-      expect(notifier.mediaList.length, 1);
-      expect(notifier.errorMessage, 'Você não tem permissão para remover esta foto');
-      expect(notifier.operatingMediaId, isNull);
-    });
-
-    test('upload envia Idempotency-Key UUID v4 e atualiza a lista', () async {
-      notifier = PlaceMediaNotifier(
-        repository: repository,
-        uuidGenerator: () => 'custom-uuid-key-v4',
-      );
-      repository.mediaToReturn = [];
-      await notifier.loadMedia('place-1');
-
-      final fakeBytes = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0x00]);
-      final success = await notifier.uploadMedia(
-        placeId: 'place-1',
-        bytes: fakeBytes,
-        filename: 'foto_fachada.jpg',
-        mimeType: 'image/jpeg',
-      );
-
-      expect(success, isTrue);
-      expect(repository.lastUploadPlaceId, 'place-1');
-      expect(repository.lastUploadBytes, fakeBytes);
-      expect(repository.lastUploadFilename, 'foto_fachada.jpg');
-      expect(repository.lastUploadMimeType, 'image/jpeg');
-      expect(repository.lastUploadIdempotencyKey, 'custom-uuid-key-v4');
-      expect(notifier.mediaList.length, 1);
-      expect(notifier.isUploading, isFalse);
-      expect(notifier.successMessage, 'Fotografia adicionada com sucesso!');
-    });
-
-    test('impede upload quando limite de 5 fotografias é atingido', () async {
-      notifier = PlaceMediaNotifier(repository: repository);
-      repository.mediaToReturn = List.generate(
-        5,
-        (i) => PlaceMediaItem(
-          id: 'media-$i',
-          placeId: 'place-1',
-          url: '/url-$i',
-          mediaType: 'PHOTO',
-          mimeType: 'image/jpeg',
-          sizeBytes: 1024,
-          status: 'ACTIVE',
-          isPrimary: i == 0,
-          createdAt: DateTime.now(),
-        ),
-      );
-      await notifier.loadMedia('place-1');
-
-      expect(notifier.isLimitReached, isTrue);
-
-      final success = await notifier.uploadMedia(
-        placeId: 'place-1',
-        bytes: Uint8List(100),
-        filename: 'foto_extra.jpg',
-      );
-
-      expect(success, isFalse);
-      expect(notifier.errorMessage, contains('Limite máximo de 5 fotografias'));
-      expect(repository.lastUploadPlaceId, isNull); // Nenhuma requisição enviada
-    });
-
-    test('impede upload quando arquivo excede limite de 10 MB', () async {
-      notifier = PlaceMediaNotifier(repository: repository);
-      repository.mediaToReturn = [];
-      await notifier.loadMedia('place-1');
-
-      // 10 MB + 1 byte
-      final oversizedBytes = Uint8List((10 * 1024 * 1024) + 1);
-
-      final success = await notifier.uploadMedia(
-        placeId: 'place-1',
-        bytes: oversizedBytes,
-        filename: 'foto_gigante.jpg',
-      );
-
-      expect(success, isFalse);
-      expect(notifier.errorMessage, contains('excede o limite máximo permitido de 10 MB'));
-      expect(repository.lastUploadPlaceId, isNull);
-    });
-
-    test('impede operações simultâneas conflitantes na mesma fotografia', () async {
-      notifier = PlaceMediaNotifier(repository: repository);
-      repository.mediaToReturn = [
-        PlaceMediaItem(
-          id: 'media-1',
-          placeId: 'place-1',
-          url: '/url-1',
-          mediaType: 'PHOTO',
-          mimeType: 'image/jpeg',
-          sizeBytes: 1024,
-          status: 'ACTIVE',
+          status: 'REMOVED',
           isPrimary: false,
           createdAt: DateTime.now(),
-        ),
-      ];
-      await notifier.loadMedia('place-1');
+        );
 
-      // Dispara primeira operação
-      final op1 = notifier.setPrimaryMedia(placeId: 'place-1', mediaId: 'media-1');
-      // Segunda operação simultânea enquanto op1 está em curso
-      final op2 = notifier.deleteMedia(placeId: 'place-1', mediaId: 'media-1');
+        final success = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: Uint8List.fromList([1, 2, 3]),
+          filename: 'foto.jpg',
+        );
 
-      final r2 = await op2;
-      final r1 = await op1;
+        expect(success, isFalse);
+        expect(notifier.mediaList.any((m) => m.id == 'media-removed-replay'), isFalse);
+        expect(notifier.hasPendingRetry, isFalse); // Encerrou a operação esgotada
+      });
 
-      expect(r1, isTrue);
-      expect(r2, isFalse); // Rejeitada pois já havia operação em andamento
+      test('11. Reconcilia o estado com o servidor e fornece feedback verdadeiro', () async {
+        repository.uploadItemToReturn = PlaceMediaItem(
+          id: 'media-removed-replay',
+          placeId: 'place-1',
+          url: '/url-removed',
+          mediaType: 'PHOTO',
+          mimeType: 'image/jpeg',
+          sizeBytes: 1024,
+          status: 'REMOVED',
+          isPrimary: false,
+          createdAt: DateTime.now(),
+        );
+
+        await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: Uint8List.fromList([1, 2, 3]),
+          filename: 'foto.jpg',
+        );
+
+        expect(notifier.errorMessage, contains('não está mais ativa'));
+        expect(repository.lastGetPlaceId, 'place-1'); // Reconciliou chamando getPlaceMedia
+      });
+
+      test('12. Nova operação explicitamente iniciada usa nova chave após resposta REMOVED', () async {
+        repository.uploadItemToReturn = PlaceMediaItem(
+          id: 'media-removed-replay',
+          placeId: 'place-1',
+          url: '/url-removed',
+          mediaType: 'PHOTO',
+          mimeType: 'image/jpeg',
+          sizeBytes: 1024,
+          status: 'REMOVED',
+          isPrimary: false,
+          createdAt: DateTime.now(),
+        );
+
+        await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: Uint8List.fromList([1, 2, 3]),
+          filename: 'foto1.jpg',
+        );
+        expect(repository.lastUploadIdempotencyKey, 'generated-uuid-key-1');
+
+        // Usuário escolhe outra foto e inicia novo upload
+        repository.uploadItemToReturn = null;
+        final secondUpload = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: Uint8List.fromList([4, 5, 6]),
+          filename: 'foto2.jpg',
+        );
+
+        expect(secondUpload, isTrue);
+        expect(repository.lastUploadIdempotencyKey, 'generated-uuid-key-2');
+        expect(notifier.mediaList.length, 1);
+        expect(notifier.mediaList.first.id, 'media-new-99');
+      });
+    });
+
+    group('Limites de mídia', () {
+      test('impede upload quando limite de 5 fotografias é atingido', () async {
+        repository.mediaToReturn = List.generate(
+          5,
+          (i) => PlaceMediaItem(
+            id: 'media-$i',
+            placeId: 'place-1',
+            url: '/url-$i',
+            mediaType: 'PHOTO',
+            mimeType: 'image/jpeg',
+            sizeBytes: 1024,
+            status: 'ACTIVE',
+            isPrimary: i == 0,
+            createdAt: DateTime.now(),
+          ),
+        );
+        await notifier.loadMedia('place-1');
+
+        expect(notifier.isLimitReached, isTrue);
+
+        final success = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: Uint8List(100),
+          filename: 'foto_extra.jpg',
+        );
+
+        expect(success, isFalse);
+        expect(notifier.errorMessage, contains('Limite máximo de 5 fotografias'));
+      });
+
+      test('impede upload quando arquivo excede limite de 10 MB', () async {
+        await notifier.loadMedia('place-1');
+
+        final oversizedBytes = Uint8List((10 * 1024 * 1024) + 1);
+
+        final success = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: oversizedBytes,
+          filename: 'foto_gigante.jpg',
+        );
+
+        expect(success, isFalse);
+        expect(notifier.errorMessage, contains('excede o limite máximo permitido de 10 MB'));
+      });
     });
   });
 }
-

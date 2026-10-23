@@ -77,6 +77,7 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
     if (_notifier.successMessage != null) {
       final msg = _notifier.successMessage!;
       _notifier.clearMessages();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(msg),
@@ -85,16 +86,25 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
         ),
       );
     } else if (_notifier.errorMessage != null && !_notifier.isLoading) {
-      // Se já temos fotos na galeria, mostramos erro de operação pontual via SnackBar.
-      // Se a galeria estiver vazia, preservamos a mensagem no notifier para exibir a ErrorView completa com botão de retry.
-      if (_notifier.mediaList.isNotEmpty) {
+      // Se for erro de carregamento inicial da página (sem fotos), a ErrorView cuida da renderização.
+      if (!_notifier.hasInitialLoadError) {
         final err = _notifier.errorMessage!;
+        final canRetry = _notifier.hasPendingRetry;
         _notifier.clearMessages();
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(err),
             backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
+            duration: const Duration(seconds: 5),
+            action: canRetry
+                ? SnackBarAction(
+                    key: const Key('snackbar_retry_upload_action'),
+                    label: 'Tentar novamente',
+                    textColor: Colors.white,
+                    onPressed: () => _notifier.retryUpload(),
+                  )
+                : null,
           ),
         );
       }
@@ -314,7 +324,7 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
             return const LoadingIndicator(message: 'Carregando fotografias...');
           }
 
-          if (_notifier.errorMessage != null && _notifier.mediaList.isEmpty) {
+          if (_notifier.hasInitialLoadError && _notifier.errorMessage != null) {
             return ErrorView(
               title: 'Erro ao carregar fotografias',
               message: _notifier.errorMessage!,
@@ -332,6 +342,46 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
     );
   }
 
+  Widget _buildPendingUploadBanner(BuildContext context, ThemeData theme) {
+    final pending = _notifier.pendingUpload;
+    if (pending == null) return const SizedBox.shrink();
+
+    return Container(
+      key: const Key('pending_upload_banner'),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.amber.shade400),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_outlined, color: Colors.orange, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Envio pendente: ${pending.filename}',
+              style: const TextStyle(fontSize: 12, color: Colors.black87),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          TextButton(
+            key: const Key('retry_upload_button'),
+            onPressed: _notifier.isUploading ? null : () => _notifier.retryUpload(),
+            child: const Text('Tentar novamente', style: TextStyle(fontSize: 12)),
+          ),
+          IconButton(
+            key: const Key('cancel_retry_button'),
+            icon: const Icon(Icons.close, size: 16),
+            tooltip: 'Descartar',
+            onPressed: _notifier.isUploading ? null : () => _notifier.cancelPendingUpload(),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyState(BuildContext context, ThemeData theme) {
     return Center(
       child: Padding(
@@ -339,6 +389,10 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            if (_notifier.hasPendingRetry) ...[
+              _buildPendingUploadBanner(context, theme),
+              const SizedBox(height: 16),
+            ],
             Icon(
               Icons.photo_library_outlined,
               size: 64,
@@ -379,6 +433,8 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_notifier.hasPendingRetry)
+            _buildPendingUploadBanner(context, theme),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
