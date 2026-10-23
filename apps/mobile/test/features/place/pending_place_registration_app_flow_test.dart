@@ -448,7 +448,9 @@ void main() {
       }
       return http.Response('{}', 404);
     });
-    // Cadeia real de produção: repositório -> RewitHttpClient -> onSessionExpired -> AuthNotifier
+    // Cadeia repositório -> RewitHttpClient -> onSessionExpired -> AuthNotifier sem TokenRefreshingClient nem
+    // SessionRefresher: sem renovação, o 401 encerra a sessão na hora. A cadeia completa de produção, com
+    // renovação aceita, recusada ou indisponível, está em session_refresh_pending_registration_flow_test.dart.
     PlaceRepository realPlaces(AuthNotifier auth) => PlaceRepositoryImpl(
           httpClient: RewitHttpClient(
             baseUrl: 'http://api.rewit.test',
