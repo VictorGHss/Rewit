@@ -327,26 +327,7 @@ public class PlaceController {
 
     private PlaceResponse toResponse(Place place) {
         String photoUrl = placeMediaService != null ? placeMediaService.findPrimaryPhotoUrl(place.getId()) : null;
-        return new PlaceResponse(
-                place.getId(),
-                place.getName(),
-                place.getSlug(),
-                place.getCategory(),
-                place.getDescription(),
-                place.getAddressText(),
-                place.getStreetNumber(),
-                place.getNeighborhood(),
-                place.getCity(),
-                place.getState(),
-                place.getCountry(),
-                place.getLatitude(),
-                place.getLongitude(),
-                place.getValidationRadiusMeters(),
-                place.getOrigin(),
-                place.isVerified(),
-                place.getStatus(),
-                photoUrl
-        );
+        return PlaceResponse.of(place, photoUrl);
     }
 
     private UUID extractAuthenticatedUserId(Authentication authentication) {

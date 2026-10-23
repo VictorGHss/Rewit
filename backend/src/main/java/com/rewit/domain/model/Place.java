@@ -30,6 +30,7 @@ public class Place extends RateableTarget {
     private UUID claimedByBusinessId;
     private final UUID createdByUserId;
     private String status;
+    private final PlaceContactInfo contactInfo;
     private final Instant updatedAt;
 
     public Place(UUID id, String name, String slug, String category, String description,
@@ -37,6 +38,21 @@ public class Place extends RateableTarget {
                  String city, String state, String country,
                  Double latitude, Double longitude, int validationRadiusMeters,
                  String origin, boolean isVerified, UUID claimedByBusinessId, UUID createdByUserId, String status) {
+        this(id, name, slug, category, description, addressText, streetNumber, neighborhood,
+                city, state, country, latitude, longitude, validationRadiusMeters,
+                origin, isVerified, claimedByBusinessId, createdByUserId, status, PlaceContactInfo.EMPTY);
+    }
+
+    /**
+     * Reconstituição completa, com os contatos do perfil comercial já gravados ({@code null} equivale a
+     * {@link PlaceContactInfo#EMPTY}).
+     */
+    public Place(UUID id, String name, String slug, String category, String description,
+                 String addressText, String streetNumber, String neighborhood,
+                 String city, String state, String country,
+                 Double latitude, Double longitude, int validationRadiusMeters,
+                 String origin, boolean isVerified, UUID claimedByBusinessId, UUID createdByUserId, String status,
+                 PlaceContactInfo contactInfo) {
         super(id, TargetType.PLACE);
 
         if (name == null || name.isBlank()) {
@@ -103,6 +119,7 @@ public class Place extends RateableTarget {
         this.claimedByBusinessId = claimedByBusinessId;
         this.createdByUserId = createdByUserId;
         this.status = status != null ? status : "ACTIVE";
+        this.contactInfo = contactInfo != null ? contactInfo : PlaceContactInfo.EMPTY;
         this.updatedAt = Instant.now();
     }
 
@@ -202,6 +219,10 @@ public class Place extends RateableTarget {
 
     public String getStatus() {
         return status;
+    }
+
+    public PlaceContactInfo getContactInfo() {
+        return contactInfo;
     }
 
     public Instant getUpdatedAt() {

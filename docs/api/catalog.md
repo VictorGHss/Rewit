@@ -86,9 +86,15 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
   "validationRadiusMeters": 50,
   "origin": "USER",
   "isVerified": false,
-  "status": "ACTIVE"
+  "status": "ACTIVE",
+  "phone": null,
+  "websiteUrl": null,
+  "instagramUrl": null,
+  "facebookUrl": null
 }
 ```
+
+Os contatos (`phone`, `websiteUrl`, `instagramUrl`, `facebookUrl`) vêm do perfil comercial (2.21) e são `null` enquanto não informados.
 
 ---
 
@@ -780,6 +786,41 @@ Um item no formato de 2.18 (`product`, `availability`, `price`, `currency`), tan
 
 ---
 
+### 2.21 Perfil Comercial do Estabelecimento (PUT /api/v1/places/{id}/business-profile)
+* **Método**: `PUT`
+* **Rota**: `/api/v1/places/{id}/business-profile`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+* **Propósito**: Substitui integralmente a descrição pública (`places.description`) e os contatos do estabelecimento reivindicado. A leitura é a do próprio local (2.2), cujo `PlaceResponse` traz os campos. Nome, slug, categoria, endereço, coordenadas, status, titularidade e verificação não são alterados.
+* **Substituição integral**: cada campo de perfil ausente, `null` ou só com espaços fica sem valor e apaga o que havia antes; para manter um valor, reenvie-o. Bordas são aparadas; o telefone é guardado como enviado (só espaços repetidos são colapsados).
+* **Validação do payload** (antes de qualquer leitura, trava ou escrita; erro não altera nada):
+  * `businessAccountId` obrigatório; `description` até 2000, `phone` até 32 e cada link até 500 caracteres (`400 VALIDATION_ERROR` com `fieldErrors`).
+  * `phone`: 8 a 15 dígitos, `+` opcional só no início, separadores espaço, `(`, `)`, `.` e `-`; letras, ramal ou outros símbolos: `400 INVALID_PHONE`.
+  * `websiteUrl`, `instagramUrl`, `facebookUrl`: link absoluto `http` ou `https` com host, sem espaços e sem credenciais embutidas (`https://usuario@host`). Outros esquemas (`javascript:`, `data:`, `ftp:`, `mailto:`) ou link sem esquema: `400 INVALID_WEBSITE_URL`, `INVALID_INSTAGRAM_URL` ou `INVALID_FACEBOOK_URL`. O domínio não é restringido.
+  * JSON malformado: `400 MALFORMED_REQUEST`.
+* **Autorização** (Política B, mesma ordem de 2.14, 2.17 e 2.19):
+  * Autor com conta pessoal operacional (`401 ACCOUNT_DISABLED`).
+  * Conta comercial existente e administrada pelo autor (`404 BUSINESS_ACCOUNT_NOT_FOUND`) e aprovada (`409 BUSINESS_ACCOUNT_NOT_APPROVED` se `PENDING` ou `REJECTED`).
+  * Local ativo (`404 PLACE_NOT_FOUND`) e reivindicado agora pela conta (`403 BUSINESS_NOT_RESPONSIBLE` se de outra conta ou sem titular).
+* **Concorrência**: A linha do local é travada (`SELECT ... FOR NO KEY UPDATE`) antes de conferir a representação e gravar. Uma troca de titular concorrente termina antes, e a conta que deixou de representar o local recebe `403` sem gravar.
+* **Persistência**: Colunas `phone`, `website_url`, `instagram_url` e `facebook_url` (V38), com CHECKs de formato. Não há histórico de alterações nem registro de autor; `updated_at` do local muda a cada gravação.
+
+#### Requisição
+```json
+{
+  "businessAccountId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "description": "Cafeteria tradicional com grãos artesanais",
+  "phone": "+55 (41) 3333-4444",
+  "websiteUrl": "https://www.cafedocentro.com.br",
+  "instagramUrl": "https://www.instagram.com/cafedocentro",
+  "facebookUrl": null
+}
+```
+
+#### Resposta (`200 OK`)
+O `PlaceResponse` atualizado (mesmo formato de 2.1 e 2.2).
+
+---
+
 ## 3. Códigos de Erro Esperados
 * `400 Bad Request`:
   * Payload malformado, valores de coordenadas fora do intervalo WGS 84, identificador inválido (`Erro de Validação de Dados`).
@@ -791,6 +832,7 @@ Um item no formato de 2.18 (`product`, `availability`, `price`, `currency`), tan
   * Produto por código: tipo fora de `EAN`/`UPC`/`GTIN`/`ISBN` (`INVALID_IDENTIFIER_TYPE`) ou valor vazio, longo demais ou com caractere inválido (`INVALID_IDENTIFIER_VALUE`).
   * Horários de funcionamento: identificadores ausentes (`MISSING_PLACE_ID`, `MISSING_BUSINESS_ACCOUNT_ID`), dia da semana inválido (`INVALID_DAY_OF_WEEK`), dia repetido na requisição (`DUPLICATE_DAY_OF_WEEK`), incoerência entre dia fechado e intervalos (`INVALID_OPENING_HOURS`), intervalo com horário de abertura igual ou posterior ao fechamento (`INVALID_OPENING_HOURS_INTERVAL`), ou intervalos sobrepostos no mesmo dia (`OPENING_HOURS_OVERLAPPING_INTERVALS`).
   * Comodidades: código fora do catálogo (`INVALID_AMENITY_CODE`), código repetido na requisição (`DUPLICATE_AMENITY`), `businessAccountId`/`amenities` ausentes, lista acima de 50 elementos ou elemento nulo (`VALIDATION_ERROR`), `amenities` que não seja lista (`MALFORMED_REQUEST`).
+  * Perfil comercial: `businessAccountId` ausente ou campo acima do tamanho (`VALIDATION_ERROR`), telefone fora do formato (`INVALID_PHONE`), link com esquema diferente de http/https, sem host ou com credenciais (`INVALID_WEBSITE_URL`, `INVALID_INSTAGRAM_URL`, `INVALID_FACEBOOK_URL`).
   * Ofertas comerciais: preço negativo, com mais de duas casas ou acima do máximo (`INVALID_OFFER_PRICE`), moeda diferente de `BRL` (`UNSUPPORTED_CURRENCY`), disponibilidade fora de `AVAILABLE`/`OUT_OF_STOCK` (`INVALID_OFFER_AVAILABILITY`), `businessAccountId`/`availability` ausentes (`VALIDATION_ERROR`), preço não numérico (`MALFORMED_REQUEST`), `businessAccountId` ausente no DELETE (`MISSING_PARAMETER`), página negativa (`INVALID_PAGE`) e tamanho fora de 1..50 (`INVALID_PAGE_SIZE`).
 * `401 Unauthorized`: Ausência de token JWT ou token expirado/inválido (`AUTHENTICATION_REQUIRED` / `UNAUTHORIZED`).
 * `401 Unauthorized` (`ACCOUNT_DISABLED`): nas escritas (`POST /places`, `POST /places/adopt`, `POST /products`, `POST /products/{id}/identifiers`, `POST /products/{id}/presence`, `PUT /places/{id}/opening-hours`, `PUT /places/{id}/amenities`, `PUT` e `DELETE /places/{id}/offers/{productId}`), a conta do autor não está operacional (desativada, suspensa, excluída ou inexistente), mesmo com access token ainda válido.

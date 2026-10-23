@@ -1,6 +1,7 @@
 package com.rewit.application.port;
 
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceBusinessProfile;
 
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +25,14 @@ public interface PlaceRepository {
      * @return false se o local não existe ou já pertence a uma conta
      */
     boolean assignClaimedBusiness(UUID placeId, UUID businessAccountId);
+
+    /**
+     * Substitui o perfil comercial do local (descrição e contatos) sem tocar nos demais campos. Exige transação; o
+     * chamador trava o local antes ({@link #findByIdForUpdate}).
+     *
+     * @return o local recarregado do banco, ou vazio se não existe
+     */
+    Optional<Place> updateBusinessProfile(UUID placeId, PlaceBusinessProfile profile);
 
     Optional<Place> findBySlug(String slug);
 

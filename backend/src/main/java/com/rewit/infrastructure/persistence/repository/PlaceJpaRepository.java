@@ -108,4 +108,23 @@ public interface PlaceJpaRepository extends JpaRepository<PlaceJpaEntity, UUID> 
             WHERE id = :placeId AND claimed_by_business_id IS NULL
             """, nativeQuery = true)
     int assignClaimedBusiness(@Param("placeId") UUID placeId, @Param("businessAccountId") UUID businessAccountId);
+
+    /**
+     * Grava o perfil comercial (descrição e contatos) e nada mais: nome, endereço, coordenadas, status, titular e
+     * verificação ficam fora do SET, então os triggers de troca de titular (V28/V29) não são acionados. Os CASTs
+     * fixam o tipo dos parâmetros nulos (limpeza de campo), que o driver não teria como inferir.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            UPDATE places SET description = CAST(:description AS TEXT), phone = CAST(:phone AS VARCHAR),
+                website_url = CAST(:websiteUrl AS VARCHAR), instagram_url = CAST(:instagramUrl AS VARCHAR),
+                facebook_url = CAST(:facebookUrl AS VARCHAR), updated_at = NOW()
+            WHERE id = :placeId
+            """, nativeQuery = true)
+    int updateBusinessProfile(@Param("placeId") UUID placeId,
+                              @Param("description") String description,
+                              @Param("phone") String phone,
+                              @Param("websiteUrl") String websiteUrl,
+                              @Param("instagramUrl") String instagramUrl,
+                              @Param("facebookUrl") String facebookUrl);
 }
