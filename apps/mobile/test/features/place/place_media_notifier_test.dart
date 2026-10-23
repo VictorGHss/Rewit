@@ -515,6 +515,105 @@ void main() {
         expect(rDelete, isFalse);
         expect(rRetry, isTrue);
       });
+
+      test('Tentativa de iniciar outro upload após falha não substitui operação pendente nem envia requisição', () async {
+        final bytesA = Uint8List.fromList([1, 2, 3, 4]);
+        final bytesB = Uint8List.fromList([9, 8, 7, 6]);
+
+        // 1. Falha no primeiro envio da fotoA
+        repository.errorToThrow = Exception('Network error');
+        final firstAttempt = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: bytesA,
+          filename: 'fotoA.jpg',
+          mimeType: 'image/jpeg',
+        );
+
+        expect(firstAttempt, isFalse);
+        expect(repository.uploadCallCount, 1);
+        final originalKey = repository.lastUploadIdempotencyKey;
+        expect(originalKey, 'generated-uuid-key-1');
+        expect(notifier.hasPendingRetry, isTrue);
+        expect(notifier.pendingUpload?.filename, 'fotoA.jpg');
+        expect(notifier.pendingUpload?.bytes, bytesA);
+        expect(notifier.pendingUpload?.idempotencyKey, originalKey);
+
+        // 2. Tentativa de iniciar outro upload com fotoB enquanto fotoA está pendente
+        final secondAttempt = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: bytesB,
+          filename: 'fotoB.jpg',
+          mimeType: 'image/jpeg',
+        );
+
+        expect(secondAttempt, isFalse);
+        expect(
+          notifier.errorMessage,
+          'Existe um envio pendente. Tente novamente ou descarte a operação antes de adicionar outra foto.',
+        );
+        // Nenhuma segunda requisição foi enviada
+        expect(repository.uploadCallCount, 1);
+        // Chave e bytes originais continuam intactos
+        expect(notifier.hasPendingRetry, isTrue);
+        expect(notifier.pendingUpload?.filename, 'fotoA.jpg');
+        expect(notifier.pendingUpload?.bytes, bytesA);
+        expect(notifier.pendingUpload?.idempotencyKey, originalKey);
+        expect(notifier.pendingUpload?.placeId, 'place-1');
+        expect(notifier.pendingUpload?.mimeType, 'image/jpeg');
+
+        // 3. Retentar operação original continua usando a mesma chave e os mesmos bytes
+        repository.errorToThrow = null;
+        final retrySuccess = await notifier.retryUpload();
+
+        expect(retrySuccess, isTrue);
+        expect(repository.uploadCallCount, 2);
+        expect(repository.lastUploadIdempotencyKey, originalKey);
+        expect(notifier.hasPendingRetry, isFalse);
+        expect(notifier.pendingUpload, isNull);
+
+        // 4. Sucesso da retentativa encerra estado pendente e permite novo upload
+        final newUploadSuccess = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: bytesB,
+          filename: 'fotoB.jpg',
+        );
+
+        expect(newUploadSuccess, isTrue);
+        expect(repository.uploadCallCount, 3);
+        expect(repository.lastUploadIdempotencyKey, 'generated-uuid-key-2');
+      });
+
+      test('Descartar a operação pendente libera novo upload que recebe uma nova chave', () async {
+        final bytesA = Uint8List.fromList([1, 2]);
+        final bytesB = Uint8List.fromList([3, 4]);
+
+        repository.errorToThrow = Exception('Fail');
+        await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: bytesA,
+          filename: 'fotoA.jpg',
+        );
+
+        expect(notifier.hasPendingRetry, isTrue);
+        expect(notifier.pendingUpload?.filename, 'fotoA.jpg');
+
+        // Descarte explícito
+        notifier.cancelPendingUpload();
+        expect(notifier.hasPendingRetry, isFalse);
+        expect(notifier.pendingUpload, isNull);
+
+        // Novo upload agora é aceito e recebe nova chave
+        repository.errorToThrow = null;
+        final success = await notifier.uploadMedia(
+          placeId: 'place-1',
+          bytes: bytesB,
+          filename: 'fotoB.jpg',
+        );
+
+        expect(success, isTrue);
+        expect(repository.uploadCallCount, 2);
+        expect(repository.lastUploadIdempotencyKey, 'generated-uuid-key-2');
+      });
     });
 
     group('Correção C: Replay com mídia REMOVED', () {
