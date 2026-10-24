@@ -1,6 +1,7 @@
 import '../../domain/entities/external_place_candidate.dart';
 
 /// Leitura defensiva de `PlaceCandidateResponse`; itens sem provedor, id ou nome são descartados pelo chamador.
+/// Atribuições chegam como `{provider, providerUri}` (`PlaceAttributionResponse`).
 class ExternalPlaceCandidateDto {
   const ExternalPlaceCandidateDto._();
 
@@ -23,9 +24,9 @@ class ExternalPlaceCandidateDto {
       attributions: rawAttributions is List
           ? rawAttributions
               .whereType<Map<String, dynamic>>()
-              .map((a) => _text(a['text']) == null
+              .map((a) => _text(a['provider']) == null
                   ? null
-                  : ExternalPlaceAttribution(text: _text(a['text'])!, url: _text(a['url'])))
+                  : ExternalPlaceAttribution(text: _text(a['provider'])!, url: _text(a['providerUri'])))
               .whereType<ExternalPlaceAttribution>()
               .toList()
           : const [],

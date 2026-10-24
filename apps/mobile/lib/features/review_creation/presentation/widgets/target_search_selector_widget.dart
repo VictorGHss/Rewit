@@ -13,6 +13,7 @@ import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_
 import 'package:rewit_mobile/features/place_discovery/presentation/widgets/external_place_results_section.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/product/presentation/widgets/manual_product_registration_sheet.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/widgets/target_type_style.dart';
@@ -32,6 +33,9 @@ class TargetSearchSelectorWidget extends StatefulWidget {
 
   /// Com ele, o seletor oferece a busca em fonte externa (pelo backend) e a adoção do local encontrado.
   final PlaceDiscoveryRepository? placeDiscoveryRepository;
+
+  /// Habilita a opção "Perto de mim" da busca externa; a posição é lida uma vez, no toque de busca.
+  final LocationService? locationService;
   final int targetIndex;
   final bool enabled;
   final ValueChanged<SearchResultItem> onTargetSelected;
@@ -51,6 +55,7 @@ class TargetSearchSelectorWidget extends StatefulWidget {
     this.placeRepository,
     this.productRepository,
     this.placeDiscoveryRepository,
+    this.locationService,
     required this.targetIndex,
     this.enabled = true,
     required this.onTargetSelected,
@@ -887,6 +892,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             enabled: widget.enabled,
             onAdopted: _onExternalPlaceAdopted,
             onRegisterManually: _canRegisterPlace ? _openManualPlaceRegistration : null,
+            locationService: widget.locationService,
           ),
       ],
     );

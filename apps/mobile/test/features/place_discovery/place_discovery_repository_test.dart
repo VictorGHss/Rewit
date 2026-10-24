@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/features/place_discovery/data/repositories/place_discovery_repository_impl.dart';
+import 'package:rewit_mobile/features/place_discovery/domain/entities/discovery_region.dart';
 import 'package:rewit_mobile/features/place_discovery/domain/entities/external_place_candidate.dart';
 
 class _MockHttpBaseClient extends http.BaseClient {
@@ -58,8 +59,9 @@ void main() {
         'longitude': -50.1633,
         'types': ['commercial.food_and_drink.bakery'],
         'attributions': [
-          {'text': 'Powered by Geoapify', 'url': 'https://www.geoapify.com/'},
-          {'text': '© OpenStreetMap contributors', 'url': 'https://www.openstreetmap.org/copyright'},
+          // Formato real de PlaceAttributionResponse no backend
+          {'provider': 'Powered by Geoapify', 'providerUri': 'https://www.geoapify.com/'},
+          {'provider': '© OpenStreetMap contributors', 'providerUri': 'https://www.openstreetmap.org/copyright'},
         ],
         'city': 'Ponta Grossa',
         'state': 'PR',
@@ -76,6 +78,7 @@ void main() {
     expect(uri.queryParameters['query'], 'padaria em Ponta Grossa');
     expect(uri.queryParameters['limit'], '10');
     expect(uri.queryParameters.containsKey('latitude'), isFalse);
+    expect(uri.queryParameters.containsKey('city'), isFalse, reason: 'sem região a busca não é restrita');
     // Nenhuma credencial de provedor sai do app: só a API Rewit é chamada
     expect(uri.host, 'api.rewit.test');
     expect(uri.queryParameters.keys, isNot(contains('apiKey')));
@@ -89,18 +92,67 @@ void main() {
     expect(first.country, 'BR');
     expect(first.types, ['commercial.food_and_drink.bakery']);
     expect(first.attributions.map((a) => a.text), ['Powered by Geoapify', '© OpenStreetMap contributors']);
+    expect(first.attributions.first.url, 'https://www.geoapify.com/');
     expect(first.isAdoptable, isTrue);
     expect(first.providerLabel, 'Geoapify / OpenStreetMap');
     expect(results[1].isAdoptable, isFalse, reason: 'sem endereço, cidade e coordenadas não é adotável');
   });
 
-  test('search envia localização e raio só quando ambas as coordenadas existem', () async {
-    await repository.search(query: 'cafe', latitude: -25.09, longitude: -50.16, radiusMeters: 3000, limit: 5);
+  test('região por cidade envia cidade e UF, sem coordenadas', () async {
+    await repository.search(query: 'padaria', region: const CityRegion(city: ' Ponta Grossa ', state: 'pr'), limit: 5);
+    final params = mock.requests.single.url.queryParameters;
+    expect(params['city'], 'Ponta Grossa');
+    expect(params['state'], 'PR');
+    expect(params['limit'], '5');
+    expect(params.containsKey('latitude'), isFalse, reason: 'a cidade escolhida não é trocada pelo GPS');
+  });
+
+  test('região "perto de mim" envia coordenadas e raio, sem cidade', () async {
+    await repository.search(
+      query: 'cafe',
+      region: const NearbyRegion(latitude: -25.09, longitude: -50.16, radiusMeters: 3000),
+    );
     final params = mock.requests.single.url.queryParameters;
     expect(params['latitude'], '-25.09');
     expect(params['longitude'], '-50.16');
     expect(params['radius'], '3000.0');
-    expect(params['limit'], '5');
+    expect(params.containsKey('city'), isFalse);
+  });
+
+  group('adoção bloqueada para endereço inconsistente', () {
+    ExternalPlaceCandidate candidate({String? state = 'PR', String? country = 'BR', double? lat = -25.09, double? lng = -50.16, String? city = 'Ponta Grossa'}) =>
+        ExternalPlaceCandidate(
+          provider: 'GEOAPIFY',
+          externalId: 'x',
+          displayName: 'Padaria',
+          formattedAddress: 'Rua X, 1',
+          latitude: lat,
+          longitude: lng,
+          city: city,
+          state: state,
+          country: country,
+        );
+
+    test('candidato brasileiro com UF oficial e coordenadas válidas é adotável', () {
+      expect(candidate().isAdoptable, isTrue);
+      expect(candidate(state: 'pr').isAdoptable, isTrue);
+    });
+
+    test('região, UF nula, sigla desconhecida, cidade ausente e coordenadas inválidas bloqueiam', () {
+      expect(candidate(state: 'Sul').adoptionBlockReason, 'UF inválida');
+      expect(candidate(state: 'XX').adoptionBlockReason, 'UF inválida');
+      expect(candidate(state: null).adoptionBlockReason, 'estado (UF) não informado');
+      expect(candidate(city: null).adoptionBlockReason, 'endereço incompleto');
+      expect(candidate(lat: 91).adoptionBlockReason, 'coordenadas inválidas');
+      expect(candidate(lng: -181).adoptionBlockReason, 'coordenadas inválidas');
+      expect(candidate(lat: double.nan).adoptionBlockReason, 'coordenadas inválidas');
+      expect(candidate(lat: null).adoptionBlockReason, 'coordenadas inválidas');
+      expect(candidate(state: 'Sul', country: null).isAdoptable, isFalse, reason: 'sem país vale a regra brasileira');
+    });
+
+    test('fora do Brasil a regra de UF não se aplica', () {
+      expect(candidate(state: 'CA', country: 'US').isAdoptable, isTrue);
+    });
   });
 
   test('search sem provedor configurado propaga o ProblemDetail 503 com o código do backend', () async {

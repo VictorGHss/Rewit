@@ -9,6 +9,7 @@ import 'package:rewit_mobile/features/search/domain/repositories/search_reposito
 import 'package:rewit_mobile/features/search/presentation/widgets/target_type_style.dart';
 import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import '../../domain/entities/review_creation_input.dart';
 import 'rating_bar_widget.dart';
 import 'target_search_selector_widget.dart';
@@ -27,6 +28,9 @@ class TargetItemInputWidget extends StatefulWidget {
 
   /// Habilita a busca em fonte externa e a adoção de local a partir da busca de alvos.
   final PlaceDiscoveryRepository? placeDiscoveryRepository;
+
+  /// Localização sob demanda para a opção "Perto de mim" da busca externa.
+  final LocationService? locationService;
   final ValueChanged<String> onTargetIdChanged;
   final ValueChanged<double> onRatingChanged;
   final ValueChanged<String> onSpecificCommentChanged;
@@ -51,6 +55,7 @@ class TargetItemInputWidget extends StatefulWidget {
     this.placeRepository,
     this.productRepository,
     this.placeDiscoveryRepository,
+    this.locationService,
     required this.onTargetIdChanged,
     required this.onRatingChanged,
     required this.onSpecificCommentChanged,
@@ -167,6 +172,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                 placeRepository: widget.placeRepository,
                 productRepository: widget.productRepository,
                 placeDiscoveryRepository: widget.placeDiscoveryRepository,
+                locationService: widget.locationService,
                 targetIndex: widget.index,
                 enabled: widget.enabled,
                 isTargetSelectedElsewhere: widget.isTargetSelectedElsewhere,

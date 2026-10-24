@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.rewit.application.port.PlaceDiscoveryPort;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.model.BrazilianState;
 import com.rewit.domain.model.PlaceAttribution;
 import com.rewit.domain.model.PlaceCandidate;
 import com.rewit.infrastructure.integration.PlaceDiscoveryProperties;
@@ -19,15 +20,21 @@ import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.util.UriBuilder;
 
 import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Adapter de descoberta de locais pelo Geoapify (dados do OpenStreetMap), ativo com
@@ -37,6 +44,14 @@ import java.util.Optional;
  * Places API exige categorias. Só estabelecimentos com nome viram candidatos: endereço, rua ou cidade geocodificados
  * não são estabelecimentos. Detalhes: Place Details API ({@code /v2/place-details}). Nada é inventado: sem nota,
  * horários ou avaliações, que a fonte não fornece.
+ *
+ * <p>Região: com cidade e UF, a cidade é resolvida uma vez ({@code type=city}, {@code filter=countrycode:br}, cache em
+ * memória) e a busca usa {@code filter=place:<id da cidade>}, que exclui resultados de fora da fronteira. Com
+ * coordenadas, {@code filter=circle} (raio padrão de 10 km, teto de 50 km). Sem região, a busca não é restrita.
+ *
+ * <p>UF: para locais do Brasil ({@code country_code=br}) vale só uma das 27 siglas oficiais, vinda de
+ * {@code state_code} ou do nome oficial do estado; regiões como "Sul" ficam nulas. Fora do Brasil, o código ou o nome
+ * informado pelo provedor, sem regras de UF; sem país, o estado fica nulo.
  *
  * <p>A chave vai na query string ({@code apiKey}), o único meio que o Geoapify aceita. Por isso nenhum log registra
  * URL ou mensagem de exceção (só o tipo e o status), e este cliente não usa o {@code RestClient.Builder} do Spring:
@@ -52,7 +67,10 @@ public class GeoapifyPlacesAdapter implements PlaceDiscoveryPort {
     public static final String SEARCH_PATH = "/v1/geocode/search";
     public static final String DETAILS_PATH = "/v2/place-details";
     public static final String RESULT_TYPE_AMENITY = "amenity";
+    public static final String RESULT_TYPE_CITY = "city";
     public static final double MAX_RADIUS_METERS = 50_000.0;
+    public static final double DEFAULT_RADIUS_METERS = 10_000.0;
+    static final int CITY_CACHE_SIZE = 256;
 
     /** Atribuições exigidas pelos termos do Geoapify e pela licença ODbL do OpenStreetMap. */
     public static final PlaceAttribution GEOAPIFY_ATTRIBUTION =
@@ -62,6 +80,17 @@ public class GeoapifyPlacesAdapter implements PlaceDiscoveryPort {
 
     private final GeoapifyProperties properties;
     private final RestClient restClient;
+
+    /** Cidade já resolvida: evita gastar cota a cada busca na mesma cidade. Só ids e centro, nada do usuário. */
+    private final Map<String, ResolvedCity> cityCache = Collections.synchronizedMap(
+            new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, ResolvedCity> eldest) {
+                    return size() > CITY_CACHE_SIZE;
+                }
+            });
+
+    record ResolvedCity(String placeId, double latitude, double longitude) {}
 
     @Autowired
     public GeoapifyPlacesAdapter(GeoapifyProperties properties) {
@@ -99,46 +128,112 @@ public class GeoapifyPlacesAdapter implements PlaceDiscoveryPort {
             String languageCode
     ) {
         validateConfiguration();
-        int resolvedLimit = (limit != null && limit >= 1 && limit <= 20) ? limit : 10;
+        return search(query, limit, toIsoLanguage(languageCode), uriBuilder -> {
+            if (latitude != null && longitude != null) {
+                double radius = radiusMeters != null && radiusMeters > 0
+                        ? Math.min(radiusMeters, MAX_RADIUS_METERS) : DEFAULT_RADIUS_METERS;
+                uriBuilder.queryParam("bias", "proximity:" + longitude + "," + latitude)
+                        .queryParam("filter", "circle:" + longitude + "," + latitude + "," + radius);
+            }
+        });
+    }
+
+    @Override
+    public List<PlaceCandidate> searchByTextInCity(
+            String query,
+            String city,
+            BrazilianState state,
+            Integer limit,
+            String languageCode
+    ) {
+        validateConfiguration();
         String lang = toIsoLanguage(languageCode);
+        ResolvedCity resolved = resolveCity(city, state, lang);
+        return search(query, limit, lang, uriBuilder -> uriBuilder
+                .queryParam("filter", "place:" + resolved.placeId())
+                .queryParam("bias", "proximity:" + resolved.longitude() + "," + resolved.latitude()));
+    }
+
+    private List<PlaceCandidate> search(String query, Integer limit, String lang, Consumer<UriBuilder> region) {
+        int resolvedLimit = (limit != null && limit >= 1 && limit <= 20) ? limit : 10;
+        GeoapifySearchResponse response = fetch(uriBuilder -> {
+            uriBuilder.path(SEARCH_PATH)
+                    .queryParam("text", query)
+                    .queryParam("type", RESULT_TYPE_AMENITY)
+                    .queryParam("format", "json")
+                    .queryParam("lang", lang)
+                    .queryParam("limit", resolvedLimit);
+            region.accept(uriBuilder);
+            return uriBuilder.queryParam("apiKey", properties.getApiKey()).build();
+        }, GeoapifySearchResponse.class, "busca");
+        if (response == null || response.results() == null || response.results().isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<PlaceCandidate> candidates = new ArrayList<>();
+        for (GeoapifyPlace place : response.results()) {
+            toCandidate(place).ifPresent(candidates::add);
+        }
+        return Collections.unmodifiableList(candidates);
+    }
+
+    /**
+     * Fronteira da cidade pedida. Só vale um resultado do tipo cidade, com o mesmo nome (sem diferenciar acentos) e a
+     * mesma UF: na dúvida a busca é recusada, nunca feita em outra cidade.
+     */
+    private ResolvedCity resolveCity(String city, BrazilianState state, String lang) {
+        String key = BrazilianState.fold(city) + "|" + state.name();
+        ResolvedCity cached = cityCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        GeoapifySearchResponse response = fetch(uriBuilder -> uriBuilder.path(SEARCH_PATH)
+                .queryParam("city", city)
+                .queryParam("state", state.getOfficialName())
+                .queryParam("country", "Brasil")
+                .queryParam("type", RESULT_TYPE_CITY)
+                .queryParam("filter", "countrycode:br")
+                .queryParam("format", "json")
+                .queryParam("lang", lang)
+                .queryParam("limit", 5)
+                .queryParam("apiKey", properties.getApiKey())
+                .build(), GeoapifySearchResponse.class, "resolução da cidade");
+        String wanted = BrazilianState.fold(city);
+        ResolvedCity resolved = response == null || response.results() == null ? null : response.results().stream()
+                .filter(Objects::nonNull)
+                .filter(p -> RESULT_TYPE_CITY.equalsIgnoreCase(p.resultType()))
+                .filter(p -> p.placeId() != null && !p.placeId().isBlank())
+                .filter(p -> isValidCoordinate(p.lat(), p.lon()))
+                .filter(p -> state.name().equals(stateFor(p.countryCode(), p.stateCode(), p.state())))
+                .filter(p -> (p.city() != null && BrazilianState.fold(p.city()).equals(wanted))
+                        || (p.name() != null && BrazilianState.fold(p.name()).equals(wanted)))
+                .findFirst()
+                .map(p -> new ResolvedCity(p.placeId(), p.lat(), p.lon()))
+                .orElse(null);
+        if (resolved == null) {
+            throw new BusinessException("Cidade não encontrada para a UF informada. Confira o nome e a UF.",
+                    HttpStatus.UNPROCESSABLE_CONTENT, "REGION_NOT_FOUND");
+        }
+        cityCache.put(key, resolved);
+        return resolved;
+    }
+
+    /** GET no Geoapify; 404 vira {@code null}. Falhas são traduzidas sem registrar URL nem mensagem (contêm a chave). */
+    private <T> T fetch(Function<UriBuilder, URI> uri, Class<T> type, String operation) {
         try {
-            GeoapifySearchResponse response = restClient.get()
-                    .uri(uriBuilder -> {
-                        uriBuilder.path(SEARCH_PATH)
-                                .queryParam("text", query)
-                                .queryParam("type", RESULT_TYPE_AMENITY)
-                                .queryParam("format", "json")
-                                .queryParam("lang", lang)
-                                .queryParam("limit", resolvedLimit);
-                        if (latitude != null && longitude != null) {
-                            uriBuilder.queryParam("bias", "proximity:" + longitude + "," + latitude);
-                            if (radiusMeters != null && radiusMeters > 0) {
-                                double radius = Math.min(radiusMeters, MAX_RADIUS_METERS);
-                                uriBuilder.queryParam("filter", "circle:" + longitude + "," + latitude + "," + radius);
-                            }
-                        }
-                        return uriBuilder.queryParam("apiKey", properties.getApiKey()).build();
-                    })
+            return restClient.get()
+                    .uri(uri)
                     .accept(MediaType.APPLICATION_JSON)
                     .retrieve()
-                    .body(GeoapifySearchResponse.class);
-            if (response == null || response.results() == null || response.results().isEmpty()) {
-                return Collections.emptyList();
-            }
-            List<PlaceCandidate> candidates = new ArrayList<>();
-            for (GeoapifyPlace place : response.results()) {
-                toCandidate(place).ifPresent(candidates::add);
-            }
-            return Collections.unmodifiableList(candidates);
+                    .body(type);
         } catch (ResourceAccessException ex) {
             throw resourceAccessFailure(ex);
         } catch (HttpStatusCodeException ex) {
             if (ex.getStatusCode().value() == 404) {
-                return Collections.emptyList();
+                return null;
             }
             throw httpFailure(ex);
         } catch (RestClientException ex) {
-            log.error("Resposta inesperada da busca do Geoapify (erro={})", ex.getClass().getSimpleName());
+            log.error("Resposta inesperada do Geoapify na {} (erro={})", operation, ex.getClass().getSimpleName());
             throw invalidResponse();
         }
     }
@@ -235,9 +330,7 @@ public class GeoapifyPlacesAdapter implements PlaceDiscoveryPort {
                     types,
                     attributionsOf(place.datasource()),
                     place.city(),
-                    // UF (ex.: "PR") quando o provedor informa; senão o nome do estado
-                    place.stateCode() != null && !place.stateCode().isBlank()
-                            ? place.stateCode().toUpperCase(Locale.ROOT) : place.state(),
+                    stateFor(place.countryCode(), place.stateCode(), place.state()),
                     place.countryCode()
             ));
         } catch (BusinessException invalid) {
@@ -245,6 +338,31 @@ public class GeoapifyPlacesAdapter implements PlaceDiscoveryPort {
             log.warn("Candidato do Geoapify descartado por dados inválidos (codigo={})", invalid.getErrorCode());
             return Optional.empty();
         }
+    }
+
+    /**
+     * Estado validado. Brasil: UF oficial por {@code state_code} ou pelo nome oficial; região ("Sul") ou sigla
+     * desconhecida → {@code null}. Outro país: código ou nome do provedor, sem regras de UF. Sem país → {@code null}.
+     */
+    static String stateFor(String countryCode, String stateCode, String stateName) {
+        if (countryCode == null || countryCode.isBlank()) {
+            return null;
+        }
+        if ("BR".equalsIgnoreCase(countryCode.trim())) {
+            return BrazilianState.fromCode(stateCode)
+                    .or(() -> BrazilianState.fromOfficialName(stateName))
+                    .map(Enum::name)
+                    .orElse(null);
+        }
+        if (stateCode != null && !stateCode.isBlank()) {
+            return stateCode.trim().toUpperCase(Locale.ROOT);
+        }
+        return stateName == null || stateName.isBlank() ? null : stateName.trim();
+    }
+
+    private static boolean isValidCoordinate(Double latitude, Double longitude) {
+        return latitude != null && longitude != null && Double.isFinite(latitude) && Double.isFinite(longitude)
+                && latitude >= -90.0 && latitude <= 90.0 && longitude >= -180.0 && longitude <= 180.0;
     }
 
     private static List<PlaceAttribution> attributionsOf(GeoapifyDatasource datasource) {

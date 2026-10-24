@@ -368,6 +368,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     placeRepository: widget.placeRepository,
                     productRepository: widget.productRepository,
                     placeDiscoveryRepository: widget.placeDiscoveryRepository,
+                    locationService: widget.locationService,
                     isTargetSelectedElsewhere: (targetId) =>
                         _notifier.isTargetAlreadySelected(targetId, excludeIndex: index),
                     onTargetSelected: (item) {

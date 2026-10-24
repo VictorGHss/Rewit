@@ -28,6 +28,7 @@ public class PlaceDiscoveryController {
     /**
      * Endpoint protegido de busca textual de candidatos externos.
      * GET /api/v1/places/discovery/search?query=...&latitude=...&longitude=...&radius=...&limit=...
+     * ou, restrita a uma cidade: ?query=...&city=...&state=UF&limit=...
      */
     @GetMapping("/search")
     public ResponseEntity<List<PlaceCandidateResponse>> searchCandidates(
@@ -38,7 +39,9 @@ public class PlaceDiscoveryController {
                 request.latitude(),
                 request.longitude(),
                 request.radius(),
-                request.limit()
+                request.limit(),
+                request.city(),
+                request.state()
         );
 
         List<PlaceCandidateResponse> responseList = candidates.stream()

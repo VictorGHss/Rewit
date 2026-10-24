@@ -74,10 +74,10 @@ public class PlaceCandidate {
         if (displayName == null || displayName.isBlank()) {
             throw new BusinessException("O nome de exibição do local é obrigatório", HttpStatus.BAD_REQUEST, "INVALID_DISPLAY_NAME");
         }
-        if (latitude != null && (latitude < -90.0 || latitude > 90.0)) {
+        if (latitude != null && (!Double.isFinite(latitude) || latitude < -90.0 || latitude > 90.0)) {
             throw new BusinessException("Latitude fora do elipsoide WGS 84 (-90 a 90)", HttpStatus.BAD_REQUEST, "INVALID_COORDINATES");
         }
-        if (longitude != null && (longitude < -180.0 || longitude > 180.0)) {
+        if (longitude != null && (!Double.isFinite(longitude) || longitude < -180.0 || longitude > 180.0)) {
             throw new BusinessException("Longitude fora do elipsoide WGS 84 (-180 a 180)", HttpStatus.BAD_REQUEST, "INVALID_COORDINATES");
         }
 

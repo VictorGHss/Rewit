@@ -4,12 +4,15 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.model.BrazilianState;
 import com.rewit.domain.model.PlaceAttribution;
 import com.rewit.domain.model.PlaceCandidate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -293,7 +296,7 @@ class GeoapifyPlacesAdapterTest {
         assertEquals("Padaria Estrela", found.get().getDisplayName());
         assertEquals(List.of("commercial", "commercial.food_and_drink.bakery"), found.get().getTypes());
         assertEquals("Ponta Grossa", found.get().getCity());
-        assertEquals("Paraná", found.get().getState(), "sem state_code, o nome do estado é usado");
+        assertNull(found.get().getState(), "sem país não há como validar a UF: o estado fica nulo");
         assertNull(found.get().getCountryCode(), "país ausente fica nulo, sem inventar valor");
         assertEquals(GeoapifyPlacesAdapter.OSM_ATTRIBUTION, found.get().getAttributions().get(1),
                 "sem datasource na resposta, a atribuição do OSM é mantida");
@@ -312,6 +315,165 @@ class GeoapifyPlacesAdapterTest {
         assertEquals("pt", GeoapifyPlacesAdapter.toIsoLanguage(null));
         assertEquals("en", GeoapifyPlacesAdapter.toIsoLanguage("EN"));
         assertEquals("pt", GeoapifyPlacesAdapter.toIsoLanguage("portuguese"));
+    }
+
+    @ParameterizedTest(name = "pais={0}, state_code={1}, state={2} -> {3}")
+    @CsvSource(nullValues = "NULL", value = {
+            "br, PR, Paraná, PR",
+            "BR, pr, NULL, PR",
+            "br, NULL, Paraná, PR",
+            "br, NULL, parana, PR",
+            "br, NULL, Sul, NULL",
+            "br, NULL, Sudeste, NULL",
+            "br, NULL, NULL, NULL",
+            "br, XX, Sul, NULL",
+            "br, XX, Paraná, PR",
+            "us, CA, California, CA",
+            "ar, NULL, Córdoba, Córdoba",
+            "NULL, PR, Paraná, NULL"
+    })
+    @DisplayName("UF: só as 27 siglas oficiais no Brasil; regiões e códigos desconhecidos ficam nulos; outros países sem regra de UF")
+    void stateMapping(String country, String stateCode, String stateName, String expected) {
+        assertEquals(expected, GeoapifyPlacesAdapter.stateFor(country, stateCode, stateName));
+    }
+
+    @Test
+    @DisplayName("Região \"Sul\" sem state_code: estado nulo, demais campos e atribuições preservados")
+    void regionNameIsNeverMappedToState() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andRespond(withSuccess("""
+                        {"results": [{
+                          "place_id": "51c39b-super-pao", "name": "Padaria Super Pão", "result_type": "amenity",
+                          "formatted": "Padaria Super Pão, Avenida Brasil, Cambará - Sul, 86390-000, Brasil",
+                          "lat": -23.043, "lon": -50.073, "city": "Cambará", "state": "Sul", "country_code": "br"
+                        }]}
+                        """, MediaType.APPLICATION_JSON));
+
+        PlaceCandidate c = adapter.searchByText("padaria", null, null, null, 5, "pt-BR").getFirst();
+
+        mockServer.verify();
+        assertNull(c.getState(), "\"Sul\" é região, não UF");
+        assertEquals("Padaria Super Pão", c.getDisplayName());
+        assertEquals("Cambará", c.getCity());
+        assertEquals("BR", c.getCountryCode());
+        assertEquals(-23.043, c.getLatitude());
+        assertEquals(List.of(GeoapifyPlacesAdapter.GEOAPIFY_ATTRIBUTION, GeoapifyPlacesAdapter.OSM_ATTRIBUTION),
+                c.getAttributions());
+    }
+
+    @Test
+    @DisplayName("Coordenadas sem raio aplicam filtro circular padrão de 10 km, não só viés")
+    void coordinatesWithoutRadiusUseDefaultCircleFilter() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("circle:-50.16,-25.09,10000.0", p.get("filter"));
+                    assertEquals("proximity:-50.16,-25.09", p.get("bias"));
+                })
+                .andRespond(withSuccess("{\"results\": []}", MediaType.APPLICATION_JSON));
+
+        adapter.searchByText("padaria", -25.09, -50.16, null, 5, "pt-BR");
+        mockServer.verify();
+    }
+
+    private static final String PONTA_GROSSA_CITY = """
+            {"results": [
+              {"place_id": "51-ponta-grossa-sc", "name": "Ponta Grossa", "city": "Ponta Grossa", "result_type": "city",
+               "lat": -27.0, "lon": -49.0, "state": "Santa Catarina", "state_code": "SC", "country_code": "br"},
+              {"place_id": "51-ponta-grossa-pr", "name": "Ponta Grossa", "city": "Ponta Grossa", "result_type": "city",
+               "lat": -25.0945, "lon": -50.1633, "state": "Paraná", "state_code": "PR", "country_code": "br"}
+            ]}
+            """;
+
+    @Test
+    @DisplayName("Cidade com UF: resolve a cidade uma vez e filtra a busca pela fronteira dela (filter=place)")
+    void citySearchFiltersByCityBoundaryAndCachesResolution() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("Ponta Grossa", p.get("city"));
+                    assertEquals("Paraná", p.get("state"));
+                    assertEquals("Brasil", p.get("country"));
+                    assertEquals("city", p.get("type"));
+                    assertEquals("countrycode:br", p.get("filter"));
+                    assertFalse(p.containsKey("text"), "a resolução da cidade é estruturada, sem texto livre");
+                })
+                .andRespond(withSuccess(PONTA_GROSSA_CITY, MediaType.APPLICATION_JSON));
+        for (int i = 0; i < 2; i++) {
+            mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                    .andExpect(request -> {
+                        Map<String, String> p = params(request);
+                        assertEquals("padaria", p.get("text"));
+                        assertEquals("amenity", p.get("type"));
+                        assertEquals("place:51-ponta-grossa-pr", p.get("filter"), "fronteira da cidade da UF pedida");
+                        assertEquals("proximity:-50.1633,-25.0945", p.get("bias"));
+                        assertEquals(KEY, p.get("apiKey"));
+                    })
+                    .andRespond(withSuccess("""
+                            {"results": [{"place_id": "51-raikoski", "name": "Padaria Junior Raikoski",
+                              "result_type": "amenity", "formatted": "Rua Conrado Schiffer, Ponta Grossa - PR",
+                              "lat": -25.108, "lon": -50.169, "city": "Ponta Grossa", "state": "Paraná",
+                              "state_code": "PR", "country_code": "br"}]}
+                            """, MediaType.APPLICATION_JSON));
+        }
+
+        List<PlaceCandidate> first = adapter.searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.PR, 5, "pt-BR");
+        // Mesma cidade com outra grafia: reaproveita a resolução, só a busca vai ao provedor
+        List<PlaceCandidate> second = adapter.searchByTextInCity("padaria", "PONTA GROSSA", BrazilianState.PR, 5, "pt-BR");
+
+        mockServer.verify();
+        assertEquals("Padaria Junior Raikoski", first.getFirst().getDisplayName());
+        assertEquals("PR", first.getFirst().getState());
+        assertEquals(1, second.size());
+    }
+
+    @Test
+    @DisplayName("Cidade não encontrada na UF: 422 REGION_NOT_FOUND sem buscar em outra cidade")
+    void cityNotFoundInStateIsRejectedWithoutSearching() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andRespond(withSuccess(PONTA_GROSSA_CITY, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andRespond(withSuccess("""
+                        {"results": [{"place_id": "51-ponta-pora", "name": "Ponta Porã", "city": "Ponta Porã",
+                          "result_type": "city", "lat": -22.5, "lon": -55.7, "state_code": "MS", "country_code": "br"},
+                          {"place_id": "51-bairro", "name": "Ponta Grossa", "result_type": "suburb",
+                          "lat": -22.5, "lon": -55.7, "state_code": "MS", "country_code": "br"}]}
+                        """, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertError(HttpStatus.UNPROCESSABLE_CONTENT, "REGION_NOT_FOUND",
+                () -> adapter.searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.RS, 5, "pt-BR"));
+        assertError(HttpStatus.UNPROCESSABLE_CONTENT, "REGION_NOT_FOUND",
+                () -> adapter.searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.MS, 5, "pt-BR"));
+        assertError(HttpStatus.UNPROCESSABLE_CONTENT, "REGION_NOT_FOUND",
+                () -> adapter.searchByTextInCity("padaria", "Cidade Inexistente", BrazilianState.PR, 5, "pt-BR"));
+        // Nenhuma busca de estabelecimento foi feita: só as três resoluções esperadas
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("Falha do provedor na resolução da cidade é mapeada como na busca, sem vazar a chave")
+    void cityResolutionFailuresAreControlled() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        Logger logger = (Logger) LoggerFactory.getLogger(GeoapifyPlacesAdapter.class);
+        logger.addAppender(appender);
+        try {
+            mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+            mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+
+            assertError(HttpStatus.SERVICE_UNAVAILABLE, "EXTERNAL_SERVICE_UNAVAILABLE",
+                    () -> adapter.searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.PR, 5, "pt-BR"));
+            BusinessException denied = assertThrows(BusinessException.class,
+                    () -> adapter.searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.PR, 5, "pt-BR"));
+            assertEquals("EXTERNAL_SERVICE_ERROR", denied.getErrorCode());
+            assertFalse(denied.getMessage().contains(KEY));
+            mockServer.verify();
+            assertTrue(appender.list.stream().map(ILoggingEvent::getFormattedMessage).noneMatch(m -> m.contains(KEY)));
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     private void search() {

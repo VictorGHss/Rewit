@@ -1,3 +1,5 @@
+import 'discovery_region.dart';
+
 /// Atribuição exigida pela fonte de um candidato externo (ex.: "Powered by Geoapify", "© OpenStreetMap contributors").
 class ExternalPlaceAttribution {
   final String text;
@@ -44,13 +46,28 @@ class ExternalPlaceCandidate {
     this.country,
   });
 
-  /// A adoção exige endereço, cidade, UF e coordenadas; sem eles o local precisa de cadastro manual.
-  bool get isAdoptable =>
-      formattedAddress.trim().isNotEmpty &&
-      (city?.trim().isNotEmpty ?? false) &&
-      (state?.trim().isNotEmpty ?? false) &&
-      latitude != null &&
-      longitude != null;
+  /// A adoção exige endereço, cidade, UF válida (no Brasil, uma das 27 siglas) e coordenadas válidas; sem isso o
+  /// local precisa de cadastro manual.
+  bool get isAdoptable => adoptionBlockReason == null;
+
+  /// Motivo pelo qual o candidato não pode ser adotado, ou `null` quando pode.
+  String? get adoptionBlockReason {
+    if (formattedAddress.trim().isEmpty || (city?.trim().isEmpty ?? true)) {
+      return 'endereço incompleto';
+    }
+    final uf = state?.trim();
+    if (uf == null || uf.isEmpty) return 'estado (UF) não informado';
+    if ((country == null || country!.toUpperCase() == 'BR') && !isBrazilianStateCode(uf)) {
+      return 'UF inválida';
+    }
+    if (!_isValidCoordinate(latitude, -90, 90) || !_isValidCoordinate(longitude, -180, 180)) {
+      return 'coordenadas inválidas';
+    }
+    return null;
+  }
+
+  static bool _isValidCoordinate(double? value, double min, double max) =>
+      value != null && value.isFinite && value >= min && value <= max;
 
   /// Nome legível da fonte, para identificar o resultado externo na interface.
   String get providerLabel => switch (provider.toUpperCase()) {

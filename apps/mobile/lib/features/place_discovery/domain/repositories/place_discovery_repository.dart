@@ -1,15 +1,15 @@
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
+import '../entities/discovery_region.dart';
 import '../entities/external_place_candidate.dart';
 
 /// Descoberta de locais em fonte externa pelo backend. A credencial do provedor fica só no servidor:
 /// o app conversa apenas com a API Rewit.
 abstract class PlaceDiscoveryRepository {
-  /// Busca candidatos externos (`GET /api/v1/places/discovery/search`). Nada é gravado no catálogo.
+  /// Busca candidatos externos (`GET /api/v1/places/discovery/search`) na [region] escolhida. Nada é gravado no
+  /// catálogo.
   Future<List<ExternalPlaceCandidate>> search({
     required String query,
-    double? latitude,
-    double? longitude,
-    double? radiusMeters,
+    DiscoveryRegion region = const UnrestrictedRegion(),
     int limit = 10,
   });
 

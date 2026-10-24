@@ -3,6 +3,7 @@ import 'package:rewit_mobile/core/network/api_endpoints.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/features/place/data/models/place_dtos.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
+import '../../domain/entities/discovery_region.dart';
 import '../../domain/entities/external_place_candidate.dart';
 import '../../domain/repositories/place_discovery_repository.dart';
 import '../models/place_discovery_dtos.dart';
@@ -16,9 +17,7 @@ class PlaceDiscoveryRepositoryImpl implements PlaceDiscoveryRepository {
   @override
   Future<List<ExternalPlaceCandidate>> search({
     required String query,
-    double? latitude,
-    double? longitude,
-    double? radiusMeters,
+    DiscoveryRegion region = const UnrestrictedRegion(),
     int limit = 10,
   }) async {
     final response = await httpClient.get(
@@ -26,9 +25,15 @@ class PlaceDiscoveryRepositoryImpl implements PlaceDiscoveryRepository {
       queryParameters: {
         'query': query,
         'limit': limit,
-        if (latitude != null && longitude != null) 'latitude': latitude,
-        if (latitude != null && longitude != null) 'longitude': longitude,
-        if (latitude != null && longitude != null && radiusMeters != null) 'radius': radiusMeters,
+        ...switch (region) {
+          CityRegion(:final city, :final state) => {'city': city.trim(), 'state': state.trim().toUpperCase()},
+          NearbyRegion(:final latitude, :final longitude, :final radiusMeters) => {
+              'latitude': latitude,
+              'longitude': longitude,
+              'radius': radiusMeters,
+            },
+          UnrestrictedRegion() => const <String, Object>{},
+        },
       },
     );
     final dynamic decoded = jsonDecode(response.body);

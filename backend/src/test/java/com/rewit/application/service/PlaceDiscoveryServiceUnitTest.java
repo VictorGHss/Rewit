@@ -2,6 +2,7 @@ package com.rewit.application.service;
 
 import com.rewit.application.port.PlaceDiscoveryPort;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.model.BrazilianState;
 import com.rewit.domain.model.PlaceCandidate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -211,6 +212,79 @@ class PlaceDiscoveryServiceUnitTest {
         assertEquals("INVALID_EXTERNAL_ID", exBlank.getErrorCode());
 
         verify(placeDiscoveryPort, never()).getDetails(any(), any());
+    }
+
+    @Test
+    @DisplayName("Cidade com UF válida busca restrita à cidade, com texto, cidade e limite normalizados")
+    void citySearchUsesCityRestrictedPort() {
+        when(placeDiscoveryPort.searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.PR, 10, "pt-BR"))
+                .thenReturn(List.of());
+
+        discoveryService.searchCandidates("  padaria ", null, null, null, null, "  Ponta   Grossa ", " pr ");
+
+        verify(placeDiscoveryPort).searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.PR, 10, "pt-BR");
+        verify(placeDiscoveryPort, never()).searchByText(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Região inválida responde 400 INVALID_REGION sem consultar o provedor")
+    void invalidRegionIsRejected() {
+        String[][] invalid = {
+                {"Ponta Grossa", null},     // cidade sem UF
+                {"Ponta Grossa", "Sul"},    // região não é UF
+                {"Ponta Grossa", "XX"},     // sigla inexistente
+                {null, "PR"},               // UF sem cidade
+                {"x".repeat(101), "PR"}     // cidade longa demais
+        };
+        for (String[] region : invalid) {
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> discoveryService.searchCandidates("padaria", null, null, null, 10, region[0], region[1]));
+            assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+            assertEquals("INVALID_REGION", ex.getErrorCode());
+        }
+        // Cidade escolhida não se mistura com a localização do aparelho
+        BusinessException mixed = assertThrows(BusinessException.class,
+                () -> discoveryService.searchCandidates("padaria", -25.0, -50.0, 3000.0, 10, "Ponta Grossa", "PR"));
+        assertEquals("INVALID_REGION", mixed.getErrorCode());
+        verify(placeDiscoveryPort, never()).searchByTextInCity(any(), any(), any(), any(), any());
+        verify(placeDiscoveryPort, never()).searchByText(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Coordenadas e raio não finitos (NaN, infinito) são rejeitados")
+    void nonFiniteCoordinatesAreRejected() {
+        assertEquals("INVALID_COORDINATES", assertThrows(BusinessException.class,
+                () -> discoveryService.searchCandidates("Bar", Double.NaN, -50.0, null, 10)).getErrorCode());
+        assertEquals("INVALID_COORDINATES", assertThrows(BusinessException.class,
+                () -> discoveryService.searchCandidates("Bar", -25.0, Double.POSITIVE_INFINITY, null, 10)).getErrorCode());
+        assertEquals("INVALID_RADIUS", assertThrows(BusinessException.class,
+                () -> discoveryService.searchCandidates("Bar", -25.0, -50.0, Double.NaN, 10)).getErrorCode());
+        verifyNoInteractions(placeDiscoveryPort);
+    }
+
+    @Test
+    @DisplayName("Provedor sem filtro por cidade (padrão da porta) responde REGION_FILTER_UNSUPPORTED, sem ignorar a cidade")
+    void portWithoutCityFilterRefusesExplicitly() {
+        PlaceDiscoveryPort withoutCityFilter = new PlaceDiscoveryPort() {
+            @Override
+            public String getProviderName() {
+                return "GOOGLE";
+            }
+
+            @Override
+            public List<PlaceCandidate> searchByText(String q, Double lat, Double lng, Double r, Integer l, String lang) {
+                throw new AssertionError("não deve cair na busca sem região");
+            }
+
+            @Override
+            public Optional<PlaceCandidate> getDetails(String id, String lang) {
+                return Optional.empty();
+            }
+        };
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> new PlaceDiscoveryService(withoutCityFilter)
+                .searchCandidates("padaria", null, null, null, 10, "Ponta Grossa", "PR"));
+        assertEquals("REGION_FILTER_UNSUPPORTED", ex.getErrorCode());
     }
 
     @Test
