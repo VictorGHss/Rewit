@@ -5,6 +5,7 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
@@ -24,6 +25,9 @@ class ReviewCreateScreen extends StatefulWidget {
   final MediaPickerService? mediaPickerService;
   final SearchRepository? searchRepository;
   final PlaceRepository? placeRepository;
+
+  /// Habilita o cadastro de produto inexistente na busca de alvos.
+  final ProductRepository? productRepository;
   final LocationService? locationService;
   final ReviewCreateNotifier? notifier;
   final ValueChanged<FeedReview>? onReviewCreated;
@@ -45,6 +49,7 @@ class ReviewCreateScreen extends StatefulWidget {
     this.mediaPickerService,
     this.searchRepository,
     this.placeRepository,
+    this.productRepository,
     this.locationService,
     this.notifier,
     this.onReviewCreated,
@@ -356,6 +361,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     enabled: !isSubmitting,
                     searchRepository: widget.searchRepository,
                     placeRepository: widget.placeRepository,
+                    productRepository: widget.productRepository,
                     isTargetSelectedElsewhere: (targetId) =>
                         _notifier.isTargetAlreadySelected(targetId, excludeIndex: index),
                     onTargetSelected: (item) {

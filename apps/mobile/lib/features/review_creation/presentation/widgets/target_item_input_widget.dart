@@ -6,6 +6,8 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
+import 'package:rewit_mobile/features/search/presentation/widgets/target_type_style.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import '../../domain/entities/review_creation_input.dart';
 import 'rating_bar_widget.dart';
 import 'target_search_selector_widget.dart';
@@ -18,6 +20,9 @@ class TargetItemInputWidget extends StatefulWidget {
   final bool enabled;
   final SearchRepository? searchRepository;
   final PlaceRepository? placeRepository;
+
+  /// Habilita o cadastro de produto inexistente a partir da busca de alvos.
+  final ProductRepository? productRepository;
   final ValueChanged<String> onTargetIdChanged;
   final ValueChanged<double> onRatingChanged;
   final ValueChanged<String> onSpecificCommentChanged;
@@ -40,6 +45,7 @@ class TargetItemInputWidget extends StatefulWidget {
     this.enabled = true,
     this.searchRepository,
     this.placeRepository,
+    this.productRepository,
     required this.onTargetIdChanged,
     required this.onRatingChanged,
     required this.onSpecificCommentChanged,
@@ -154,6 +160,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
               TargetSearchSelectorWidget(
                 searchRepository: widget.searchRepository!,
                 placeRepository: widget.placeRepository,
+                productRepository: widget.productRepository,
                 targetIndex: widget.index,
                 enabled: widget.enabled,
                 isTargetSelectedElsewhere: widget.isTargetSelectedElsewhere,
@@ -220,26 +227,11 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
   }
 
   Widget _buildSelectedTargetCard(BuildContext context, ThemeData theme) {
-    final isPlace = widget.target.targetType?.toUpperCase() == 'PLACE';
-    final isProduct = widget.target.targetType?.toUpperCase() == 'PRODUCT';
-
-    final Color badgeColor = isPlace
-        ? theme.colorScheme.primary
-        : isProduct
-            ? Colors.teal
-            : theme.colorScheme.secondary;
-
-    final IconData typeIcon = isPlace
-        ? Icons.storefront_rounded
-        : isProduct
-            ? Icons.inventory_2_outlined
-            : Icons.category_outlined;
-
-    final String typeLabel = isPlace
-        ? 'Local'
-        : isProduct
-            ? 'Produto'
-            : (widget.target.targetType ?? 'Alvo');
+    final type = TargetType.fromString(widget.target.targetType);
+    final style = TargetTypeStyle.of(type, theme.colorScheme);
+    final Color badgeColor = style.color;
+    final IconData typeIcon = style.icon;
+    final String typeLabel = type == TargetType.unknown ? (widget.target.targetType ?? 'Alvo') : style.label;
 
     return Container(
       padding: const EdgeInsets.all(12),

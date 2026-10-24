@@ -12,6 +12,7 @@ import 'package:rewit_mobile/features/notifications/presentation/state/notificat
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
@@ -32,6 +33,7 @@ class HomeScreen extends StatefulWidget {
   final LocationService? locationService;
   final SearchRepository? searchRepository;
   final PlaceRepository? placeRepository;
+  final ProductRepository? productRepository;
   final UserProfileRepository? userProfileRepository;
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
@@ -52,6 +54,7 @@ class HomeScreen extends StatefulWidget {
     this.locationService,
     this.searchRepository,
     this.placeRepository,
+    this.productRepository,
     this.userProfileRepository,
     this.notificationRepository,
     this.notificationsNotifier,
@@ -392,6 +395,7 @@ class _HomeScreenState extends State<HomeScreen> {
             locationService: widget.locationService,
             searchRepository: widget.searchRepository,
             placeRepository: widget.placeRepository,
+            productRepository: widget.productRepository,
             authNotifier: widget.authNotifier,
             pendingRegistrationStore: widget.pendingRegistrationStore,
             onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
@@ -418,30 +422,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            // Dois controles de cada lado mantêm o título de fato centralizado em qualquer largura
+            // O perfil fica no cartão do usuário e na aba inferior; o AppBar mantém só o scanner à esquerda
             centerTitle: true,
             title: Semantics(
               header: true,
               child: const Text('Rewit'),
             ),
-            leadingWidth: 96,
-            leading: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  key: const Key('home_open_profile_button'),
-                  icon: const Icon(Icons.account_circle_outlined),
-                  tooltip: 'Meu perfil',
-                  onPressed: _openMyProfile,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.qr_code_scanner),
-                  tooltip: 'Escanear Código',
-                  onPressed: () {
-                    Navigator.of(context).pushNamed(AppRouter.scanner);
-                  },
-                ),
-              ],
+            leading: IconButton(
+              key: const Key('home_scanner_button'),
+              icon: const Icon(Icons.qr_code_scanner),
+              tooltip: 'Escanear Código',
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRouter.scanner);
+              },
             ),
             actions: [
               if (_notificationsNotifier != null)

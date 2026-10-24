@@ -17,6 +17,7 @@ import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
@@ -269,6 +270,9 @@ class MockPlaceRepo implements PlaceRepository {
 }
 
 class MockProductRepo implements ProductRepository {
+  @override
+  Future<ProductDetail> createProduct(CreateProductInput input) async => throw UnimplementedError();
+
   @override
   Future<ProductDetail> getProductById(String id) async => const ProductDetail(
         id: 'prod-milkshake',

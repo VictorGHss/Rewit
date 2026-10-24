@@ -103,17 +103,43 @@ void main() {
       expect(find.byType(HomeScreen), findsOneWidget);
     });
 
-    testWidgets('botão "Meu perfil" do AppBar abre a aba Perfil sem afetar os demais controles', (tester) async {
+    testWidgets('AppBar não tem atalho redundante de perfil; scanner à esquerda e menu à direita', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      expect(find.byTooltip('Escanear Código'), findsOneWidget);
-      expect(find.byTooltip('Mais opções'), findsOneWidget);
+      final appBar = find.byType(AppBar);
+      expect(find.descendant(of: appBar, matching: find.byTooltip('Meu perfil')), findsNothing);
+      expect(find.descendant(of: appBar, matching: find.byIcon(Icons.account_circle_outlined)), findsNothing);
+      expect(find.byKey(const Key('home_open_profile_button')), findsNothing);
 
-      await tester.tap(find.byTooltip('Meu perfil'));
+      final scanner = find.descendant(of: appBar, matching: find.byTooltip('Escanear Código'));
+      expect(scanner, findsOneWidget);
+      expect(tester.getCenter(scanner).dx, lessThan(360 / 2));
+      final more = find.descendant(of: appBar, matching: find.byTooltip('Mais opções'));
+      expect(more, findsOneWidget);
+      expect(tester.getCenter(more).dx, greaterThan(360 / 2));
+    });
+
+    testWidgets('a aba Perfil da navegação inferior abre o próprio perfil', (tester) async {
+      _setScreen(tester, 360);
+      await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Perfil')));
       await tester.pumpAndSettle();
       expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 3);
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 3);
+    });
+
+    testWidgets('scanner do AppBar continua abrindo a rota do scanner', (tester) async {
+      _setScreen(tester, 360);
+      await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('home_scanner_button')));
+      await tester.pumpAndSettle();
+      expect(find.text('rota ${AppRouter.scanner}'), findsOneWidget);
     });
 
     testWidgets('menu "Mais opções" leva às configurações da conta', (tester) async {

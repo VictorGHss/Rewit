@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../domain/entities/search_entities.dart';
+import 'target_type_style.dart';
 
 /// Card de exibição visual de um resultado do catálogo na Busca Global.
 ///
@@ -18,20 +19,9 @@ class SearchResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isPlace = item.isPlace;
-    final isProduct = item.isProduct;
-
-    final IconData typeIcon = isPlace
-        ? Icons.storefront_rounded
-        : isProduct
-            ? Icons.inventory_2_outlined
-            : Icons.category_outlined;
-
-    final Color badgeColor = isPlace
-        ? theme.colorScheme.primary
-        : isProduct
-            ? Colors.teal
-            : theme.colorScheme.secondary;
+    final style = TargetTypeStyle.of(item.targetType, theme.colorScheme);
+    final IconData typeIcon = style.icon;
+    final Color badgeColor = style.color;
 
     return Card(
       elevation: 0.5,

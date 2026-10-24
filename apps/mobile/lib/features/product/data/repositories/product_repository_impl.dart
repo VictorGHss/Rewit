@@ -5,6 +5,7 @@ import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/features/place/data/models/place_dtos.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
+import '../../domain/entities/create_product_input.dart';
 import '../../domain/entities/product_detail.dart';
 import '../../domain/entities/product_identifier.dart';
 import '../../domain/entities/products_in_place_page.dart';
@@ -25,6 +26,24 @@ class ProductRepositoryImpl implements ProductRepository {
       throw const FormatException('Resposta inválida do servidor ao obter detalhes do produto.');
     }
     return ProductDto.fromJson(decoded).toEntity();
+  }
+
+  static final RegExp _uuidRegex = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
+
+  @override
+  Future<ProductDetail> createProduct(CreateProductInput input) async {
+    final response = await httpClient.post(ApiEndpoints.products, body: input.toJson());
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Resposta inválida do servidor ao cadastrar produto.');
+    }
+    final entity = ProductDto.fromJson(decoded).toEntity();
+    if (!_uuidRegex.hasMatch(entity.id)) {
+      throw const FormatException('O servidor retornou um identificador de produto inválido.');
+    }
+    return entity;
   }
 
   @override

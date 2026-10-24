@@ -25,6 +25,7 @@ import 'package:rewit_mobile/features/place/presentation/screens/place_opening_h
 import 'package:rewit_mobile/features/place/presentation/widgets/place_amenities_section.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/place_commercial_offers_section.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/place_opening_hours_section.dart';
+import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
@@ -430,6 +431,9 @@ class _E2ESearchRepository implements SearchRepository {
 }
 
 class _E2EProductRepository implements ProductRepository {
+  @override
+  Future<ProductDetail> createProduct(CreateProductInput input) async => throw UnimplementedError();
+
   @override
   Future<ProductsInPlacePage> getProductsInPlace(String placeId, {int page = 0, int size = 20}) async {
     return const ProductsInPlacePage(

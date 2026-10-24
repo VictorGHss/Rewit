@@ -7,6 +7,7 @@ import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/product/data/models/product_dtos.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
+import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 
 class _MockHttpBaseClient extends http.BaseClient {
   http.Request? capturedRequest;
@@ -171,6 +172,69 @@ void main() {
         () => repository.getProductById('prod-nao-existe'),
         throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404)),
       );
+    });
+
+    test('createProduct faz POST /api/v1/products com campos aparados e devolve o produto criado', () async {
+      mockBaseClient.responseToReturn = http.Response(
+        jsonEncode({
+          'id': '33333333-3333-4333-8333-333333333333',
+          'name': 'Granola da Casa',
+          'brand': 'Sítio Bom',
+          'category': 'Cereais',
+          'status': 'ACTIVE',
+        }),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      final product = await repository.createProduct(const CreateProductInput(
+        name: '  Granola da Casa ',
+        brand: ' Sítio Bom ',
+        model: '   ',
+        category: 'Cereais',
+      ));
+
+      expect(mockBaseClient.capturedRequest?.method, 'POST');
+      expect(mockBaseClient.capturedRequest?.url.path, '/api/v1/products');
+      expect(jsonDecode(mockBaseClient.capturedRequest!.body), {
+        'name': 'Granola da Casa',
+        'brand': 'Sítio Bom',
+        'category': 'Cereais',
+      });
+      expect(product.id, '33333333-3333-4333-8333-333333333333');
+      expect(product.name, 'Granola da Casa');
+    });
+
+    test('createProduct propaga ApiException com os fieldErrors do backend', () async {
+      mockBaseClient.responseToReturn = http.Response(
+        jsonEncode({
+          'type': 'about:blank',
+          'title': 'Erro de validação',
+          'status': 400,
+          'detail': 'Parâmetros da requisição inválidos',
+          'code': 'VALIDATION_ERROR',
+          'fieldErrors': {'name': 'O nome do produto é obrigatório'},
+        }),
+        400,
+        headers: {'content-type': 'application/problem+json'},
+      );
+
+      expect(
+        () => repository.createProduct(const CreateProductInput(name: 'x')),
+        throwsA(isA<ApiException>()
+            .having((e) => e.statusCode, 'statusCode', 400)
+            .having((e) => e.allFieldErrors['name'], 'fieldErrors.name', 'O nome do produto é obrigatório')),
+      );
+    });
+
+    test('createProduct recusa resposta com identificador que não é UUID', () async {
+      mockBaseClient.responseToReturn = http.Response(
+        jsonEncode({'id': 'nao-e-uuid', 'name': 'Produto', 'status': 'ACTIVE'}),
+        201,
+        headers: {'content-type': 'application/json'},
+      );
+
+      expect(() => repository.createProduct(const CreateProductInput(name: 'Produto')), throwsFormatException);
     });
 
     test('getProductIdentifiers requisita /identifiers e filtra tipos públicos', () async {

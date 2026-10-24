@@ -9,8 +9,14 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
+import 'package:rewit_mobile/features/product/presentation/widgets/manual_product_registration_sheet.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
+import 'package:rewit_mobile/features/search/presentation/widgets/target_type_style.dart';
+
+/// Tipo de alvo que o usuário quer avaliar; filtra os resultados da busca unificada no próprio app.
+enum TargetKindFilter { all, place, product }
 
 /// Seletor de busca textual interativo de alvos (Search V1) com debounce,
 /// cache de sessão em memória, proteção contra respostas fora de ordem
@@ -18,6 +24,9 @@ import 'package:rewit_mobile/features/search/domain/repositories/search_reposito
 class TargetSearchSelectorWidget extends StatefulWidget {
   final SearchRepository searchRepository;
   final PlaceRepository? placeRepository;
+
+  /// Com ele, o seletor oferece o cadastro de um produto inexistente, que já volta selecionado.
+  final ProductRepository? productRepository;
   final int targetIndex;
   final bool enabled;
   final ValueChanged<SearchResultItem> onTargetSelected;
@@ -35,6 +44,7 @@ class TargetSearchSelectorWidget extends StatefulWidget {
     super.key,
     required this.searchRepository,
     this.placeRepository,
+    this.productRepository,
     required this.targetIndex,
     this.enabled = true,
     required this.onTargetSelected,
@@ -62,6 +72,25 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   int? _retryAfterSeconds;
   List<SearchResultItem>? _results;
   bool _showManualInput = false;
+  TargetKindFilter _kindFilter = TargetKindFilter.all;
+  bool _isOpeningProductRegistration = false;
+
+  /// Resultados do tipo escolhido; a busca é a mesma, só a exibição muda.
+  List<SearchResultItem>? get _visibleResults {
+    final results = _results;
+    if (results == null) return null;
+    switch (_kindFilter) {
+      case TargetKindFilter.all:
+        return results;
+      case TargetKindFilter.place:
+        return results.where((item) => item.isPlace).toList();
+      case TargetKindFilter.product:
+        return results.where((item) => item.isProduct).toList();
+    }
+  }
+
+  bool get _canRegisterPlace => widget.placeRepository != null && _kindFilter != TargetKindFilter.product;
+  bool get _canRegisterProduct => widget.productRepository != null && _kindFilter != TargetKindFilter.place;
 
   // Cache em memória durante a sessão da tela para evitar requisições idênticas
   final Map<String, List<SearchResultItem>> _queryCache = {};
@@ -257,6 +286,41 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     if (postWaitUid != currentUid) return;
 
     await _handleRegistrationResult(result, currentUid);
+  }
+
+  /// Cadastra um produto inexistente e o seleciona como alvo; nota, comentários, demais alvos e mídia ficam no
+  /// formulário da avaliação, que este seletor não toca.
+  Future<void> _openManualProductRegistration() async {
+    if (!widget.enabled || widget.productRepository == null || _isOpeningProductRegistration) return;
+    _isOpeningProductRegistration = true;
+    try {
+      final currentUid = _getCurrentUserId();
+      final created = await ManualProductRegistrationSheet.show(
+        context,
+        productRepository: widget.productRepository!,
+        initialName: _searchController.text.trim(),
+      );
+      if (!mounted || created == null) return;
+      // Sessão trocada durante o cadastro: o produto existe no catálogo, mas não vira alvo da outra conta
+      if (_getCurrentUserId() != currentUid) return;
+
+      final createdItem = SearchResultItem(
+        id: created.id,
+        name: created.name,
+        category: created.category.isEmpty ? null : created.category,
+        targetType: TargetType.product,
+        rawTargetType: 'PRODUCT',
+        status: created.status,
+      );
+      final normalizedQuery = _searchController.text.trim().toLowerCase();
+      if (normalizedQuery.isNotEmpty) {
+        final existing = _queryCache[normalizedQuery] ?? const [];
+        _queryCache[normalizedQuery] = [createdItem, ...existing.where((e) => e.id != createdItem.id)];
+      }
+      widget.onTargetSelected(createdItem);
+    } finally {
+      _isOpeningProductRegistration = false;
+    }
   }
 
   Future<void> _resumePendingRegistration() async {
@@ -485,6 +549,30 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           ),
           onChanged: _onSearchQueryChanged,
         ),
+        const SizedBox(height: 8),
+
+        // Tipo do alvo: a mesma busca, filtrada para locais ou produtos
+        SegmentedButton<TargetKindFilter>(
+          key: const Key('target_kind_filter'),
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: TargetKindFilter.all, label: Text('Todos')),
+            ButtonSegment(
+              value: TargetKindFilter.place,
+              icon: Icon(Icons.storefront_rounded, size: 16),
+              label: Text('Locais'),
+            ),
+            ButtonSegment(
+              value: TargetKindFilter.product,
+              icon: Icon(Icons.inventory_2_outlined, size: 16),
+              label: Text('Produtos'),
+            ),
+          ],
+          selected: {_kindFilter},
+          onSelectionChanged: widget.enabled
+              ? (selection) => setState(() => _kindFilter = selection.first)
+              : null,
+        ),
         const SizedBox(height: 4),
 
         // Atalho opcional para inserção direta de UUID
@@ -626,11 +714,11 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           ),
         ],
 
-        // Nenhum resultado encontrado
+        // Nenhum resultado encontrado (para o tipo escolhido)
         if (!_isLoading &&
             _errorMessage == null &&
-            _results != null &&
-            _results!.isEmpty) ...[
+            _visibleResults != null &&
+            _visibleResults!.isEmpty) ...[
           Container(
             margin: const EdgeInsets.only(top: 8),
             padding: const EdgeInsets.all(14),
@@ -654,7 +742,11 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Nenhum resultado para "${_searchController.text.trim()}".',
+                            switch (_kindFilter) {
+                              TargetKindFilter.all => 'Nenhum resultado para "${_searchController.text.trim()}".',
+                              TargetKindFilter.place => 'Nenhum local para "${_searchController.text.trim()}".',
+                              TargetKindFilter.product => 'Nenhum produto para "${_searchController.text.trim()}".',
+                            },
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -673,7 +765,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     ),
                   ],
                 ),
-                if (widget.placeRepository != null) ...[
+                if (_canRegisterPlace) ...[
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(
                     key: const Key('register_manual_place_button'),
@@ -682,13 +774,22 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     label: const Text('Cadastrar local manualmente'),
                   ),
                 ],
+                if (_canRegisterProduct) ...[
+                  const SizedBox(height: 8),
+                  FilledButton.tonalIcon(
+                    key: const Key('register_manual_product_button'),
+                    onPressed: widget.enabled ? _openManualProductRegistration : null,
+                    icon: const Icon(Icons.add_box_outlined, size: 18),
+                    label: const Text('Cadastrar produto'),
+                  ),
+                ],
               ],
             ),
           ),
         ],
 
         // Lista de resultados encontrados
-        if (_results != null && _results!.isNotEmpty) ...[
+        if (_visibleResults != null && _visibleResults!.isNotEmpty) ...[
           Container(
             margin: const EdgeInsets.only(top: 8),
             constraints: const BoxConstraints(maxHeight: 280),
@@ -701,13 +802,13 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               child: ListView.separated(
                 shrinkWrap: true,
                 padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount: _results!.length,
+                itemCount: _visibleResults!.length,
                 separatorBuilder: (context, _) => Divider(
                   height: 1,
                   color: theme.colorScheme.outlineVariant.withAlpha(60),
                 ),
                 itemBuilder: (context, index) {
-                  final item = _results![index];
+                  final item = _visibleResults![index];
                   final isAlreadySelected =
                       widget.isTargetSelectedElsewhere?.call(item.id) ?? false;
 
@@ -721,7 +822,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               ),
             ),
           ),
-          if (widget.placeRepository != null) ...[
+          if (_canRegisterPlace) ...[
             const SizedBox(height: 6),
             Align(
               alignment: Alignment.centerRight,
@@ -736,6 +837,19 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               ),
             ),
           ],
+          if (_canRegisterProduct)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('register_manual_product_footer_button'),
+                onPressed: widget.enabled ? _openManualProductRegistration : null,
+                icon: const Icon(Icons.add_box_outlined, size: 16),
+                label: const Text(
+                  'Não encontrou o produto? Cadastrar',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
         ],
       ],
     );
@@ -747,21 +861,10 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     required SearchResultItem item,
     required bool isAlreadySelected,
   }) {
-    final isPlace = item.isPlace;
-    final isProduct = item.isProduct;
-
-    // Ícone e cores distintivas para Place vs Product
-    final IconData typeIcon = isPlace
-        ? Icons.storefront_rounded
-        : isProduct
-            ? Icons.inventory_2_outlined
-            : Icons.category_outlined;
-
-    final Color badgeColor = isPlace
-        ? theme.colorScheme.primary
-        : isProduct
-            ? Colors.teal
-            : theme.colorScheme.secondary;
+    // Ícone e cores distintivas por tipo de alvo
+    final style = TargetTypeStyle.of(item.targetType, theme.colorScheme);
+    final IconData typeIcon = style.icon;
+    final Color badgeColor = style.color;
 
     return ListTile(
       dense: true,

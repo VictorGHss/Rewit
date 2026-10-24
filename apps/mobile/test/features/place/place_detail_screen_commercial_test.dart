@@ -10,6 +10,7 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/state/place_commercial_notifier.dart';
 import 'package:rewit_mobile/features/place/presentation/state/place_detail_notifier.dart';
+import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
@@ -107,6 +108,9 @@ class _FakePlaceRepository implements PlaceRepository {
 }
 
 class _FakeProductRepository implements ProductRepository {
+  @override
+  Future<ProductDetail> createProduct(CreateProductInput input) async => throw UnimplementedError();
+
   @override
   Future<ProductsInPlacePage> getProductsInPlace(
     String placeId, {

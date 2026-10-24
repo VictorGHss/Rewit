@@ -115,9 +115,10 @@ class ReviewCard extends StatelessWidget {
     if (isPlace) {
       icon = Icons.place_outlined;
       labelText = 'Local • ${target.rating.toStringAsFixed(1)}';
-      chipBgColor = Colors.teal.shade50;
-      chipBorderColor = Colors.teal.shade200;
-      chipTextColor = Colors.teal.shade900;
+      // Azul da marca para Local; Produto segue em índigo, como na busca e na criação da avaliação
+      chipBgColor = Colors.blue.shade50;
+      chipBorderColor = Colors.blue.shade200;
+      chipTextColor = Colors.blue.shade900;
       tooltipMessage = 'Ver detalhes do local';
     } else if (isProduct) {
       icon = Icons.shopping_bag_outlined;

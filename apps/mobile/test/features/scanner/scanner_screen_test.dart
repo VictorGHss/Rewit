@@ -11,6 +11,7 @@ import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
+import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
@@ -20,6 +21,9 @@ import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_scree
 import 'package:rewit_mobile/features/scanner/presentation/state/scanner_notifier.dart';
 
 class _FakeProductRepository implements ProductRepository {
+  @override
+  Future<ProductDetail> createProduct(CreateProductInput input) async => throw UnimplementedError();
+
   ProductDetail? productToReturn;
   Exception? exceptionToThrow;
 

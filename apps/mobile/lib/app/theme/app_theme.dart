@@ -7,7 +7,10 @@ class AppTheme {
   // Paleta de Cores Primária e Neutros
   static const Color primaryColor = Color(0xFF1E3A8A); // Blue 900
   static const Color primaryVariant = Color(0xFF1D4ED8); // Blue 700
-  static const Color secondaryColor = Color(0xFF0D9488); // Teal 600
+  // Destaque secundário na mesma família azul da marca (antes Teal 600, que destoava da identidade)
+  static const Color secondaryColor = primaryVariant;
+  // Fundo dos estados selecionados (indicador da navegação, botões tonais, chips): azul claro com texto Blue 900
+  static const Color accentContainerColor = Color(0xFFDBEAFE); // Blue 100
   static const Color backgroundColor = Color(0xFFF8FAFC); // Slate 50
   static const Color surfaceColor = Colors.white;
   static const Color errorColor = Color(0xFFDC2626); // Red 600
@@ -19,6 +22,9 @@ class AppTheme {
     const colorScheme = ColorScheme.light(
       primary: primaryColor,
       secondary: secondaryColor,
+      // Sem secondaryContainer explícito o Material 3 cai no próprio secondary (era o indicador verde-água)
+      secondaryContainer: accentContainerColor,
+      onSecondaryContainer: primaryColor,
       surface: surfaceColor,
       error: errorColor,
       onPrimary: Colors.white,
@@ -31,6 +37,22 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: backgroundColor,
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: surfaceColor,
+        indicatorColor: accentContainerColor,
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            color: states.contains(WidgetState.selected) ? primaryColor : textSecondaryColor,
+          ),
+        ),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 12,
+            color: states.contains(WidgetState.selected) ? primaryColor : textSecondaryColor,
+            fontWeight: states.contains(WidgetState.selected) ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: surfaceColor,
         foregroundColor: textPrimaryColor,
