@@ -12,6 +12,7 @@ import 'package:rewit_mobile/features/notifications/presentation/state/notificat
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
+import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
@@ -34,6 +35,7 @@ class HomeScreen extends StatefulWidget {
   final SearchRepository? searchRepository;
   final PlaceRepository? placeRepository;
   final ProductRepository? productRepository;
+  final PlaceDiscoveryRepository? placeDiscoveryRepository;
   final UserProfileRepository? userProfileRepository;
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
@@ -55,6 +57,7 @@ class HomeScreen extends StatefulWidget {
     this.searchRepository,
     this.placeRepository,
     this.productRepository,
+    this.placeDiscoveryRepository,
     this.userProfileRepository,
     this.notificationRepository,
     this.notificationsNotifier,
@@ -396,6 +399,7 @@ class _HomeScreenState extends State<HomeScreen> {
             searchRepository: widget.searchRepository,
             placeRepository: widget.placeRepository,
             productRepository: widget.productRepository,
+            placeDiscoveryRepository: widget.placeDiscoveryRepository,
             authNotifier: widget.authNotifier,
             pendingRegistrationStore: widget.pendingRegistrationStore,
             onPickManualPlacePhoto: widget.onPickManualPlacePhoto,

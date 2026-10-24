@@ -21,6 +21,10 @@ public class PlaceCandidate {
     private final Double longitude;
     private final List<String> types;
     private final List<PlaceAttribution> attributions;
+    // Partes do endereço quando o provedor as informa (null caso contrário): permitem a adoção pelo fluxo oficial
+    private final String city;
+    private final String state;
+    private final String countryCode;
 
     public PlaceCandidate(
             String provider,
@@ -43,6 +47,23 @@ public class PlaceCandidate {
             Double longitude,
             List<String> types,
             List<PlaceAttribution> attributions
+    ) {
+        this(provider, externalId, displayName, formattedAddress, latitude, longitude, types, attributions,
+                null, null, null);
+    }
+
+    public PlaceCandidate(
+            String provider,
+            String externalId,
+            String displayName,
+            String formattedAddress,
+            Double latitude,
+            Double longitude,
+            List<String> types,
+            List<PlaceAttribution> attributions,
+            String city,
+            String state,
+            String countryCode
     ) {
         if (provider == null || provider.isBlank()) {
             throw new BusinessException("O provedor externo é obrigatório", HttpStatus.BAD_REQUEST, "INVALID_PROVIDER");
@@ -68,6 +89,13 @@ public class PlaceCandidate {
         this.longitude = longitude;
         this.types = types != null ? List.copyOf(types) : Collections.emptyList();
         this.attributions = attributions != null ? List.copyOf(attributions) : Collections.emptyList();
+        this.city = blankToNull(city);
+        this.state = blankToNull(state);
+        this.countryCode = blankToNull(countryCode) != null ? countryCode.trim().toUpperCase() : null;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     public String getProvider() {
@@ -100,5 +128,17 @@ public class PlaceCandidate {
 
     public List<PlaceAttribution> getAttributions() {
         return attributions;
+    }
+
+    public String getCity() {
+        return city;
+    }
+
+    public String getState() {
+        return state;
+    }
+
+    public String getCountryCode() {
+        return countryCode;
     }
 }

@@ -26,6 +26,9 @@ class ApiEndpoints {
   static String placeMediaPrimary(String placeId, String mediaId) =>
       '/api/v1/places/$placeId/media/$mediaId/primary';
   static String placeDetail(String id) => '/api/v1/places/$id';
+  // Descoberta externa e adoção no catálogo
+  static const String placeDiscoverySearch = '/api/v1/places/discovery/search';
+  static const String placeAdopt = '/api/v1/places/adopt';
   static String placeMedia(String id) => '/api/v1/places/$id/media';
   static String placeMediaItem(String placeId, String mediaId) =>
       '/api/v1/places/$placeId/media/$mediaId';

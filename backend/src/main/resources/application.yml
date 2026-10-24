@@ -161,3 +161,12 @@ rewit:
       base-url: ${GOOGLE_PLACES_BASE_URL:https://places.googleapis.com}
       connect-timeout-ms: ${GOOGLE_PLACES_CONNECT_TIMEOUT_MS:3000}
       read-timeout-ms: ${GOOGLE_PLACES_READ_TIMEOUT_MS:5000}
+  # Provedor único da descoberta externa de locais: GOOGLE (padrão) ou GEOAPIFY; sem fallback entre eles
+  place-discovery:
+    provider: ${PLACE_DISCOVERY_PROVIDER:GOOGLE}
+  # Geoapify (OpenStreetMap): a chave fica só no backend
+  geoapify:
+    api-key: ${GEOAPIFY_API_KEY:}
+    base-url: ${GEOAPIFY_BASE_URL:https://api.geoapify.com}
+    connect-timeout-ms: ${GEOAPIFY_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${GEOAPIFY_READ_TIMEOUT_MS:5000}

@@ -60,6 +60,8 @@ class PlaceDiscoveryControllerIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .apply(springSecurity())
                 .build();
+        // O mock substitui o adapter padrão (Google); detalhes só do provedor ativo
+        org.mockito.Mockito.when(placeDiscoveryPort.getProviderName()).thenReturn("GOOGLE");
     }
 
     private String registerAndGetToken() throws Exception {
@@ -84,7 +86,8 @@ class PlaceDiscoveryControllerIntegrationTest {
         String token = registerAndGetToken();
 
         PlaceCandidate candidate1 = new PlaceCandidate(
-                "GOOGLE", "ChIJ_mock_1", "Café do Ponto", "Rua XV de Novembro, 500", -25.0916, -50.1581, List.of("cafe", "food")
+                "GOOGLE", "ChIJ_mock_1", "Café do Ponto", "Rua XV de Novembro, 500", -25.0916, -50.1581, List.of("cafe", "food"),
+                List.of(), "Ponta Grossa", "PR", "br"
         );
         PlaceCandidate candidate2 = new PlaceCandidate(
                 "GOOGLE", "ChIJ_mock_2", "Livraria & Café", "Rua Balduíno Taques, 800", -25.0930, -50.1600, List.of("book_store", "cafe")
@@ -106,7 +109,12 @@ class PlaceDiscoveryControllerIntegrationTest {
                 .andExpect(jsonPath("$[0].latitude").value(-25.0916))
                 .andExpect(jsonPath("$[0].longitude").value(-50.1581))
                 .andExpect(jsonPath("$[0].types", hasItem("cafe")))
-                .andExpect(jsonPath("$[1].externalId").value("ChIJ_mock_2"));
+                // Partes do endereço são aditivas: presentes quando o provedor informa, null caso contrário
+                .andExpect(jsonPath("$[0].city").value("Ponta Grossa"))
+                .andExpect(jsonPath("$[0].state").value("PR"))
+                .andExpect(jsonPath("$[0].country").value("BR"))
+                .andExpect(jsonPath("$[1].externalId").value("ChIJ_mock_2"))
+                .andExpect(jsonPath("$[1].city").doesNotExist());
     }
 
     @Test

@@ -28,6 +28,7 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_business_profile_edit_screen.dart';
+import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/product/presentation/screens/product_detail_screen.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
@@ -86,6 +87,7 @@ class AppRouter {
   final PlaceRepository? placeRepository;
   final PlaceCommercialRepository? placeCommercialRepository;
   final ProductRepository? productRepository;
+  final PlaceDiscoveryRepository? placeDiscoveryRepository;
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
   final BusinessRepository? businessRepository;
@@ -111,6 +113,7 @@ class AppRouter {
     this.placeRepository,
     this.placeCommercialRepository,
     this.productRepository,
+    this.placeDiscoveryRepository,
     this.notificationRepository,
     this.notificationsNotifier,
     this.businessRepository,
@@ -143,6 +146,7 @@ class AppRouter {
                   searchRepository: searchRepository,
                   placeRepository: placeRepository,
                   productRepository: productRepository,
+                  placeDiscoveryRepository: placeDiscoveryRepository,
                   userProfileRepository: userProfileRepository,
                   notificationRepository: notificationRepository,
                   notificationsNotifier: notificationsNotifier,
@@ -174,6 +178,7 @@ class AppRouter {
             searchRepository: searchRepository,
             placeRepository: placeRepository,
             productRepository: productRepository,
+            placeDiscoveryRepository: placeDiscoveryRepository,
             userProfileRepository: userProfileRepository,
             notificationRepository: notificationRepository,
             notificationsNotifier: notificationsNotifier,
@@ -340,6 +345,7 @@ class AppRouter {
             searchRepository: searchRepository,
             placeRepository: placeRepository,
             productRepository: productRepository,
+            placeDiscoveryRepository: placeDiscoveryRepository,
             initialTargetId: initialTargetId,
             initialTargetName: initialTargetName,
             initialTargetType: initialTargetType,

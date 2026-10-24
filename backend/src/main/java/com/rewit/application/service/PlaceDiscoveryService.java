@@ -7,12 +7,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 /**
  * Serviço de aplicação para descoberta externa de locais (Step 8).
  * Orquestra validações de entrada, limites e chamadas à porta {@link PlaceDiscoveryPort}.
  * Os resultados são transitórios e NÃO sofrem persistência automática.
+ *
+ * <p>Há um único provedor ativo (o adapter registrado pela configuração); identificadores de outro provedor não
+ * são consultados em nenhum outro, sem fallback.
  */
 @Service
 public class PlaceDiscoveryService {
@@ -21,7 +25,6 @@ public class PlaceDiscoveryService {
     public static final int MAX_LIMIT = 20;
     public static final int MIN_LIMIT = 1;
     public static final String DEFAULT_LANGUAGE_CODE = "pt-BR";
-    public static final String SUPPORTED_PROVIDER = "GOOGLE";
 
     private final PlaceDiscoveryPort placeDiscoveryPort;
 
@@ -77,10 +80,11 @@ public class PlaceDiscoveryService {
             throw new BusinessException("O provedor é obrigatório", HttpStatus.BAD_REQUEST, "INVALID_PROVIDER");
         }
 
-        String normalizedProvider = provider.trim().toUpperCase();
-        if (!SUPPORTED_PROVIDER.equals(normalizedProvider)) {
+        String normalizedProvider = provider.trim().toUpperCase(Locale.ROOT);
+        String activeProvider = getActiveProvider();
+        if (!activeProvider.equals(normalizedProvider)) {
             throw new BusinessException(
-                    "Provedor não suportado. Provedor suportado atualmente: " + SUPPORTED_PROVIDER,
+                    "Provedor não suportado. Provedor ativo: " + activeProvider,
                     HttpStatus.BAD_REQUEST,
                     "UNSUPPORTED_PROVIDER"
             );
@@ -96,6 +100,12 @@ public class PlaceDiscoveryService {
                         HttpStatus.NOT_FOUND,
                         "EXTERNAL_PLACE_NOT_FOUND"
                 ));
+    }
+
+    /** Nome do provedor do adapter ativo, em maiúsculas (ex.: "GOOGLE", "GEOAPIFY"). */
+    public String getActiveProvider() {
+        String name = placeDiscoveryPort.getProviderName();
+        return name == null ? "" : name.trim().toUpperCase(Locale.ROOT);
     }
 
     private void validateCoordinates(Double latitude, Double longitude, Double radiusMeters) {

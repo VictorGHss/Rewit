@@ -9,6 +9,8 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
+import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
+import 'package:rewit_mobile/features/place_discovery/presentation/widgets/external_place_results_section.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/product/presentation/widgets/manual_product_registration_sheet.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
@@ -27,6 +29,9 @@ class TargetSearchSelectorWidget extends StatefulWidget {
 
   /// Com ele, o seletor oferece o cadastro de um produto inexistente, que já volta selecionado.
   final ProductRepository? productRepository;
+
+  /// Com ele, o seletor oferece a busca em fonte externa (pelo backend) e a adoção do local encontrado.
+  final PlaceDiscoveryRepository? placeDiscoveryRepository;
   final int targetIndex;
   final bool enabled;
   final ValueChanged<SearchResultItem> onTargetSelected;
@@ -45,6 +50,7 @@ class TargetSearchSelectorWidget extends StatefulWidget {
     required this.searchRepository,
     this.placeRepository,
     this.productRepository,
+    this.placeDiscoveryRepository,
     required this.targetIndex,
     this.enabled = true,
     required this.onTargetSelected,
@@ -91,6 +97,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
 
   bool get _canRegisterPlace => widget.placeRepository != null && _kindFilter != TargetKindFilter.product;
   bool get _canRegisterProduct => widget.productRepository != null && _kindFilter != TargetKindFilter.place;
+  bool get _canDiscoverExternally =>
+      widget.placeDiscoveryRepository != null && _kindFilter != TargetKindFilter.product;
 
   // Cache em memória durante a sessão da tela para evitar requisições idênticas
   final Map<String, List<SearchResultItem>> _queryCache = {};
@@ -321,6 +329,25 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     } finally {
       _isOpeningProductRegistration = false;
     }
+  }
+
+  /// Local adotado da fonte externa: entra no cache da consulta e vira o alvo, salvo se já estiver em outro alvo.
+  void _onExternalPlaceAdopted(SearchResultItem adopted) {
+    if (widget.isTargetSelectedElsewhere?.call(adopted.id) ?? false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('O local "${adopted.name}" já foi adicionado a esta avaliação.'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    final normalizedQuery = _searchController.text.trim().toLowerCase();
+    if (normalizedQuery.isNotEmpty) {
+      final existing = _queryCache[normalizedQuery] ?? const [];
+      _queryCache[normalizedQuery] = [adopted, ...existing.where((e) => e.id != adopted.id)];
+    }
+    widget.onTargetSelected(adopted);
   }
 
   Future<void> _resumePendingRegistration() async {
@@ -851,6 +878,16 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               ),
             ),
         ],
+
+        // Fonte externa, separada do catálogo: só depois da busca local, para não gastar cota à toa
+        if (_canDiscoverExternally && !_isLoading && _results != null)
+          ExternalPlaceResultsSection(
+            repository: widget.placeDiscoveryRepository!,
+            query: _searchController.text,
+            enabled: widget.enabled,
+            onAdopted: _onExternalPlaceAdopted,
+            onRegisterManually: _canRegisterPlace ? _openManualPlaceRegistration : null,
+          ),
       ],
     );
   }

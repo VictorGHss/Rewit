@@ -29,7 +29,22 @@ class PlaceDiscoveryServiceUnitTest {
 
     @BeforeEach
     void setUp() {
+        // O serviço aceita detalhes só do provedor do adapter ativo
+        lenient().when(placeDiscoveryPort.getProviderName()).thenReturn("GOOGLE");
         discoveryService = new PlaceDiscoveryService(placeDiscoveryPort);
+    }
+
+    @Test
+    @DisplayName("Detalhes de outro provedor que não o ativo respondem 400 UNSUPPORTED_PROVIDER sem consultar a porta")
+    void detailsOfInactiveProviderAreRejectedWithoutFallback() {
+        when(placeDiscoveryPort.getProviderName()).thenReturn("GEOAPIFY");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> discoveryService.getCandidateDetails("GOOGLE", "ChIJ-qualquer"));
+
+        assertEquals("UNSUPPORTED_PROVIDER", ex.getErrorCode());
+        assertEquals("GEOAPIFY", discoveryService.getActiveProvider());
+        verify(placeDiscoveryPort, never()).getDetails(anyString(), anyString());
     }
 
     @Test
@@ -176,7 +191,8 @@ class PlaceDiscoveryServiceUnitTest {
         assertEquals(HttpStatus.BAD_REQUEST, exNull.getStatus());
         assertEquals("INVALID_PROVIDER", exNull.getErrorCode());
 
-        verifyNoInteractions(placeDiscoveryPort);
+        // Só o nome do provedor ativo é lido; nenhuma consulta externa é feita
+        verify(placeDiscoveryPort, never()).getDetails(anyString(), anyString());
     }
 
     @Test
@@ -194,7 +210,7 @@ class PlaceDiscoveryServiceUnitTest {
         assertEquals(HttpStatus.BAD_REQUEST, exBlank.getStatus());
         assertEquals("INVALID_EXTERNAL_ID", exBlank.getErrorCode());
 
-        verifyNoInteractions(placeDiscoveryPort);
+        verify(placeDiscoveryPort, never()).getDetails(any(), any());
     }
 
     @Test

@@ -1,0 +1,326 @@
+package com.rewit.infrastructure.integration.geoapify;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.model.PlaceAttribution;
+import com.rewit.domain.model.PlaceCandidate;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpRequest;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.util.UriComponentsBuilder;
+
+import java.net.SocketTimeoutException;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+
+@DisplayName("Adapter Geoapify (OpenStreetMap) - MockRestServiceServer")
+class GeoapifyPlacesAdapterTest {
+
+    private static final String KEY = "geoapify-chave-de-teste-nao-real";
+    private static final String BASE = "https://api.geoapify.com";
+
+    private GeoapifyProperties properties;
+    private MockRestServiceServer mockServer;
+    private GeoapifyPlacesAdapter adapter;
+
+    @BeforeEach
+    void setUp() {
+        properties = new GeoapifyProperties();
+        properties.setApiKey(KEY);
+        properties.setBaseUrl(BASE);
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE);
+        mockServer = MockRestServiceServer.bindTo(builder).build();
+        adapter = new GeoapifyPlacesAdapter(properties, builder.build());
+    }
+
+    /** Parâmetros de query já decodificados (o matcher padrão compara os valores codificados). */
+    private static Map<String, String> params(ClientHttpRequest request) {
+        Map<String, String> decoded = new LinkedHashMap<>();
+        UriComponentsBuilder.fromUri(request.getURI()).build().getQueryParams()
+                .forEach((k, v) -> decoded.put(k, URLDecoder.decode(v.getFirst(), StandardCharsets.UTF_8)));
+        return decoded;
+    }
+
+    @Test
+    @DisplayName("Busca: só estabelecimentos com nome viram candidatos; nome, endereço, coordenadas, categorias, id e atribuições")
+    void searchMapsAmenitiesAndDropsAddressesAndInvalidItems() {
+        String body = """
+                {
+                  "results": [
+                    {
+                      "place_id": "51a1b2c3d4-padaria",
+                      "name": "Padaria Estrela",
+                      "formatted": "Padaria Estrela, Rua XV de Novembro, 100, Ponta Grossa - PR, Brasil",
+                      "lat": -25.0945,
+                      "lon": -50.1633,
+                      "result_type": "amenity",
+                      "category": "commercial.food_and_drink.bakery",
+                      "city": "Ponta Grossa",
+                      "state": "Paraná",
+                      "state_code": "pr",
+                      "country_code": "br",
+                      "datasource": {
+                        "sourcename": "openstreetmap",
+                        "attribution": "© OpenStreetMap contributors",
+                        "license": "Open Database License",
+                        "url": "https://www.openstreetmap.org/copyright"
+                      },
+                      "rank": {"confidence": 0.9},
+                      "opening_hours": "Mo-Sa 06:00-20:00"
+                    },
+                    {"place_id": "rua-1", "name": "Rua da Padaria", "result_type": "street", "lat": -25.1, "lon": -50.1},
+                    {"place_id": "sem-nome", "result_type": "amenity", "formatted": "Rua X, 10", "lat": -25.1, "lon": -50.1},
+                    {"place_id": "coordenada-invalida", "name": "Erro", "result_type": "amenity", "lat": 200.0, "lon": -50.1},
+                    {"name": "Sem id", "result_type": "amenity", "lat": -25.1, "lon": -50.1}
+                  ]
+                }
+                """;
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("padaria em Ponta Grossa, Paraná, Brasil", p.get("text"));
+                    assertEquals("amenity", p.get("type"));
+                    assertEquals("json", p.get("format"));
+                    assertEquals("pt", p.get("lang"));
+                    assertEquals("5", p.get("limit"));
+                    assertEquals("proximity:-50.1633,-25.0945", p.get("bias"));
+                    assertEquals("circle:-50.1633,-25.0945,3000.0", p.get("filter"));
+                    assertEquals(KEY, p.get("apiKey"));
+                })
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+
+        List<PlaceCandidate> candidates = adapter.searchByText(
+                "padaria em Ponta Grossa, Paraná, Brasil", -25.0945, -50.1633, 3000.0, 5, "pt-BR");
+
+        mockServer.verify();
+        assertEquals(1, candidates.size());
+        PlaceCandidate c = candidates.getFirst();
+        assertEquals("GEOAPIFY", c.getProvider());
+        assertEquals("51a1b2c3d4-padaria", c.getExternalId());
+        assertEquals("Padaria Estrela", c.getDisplayName());
+        assertEquals("Padaria Estrela, Rua XV de Novembro, 100, Ponta Grossa - PR, Brasil", c.getFormattedAddress());
+        assertEquals(-25.0945, c.getLatitude());
+        assertEquals(-50.1633, c.getLongitude());
+        assertEquals(List.of("commercial.food_and_drink.bakery"), c.getTypes());
+        assertEquals("Ponta Grossa", c.getCity());
+        assertEquals("PR", c.getState(), "state_code tem prioridade e vira UF maiúscula");
+        assertEquals("BR", c.getCountryCode());
+        assertEquals(List.of(GeoapifyPlacesAdapter.GEOAPIFY_ATTRIBUTION,
+                new PlaceAttribution("© OpenStreetMap contributors", "https://www.openstreetmap.org/copyright")),
+                c.getAttributions());
+    }
+
+    @Test
+    @DisplayName("Busca sem localização não envia bias nem filtro; raio acima de 50 km é limitado")
+    void searchWithoutLocationAndRadiusCap() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertFalse(p.containsKey("bias"));
+                    assertFalse(p.containsKey("filter"));
+                    assertEquals("10", p.get("limit"), "limite fora de 1..20 vira o padrão");
+                })
+                .andRespond(withSuccess("{\"results\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("proximity:-50.0,-25.0", p.get("bias"));
+                    assertEquals("circle:-50.0,-25.0,50000.0", p.get("filter"));
+                })
+                .andRespond(withSuccess("{\"results\": []}", MediaType.APPLICATION_JSON));
+
+        assertTrue(adapter.searchByText("café", null, null, null, 99, "pt-BR").isEmpty());
+        assertTrue(adapter.searchByText("café", -25.0, -50.0, 900_000.0, 5, null).isEmpty());
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("Busca: lista vazia, corpo sem results e 404 respondem lista vazia")
+    void emptyResponses() {
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withSuccess("{\"results\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertTrue(adapter.searchByText("nada", null, null, null, 5, "pt-BR").isEmpty());
+        assertTrue(adapter.searchByText("nada", null, null, null, 5, "pt-BR").isEmpty());
+        assertTrue(adapter.searchByText("nada", null, null, null, 5, "pt-BR").isEmpty());
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("Sem chave: 503 EXTERNAL_SERVICE_NOT_CONFIGURED antes de qualquer requisição")
+    void missingKeyIsControlledAndSendsNothing() {
+        properties.setApiKey("  ");
+        BusinessException search = assertThrows(BusinessException.class,
+                () -> adapter.searchByText("padaria", null, null, null, 5, "pt-BR"));
+        properties.setApiKey("change-me");
+        BusinessException details = assertThrows(BusinessException.class, () -> adapter.getDetails("id", "pt-BR"));
+
+        mockServer.verify();
+        for (BusinessException ex : List.of(search, details)) {
+            assertEquals(HttpStatus.SERVICE_UNAVAILABLE, ex.getStatus());
+            assertEquals("EXTERNAL_SERVICE_NOT_CONFIGURED", ex.getErrorCode());
+        }
+    }
+
+    @Test
+    @DisplayName("Erros HTTP: credencial recusada 502, cota/limite e 5xx 503, timeout 504, rede 502, payload malformado 502")
+    void httpFailuresAreMappedToControlledErrors() {
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.FORBIDDEN));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withException(new SocketTimeoutException("Read timed out")));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withException(new java.net.ConnectException("refused")));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withSuccess("{\"results\": [ {", MediaType.APPLICATION_JSON));
+
+        assertError(HttpStatus.BAD_GATEWAY, "EXTERNAL_SERVICE_ERROR", this::search);
+        assertError(HttpStatus.BAD_GATEWAY, "EXTERNAL_SERVICE_ERROR", this::search);
+        assertError(HttpStatus.SERVICE_UNAVAILABLE, "EXTERNAL_SERVICE_UNAVAILABLE", this::search);
+        assertError(HttpStatus.SERVICE_UNAVAILABLE, "EXTERNAL_SERVICE_UNAVAILABLE", this::search);
+        assertError(HttpStatus.GATEWAY_TIMEOUT, "EXTERNAL_SERVICE_TIMEOUT", this::search);
+        assertError(HttpStatus.BAD_GATEWAY, "EXTERNAL_SERVICE_UNAVAILABLE", this::search);
+        assertError(HttpStatus.BAD_GATEWAY, "EXTERNAL_SERVICE_INVALID_RESPONSE", this::search);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("Nenhum log nem mensagem de erro contém a chave, a URL ou a query enviada ao Geoapify")
+    void keyNeverLeaksIntoLogsOrErrors() {
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withException(new SocketTimeoutException("Read timed out")));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withException(new java.net.ConnectException("refused")));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withSuccess("{malformado", MediaType.APPLICATION_JSON));
+
+        Logger logger = (Logger) LoggerFactory.getLogger(GeoapifyPlacesAdapter.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        List<BusinessException> errors = new java.util.ArrayList<>();
+        try {
+            for (int i = 0; i < 4; i++) {
+                errors.add(assertThrows(BusinessException.class, this::search));
+            }
+        } finally {
+            logger.detachAppender(appender);
+        }
+        mockServer.verify();
+
+        assertEquals(4, appender.list.size());
+        for (ILoggingEvent event : appender.list) {
+            String message = event.getFormattedMessage();
+            assertFalse(message.contains(KEY), message);
+            assertFalse(message.contains("apiKey"), message);
+            assertFalse(message.contains("api.geoapify.com"), message);
+            assertFalse(message.contains("padaria"), message);
+            assertEquals(null, event.getThrowableProxy(), "sem stack trace com a URL");
+        }
+        for (BusinessException ex : errors) {
+            assertFalse(ex.getMessage().contains(KEY));
+            assertFalse(ex.getMessage().contains("apiKey"));
+        }
+    }
+
+    @Test
+    @DisplayName("Detalhes: feature details vira candidato; 404, feature sem nome e lista vazia respondem vazio")
+    void detailsMapping() {
+        String details = """
+                {
+                  "type": "FeatureCollection",
+                  "features": [
+                    {
+                      "type": "Feature",
+                      "properties": {
+                        "feature_type": "details",
+                        "place_id": "51a1b2c3d4-padaria",
+                        "name": "Padaria Estrela",
+                        "formatted": "Rua XV de Novembro, 100, Ponta Grossa - PR",
+                        "lat": -25.0945,
+                        "lon": -50.1633,
+                        "categories": ["commercial", "commercial.food_and_drink.bakery"],
+                        "city": "Ponta Grossa",
+                        "state": "Paraná"
+                      },
+                      "geometry": {"type": "Point", "coordinates": [-50.1633, -25.0945]}
+                    }
+                  ]
+                }
+                """;
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.DETAILS_PATH)))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("51a1b2c3d4-padaria", p.get("id"));
+                    assertEquals("details", p.get("features"));
+                    assertEquals("pt", p.get("lang"));
+                    assertEquals(KEY, p.get("apiKey"));
+                })
+                .andRespond(withSuccess(details, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withStatus(HttpStatus.NOT_FOUND));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withSuccess(
+                "{\"features\": [{\"properties\": {\"feature_type\": \"details\", \"place_id\": \"x\"}}]}",
+                MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE))).andRespond(withSuccess("{\"features\": []}", MediaType.APPLICATION_JSON));
+
+        Optional<PlaceCandidate> found = adapter.getDetails(" 51a1b2c3d4-padaria ", "pt-BR");
+        assertTrue(found.isPresent());
+        assertEquals("Padaria Estrela", found.get().getDisplayName());
+        assertEquals(List.of("commercial", "commercial.food_and_drink.bakery"), found.get().getTypes());
+        assertEquals("Ponta Grossa", found.get().getCity());
+        assertEquals("Paraná", found.get().getState(), "sem state_code, o nome do estado é usado");
+        assertNull(found.get().getCountryCode(), "país ausente fica nulo, sem inventar valor");
+        assertEquals(GeoapifyPlacesAdapter.OSM_ATTRIBUTION, found.get().getAttributions().get(1),
+                "sem datasource na resposta, a atribuição do OSM é mantida");
+
+        assertTrue(adapter.getDetails("inexistente", "pt-BR").isEmpty());
+        assertTrue(adapter.getDetails("sem-nome", "pt-BR").isEmpty());
+        assertTrue(adapter.getDetails("vazio", "pt-BR").isEmpty());
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("Idioma: pt-BR, pt_BR e vazio viram pt; códigos de 2 letras são mantidos")
+    void languageNormalization() {
+        assertEquals("pt", GeoapifyPlacesAdapter.toIsoLanguage("pt-BR"));
+        assertEquals("pt", GeoapifyPlacesAdapter.toIsoLanguage("pt_BR"));
+        assertEquals("pt", GeoapifyPlacesAdapter.toIsoLanguage(null));
+        assertEquals("en", GeoapifyPlacesAdapter.toIsoLanguage("EN"));
+        assertEquals("pt", GeoapifyPlacesAdapter.toIsoLanguage("portuguese"));
+    }
+
+    private void search() {
+        adapter.searchByText("padaria", null, null, null, 5, "pt-BR");
+    }
+
+    private static void assertError(HttpStatus status, String code, Executable action) {
+        BusinessException ex = assertThrows(BusinessException.class, action);
+        assertEquals(status, ex.getStatus());
+        assertEquals(code, ex.getErrorCode());
+    }
+}

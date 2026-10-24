@@ -22,7 +22,7 @@ O banco relacional do Rewit (PostgreSQL + PostGIS) permanece sendo a fonte de ve
 
 ## 2. Provedor e Escopo de Operações
 
-* **Provedor Suportado:** `GOOGLE`
+* **Provedor Suportado:** `GOOGLE` (padrão). O provedor ativo é escolhido por `rewit.place-discovery.provider` (`PLACE_DISCOVERY_PROVIDER`); a alternativa gratuita está em [geoapify.md](geoapify.md).
 * **Geração da API:** **Places API (New)** (API moderna REST v1 da Google Cloud).
 * **APIs Legadas:** APIs legacy (`https://maps.googleapis.com/maps/api/place/...`) **não** são suportadas nem utilizadas.
 

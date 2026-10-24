@@ -20,6 +20,7 @@ import 'package:rewit_mobile/features/place/data/repositories/place_commercial_r
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
 import 'package:rewit_mobile/features/place/data/services/secure_pending_place_registration_persistence.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/place_discovery/data/repositories/place_discovery_repository_impl.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/notifications/data/repositories/notification_repository_impl.dart';
@@ -73,6 +74,7 @@ void main() async {
   final placeRepository = PlaceRepositoryImpl(httpClient: httpClient);
   final placeCommercialRepository = PlaceCommercialRepositoryImpl(httpClient: httpClient);
   final productRepository = ProductRepositoryImpl(httpClient: httpClient);
+  final placeDiscoveryRepository = PlaceDiscoveryRepositoryImpl(httpClient: httpClient);
   final mediaRepository = ReviewMediaRepositoryImpl(client: httpClient);
   final mediaPickerService = ImagePickerMediaService();
   const locationService = GeolocatorLocationService();
@@ -109,6 +111,7 @@ void main() async {
     placeRepository: placeRepository,
     placeCommercialRepository: placeCommercialRepository,
     productRepository: productRepository,
+    placeDiscoveryRepository: placeDiscoveryRepository,
     notificationRepository: notificationRepository,
     businessRepository: businessRepository,
     businessResponseRepository: businessResponseRepository,
