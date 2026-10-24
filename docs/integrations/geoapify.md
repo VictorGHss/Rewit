@@ -48,19 +48,27 @@ O catálogo do Rewit (PostgreSQL + PostGIS) continua sendo a fonte de verdade. N
 * Cidade junto com coordenadas, UF sem cidade, ou UF inválida (incluindo regiões como "Sul") → 400 `INVALID_REGION`, sem chamada ao provedor.
 * Cidade não encontrada naquela UF → 422 `REGION_NOT_FOUND`; a busca nunca é feita em outra cidade.
 * Com o provedor Google, a busca por cidade responde 400 `REGION_FILTER_UNSUPPORTED` em vez de ignorar a cidade.
-* No app, "Perto de mim" lê a posição uma única vez, no toque de busca (o sistema pede a permissão); a posição não é guardada. A cidade escolhida nunca é trocada pela posição do aparelho.
+* No app, "Perto de mim" pede a posição ao ser escolhida (o sistema pede a permissão, se preciso) e, com um termo de busca, faz uma única busca automática. A posição vale só enquanto a opção estiver ativa (um novo termo reaproveita a posição dessa escolha, no toque de busca); sair da opção a descarta e voltar pede de novo. Nada é gravado nem acompanhado em segundo plano. A cidade escolhida nunca é trocada pela posição do aparelho.
+* Falhas de localização têm mensagens próprias: permissão negada, permissão bloqueada (com atalho para as configurações), GPS desativado, tempo esgotado, erro e posição inválida (incluindo 0,0); nenhuma busca é feita sem posição válida, e "Tentar novamente" pede a posição outra vez.
+* O mesmo termo na mesma região não é buscado de novo enquanto o resultado estiver na tela.
+* **Emulador:** o Android Emulator não usa a posição do computador. Sem posição simulada, ele informa um ponto padrão (normalmente na Califórnia) ou nenhum; defina a posição em ⋯ *Extended controls* › *Location* › *Set location* antes de testar "Perto de mim".
 
 ## 5. Chamadas usadas
 
 1. **Resolução da cidade** (só na região "Cidade"): `GET /v1/geocode/search?city=&state=<nome oficial da UF>&country=Brasil&type=city&filter=countrycode:br&format=json&lang=&limit=5&apiKey=`. Vale só um resultado `result_type=city` com o mesmo nome (sem diferenciar acentos e maiúsculas) e a mesma UF. O `place_id` e o centro ficam num cache em memória (até 256 cidades, sem dados de usuário), então buscas seguidas na mesma cidade custam uma chamada.
-2. **Busca:** `GET /v1/geocode/search?text=&type=amenity&format=json&lang=&limit=&apiKey=` com o filtro da região (`place:` ou `circle:`) e `bias=proximity` no centro. Só resultados `result_type=amenity` com nome viram candidatos: ruas, bairros e endereços geocodificados são descartados.
-3. **Detalhes:** `GET /v2/place-details?id=&features=details&lang=&apiKey=`.
+2. **Busca por categoria** (termo que é um tipo de estabelecimento, com região "Cidade" ou "Perto de mim"): `GET /v2/places?categories=&conditions=named&filter=&bias=proximity:lon,lat&limit=&lang=&apiKey=`. Lista os estabelecimentos do tipo na região, ordenados por proximidade, inclusive os que não têm a palavra no nome (uma padaria chamada "Pão Quente"). Não se envia `name`, para não reduzir a categoria aos nomes que contêm o termo.
+3. **Busca por nome** (nome próprio como "Padaria do Tião", termo fora da tabela, ou "Qualquer lugar", já que a Places API exige uma área): `GET /v1/geocode/search?text=&type=amenity&format=json&lang=&limit=&apiKey=` com o filtro da região (`place:` ou `circle:`) e `bias=proximity` no centro. Só resultados `result_type=amenity` com nome viram candidatos: ruas, bairros e endereços geocodificados são descartados.
+
+Os resultados das duas buscas são deduplicados pelo `place_id`, mantêm a ordem do provedor e respeitam o limite pedido (até 20).
+
+**Termos e categorias.** A tabela fica em `GeoapifyCategories` e usa só chaves da taxonomia oficial. Exemplos: padaria/padarias/panificadora → `commercial.food_and_drink.bakery`; restaurante → `catering.restaurant`; lanchonete/hamburgueria → `catering.fast_food`; café/cafeteria → `catering.cafe`; mercado/supermercado → `commercial.supermarket`; farmácia/drogaria → `healthcare.pharmacy` + `commercial.health_and_beauty.pharmacy` (as duas chaves que o OpenStreetMap usa para farmácia). O termo precisa ser exato (sem diferenciar acentos e maiúsculas); "padaria em Ponta Grossa" segue para a busca por nome, e a região deve ser escolhida no seletor.
+4. **Detalhes:** `GET /v2/place-details?id=&features=details&lang=&apiKey=`.
 
 Campos mapeados: `place_id`, `name`, `formatted`, `lat`/`lon`, `category`/`categories`, `city`, estado e `country_code`. Nota, horário de funcionamento e avaliações **não** são lidos nem inventados.
 
-**Estado (UF).** Brasil (`country_code=br`): só uma das 27 siglas oficiais, vinda de `state_code` ou do nome oficial do estado ("Paraná" → `PR`); regiões ("Sul", "Sudeste") e siglas desconhecidas ficam `null`. Outro país: o código ou o nome do provedor, sem regras de UF. Sem `country_code`: `null`. Coordenadas não finitas ou fora das faixas descartam o item. O app só oferece "Adotar e selecionar" para candidatos com endereço, cidade, UF válida e coordenadas válidas; os demais seguem para o cadastro manual.
+**Estado (UF).** Brasil (`country_code=br`, ou o país "Brasil"/"Brazil" quando a resposta da Places API não traz o código): só uma das 27 siglas oficiais, vinda de `state_code` ou do nome oficial do estado ("Paraná" → `PR`); regiões ("Sul", "Sudeste") e siglas desconhecidas ficam `null`. Outro país: o código ou o nome do provedor, sem regras de UF. Sem `country_code`: `null`. Coordenadas não finitas ou fora das faixas descartam o item. O app só oferece "Adotar e selecionar" para candidatos com endereço, cidade, UF válida e coordenadas válidas; os demais seguem para o cadastro manual.
 
-**Geocoding API ou Places API.** A busca continua na Geocoding API (`type=amenity`), que aceita texto livre e devolve `state_code` e `country_code`, necessários para validar a UF. A Places API (`/v2/places`) exige `categories` (o termo digitado teria de ser convertido numa lista de categorias, uma decisão de produto) e a documentação não lista `state_code`/`country_code` na resposta. Ela é a alternativa para buscas por categoria ("todas as padarias da cidade", inclusive sem "padaria" no nome) se esse caso for priorizado.
+Os dados vêm do OpenStreetMap: um estabelecimento pode faltar, estar sem nome ou estar classificado em outra categoria. A lista não é garantidamente completa.
 
 ## 6. Erros
 
@@ -78,7 +86,7 @@ Campos mapeados: `place_id`, `name`, `formatted`, `lat`/`lon`, `category`/`categ
 
 ## 7. Cota, atribuição e limites
 
-* Plano gratuito: 3.000 créditos por dia e limite de requisições por segundo. O app só consulta a fonte externa por toque explícito em "Buscar em fontes externas", nunca a cada tecla. Uma busca por cidade ainda não resolvida custa duas chamadas (cidade + busca); as seguintes na mesma cidade, uma.
+* Plano gratuito: 3.000 créditos por dia e limite de requisições por segundo. O app só consulta a fonte externa por toque explícito em "Buscar em fontes externas", nunca a cada tecla. Uma busca por cidade ainda não resolvida custa duas chamadas (cidade + busca); as seguintes na mesma cidade, uma. Na Places API, cada 20 lugares devolvidos custam 1 crédito.
 * Atribuição obrigatória junto dos resultados: "Powered by Geoapify" (<https://www.geoapify.com/>) e "© OpenStreetMap contributors" (ODbL, <https://www.openstreetmap.org/copyright>). O backend devolve ambas em `attributions` e o app as exibe abaixo da lista.
 * Os dados são do OpenStreetMap, mantidos por voluntários: cobertura e atualização variam por região, e a presença de um estabelecimento não confirma que ele está aberto.
 * Resultados sem cidade, UF válida ou coordenadas válidas não são adotáveis; o app oferece o cadastro manual.

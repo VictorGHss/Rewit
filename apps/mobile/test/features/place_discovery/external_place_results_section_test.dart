@@ -293,38 +293,180 @@ void main() {
     expect(find.text('O local "Padaria Junior Raikoski" já foi adicionado a esta avaliação.'), findsOneWidget);
   });
 
-  testWidgets('"Perto de mim" pede a localização só no toque de busca e envia coordenadas com raio', (tester) async {
+  Future<void> selectNearby(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('external_region_mode_nearby')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('"Perto de mim" com termo: pede a localização ao escolher e faz uma única busca automática',
+      (tester) async {
     discovery.results = const [_adoptable];
     await pumpSubject(tester);
     await typeQuery(tester, 'padaria');
-    await tester.tap(find.byKey(const Key('external_region_mode_nearby')));
-    await tester.pumpAndSettle();
+    expect(location.calls, 0, reason: 'nada de localização antes da escolha');
 
-    expect(location.calls, 0, reason: 'escolher a opção não lê a localização');
-    expect(find.byKey(const Key('external_region_nearby_hint')), findsOneWidget);
-    await tapExternalSearch(tester);
+    await selectNearby(tester);
 
     expect(location.calls, 1);
+    expect(discovery.searchCalls, 1, reason: 'busca automática, sem segundo toque');
     final region = discovery.lastRegion as NearbyRegion;
     expect(region.latitude, -25.09);
     expect(region.longitude, -50.16);
     expect(region.radiusMeters, 10000);
     expect(find.text('Região: até 10 km da sua localização atual'), findsOneWidget);
+    expect(find.textContaining('-25.09'), findsNothing, reason: 'coordenadas não são exibidas');
+    expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+
+    // Sem loop: mais quadros não geram novas chamadas, e o mesmo pedido fica indisponível
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(location.calls, 1);
+    expect(discovery.searchCalls, 1);
+    expect(searchButtonEnabled(tester), isFalse);
+    expect(find.text('Busca feita para este termo e região'), findsOneWidget);
   });
 
-  testWidgets('localização negada não busca e sugere escolher uma cidade', (tester) async {
+  testWidgets('novo termo depois da busca automática não busca sozinho; o toque reaproveita a posição desta escolha',
+      (tester) async {
+    discovery.results = const [_adoptable];
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await selectNearby(tester);
+    expect(discovery.searchCalls, 1);
+
+    await typeQuery(tester, 'farmácia');
+    expect(discovery.searchCalls, 1, reason: 'digitar não busca');
+    expect(searchButtonEnabled(tester), isTrue);
+    await tapExternalSearch(tester);
+
+    expect(discovery.searchCalls, 2);
+    expect(discovery.lastQuery, 'farmácia');
+    expect(location.calls, 1, reason: 'a posição desta escolha é reaproveitada, sem novo pedido');
+  });
+
+  testWidgets('sair de "Perto de mim" descarta a posição; voltar pede de novo', (tester) async {
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await selectNearby(tester);
+    await tester.tap(find.byKey(const Key('external_region_mode_city')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('external_region_label')), findsNothing);
+    await selectNearby(tester);
+
+    expect(location.calls, 2);
+    expect(discovery.searchCalls, 2);
+  });
+
+  testWidgets('mesmo termo na mesma cidade não é buscado de novo; outra cidade libera a busca', (tester) async {
+    discovery.results = const [_adoptable];
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await chooseCity(tester, 'Ponta Grossa', 'PR');
+    await tapExternalSearch(tester);
+    expect(searchButtonEnabled(tester), isFalse);
+    await tester.tap(find.byKey(const Key('external_place_search_button')), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(discovery.searchCalls, 1);
+
+    await chooseCity(tester, 'Curitiba', 'PR');
+    expect(searchButtonEnabled(tester), isTrue);
+    await tapExternalSearch(tester);
+    expect(discovery.searchCalls, 2);
+  });
+
+  testWidgets('permissão negada: mensagem própria, sem busca, e "Tentar novamente" pede de novo', (tester) async {
     location.result = const LocationFailure(
       reason: LocationFailureReason.permissionDenied,
       message: 'Permissão de localização negada.',
     );
     await pumpSubject(tester);
     await typeQuery(tester, 'padaria');
-    await tester.tap(find.byKey(const Key('external_region_mode_nearby')));
-    await tester.pumpAndSettle();
-    await tapExternalSearch(tester);
+    await selectNearby(tester);
 
     expect(discovery.searchCalls, 0);
-    expect(find.textContaining('Escolha uma cidade para buscar sem usar a localização.'), findsOneWidget);
+    expect(find.textContaining('Permissão de localização negada'), findsOneWidget);
+    expect(find.byKey(const Key('external_location_settings_button')), findsNothing);
+
+    location.result = const LocationSuccess(
+      DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 20),
+    );
+    await tester.tap(find.byKey(const Key('external_location_retry_button')));
+    await tester.pumpAndSettle();
+    expect(location.calls, 2);
+    expect(discovery.searchCalls, 1, reason: 'com a posição, a busca é feita uma vez');
+    expect(find.byKey(const Key('external_location_issue')), findsNothing);
+  });
+
+  testWidgets('falhas de localização têm mensagens distintas; bloqueio oferece as configurações', (tester) async {
+    final cases = <LocationResult, String>{
+      const LocationFailure(reason: LocationFailureReason.permissionDeniedForever, message: ''):
+          'bloqueada para o Rewit',
+      const LocationFailure(reason: LocationFailureReason.serviceDisabled, message: ''): 'GPS',
+      const LocationFailure(reason: LocationFailureReason.timeout, message: ''): 'não ficou disponível a tempo',
+      const LocationSuccess(DeviceLocation(latitude: 0, longitude: 0, accuracyMeters: 1)): 'recebida é inválida',
+    };
+    for (final entry in cases.entries) {
+      location.result = entry.key;
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      // O estado do widget sobrevive ao novo pump: passar por "Cidade" reinicia a escolha
+      await tester.tap(find.byKey(const Key('external_region_mode_city')));
+      await tester.pumpAndSettle();
+      await selectNearby(tester);
+      expect(find.textContaining(entry.value), findsOneWidget, reason: entry.value);
+      final permanent = entry.key is LocationFailure &&
+          (entry.key as LocationFailure).reason == LocationFailureReason.permissionDeniedForever;
+      expect(find.byKey(const Key('external_location_settings_button')), permanent ? findsOneWidget : findsNothing);
+      expect(find.byKey(const Key('external_location_emulator_hint')), permanent ? findsNothing : findsOneWidget);
+    }
+    expect(discovery.searchCalls, 0, reason: 'sem posição válida nenhuma busca é feita');
+  });
+
+  testWidgets('"Perto de mim" sem resultados explica a posição simulada do emulador', (tester) async {
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await selectNearby(tester);
+
+    expect(discovery.searchCalls, 1);
+    expect(find.textContaining('posição é a simulada'), findsOneWidget);
+  });
+
+  testWidgets('erro de rede na busca mostra o motivo e "Tentar novamente" refaz a mesma busca', (tester) async {
+    discovery.searchError = const NetworkException('Sem conexão com o servidor.');
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await selectNearby(tester);
+    expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+
+    discovery.searchError = null;
+    discovery.results = const [_adoptable];
+    await tester.tap(find.byKey(const Key('external_search_retry_button')));
+    await tester.pumpAndSettle();
+    expect(discovery.searchCalls, 2);
+    expect(location.calls, 1, reason: 'a posição já obtida é reaproveitada');
+    expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+  });
+
+  testWidgets('cota excedida e chave recusada no backend aparecem como mensagens controladas', (tester) async {
+    discovery.searchError = const ApiException(
+      ProblemDetail(type: 'about:blank', title: 'Too Many Requests', status: 429, detail: 'limite'),
+      retryAfterSeconds: 30,
+    );
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await selectNearby(tester);
+    expect(find.text('Muitas buscas seguidas. Tente novamente em 30 segundos.'), findsOneWidget);
+
+    discovery.searchError = const ApiException(ProblemDetail(
+      type: 'about:blank',
+      title: 'Bad Gateway',
+      status: 502,
+      detail: 'Falha na comunicação com o serviço externo de lugares',
+      code: 'EXTERNAL_SERVICE_ERROR',
+    ));
+    await tester.tap(find.byKey(const Key('external_search_retry_button')));
+    await tester.pumpAndSettle();
+    expect(find.text('A fonte externa não respondeu agora. Tente novamente mais tarde.'), findsOneWidget);
   });
 
   testWidgets('"Qualquer lugar" avisa que a busca não tem restrição geográfica', (tester) async {

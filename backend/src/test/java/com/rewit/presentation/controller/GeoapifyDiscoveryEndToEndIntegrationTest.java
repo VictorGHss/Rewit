@@ -77,6 +77,20 @@ class GeoapifyDiscoveryEndToEndIntegrationTest {
             ]}
             """;
 
+    /** Places API: país e estado por nome; um item com a região "Sul" no lugar da UF. */
+    private static final String BAKERIES_JSON = """
+            {"type": "FeatureCollection", "features": [
+              {"type": "Feature", "properties": {"place_id": "51-e2e-raikoski", "name": "Padaria Junior Raikoski",
+               "formatted": "Padaria Junior Raikoski, Rua Conrado Schiffer, Ponta Grossa - PR, Brasil",
+               "lat": -25.108, "lon": -50.169, "city": "Ponta Grossa", "state": "Paraná", "country": "Brasil",
+               "categories": ["commercial.food_and_drink.bakery"]}},
+              {"type": "Feature", "properties": {"place_id": "51-e2e-sul", "name": "Padaria Região",
+               "formatted": "Padaria Região, Ponta Grossa - Sul, Brasil", "lat": -25.1, "lon": -50.1,
+               "city": "Ponta Grossa", "state": "Sul", "country": "Brasil",
+               "categories": ["commercial.food_and_drink.bakery"]}}
+            ]}
+            """;
+
     private static HttpServer geoapifyStub;
     private static final List<Map<String, String>> stubRequests = new CopyOnWriteArrayList<>();
 
@@ -84,15 +98,18 @@ class GeoapifyDiscoveryEndToEndIntegrationTest {
     static void geoapifyStubProperties(DynamicPropertyRegistry registry) throws IOException {
         if (geoapifyStub == null) {
             geoapifyStub = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            geoapifyStub.createContext("/v1/geocode/search", exchange -> {
-                Map<String, String> params = UriComponentsBuilder.fromUri(exchange.getRequestURI()).build()
-                        .getQueryParams().entrySet().stream()
+            geoapifyStub.createContext("/", exchange -> {
+                Map<String, String> params = new java.util.HashMap<>(UriComponentsBuilder.fromUri(exchange.getRequestURI())
+                        .build().getQueryParams().entrySet().stream()
                         .collect(Collectors.toMap(Map.Entry::getKey,
-                                e -> URLDecoder.decode(e.getValue().getFirst(), StandardCharsets.UTF_8)));
+                                e -> URLDecoder.decode(e.getValue().getFirst(), StandardCharsets.UTF_8))));
+                params.put("_path", exchange.getRequestURI().getPath());
                 stubRequests.add(params);
                 int status = 200;
                 String body;
-                if ("city".equals(params.get("type"))) {
+                if (GeoapifyPlacesAdapter.PLACES_PATH.equals(params.get("_path"))) {
+                    body = BAKERIES_JSON;
+                } else if ("city".equals(params.get("type"))) {
                     body = CITY_JSON;
                 } else if ("chave recusada".equals(params.get("text"))) {
                     status = 401;
@@ -189,12 +206,13 @@ class GeoapifyDiscoveryEndToEndIntegrationTest {
         assertFalse(body.contains(FAKE_KEY), "a chave do provedor nunca chega ao cliente");
         assertFalse(body.toLowerCase().contains("apikey"));
 
-        // Resolução da cidade + busca filtrada pela fronteira dela
+        // Resolução da cidade + Places API pela categoria de padarias, limitada à fronteira da cidade
         assertEquals(2, stubRequests.size());
         assertEquals("city", stubRequests.get(0).get("type"));
         assertEquals("countrycode:br", stubRequests.get(0).get("filter"));
+        assertEquals(GeoapifyPlacesAdapter.PLACES_PATH, stubRequests.get(1).get("_path"));
+        assertEquals("commercial.food_and_drink.bakery", stubRequests.get(1).get("categories"));
         assertEquals("place:51-pg-pr", stubRequests.get(1).get("filter"));
-        assertEquals("padaria", stubRequests.get(1).get("text"));
         assertEquals(FAKE_KEY, stubRequests.get(1).get("apiKey"), "a chave só vai do backend ao provedor");
 
         // Pesquisa não persiste: nenhuma referência externa nem local foi criado
@@ -212,8 +230,11 @@ class GeoapifyDiscoveryEndToEndIntegrationTest {
         mockMvc.perform(get("/api/v1/places/discovery/search").header("Authorization", "Bearer " + token)
                         .param("query", "padaria").param("latitude", "-25.09").param("longitude", "-50.16")
                         .param("radius", "3000"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)));
+        assertEquals(GeoapifyPlacesAdapter.PLACES_PATH, stubRequests.getLast().get("_path"));
         assertEquals("circle:-50.16,-25.09,3000.0", stubRequests.getLast().get("filter"));
+        assertEquals("proximity:-50.16,-25.09", stubRequests.getLast().get("bias"));
 
         stubRequests.clear();
         for (String[] region : new String[][]{{"Ponta Grossa", "Sul"}, {"Ponta Grossa", "XX"}, {"", "PR"}}) {

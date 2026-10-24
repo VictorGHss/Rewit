@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/services/url_launcher_service.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import '../../domain/entities/discovery_region.dart';
@@ -13,9 +14,10 @@ enum ExternalRegionMode { city, nearby, anywhere }
 
 /// Resultados de fonte externa, separados do catálogo Rewit.
 ///
-/// A busca só parte de um toque explícito (respeita a cota gratuita do provedor), numa região escolhida pelo
-/// usuário: uma cidade com UF, a localização atual (pedida só nesse toque, sem rastreamento) ou nenhuma restrição,
-/// avisada na tela. Nada é gravado até o usuário escolher "Adotar e selecionar", que usa o fluxo oficial de adoção
+/// A busca externa respeita a cota gratuita do provedor: parte de um toque explícito, ou uma única vez ao escolher
+/// "Perto de mim" (a posição é pedida nessa escolha, sem rastreamento), e nunca a cada tecla. A região é escolhida pelo
+/// usuário: uma cidade com UF, a localização atual ou nenhuma restrição, avisada na tela. O mesmo termo na mesma
+/// região não é buscado de novo. Nada é gravado até o usuário escolher "Adotar e selecionar", que usa o fluxo oficial de adoção
 /// com deduplicação por referência externa.
 class ExternalPlaceResultsSection extends StatefulWidget {
   final PlaceDiscoveryRepository repository;
@@ -60,10 +62,18 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
   String? _resultsQuery;
   String? _adoptingId;
 
+  /// Busca concluída (termo + região): repetir o mesmo pedido não gasta cota de novo.
+  String? _lastSearchKey;
+
+  /// Posição obtida ao escolher "Perto de mim"; vale só enquanto essa opção estiver ativa e nunca é gravada.
+  DeviceLocation? _nearbyLocation;
+  bool _locating = false;
+  _LocationIssue? _locationIssue;
+
   @override
   void didUpdateWidget(covariant ExternalPlaceResultsSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Resultados de outra consulta não são reaproveitados
+    // Resultados de outra consulta não são reaproveitados; a nova consulta espera um toque (não busca a cada tecla)
     if (oldWidget.query.trim() != widget.query.trim() && _resultsQuery != widget.query.trim()) {
       _discardResults();
     }
@@ -82,31 +92,65 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
     _results = null;
     _resultsRegion = null;
     _resultsQuery = null;
+    _lastSearchKey = null;
   }
 
-  bool get _regionReady => switch (_mode) {
-        ExternalRegionMode.city => _cityController.text.trim().length >= 2 && _stateCode != null,
-        ExternalRegionMode.nearby => widget.locationService != null,
-        ExternalRegionMode.anywhere => true,
+  bool get _hasQuery => widget.query.trim().length >= 2;
+
+  /// Região atual, ou `null` enquanto faltar dado (cidade/UF ou posição).
+  DiscoveryRegion? get _currentRegion => switch (_mode) {
+        ExternalRegionMode.city => _cityController.text.trim().length >= 2 && _stateCode != null
+            ? CityRegion(city: _cityController.text.trim(), state: _stateCode!)
+            : null,
+        ExternalRegionMode.nearby => _nearbyLocation == null
+            ? null
+            : NearbyRegion(latitude: _nearbyLocation!.latitude, longitude: _nearbyLocation!.longitude),
+        ExternalRegionMode.anywhere => const UnrestrictedRegion(),
       };
 
-  bool get _canSearch => widget.enabled && !_isLoading && widget.query.trim().length >= 2 && _regionReady;
+  static String _regionKey(DiscoveryRegion region) => switch (region) {
+        CityRegion(:final city, :final state) => 'city:${city.toLowerCase()}|${state.toUpperCase()}',
+        NearbyRegion(:final latitude, :final longitude, :final radiusMeters) =>
+          'near:${latitude.toStringAsFixed(4)},${longitude.toStringAsFixed(4)},$radiusMeters',
+        UnrestrictedRegion() => 'anywhere',
+      };
+
+  String? get _currentSearchKey {
+    final region = _currentRegion;
+    return region == null ? null : '${widget.query.trim().toLowerCase()}|${_regionKey(region)}';
+  }
+
+  /// O mesmo termo já foi buscado na mesma região e o resultado está na tela.
+  bool get _alreadySearched => _results != null && _lastSearchKey != null && _lastSearchKey == _currentSearchKey;
+
+  bool get _canSearch {
+    if (!widget.enabled || _isLoading || _locating || !_hasQuery || _alreadySearched) return false;
+    return switch (_mode) {
+      // Sem posição ainda, o toque pede a localização e busca em seguida
+      ExternalRegionMode.nearby => widget.locationService != null,
+      _ => _currentRegion != null,
+    };
+  }
+
+  Future<void> _onSearchPressed() async {
+    if (_mode == ExternalRegionMode.nearby && _nearbyLocation == null) {
+      await _locateAndSearch();
+    } else {
+      await _search();
+    }
+  }
 
   Future<void> _search() async {
     final query = widget.query.trim();
-    if (!_canSearch) return;
+    final region = _currentRegion;
+    final key = _currentSearchKey;
+    if (!_hasQuery || region == null || _isLoading || _alreadySearched) return;
     final seq = ++_sequence;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
     try {
-      final region = await _resolveRegion();
-      if (!mounted || seq != _sequence) return;
-      if (region == null) {
-        setState(() => _isLoading = false);
-        return;
-      }
       final results = await widget.repository.search(query: query, region: region);
       if (!mounted || seq != _sequence) return;
       setState(() {
@@ -114,6 +158,7 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
         _results = results;
         _resultsRegion = region;
         _resultsQuery = query;
+        _lastSearchKey = key;
       });
     } catch (e) {
       if (!mounted || seq != _sequence) return;
@@ -124,25 +169,46 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
     }
   }
 
-  /// Região da busca. "Perto de mim" pede a posição só agora (o sistema pede a permissão) e não a guarda.
-  Future<DiscoveryRegion?> _resolveRegion() async {
-    switch (_mode) {
-      case ExternalRegionMode.city:
-        return CityRegion(city: _cityController.text.trim(), state: _stateCode!);
-      case ExternalRegionMode.anywhere:
-        return const UnrestrictedRegion();
-      case ExternalRegionMode.nearby:
-        final result = await widget.locationService!.getCurrentLocation();
-        switch (result) {
-          case LocationSuccess(:final location):
-            return NearbyRegion(latitude: location.latitude, longitude: location.longitude);
-          case LocationFailure(:final message):
-            if (mounted) {
-              setState(() => _errorMessage = '$message Escolha uma cidade para buscar sem usar a localização.');
-            }
-            return null;
+  /// Pede a posição uma vez (o sistema pede a permissão, se preciso) e, com termo utilizável, faz uma única busca.
+  Future<void> _locateAndSearch() async {
+    final service = widget.locationService;
+    if (service == null || _locating) return;
+    setState(() {
+      _locating = true;
+      _locationIssue = null;
+      _errorMessage = null;
+    });
+    final result = await service.getCurrentLocation();
+    // Opção trocada durante a leitura: a posição é descartada
+    if (!mounted || _mode != ExternalRegionMode.nearby) return;
+    switch (result) {
+      case LocationSuccess(:final location):
+        if (!_isUsableLocation(location)) {
+          setState(() {
+            _locating = false;
+            _locationIssue = const _LocationIssue.invalid();
+          });
+          return;
         }
+        setState(() {
+          _locating = false;
+          _nearbyLocation = location;
+        });
+        if (_hasQuery) await _search();
+      case LocationFailure(:final reason):
+        setState(() {
+          _locating = false;
+          _locationIssue = _LocationIssue(reason);
+        });
     }
+  }
+
+  static bool _isUsableLocation(DeviceLocation location) {
+    final lat = location.latitude;
+    final lng = location.longitude;
+    if (!lat.isFinite || !lng.isFinite || lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+    // 0,0 é o valor de quem não tem posição, não um lugar plausível para a busca
+    return !(lat == 0 && lng == 0);
   }
 
   Future<void> _adopt(ExternalPlaceCandidate candidate) async {
@@ -247,13 +313,26 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
             alignment: Alignment.centerLeft,
             child: OutlinedButton.icon(
               key: const Key('external_place_search_button'),
-              onPressed: _canSearch ? _search : null,
+              onPressed: _canSearch ? _onSearchPressed : null,
               icon: Icon(_mode == ExternalRegionMode.nearby ? Icons.my_location_rounded : Icons.public_rounded,
                   size: 16),
-              label: Text(results == null ? 'Buscar em fontes externas' : 'Buscar de novo nesta região',
+              label: Text(_alreadySearched ? 'Busca feita para este termo e região' : 'Buscar em fontes externas',
                   style: const TextStyle(fontSize: 12)),
             ),
           ),
+          if (_locating)
+            Padding(
+              key: const Key('external_locating'),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 8),
+                  Text('Obtendo sua localização…', style: mutedStyle),
+                ],
+              ),
+            ),
+          if (_locationIssue != null) _buildLocationIssue(theme, _locationIssue!),
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 10),
@@ -265,6 +344,15 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
               _errorMessage!,
               key: const Key('external_place_error_text'),
               style: TextStyle(fontSize: 11, color: theme.colorScheme.error, fontWeight: FontWeight.w500),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const Key('external_search_retry_button'),
+                onPressed: widget.enabled && !_isLoading ? _onSearchPressed : null,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Tentar novamente', style: TextStyle(fontSize: 12)),
+              ),
             ),
           ],
           if (_resultsRegion != null && results != null) ...[
@@ -281,8 +369,14 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
           ],
           if (results != null && results.isEmpty) ...[
             const SizedBox(height: 6),
-            Text('Nenhum estabelecimento encontrado na fonte externa.',
-                key: const Key('external_place_empty_text'), style: mutedStyle),
+            Text(
+              _resultsRegion is NearbyRegion
+                  ? 'Nenhum estabelecimento encontrado perto da sua localização atual. No Android Emulator, a posição '
+                      'é a simulada (⋯ Extended controls › Location), não a do computador.'
+                  : 'Nenhum estabelecimento encontrado na fonte externa.',
+              key: const Key('external_place_empty_text'),
+              style: mutedStyle,
+            ),
           ],
           if (results != null && results.isNotEmpty) ...[
             const SizedBox(height: 4),
@@ -379,7 +473,7 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
               ],
             ),
           ExternalRegionMode.nearby => Text(
-              'A localização é pedida só ao tocar em buscar, usada nesta busca (raio de '
+              'A localização é pedida ao escolher esta opção, usada só nesta busca (raio de '
               '${(NearbyRegion.defaultRadiusMeters / 1000).round()} km) e não é guardada.',
               key: const Key('external_region_nearby_hint'),
               style: mutedStyle,
@@ -399,7 +493,50 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
     setState(() {
       _mode = mode;
       _discardResults();
+      // Sair de "Perto de mim" descarta a posição; voltar pede de novo
+      _nearbyLocation = null;
+      _locationIssue = null;
+      _locating = false;
     });
+    if (mode == ExternalRegionMode.nearby) _locateAndSearch();
+  }
+
+  Widget _buildLocationIssue(ThemeData theme, _LocationIssue issue) {
+    return Padding(
+      key: const Key('external_location_issue'),
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(issue.message,
+              style: TextStyle(fontSize: 11, color: theme.colorScheme.error, fontWeight: FontWeight.w500)),
+          if (issue.showsEmulatorHint)
+            Text(
+              'No Android Emulator, defina uma posição em ⋯ Extended controls › Location › Set location.',
+              key: const Key('external_location_emulator_hint'),
+              style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurface.withAlpha(150)),
+            ),
+          Wrap(
+            spacing: 4,
+            children: [
+              TextButton.icon(
+                key: const Key('external_location_retry_button'),
+                onPressed: widget.enabled && !_locating ? _locateAndSearch : null,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Tentar novamente', style: TextStyle(fontSize: 12)),
+              ),
+              if (issue.reason == LocationFailureReason.permissionDeniedForever)
+                TextButton.icon(
+                  key: const Key('external_location_settings_button'),
+                  onPressed: () => widget.locationService?.openAppSettings(),
+                  icon: const Icon(Icons.settings_outlined, size: 16),
+                  label: const Text('Abrir configurações', style: TextStyle(fontSize: 12)),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildCandidateTile(ThemeData theme, ExternalPlaceCandidate candidate) {
@@ -435,4 +572,32 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
                   : null,
     );
   }
+}
+
+/// Falha ao obter a posição, com mensagem própria para cada caso; `reason` nulo é posição recebida mas inválida.
+class _LocationIssue {
+  final LocationFailureReason? reason;
+
+  const _LocationIssue(this.reason);
+
+  const _LocationIssue.invalid() : reason = null;
+
+  String get message => switch (reason) {
+        LocationFailureReason.permissionDenied =>
+          'Permissão de localização negada. Para buscar perto de você, permita o acesso à localização.',
+        LocationFailureReason.permissionDeniedForever =>
+          'A localização está bloqueada para o Rewit. Libere a permissão nas configurações do aparelho.',
+        LocationFailureReason.serviceDisabled =>
+          'A localização (GPS) do aparelho está desativada. Ative-a e tente novamente.',
+        LocationFailureReason.timeout => 'A localização não ficou disponível a tempo.',
+        LocationFailureReason.error => 'Não foi possível obter a localização do aparelho.',
+        null => 'A localização recebida é inválida. Nenhuma busca foi feita.',
+      };
+
+  /// Casos em que, num emulador, o mais provável é não haver posição simulada.
+  bool get showsEmulatorHint =>
+      reason == null ||
+      reason == LocationFailureReason.serviceDisabled ||
+      reason == LocationFailureReason.timeout ||
+      reason == LocationFailureReason.error;
 }

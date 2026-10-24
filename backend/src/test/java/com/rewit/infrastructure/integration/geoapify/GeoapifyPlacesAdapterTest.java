@@ -159,8 +159,8 @@ class GeoapifyPlacesAdapterTest {
                 })
                 .andRespond(withSuccess("{\"results\": []}", MediaType.APPLICATION_JSON));
 
-        assertTrue(adapter.searchByText("café", null, null, null, 99, "pt-BR").isEmpty());
-        assertTrue(adapter.searchByText("café", -25.0, -50.0, 900_000.0, 5, null).isEmpty());
+        assertTrue(adapter.searchByText("Café do Ponto", null, null, null, 99, "pt-BR").isEmpty());
+        assertTrue(adapter.searchByText("Café do Ponto", -25.0, -50.0, 900_000.0, 5, null).isEmpty());
         mockServer.verify();
     }
 
@@ -372,7 +372,7 @@ class GeoapifyPlacesAdapterTest {
                 })
                 .andRespond(withSuccess("{\"results\": []}", MediaType.APPLICATION_JSON));
 
-        adapter.searchByText("padaria", -25.09, -50.16, null, 5, "pt-BR");
+        adapter.searchByText("Padaria do Tião", -25.09, -50.16, null, 5, "pt-BR");
         mockServer.verify();
     }
 
@@ -403,7 +403,7 @@ class GeoapifyPlacesAdapterTest {
             mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
                     .andExpect(request -> {
                         Map<String, String> p = params(request);
-                        assertEquals("padaria", p.get("text"));
+                        assertEquals("Padaria Junior", p.get("text"));
                         assertEquals("amenity", p.get("type"));
                         assertEquals("place:51-ponta-grossa-pr", p.get("filter"), "fronteira da cidade da UF pedida");
                         assertEquals("proximity:-50.1633,-25.0945", p.get("bias"));
@@ -417,9 +417,9 @@ class GeoapifyPlacesAdapterTest {
                             """, MediaType.APPLICATION_JSON));
         }
 
-        List<PlaceCandidate> first = adapter.searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.PR, 5, "pt-BR");
+        List<PlaceCandidate> first = adapter.searchByTextInCity("Padaria Junior", "Ponta Grossa", BrazilianState.PR, 5, "pt-BR");
         // Mesma cidade com outra grafia: reaproveita a resolução, só a busca vai ao provedor
-        List<PlaceCandidate> second = adapter.searchByTextInCity("padaria", "PONTA GROSSA", BrazilianState.PR, 5, "pt-BR");
+        List<PlaceCandidate> second = adapter.searchByTextInCity("Padaria Junior", "PONTA GROSSA", BrazilianState.PR, 5, "pt-BR");
 
         mockServer.verify();
         assertEquals("Padaria Junior Raikoski", first.getFirst().getDisplayName());
@@ -474,6 +474,173 @@ class GeoapifyPlacesAdapterTest {
         } finally {
             logger.detachAppender(appender);
         }
+    }
+
+    /** Resposta da Places API: FeatureCollection, país e estado por nome (sem códigos), um item repetido e um sem nome. */
+    private static final String BAKERIES_PLACES = """
+            {"type": "FeatureCollection", "features": [
+              {"type": "Feature", "properties": {"place_id": "51-raikoski", "name": "Padaria Junior Raikoski",
+                "formatted": "Rua Conrado Schiffer, Ponta Grossa - PR", "lat": -25.108, "lon": -50.169,
+                "city": "Ponta Grossa", "state": "Paraná", "country": "Brasil",
+                "categories": ["commercial", "commercial.food_and_drink", "commercial.food_and_drink.bakery"]}},
+              {"type": "Feature", "properties": {"place_id": "51-pao-quente", "name": "Pão Quente",
+                "formatted": "Rua Balduíno Taques, Ponta Grossa - PR", "lat": -25.095, "lon": -50.161,
+                "city": "Ponta Grossa", "state": "Paraná", "country": "Brazil",
+                "categories": ["commercial.food_and_drink.bakery"]}},
+              {"type": "Feature", "properties": {"place_id": "51-raikoski", "name": "Padaria Junior Raikoski",
+                "lat": -25.108, "lon": -50.169}},
+              {"type": "Feature", "properties": {"place_id": "51-sem-nome", "lat": -25.1, "lon": -50.1}}
+            ]}
+            """;
+
+    @Test
+    @DisplayName("Categoria perto de mim: Places API com categoria oficial, filtro circular, viés e só lugares com nome")
+    void categoryNearbyUsesPlacesApiWithCircleFilter() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.PLACES_PATH)))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("commercial.food_and_drink.bakery", p.get("categories"));
+                    assertEquals("named", p.get("conditions"));
+                    assertEquals("circle:-50.16,-25.09,10000.0", p.get("filter"));
+                    assertEquals("proximity:-50.16,-25.09", p.get("bias"));
+                    assertEquals("5", p.get("limit"));
+                    assertEquals("pt", p.get("lang"));
+                    assertFalse(p.containsKey("name"), "categoria não é reduzida aos nomes com a palavra pesquisada");
+                    assertFalse(p.containsKey("text"));
+                    assertEquals(KEY, p.get("apiKey"));
+                })
+                .andRespond(withSuccess(BAKERIES_PLACES, MediaType.APPLICATION_JSON));
+
+        List<PlaceCandidate> results = adapter.searchByText("Padarias", -25.09, -50.16, 10_000.0, 5, "pt-BR");
+
+        mockServer.verify();
+        assertEquals(List.of("51-raikoski", "51-pao-quente"), results.stream().map(PlaceCandidate::getExternalId).toList(),
+                "deduplicado pelo id externo, na ordem do provedor, sem o lugar sem nome");
+        PlaceCandidate semPalavraNoNome = results.get(1);
+        assertEquals("Pão Quente", semPalavraNoNome.getDisplayName(), "padaria sem 'padaria' no nome também aparece");
+        assertEquals("PR", semPalavraNoNome.getState(), "país e estado por nome: Brazil + Paraná viram BR/PR");
+        assertEquals("BR", semPalavraNoNome.getCountryCode());
+        assertEquals(List.of(GeoapifyPlacesAdapter.GEOAPIFY_ATTRIBUTION, GeoapifyPlacesAdapter.OSM_ATTRIBUTION),
+                semPalavraNoNome.getAttributions());
+    }
+
+    @Test
+    @DisplayName("Categoria na cidade: Places API limitada à fronteira da cidade (filter=place)")
+    void categoryInCityUsesPlacesApiWithCityBoundary() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andRespond(withSuccess(PONTA_GROSSA_CITY, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.PLACES_PATH)))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("commercial.food_and_drink.bakery", p.get("categories"));
+                    assertEquals("place:51-ponta-grossa-pr", p.get("filter"));
+                    assertEquals("proximity:-50.1633,-25.0945", p.get("bias"));
+                })
+                .andRespond(withSuccess(BAKERIES_PLACES, MediaType.APPLICATION_JSON));
+
+        List<PlaceCandidate> results = adapter.searchByTextInCity("padaria", "Ponta Grossa", BrazilianState.PR, 10, "pt-BR");
+
+        mockServer.verify();
+        assertEquals(2, results.size());
+    }
+
+    @Test
+    @DisplayName("Nome próprio na cidade: busca textual pelo nome, sem reduzir a uma categoria genérica")
+    void specificNameUsesTextSearch() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andRespond(withSuccess(PONTA_GROSSA_CITY, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("Padaria do Tião", p.get("text"));
+                    assertEquals("amenity", p.get("type"));
+                    assertEquals("place:51-ponta-grossa-pr", p.get("filter"));
+                    assertFalse(p.containsKey("categories"));
+                })
+                .andRespond(withSuccess("{\"results\": []}", MediaType.APPLICATION_JSON));
+
+        assertTrue(adapter.searchByTextInCity("Padaria do Tião", "Ponta Grossa", BrazilianState.PR, 10, "pt-BR").isEmpty());
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("Categoria sem região: Places exige área, então a busca é textual e sem restrição geográfica")
+    void categoryWithoutRegionFallsBackToTextSearch() {
+        mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.SEARCH_PATH)))
+                .andExpect(request -> {
+                    Map<String, String> p = params(request);
+                    assertEquals("padaria", p.get("text"));
+                    assertFalse(p.containsKey("filter"));
+                    assertFalse(p.containsKey("bias"));
+                })
+                .andRespond(withSuccess("""
+                        {"results": [
+                          {"place_id": "51-a", "name": "Padaria A", "result_type": "amenity", "lat": -25.1, "lon": -50.1},
+                          {"place_id": "51-a", "name": "Padaria A", "result_type": "amenity", "lat": -25.1, "lon": -50.1}
+                        ]}
+                        """, MediaType.APPLICATION_JSON));
+
+        List<PlaceCandidate> results = adapter.searchByText("padaria", null, null, null, 10, "pt-BR");
+
+        mockServer.verify();
+        assertEquals(1, results.size(), "duplicados pelo id externo também são removidos na busca textual");
+    }
+
+    @Test
+    @DisplayName("Places API: vazio, 404, cota, chave recusada e timeout são controlados, sem vazar a chave")
+    void placesFailuresAreControlled() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        Logger logger = (Logger) LoggerFactory.getLogger(GeoapifyPlacesAdapter.class);
+        logger.addAppender(appender);
+        try {
+            mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.PLACES_PATH)))
+                    .andRespond(withSuccess("{\"type\": \"FeatureCollection\", \"features\": []}", MediaType.APPLICATION_JSON));
+            mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.PLACES_PATH)))
+                    .andRespond(withStatus(HttpStatus.NOT_FOUND));
+            mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.PLACES_PATH)))
+                    .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+            mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.PLACES_PATH)))
+                    .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+            mockServer.expect(requestTo(startsWith(BASE + GeoapifyPlacesAdapter.PLACES_PATH)))
+                    .andRespond(withException(new SocketTimeoutException("Read timed out")));
+
+            assertTrue(adapter.searchByText("farmácia", -25.09, -50.16, 3000.0, 5, "pt-BR").isEmpty());
+            assertTrue(adapter.searchByText("farmácia", -25.09, -50.16, 3000.0, 5, "pt-BR").isEmpty());
+            assertError(HttpStatus.SERVICE_UNAVAILABLE, "EXTERNAL_SERVICE_UNAVAILABLE",
+                    () -> adapter.searchByText("farmácia", -25.09, -50.16, 3000.0, 5, "pt-BR"));
+            BusinessException denied = assertThrows(BusinessException.class,
+                    () -> adapter.searchByText("farmácia", -25.09, -50.16, 3000.0, 5, "pt-BR"));
+            assertEquals("EXTERNAL_SERVICE_ERROR", denied.getErrorCode());
+            assertFalse(denied.getMessage().contains(KEY));
+            assertError(HttpStatus.GATEWAY_TIMEOUT, "EXTERNAL_SERVICE_TIMEOUT",
+                    () -> adapter.searchByText("farmácia", -25.09, -50.16, 3000.0, 5, "pt-BR"));
+            mockServer.verify();
+            assertTrue(appender.list.stream().map(ILoggingEvent::getFormattedMessage).noneMatch(m -> m.contains(KEY)));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @ParameterizedTest(name = "\"{0}\" -> {1}")
+    @CsvSource(delimiter = ';', nullValues = "NULL", value = {
+            "padaria; commercial.food_and_drink.bakery",
+            "  PADARIAS ; commercial.food_and_drink.bakery",
+            "Panificadora; commercial.food_and_drink.bakery",
+            "farmácia; healthcare.pharmacy,commercial.health_and_beauty.pharmacy",
+            "Drogaria; healthcare.pharmacy,commercial.health_and_beauty.pharmacy",
+            "restaurantes; catering.restaurant",
+            "Café; catering.cafe",
+            "supermercado; commercial.supermarket",
+            "Padaria do Tião; NULL",
+            "padaria em Ponta Grossa; NULL",
+            "pizzaria napolitana; NULL"
+    })
+    @DisplayName("Termos e sinônimos do tipo de estabelecimento viram categorias oficiais; nomes próprios não")
+    void termToCategoryMapping(String term, String expected) {
+        assertEquals(expected == null ? null : List.of(expected.split(",")),
+                GeoapifyCategories.forQuery(term).orElse(null));
     }
 
     private void search() {
