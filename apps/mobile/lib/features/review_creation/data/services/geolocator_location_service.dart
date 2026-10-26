@@ -39,12 +39,43 @@ class GeolocatorLocationService implements LocationService {
         );
       }
 
+      // 1. Tenta obter a última localização conhecida do cache do sistema operacional.
+      // Esta operação é praticamente instantânea (milissegundos), não aciona o hardware de satélites
+      // nem listeners NMEA síncronos, prevenindo travamento da UI thread (ANR) no Android.
+      try {
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null && _isUsablePosition(lastKnown)) {
+          return LocationSuccess(
+            DeviceLocation(
+              latitude: lastKnown.latitude,
+              longitude: lastKnown.longitude,
+              accuracyMeters: lastKnown.accuracy,
+            ),
+          );
+        }
+      } catch (_) {
+        // Fallback para obtenção ativa se o cache não estiver disponível
+      }
+
+      // 2. Se não houver posição em cache, solicita a posição atual com precisão equilibrada (medium)
+      // e tempo limite seguro (máximo 5s) para evitar bloqueio e timeout da UI thread.
+      final effectiveTimeout = timeout > const Duration(seconds: 5)
+          ? const Duration(seconds: 5)
+          : timeout;
+
       final position = await Geolocator.getCurrentPosition(
         locationSettings: LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: timeout,
+          accuracy: LocationAccuracy.medium,
+          timeLimit: effectiveTimeout,
         ),
       );
+
+      if (!_isUsablePosition(position)) {
+        return const LocationFailure(
+          reason: LocationFailureReason.error,
+          message: 'A localização obtida é inválida.',
+        );
+      }
 
       return LocationSuccess(
         DeviceLocation(
@@ -64,6 +95,18 @@ class GeolocatorLocationService implements LocationService {
         message: 'Não foi possível obter sua localização agora.',
       );
     }
+  }
+
+  static bool _isUsablePosition(Position position) {
+    final lat = position.latitude;
+    final lng = position.longitude;
+    return lat.isFinite &&
+        lng.isFinite &&
+        lat >= -90.0 &&
+        lat <= 90.0 &&
+        lng >= -180.0 &&
+        lng <= 180.0 &&
+        !(lat == 0.0 && lng == 0.0);
   }
 
   @override
