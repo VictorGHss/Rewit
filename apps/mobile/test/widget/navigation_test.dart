@@ -5,6 +5,7 @@ import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 
@@ -34,6 +35,26 @@ class StubNotificationRepo implements NotificationRepository {
 }
 
 class StubAuthRepo implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   bool logoutCalled = false;
 
   @override

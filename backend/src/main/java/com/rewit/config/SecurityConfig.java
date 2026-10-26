@@ -79,7 +79,8 @@ public class SecurityConfig {
                         .requestMatchers(EndpointRequest.toAnyEndpoint()).denyAll()
                         // Endpoints públicos de autenticação e documentação
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
-                                "/api/v1/auth/reactivate").permitAll()
+                                "/api/v1/auth/reactivate", "/api/v1/auth/social/nonce", "/api/v1/auth/social/google",
+                                "/api/v1/auth/social/apple", "/api/v1/auth/apple/callback").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
                         // Endpoints de autenticação protegidos
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").authenticated()

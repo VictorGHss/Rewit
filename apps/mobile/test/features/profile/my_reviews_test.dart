@@ -12,6 +12,7 @@ import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/user_reviews_page.dart';
@@ -132,6 +133,26 @@ class FakeUserProfileRepository implements UserProfileRepository {
 }
 
 class FakeAuthRepo implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   final AuthUserDto user;
 
   FakeAuthRepo({

@@ -7,6 +7,7 @@ import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 
 /// Implementação de [AuthRepository] consumindo a API REST do Rewit.
 class AuthRepositoryImpl implements AuthRepository {
@@ -34,6 +35,70 @@ class AuthRepositoryImpl implements AuthRepository {
     );
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final user = AuthUserDto.fromJson(data['user'] as Map<String, dynamic>);
+    final tokens = AuthTokens.fromJson(data);
+
+    await _tokenStorage.saveTokens(
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    );
+
+    return Authenticated(user: user, tokens: tokens);
+  }
+
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) async {
+    final response = await _httpClient.post(
+      ApiEndpoints.authRegister,
+      body: {
+        'displayName': displayName.trim(),
+        'handle': handle.trim().toLowerCase(),
+        'email': email.trim().toLowerCase(),
+        'password': password,
+      },
+      requiresAuth: false,
+    );
+
+    return _storeSession(response.body);
+  }
+
+  @override
+  Future<String> requestSocialNonce() async {
+    final response = await _httpClient.post(
+      ApiEndpoints.authSocialNonce,
+      requiresAuth: false,
+    );
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['nonce'] as String;
+  }
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) async {
+    final response = await _httpClient.post(
+      ApiEndpoints.authSocial(provider.apiPath),
+      body: {
+        'idToken': idToken,
+        'nonce': nonce,
+      },
+      requiresAuth: false,
+    );
+
+    return _storeSession(response.body);
+  }
+
+  /// Interpreta a resposta de autenticação e persiste o par de tokens no armazenamento seguro.
+  Future<Authenticated> _storeSession(String body) async {
+    final data = jsonDecode(body) as Map<String, dynamic>;
     final user = AuthUserDto.fromJson(data['user'] as Map<String, dynamic>);
     final tokens = AuthTokens.fromJson(data);
 

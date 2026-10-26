@@ -1,6 +1,6 @@
-# API de Autenticação Local (docs/api/authentication.md)
+# API de Autenticação (docs/api/authentication.md)
 
-Este documento especifica os contratos de API RESTful dos endpoints de autenticação local da plataforma **Rewit** (Step 4).
+Este documento especifica os contratos de API RESTful dos endpoints de autenticação local (Step 4) e social (Google, Apple; seções 7 a 9) da plataforma **Rewit**.
 
 Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`). Erros seguem a especificação [RFC 7807](https://tools.ietf.org/html/rfc7807) (`ProblemDetail`).
 
@@ -27,7 +27,7 @@ Cria uma conta de usuário com credenciais locais (`auth_provider = LOCAL`) e o 
 #### Validações de Entrada
 - `email`: Obrigatório, formato RFC 5322 válido. Normalizado para minúsculas e sem espaços laterais.
 - `password`: Obrigatória, mínimo de 8 caracteres e máximo de 128 caracteres.
-- `handle`: Obrigatório, 3 a 30 caracteres (`[a-z0-9_.]`). Prefixo `@` removido e normalizado para minúsculas.
+- `handle`: Obrigatório, 3 a 30 letras sem acento, dígitos ou sublinhado (`^@?[a-zA-Z0-9_]{3,30}$`; ponto não é aceito). Prefixo `@` removido e normalizado para minúsculas.
 - `displayName`: Obrigatório, 2 a 100 caracteres.
 
 ### Resposta de Sucesso (`201 Created`)
@@ -223,3 +223,78 @@ Mesmo corpo do login (`accessToken`, `refreshToken`, `tokenType`, `expiresIn`, `
 - **Mesmo limite do login**: as tentativas consomem a janela `LOGIN` da mesma identidade; não é um segundo orçamento de tentativas.
 - **Sessões**: a transição revoga todas as sessões anteriores antes de criar a nova.
 - **Login de conta desativada**: `POST /api/v1/auth/login` continua respondendo `401 INVALID_CREDENTIALS`; o cliente oferece a reativação como fluxo próprio.
+- **Contas federadas**: contas criadas por login social não têm senha e não são reativadas por aqui.
+
+---
+
+## 7. Nonce do Login Social
+
+Emite um nonce de uso único para uma tentativa de login social. O cliente entrega ao provedor o **SHA-256 do nonce, em hexadecimal minúsculo** (UTF-8), e reenvia o nonce **em claro** ao Rewit junto com o ID token.
+
+* **Método**: `POST`
+* **Rota**: `/api/v1/auth/social/nonce`
+* **Autenticação**: Pública, sem corpo
+
+### Resposta de Sucesso (`200 OK`, `Cache-Control: no-store`)
+```json
+{ "nonce": "<43 caracteres Base64 URL-safe>", "expiresIn": 600 }
+```
+
+### Erros
+- `429 RATE_LIMIT_EXCEEDED` (com `Retry-After`): limite global de nonces (padrão 60 por minuto).
+- `503 SOCIAL_LOGIN_UNAVAILABLE`: armazenamento de nonces (Redis) indisponível. O login social falha fechado.
+
+---
+
+## 8. Login Social (Google e Apple)
+
+Valida o ID token OpenID Connect do provedor e emite a sessão do Rewit (mesmo corpo de resposta do login local).
+
+* **Método**: `POST`
+* **Rotas**: `/api/v1/auth/social/google` e `/api/v1/auth/social/apple`
+* **Autenticação**: Pública
+
+### Requisição
+```json
+{ "idToken": "<ID token devolvido pelo SDK do provedor>", "nonce": "<nonce emitido em /social/nonce>" }
+```
+`idToken` até 8192 caracteres; `nonce` até 64. Qualquer outro campo (e-mail, nome, provedor, `userId`, papel) é ignorado: a identidade vem somente das claims do token validado.
+
+### Validação no servidor
+- Assinatura RS256 com as chaves públicas do provedor (JWKS: `https://www.googleapis.com/oauth2/v3/certs`, `https://appleid.apple.com/auth/keys`); tokens sem assinatura, cifrados ou com outro algoritmo são recusados.
+- `iss`: `https://accounts.google.com` ou `accounts.google.com` (Google); `https://appleid.apple.com` (Apple).
+- `aud`: um dos client IDs configurados (`GOOGLE_SIGNIN_CLIENT_IDS`, `APPLE_SIGNIN_CLIENT_IDS`).
+- `exp`, `iat` e `nbf` com tolerância de 60 s; `sub` obrigatório (até 128 caracteres).
+- `nonce`: igual ao SHA-256 do nonce enviado, que precisa ter sido emitido pelo Rewit, estar dentro do prazo e não ter sido usado. O nonce é consumido antes da validação: uma tentativa recusada também o gasta.
+
+### Conta
+- A conta é localizada somente pelo par provedor + `sub`. Se existir e estiver `ACTIVE`, recebe a sessão; desativada, suspensa ou excluída responde `401 ACCOUNT_DISABLED`, sem distinguir o estado.
+- Sem conta vinculada, uma conta federada (sem senha) é criada se o provedor atestar o e-mail (`email_verified`). O handle é gerado (`usuario_` + 10 caracteres aleatórios, sem derivar do e-mail) e o nome de exibição vem da claim `name` (Google) ou é `Usuário Rewit`; os dois podem ser editados em `PATCH /api/v1/me/profile`. A criação conta no limite global de cadastro.
+- **Sem vinculação automática**: se o e-mail do token já pertence a outra conta (local, de outro provedor ou reservado de uma conta excluída), a resposta é `409 SOCIAL_ACCOUNT_EMAIL_CONFLICT` e nada é criado ou alterado. A pessoa entra pelo método usado no cadastro. Vincular uma identidade social a uma conta existente ainda não é suportado.
+
+### Erros
+| Status | Código | Situação |
+| :--- | :--- | :--- |
+| `400` | `VALIDATION_ERROR` | `idToken` ou `nonce` ausente ou longo demais |
+| `401` | `INVALID_SOCIAL_NONCE` | Nonce com formato inválido, não emitido, expirado ou já usado |
+| `401` | `INVALID_SOCIAL_TOKEN` | Assinatura, emissor, audiência, validade, `sub` ou nonce do token inválidos |
+| `401` | `ACCOUNT_DISABLED` | Conta vinculada não está ativa |
+| `409` | `SOCIAL_ACCOUNT_EMAIL_CONFLICT` | E-mail do token já pertence a outra conta |
+| `422` | `SOCIAL_EMAIL_NOT_VERIFIED` | Conta nova sem e-mail atestado pelo provedor |
+| `429` | `RATE_LIMIT_EXCEEDED` | Limite global de cadastro na criação da conta |
+| `503` | `SOCIAL_PROVIDER_UNAVAILABLE` | Provedor sem client ID configurado, ou JWKS do provedor inacessível |
+| `503` | `SOCIAL_LOGIN_UNAVAILABLE` | Armazenamento de nonces indisponível |
+
+O refresh, o logout e `/auth/me` de uma sessão social são os mesmos da sessão local. `POST /api/v1/auth/login` continua respondendo `401 INVALID_CREDENTIALS` para contas federadas.
+
+---
+
+## 9. Retorno do Sign in with Apple no Android
+
+No Android, o Sign in with Apple roda no navegador e a Apple publica o resultado (`response_mode=form_post`) numa URL do backend, que o devolve ao app.
+
+* **Método**: `POST` (`application/x-www-form-urlencoded`, enviado pela Apple)
+* **Rota**: `/api/v1/auth/apple/callback`
+* **Resposta**: `303 See Other` para `intent://callback?<parâmetros>#Intent;package=<APPLE_SIGNIN_ANDROID_PACKAGE>;scheme=signinwithapple;end`, com `Cache-Control: no-store` e `Referrer-Policy: no-referrer`
+
+Somente `code`, `id_token`, `state`, `user` e `error` são repassados, cada um codificado; parâmetro repetido ou maior que 16 KB responde `400 INVALID_SOCIAL_CALLBACK`. Nada é validado nem gravado neste endpoint: o app envia o token a `POST /api/v1/auth/social/apple`. Com a Apple desligada, responde `503 SOCIAL_PROVIDER_UNAVAILABLE`.

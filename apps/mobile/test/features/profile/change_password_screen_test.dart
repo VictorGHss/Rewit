@@ -8,12 +8,33 @@ import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/change_password_screen.dart';
 
 class FakeAuthRepoForChangePassword implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   bool shouldDelay = false;
   Completer<void>? delayCompleter;
   int changePasswordCallCount = 0;

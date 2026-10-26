@@ -1,17 +1,24 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/session_refresher.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 
 /// Gerenciador reativo de estado de autenticação (ChangeNotifier).
 class AuthNotifier extends ChangeNotifier {
+  /// Código do estado após o usuário cancelar a tela do provedor (aviso neutro, não é erro).
+  static const String socialSignInCancelledCode = 'SOCIAL_SIGN_IN_CANCELLED';
+
   final AuthRepository _authRepository;
   final SessionRefresher? _sessionRefresher;
   final Future<void> Function()? _clearLocalSession;
+  final SocialSignInService? _socialSignInService;
   AuthState _state = const AuthInitial();
   bool _isHandlingExpiry = false;
   int _sessionCheckSequence = 0;
@@ -19,18 +26,135 @@ class AuthNotifier extends ChangeNotifier {
 
   /// [sessionRefresher] permite confirmar, antes de encerrar a sessão, se o refresh token ainda vale;
   /// [clearLocalSession] apaga os tokens guardados quando a sessão acaba de fato. Sem eles, um 401
-  /// encerra a sessão na hora, como antes.
+  /// encerra a sessão na hora, como antes. Sem [socialSignInService], o login social fica indisponível.
   AuthNotifier({
     required AuthRepository authRepository,
     SessionRefresher? sessionRefresher,
     Future<void> Function()? clearLocalSession,
+    SocialSignInService? socialSignInService,
   })  : _authRepository = authRepository,
         _sessionRefresher = sessionRefresher,
-        _clearLocalSession = clearLocalSession;
+        _clearLocalSession = clearLocalSession,
+        _socialSignInService = socialSignInService;
 
   AuthState get state => _state;
   bool get isAuthenticated => _state is Authenticated;
   bool get isLoading => _state is Authenticating;
+
+  /// Provedor social configurado nesta build e suportado nesta plataforma.
+  bool isSocialProviderAvailable(SocialAuthProvider provider) =>
+      _socialSignInService?.isAvailable(provider) ?? false;
+
+  /// Remove a mensagem exibida (ex.: ao alternar entre login e cadastro), sem mexer numa sessão ou operação ativa.
+  void clearMessage() {
+    final current = _state;
+    if (current is Unauthenticated && current.errorMessage != null) {
+      _state = const Unauthenticated();
+      notifyListeners();
+    }
+  }
+
+  /// Cria a conta local e autentica com a sessão devolvida pelo cadastro, sem exigir um segundo login.
+  Future<bool> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) async {
+    if (isLoading) return false;
+
+    _state = const Authenticating(statusMessage: 'Criando conta...');
+    notifyListeners();
+
+    try {
+      _state = await _authRepository.register(
+        displayName: displayName,
+        handle: handle,
+        email: email,
+        password: password,
+      );
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _state = Unauthenticated(
+        errorMessage: e.detail,
+        errorCode: e.errorCode,
+        retryAfterSeconds: e.retryAfterSeconds,
+        fieldErrors: e.hasFieldErrors ? e.allFieldErrors : null,
+      );
+      notifyListeners();
+      return false;
+    } on NetworkException catch (e) {
+      _state = Unauthenticated(errorMessage: e.message);
+      notifyListeners();
+      return false;
+    } catch (_) {
+      _state = const Unauthenticated(
+        errorMessage: 'Ocorreu um erro inesperado ao criar a conta.',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Login social: nonce do Rewit, fluxo oficial do provedor com o SHA-256 do nonce e validação do ID token
+  /// no backend, que emite a sessão. Cancelamento volta ao estado não autenticado com um aviso neutro.
+  Future<bool> signInWithSocial(SocialAuthProvider provider) async {
+    if (isLoading) return false;
+
+    final service = _socialSignInService;
+    if (service == null || !service.isAvailable(provider)) {
+      _state = Unauthenticated(
+        errorMessage: 'Login com ${provider.label} indisponível nesta versão do app.',
+        errorCode: 'SOCIAL_PROVIDER_UNAVAILABLE',
+      );
+      notifyListeners();
+      return false;
+    }
+
+    _state = Authenticating(statusMessage: 'Entrando com ${provider.label}...');
+    notifyListeners();
+
+    try {
+      final nonce = await _authRepository.requestSocialNonce();
+      final idToken = await service.obtainIdToken(provider, providerNonce: hashSocialNonce(nonce));
+      _state = await _authRepository.signInWithSocial(provider: provider, idToken: idToken, nonce: nonce);
+      notifyListeners();
+      return true;
+    } on SocialSignInCancelledException {
+      _state = Unauthenticated(
+        errorMessage: 'Login com ${provider.label} cancelado.',
+        errorCode: socialSignInCancelledCode,
+      );
+      notifyListeners();
+      return false;
+    } on SocialSignInFailureException catch (e) {
+      _state = Unauthenticated(errorMessage: e.message, errorCode: 'SOCIAL_SIGN_IN_FAILED');
+      notifyListeners();
+      return false;
+    } on ApiException catch (e) {
+      _state = Unauthenticated(
+        errorMessage: e.detail,
+        errorCode: e.errorCode,
+        retryAfterSeconds: e.retryAfterSeconds,
+      );
+      notifyListeners();
+      return false;
+    } on NetworkException catch (e) {
+      _state = Unauthenticated(errorMessage: e.message);
+      notifyListeners();
+      return false;
+    } catch (_) {
+      _state = Unauthenticated(
+        errorMessage: 'Ocorreu um erro inesperado ao entrar com ${provider.label}.',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Valor entregue ao provedor: SHA-256 (hex minúsculo) do nonce do Rewit. O nonce em claro só vai ao Rewit.
+  static String hashSocialNonce(String nonce) => sha256.convert(utf8.encode(nonce)).toString();
 
   /// Verifica se há sessão armazenada e valida identidade via /api/v1/auth/me.
   Future<void> checkAuthStatus() async {

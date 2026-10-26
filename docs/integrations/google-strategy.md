@@ -34,7 +34,7 @@ flowchart LR
     end
 
     subgraph ACL[Camada de Integrações Google - ACL]
-        GoogleIdentity[GoogleIdentityAdapter]
+        GoogleIdentity[OidcIdTokenVerifier]
         GooglePlaces[GooglePlacesAdapter]
         GoogleMaps[GoogleMapsAdapter]
         GoogleReviews[GoogleReviewRedirectAdapter]
@@ -56,11 +56,11 @@ flowchart LR
 ### 1. `google/identity` (Autenticação e Identidade)
 - **Função**: Validar tokens de identidade OpenID Connect (ID Token) emitidos pelo Google Sign-In no aplicativo móvel.
 - **Fluxo**:
-  1. O app Flutter solicita login ao usuário via SDK Google Sign-In nativo.
-  2. O app obtém o `idToken` criptografado e o envia ao backend Rewit via `/api/v1/auth/google`.
-  3. O `GoogleIdentityAdapter` valida a assinatura do token usando as chaves públicas da Google (`GoogleIdTokenVerifier`).
-  4. Extrai `email`, `name`, `sub` (Google User ID) e avatar.
-  5. Vincula a um `User` interno ou provisiona um novo usuário em nossa base PostgreSQL.
+  1. O app pede um nonce ao Rewit (`POST /api/v1/auth/social/nonce`) e abre o Google Sign-In (`google_sign_in`: Credential Manager no Android, GoogleSignIn no iOS) com o SHA-256 do nonce.
+  2. O app envia o `idToken` e o nonce em claro a `POST /api/v1/auth/social/google`.
+  3. O `OidcIdTokenVerifier` valida assinatura (JWKS `https://www.googleapis.com/oauth2/v3/certs`), emissor, audiência (`GOOGLE_SIGNIN_CLIENT_IDS`), validade e nonce.
+  4. Usa `sub` (identificador estável), `email`, `email_verified` e `name`. O avatar não é importado.
+  5. Recupera a conta vinculada a esse `sub` ou cria uma conta federada; e-mail já usado por outra conta responde `409`, sem vinculação automática. Detalhes em `docs/architecture/authentication.md` §4.9.
 
 ### 2. `google/places` (Descoberta e Auxílio Inicial)
 - **Função**: Atuar como mecanismo de *bootstrap* para povoamento inicial de novos locais em regiões geográficas onde a base do Rewit ainda tem poucos registros cadastrados.
@@ -87,8 +87,8 @@ flowchart LR
 
 Todas as credenciais são gerenciadas através de variáveis de ambiente:
 ```properties
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
+# Audiências aceitas no ID token do Google Sign-In (client IDs públicos, separados por vírgula); sem segredo
+GOOGLE_SIGNIN_CLIENT_IDS=
 GOOGLE_MAPS_API_KEY=
 GOOGLE_PLACES_API_KEY=
 ```

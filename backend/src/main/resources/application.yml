@@ -93,6 +93,18 @@ rewit:
     max-batches-per-run: ${AUTH_SESSION_CLEANUP_MAX_BATCHES_PER_RUN:1}
   # Purge de contas excluídas (C2.3): o e-mail reservado é um HMAC-SHA256 com este segredo (mínimo 32 bytes, estável e
   # igual em todas as instâncias; trocá-lo invalida as reservas já gravadas). Sem ele o purge não executa.
+  # Login social (Google, Apple): o ID token é validado no backend (assinatura JWKS, emissor, audiência, validade e
+  # nonce). Os client IDs são públicos e separados por vírgula; sem nenhum, o provedor fica desligado. Não há
+  # segredo de provedor no backend para esta validação.
+  social-auth:
+    google:
+      # Client ID "Web application" usado como serverClientId no app (audiência do ID token no Android e no iOS)
+      client-ids: ${GOOGLE_SIGNIN_CLIENT_IDS:}
+    apple:
+      # Bundle ID do app iOS (fluxo nativo) e Services ID (fluxo web no Android)
+      client-ids: ${APPLE_SIGNIN_CLIENT_IDS:}
+    # applicationId do app Android que recebe o retorno do fluxo web da Apple (POST /api/v1/auth/apple/callback)
+    apple-android-package: ${APPLE_SIGNIN_ANDROID_PACKAGE:app.rewit.mobile}
   account:
     email-reservation-secret: ${ACCOUNT_EMAIL_RESERVATION_SECRET:}
     # Job diário do purge: contas DELETED há 30 dias ou mais, uma transação por conta. Sem o segredo acima, a passada
@@ -126,6 +138,10 @@ rewit:
       registration:
         limit: ${RATE_LIMIT_REGISTRATION_LIMIT:30}
         window: ${RATE_LIMIT_REGISTRATION_WINDOW:PT1M}
+      # Nonces de login social emitidos, somados de todos os clientes (cada tentativa consome um)
+      social-login:
+        limit: ${RATE_LIMIT_SOCIAL_LOGIN_LIMIT:60}
+        window: ${RATE_LIMIT_SOCIAL_LOGIN_WINDOW:PT1M}
     content:
       report-creation:
         limit: 10

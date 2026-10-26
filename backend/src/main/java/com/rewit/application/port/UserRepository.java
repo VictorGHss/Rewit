@@ -48,5 +48,9 @@ public interface UserRepository {
 
     boolean existsByEmail(String email);
 
+    /**
+     * Conta vinculada à identidade externa, em qualquer estado (inclusive {@code DELETED} ainda não minimizada): o
+     * identificador do provedor é único entre todas as contas, e quem chama decide se a conta opera.
+     */
     Optional<User> findByAuthProviderAndProviderUserId(AuthProvider authProvider, String providerUserId);
 }

@@ -172,7 +172,8 @@ Retry-After: <segundos>
 |---|---|---|---|---|
 | Login | `POST /api/v1/auth/login` | e-mail normalizado | 10 em 15 min | Tentativas sem sucesso. A tentativa ocupa a janela antes da verificação e é devolvida no sucesso. E-mail inexistente conta igual. |
 | Refresh | `POST /api/v1/auth/refresh` | usuário da sessão | 30 em 5 min | Rotações. Checado depois da detecção de reúso e da expiração; o 429 faz rollback sem consumir o token. |
-| Cadastro | `POST /api/v1/auth/register` | global | 30 em 1 min | Toda tentativa, inclusive as inválidas. |
+| Cadastro | `POST /api/v1/auth/register` | global | 30 em 1 min | Toda tentativa, inclusive as inválidas. Também a criação de conta pelo login social. |
+| Login social | `POST /api/v1/auth/social/nonce` | global | 60 em 1 min | Nonces emitidos; cada tentativa de login social consome um. |
 
 #### 4.6.2 Distribuição e Comportamento Degradado
 
@@ -204,12 +205,36 @@ O access token é validado só pelas claims, sem consulta ao banco, e pode ter s
 - **Purge de conta `DELETED` (C2.3)**: `PurgeDeletedAccountUseCase`, transacional e idempotente, disparado por um job diário (`AccountPurgeJobScheduler`, uma transação por conta; ver `security/privacy-and-lgpd.md` §6.1). A exclusão lógica é imediata; o purge só é elegível 30 dias depois (`deleted_at <= agora - 30 dias`, `User.PURGE_GRACE_PERIOD`); antes disso responde `NOT_ELIGIBLE` sem alterar nada. O e-mail reservado é um HMAC com `ACCOUNT_EMAIL_RESERVATION_SECRET`; sem o segredo o purge falha antes de qualquer escrita. A linha de `users` permanece (avaliações, comentários, denúncias e a auditoria com `ON DELETE RESTRICT` a referenciam): o e-mail vira o valor reservado, a credencial e o id do provedor externo saem, o perfil recebe handle reservado (`excluido-<id>`) e nome neutro. Sessões, follows, itens salvos, interesses, atividades, notificações próprias e o snapshot de reputação são removidos; coordenadas informadas nas avaliações, a referência em notificações de terceiros e o autor de presenças de produto são anulados. A conta é travada (`findByIdForUpdate`) e precisa estar `DELETED`, de onde nenhuma transição sai; purges concorrentes são serializados e o segundo é no-op.
 - **Sem vazar o estado**: fluxos do próprio usuário respondem `401 ACCOUNT_DISABLED` (sessão) ou `401 INVALID_CREDENTIALS` (credenciais), iguais para conta inexistente, desativada, suspensa ou excluída.
 
+### 4.9 Login Social (Google e Apple)
+
+O app obtém o ID token OpenID Connect pelo SDK oficial do provedor e o backend o valida antes de emitir a sessão do Rewit. Contrato HTTP em `docs/api/authentication.md` §7 a §9.
+
+**Nonce de uso único.** `POST /auth/social/nonce` gera 256 bits aleatórios e guarda no Redis apenas o SHA-256 (`rewit:social-login:nonce:<hash>`, TTL de 10 min). O app entrega ao provedor o hash e reenvia ao Rewit o nonce em claro. O backend consome a chave com `GETDEL` (atômico entre instâncias) **antes** de validar o token e exige `nonce == SHA-256(nonce enviado)` no token. Assim:
+- um token interceptado no redirecionamento (fluxo web da Apple no Android) carrega só o hash, e o nonce em claro nunca sai do app e do Rewit;
+- um token de outra pessoa injetado no app não casa com o nonce da tentativa (sem login CSRF);
+- cada nonce serve a uma única tentativa, válida ou não.
+
+Sem Redis, o login social falha fechado (`503 SOCIAL_LOGIN_UNAVAILABLE`), ao contrário do rate limiting, que tem fallback local: um fallback por instância permitiria reúso do nonce entre instâncias. A emissão de nonces conta no limite global `SOCIAL_LOGIN` (padrão 60/min, `RATE_LIMIT_SOCIAL_LOGIN_*`), que também limita as validações de token.
+
+**Validação do token** (`OidcIdTokenVerifier`, Nimbus JOSE, já presente pelo resource server): RS256 com o JWKS do provedor (cache, renovação antecipada, nova busca para `kid` desconhecido e intervalo mínimo entre buscas; timeout de 5 s), emissor, audiência (client IDs configurados), `exp`/`iat`/`nbf` com 60 s de tolerância, `sub` e `nonce`. JWKS inacessível responde `503 SOCIAL_PROVIDER_UNAVAILABLE` sem aceitar o token. Nenhum segredo de provedor é necessário: os client IDs são públicos. O provedor sem client ID fica desligado.
+
+**Conta.** A identidade é o par `auth_provider` + `provider_user_id` (`sub`), único em `uq_users_provider_user_id` (V4) para qualquer estado da conta; a busca também considera contas `DELETED` não purgadas, que respondem `401 ACCOUNT_DISABLED` como desativadas e suspensas. Uma identidade nova cria conta federada sem senha (o login local continua recusando contas federadas, §6) quando o provedor atesta o e-mail. E-mail já usado por outra conta (local, de outro provedor ou reservado após o purge) responde `409 SOCIAL_ACCOUNT_EMAIL_CONFLICT`: **não há vinculação por e-mail coincidente**. O e-mail de uma conta vinculada não é atualizado a partir do token. O perfil novo tem handle aleatório (nunca derivado do e-mail, que é dado pessoal) e o nome da claim `name` (Google) ou `Usuário Rewit`.
+
+**Transações e concorrência.** `SocialAuthService` não abre transação: o consumo do nonce não é desfeito por erro posterior e a consulta ao JWKS não segura conexão do banco. A criação ou recuperação da conta e a sessão ficam em `AuthService.authenticateExternalIdentity`, transação única como no cadastro local. Duas primeiras entradas concorrentes da mesma identidade (cada uma com o próprio nonce) colidem em `uq_users_provider_user_id` ou `uq_users_email_lower`; a perdedora sofre rollback completo e é repetida uma vez em nova transação, que encontra a conta criada. O mesmo cobre a colisão rara do handle gerado. A sessão emitida é a mesma do login local (refresh com rotação, detecção de reúso, logout).
+
+**Apple no Android.** O fluxo web publica o resultado em `POST /auth/apple/callback`, que repassa somente `code`, `id_token`, `state`, `user` e `error`, codificados, ao intent `signinwithapple://callback` do pacote configurado (`APPLE_SIGNIN_ANDROID_PACKAGE`). O endpoint não valida nem grava nada; a validação acontece em `POST /auth/social/apple`.
+
+**Limites atuais.** Vincular uma identidade social a uma conta existente (fluxo autenticado pela conta original), reativar conta federada desativada e o `authorization_code`/revogação de token da Apple (exigido pela Apple na exclusão de conta) não estão implementados.
+
 ## 5. Endpoints Implementados
 
 | Método | Endpoint | Proteção | Descrição |
 |---|---|---|---|
 | `POST` | `/api/v1/auth/register` | Pública | Cria `User` e `Profile` em transação única. Emite access token + refresh token. |
 | `POST` | `/api/v1/auth/login` | Pública | Valida credenciais locais, cria sessão e emite tokens. Erros de credenciais são uniformes. |
+| `POST` | `/api/v1/auth/social/nonce` | Pública | Emite nonce de uso único para o login social (§4.9). |
+| `POST` | `/api/v1/auth/social/google`, `/api/v1/auth/social/apple` | Pública | Valida o ID token do provedor, cria ou recupera a conta federada e emite tokens. |
+| `POST` | `/api/v1/auth/apple/callback` | Pública | Retorno do fluxo web da Apple (Android), repassado ao app. |
 | `POST` | `/api/v1/auth/refresh` | Pública | Executa rotação de refresh token e emite novo par de tokens. |
 | `POST` | `/api/v1/auth/logout` | Autenticada (Bearer) | Revoga a sessão do refresh token informado. |
 | `GET` | `/api/v1/auth/me` | Autenticada (Bearer) | Retorna dados públicos e seguros da identidade autenticada (`sub` do JWT). |
@@ -234,5 +259,5 @@ O access token é validado só pelas claims, sem consulta ao banco, e pode ter s
 2. **Ausência de Blacklist Global de Access Tokens**:
    - Para manter a arquitetura stateless, os access tokens possuem vida útil curta (15 minutos). O logout revoga imediatamente o refresh token no banco de dados.
 3. **Limites do Escopo**:
-   - Provedores externos (Google OAuth, Apple OAuth) permanecem estritamente fora do escopo deste Step.
+   - Provedores externos (Google, Apple) ficaram fora do Step 4; o login social foi implementado depois (§4.9).
    - Recursos como verificação de e-mail, recuperação de senha e MFA serão incorporados nas etapas subsequentes. O rate limiting distribuído está na seção 4.6.

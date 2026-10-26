@@ -1,5 +1,6 @@
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 
 /// Contrato de operações de autenticação e sessão.
 abstract class AuthRepository {
@@ -7,6 +8,24 @@ abstract class AuthRepository {
   Future<Authenticated> login({
     required String email,
     required String password,
+  });
+
+  /// Cria a conta local via POST /api/v1/auth/register e guarda a sessão emitida (sem segundo login).
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  });
+
+  /// Pede ao Rewit um nonce de uso único para uma tentativa de login social.
+  Future<String> requestSocialNonce();
+
+  /// Troca o ID token do provedor por uma sessão do Rewit; o backend valida o token e o [nonce] da tentativa.
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
   });
 
   /// Reativa uma conta previamente desativada usando credenciais locais.

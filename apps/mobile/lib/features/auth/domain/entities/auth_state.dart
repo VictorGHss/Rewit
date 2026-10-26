@@ -38,10 +38,14 @@ class Unauthenticated extends AuthState {
   final String? errorCode;
   final int? retryAfterSeconds;
 
+  /// Erros por campo devolvidos pela validação do backend (RFC 7807 `fieldErrors`), quando houver.
+  final Map<String, String>? fieldErrors;
+
   const Unauthenticated({
     this.errorMessage,
     this.errorCode,
     this.retryAfterSeconds,
+    this.fieldErrors,
   });
 
   bool get isRateLimited => retryAfterSeconds != null && retryAfterSeconds! > 0;

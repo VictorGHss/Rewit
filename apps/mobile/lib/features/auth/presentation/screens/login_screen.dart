@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/presentation/screens/register_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/auth/presentation/widgets/social_sign_in_buttons.dart';
 import 'package:rewit_mobile/shared/widgets/app_button.dart';
 import 'package:rewit_mobile/shared/widgets/app_text_field.dart';
 import 'package:rewit_mobile/shared/widgets/error_banner.dart';
@@ -53,6 +55,15 @@ class _LoginScreenState extends State<LoginScreen> {
     if (success && mounted) {
       widget.onLoginSuccess?.call();
     }
+  }
+
+  Future<void> _openRegistration() async {
+    widget.authNotifier.clearMessage();
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => RegisterScreen(authNotifier: widget.authNotifier)),
+    );
+    // Voltando sem cadastrar, o erro do cadastro não pertence ao login
+    if (mounted) widget.authNotifier.clearMessage();
   }
 
   Future<void> _confirmAndReactivate() async {
@@ -257,6 +268,33 @@ class _LoginScreenState extends State<LoginScreen> {
                           onPressed: isLoading ? null : _confirmAndReactivate,
                           icon: const Icon(Icons.settings_backup_restore_rounded, size: 18),
                           label: const Text('Reativar conta desativada'),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Login social: a sessão só existe depois de o backend validar o ID token do provedor
+                        Row(
+                          children: [
+                            const Expanded(child: Divider()),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text('ou', style: theme.textTheme.bodySmall),
+                            ),
+                            const Expanded(child: Divider()),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SocialSignInButtons(
+                          authNotifier: widget.authNotifier,
+                          enabled: !isLoading,
+                          onSuccess: widget.onLoginSuccess,
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Cadastro local
+                        TextButton(
+                          key: const Key('login_create_account'),
+                          onPressed: isLoading ? null : _openRegistration,
+                          child: const Text('Não tem conta? Criar conta'),
                         ),
                       ],
                     );

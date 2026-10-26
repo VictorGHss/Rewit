@@ -6,6 +6,7 @@ import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
@@ -28,6 +29,26 @@ import 'package:rewit_mobile/features/review_detail/domain/entities/update_revie
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 
 class MockAuthRepo implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   @override
   Future<bool> hasStoredSession() async => true;
 

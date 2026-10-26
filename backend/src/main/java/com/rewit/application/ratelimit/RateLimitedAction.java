@@ -11,6 +11,7 @@ public enum RateLimitedAction {
     LOGIN("Muitas tentativas de login. Tente novamente mais tarde."),
     REFRESH("Muitas renovações de sessão. Tente novamente mais tarde."),
     REGISTRATION("Muitas tentativas de cadastro. Tente novamente mais tarde."),
+    SOCIAL_LOGIN("Muitas tentativas de login social. Tente novamente mais tarde."),
     REPORT_CREATION("Limite de denúncias excedido. Tente novamente mais tarde."),
     DISCUSSION_CREATION("Limite de criação de comentários excedido. Tente novamente mais tarde."),
     MEDIA_UPLOAD("Limite de upload de mídia excedido. Tente novamente mais tarde."),

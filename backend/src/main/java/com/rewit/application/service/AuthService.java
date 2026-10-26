@@ -22,6 +22,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -38,6 +39,16 @@ import java.util.UUID;
 @Service
 public class AuthService {
 
+    // Perfil de conta criada por login social: handle aleatório (sem derivar do e-mail) e nome padrão sem a claim
+    private static final String GENERATED_HANDLE_PREFIX = "usuario_";
+    private static final char[] HANDLE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
+    private static final int GENERATED_HANDLE_RANDOM_LENGTH = 10;
+    private static final int GENERATED_HANDLE_ATTEMPTS = 5;
+    private static final String DEFAULT_SOCIAL_DISPLAY_NAME = "Usuário Rewit";
+    private static final int DISPLAY_NAME_MIN_LENGTH = 2;
+    private static final int DISPLAY_NAME_MAX_LENGTH = 100;
+
+    private final SecureRandom handleRandom = new SecureRandom();
     private final UserRepository userRepository;
     private final ProfileRepository profileRepository;
     private final AuthSessionRepository authSessionRepository;
@@ -191,6 +202,91 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException("Perfil não encontrado para o usuário", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
 
         return createSessionAndGenerateResult(locked, profile, cmd.userAgent(), cmd.ipAddress());
+    }
+
+    /**
+     * Sessão para uma identidade externa já verificada ({@link SocialAuthService}): a conta é localizada somente
+     * pelo par provedor + subject do ID token.
+     *
+     * <ul>
+     *   <li>Conta vinculada: autentica se estiver {@code ACTIVE}; em qualquer outro estado (desativada, suspensa,
+     *   excluída) responde {@code 401 ACCOUNT_DISABLED}, sem distinguir o estado.</li>
+     *   <li>Sem conta vinculada: cria a conta federada (sem senha) e o perfil, desde que o provedor ateste o e-mail
+     *   ({@code email_verified}). Um e-mail já usado por outra conta, local ou de outro provedor, inclusive o
+     *   reservado de uma conta excluída, responde {@code 409 SOCIAL_ACCOUNT_EMAIL_CONFLICT}: nunca há vinculação
+     *   automática por e-mail coincidente.</li>
+     * </ul>
+     *
+     * <p>O perfil novo não expõe o e-mail: o handle é aleatório e o nome de exibição vem da claim {@code name} do
+     * token, quando houver; os dois podem ser editados depois. A criação conta no limite global de cadastro.
+     * Duas criações concorrentes da mesma identidade colidem nos índices únicos; quem chama repete em nova
+     * transação, que então encontra a conta criada.
+     */
+    @Transactional
+    public AuthResult authenticateExternalIdentity(ExternalIdentity identity, String userAgent, String ipAddress) {
+        Objects.requireNonNull(identity, "ExternalIdentity cannot be null");
+        if (identity.provider() == null || identity.provider() == AuthProvider.LOCAL
+                || identity.subject() == null || identity.subject().isBlank()) {
+            throw new IllegalArgumentException("Identidade externa sem provedor federado ou subject");
+        }
+
+        User linked = userRepository.findByAuthProviderAndProviderUserId(identity.provider(), identity.subject()).orElse(null);
+        if (linked != null) {
+            if (!linked.isOperational()) {
+                throw new BusinessException("Conta desativada ou inexistente", HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED");
+            }
+            Profile profile = profileRepository.findByUserId(linked.getId())
+                    .orElseThrow(() -> new BusinessException("Perfil não encontrado para o usuário", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
+            return createSessionAndGenerateResult(linked, profile, userAgent, ipAddress);
+        }
+
+        if (identity.email() == null || identity.email().isBlank() || !identity.emailVerified()) {
+            throw new BusinessException("O provedor não confirmou um e-mail para criar a conta", "SOCIAL_EMAIL_NOT_VERIFIED");
+        }
+        String normalizedEmail = User.normalizeEmail(identity.email());
+        if (User.isReservedEmail(normalizedEmail)) {
+            throw new BusinessException("E-mail inválido ou ausente", "INVALID_EMAIL");
+        }
+        if (userRepository.existsByEmail(normalizedEmail)
+                || (emailReservation.isConfigured()
+                    && userRepository.existsByEmail(emailReservation.reservedEmailFor(normalizedEmail)))) {
+            throw new BusinessException(
+                    "Já existe uma conta Rewit com este e-mail. Entre com o método usado no cadastro.",
+                    HttpStatus.CONFLICT, "SOCIAL_ACCOUNT_EMAIL_CONFLICT");
+        }
+
+        rateLimiter.acquireOrThrow(RateLimitedAction.REGISTRATION, RateLimitSubject.global());
+
+        User savedUser = userRepository.save(new User(null, normalizedEmail, null, identity.provider(), identity.subject()));
+        Profile savedProfile = profileRepository.save(
+                new Profile(null, savedUser.getId(), availableGeneratedHandle(), socialDisplayName(identity.name()), null, null));
+
+        return createSessionAndGenerateResult(savedUser, savedProfile, userAgent, ipAddress);
+    }
+
+    private String availableGeneratedHandle() {
+        for (int attempt = 0; attempt < GENERATED_HANDLE_ATTEMPTS; attempt++) {
+            StringBuilder handle = new StringBuilder(GENERATED_HANDLE_PREFIX);
+            for (int i = 0; i < GENERATED_HANDLE_RANDOM_LENGTH; i++) {
+                handle.append(HANDLE_ALPHABET[handleRandom.nextInt(HANDLE_ALPHABET.length)]);
+            }
+            if (!profileRepository.existsByHandle(handle.toString())) {
+                return handle.toString();
+            }
+        }
+        throw new IllegalStateException("Não foi possível gerar um handle disponível");
+    }
+
+    /** Nome de exibição a partir da claim {@code name} do token, nos limites do cadastro (2 a 100 caracteres). */
+    static String socialDisplayName(String claimedName) {
+        if (claimedName == null) {
+            return DEFAULT_SOCIAL_DISPLAY_NAME;
+        }
+        String name = claimedName.strip().replaceAll("\\s+", " ");
+        if (name.codePointCount(0, name.length()) > DISPLAY_NAME_MAX_LENGTH) {
+            name = name.substring(0, name.offsetByCodePoints(0, DISPLAY_NAME_MAX_LENGTH)).strip();
+        }
+        return name.codePointCount(0, name.length()) < DISPLAY_NAME_MIN_LENGTH ? DEFAULT_SOCIAL_DISPLAY_NAME : name;
     }
 
     /** Estados a partir dos quais o próprio usuário volta a operar: suspensão e exclusão não se desfazem por aqui. */

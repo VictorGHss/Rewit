@@ -16,6 +16,7 @@ import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
@@ -36,6 +37,26 @@ const _userB = AuthUserDto(id: 'user-b', handle: 'bruno', email: 'bruno@rewit.te
 final _uuidV4 = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
 
 class _FakeAuthRepository implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   @override
   Future<bool> hasStoredSession() async => false;
 
