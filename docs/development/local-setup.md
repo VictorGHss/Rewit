@@ -109,6 +109,47 @@ Operações que a role de runtime não pode executar — atribuir papel a um usu
 
 O PostgreSQL de teste deve ser criado com os scripts de `infrastructure/postgres/init` (montando também `infrastructure/postgres` em `/opt/rewit/postgres`), para que `rewit_app` exista. O teste de upgrade de migrations cria e remove o próprio database descartável no mesmo servidor e nunca executa `flyway clean`.
 
+### 5.1 Infraestrutura descartável com `scripts/test-infra.ps1`
+
+**Pré-requisitos**: Docker Desktop em execução e Windows PowerShell 5.1 ou PowerShell 7. As imagens são as do `docker-compose.yml` (`postgis/postgis:18-3.6`, `redis:8-alpine`, `chrislusf/seaweedfs:4.47`); na primeira execução o Docker as baixa.
+
+Execução completa, com criação, suíte e limpeza garantida mesmo se a suíte falhar (o código de saída é o do Maven):
+```powershell
+.\scripts\test-infra.ps1 run
+# Outros argumentos do Maven, ex.: um teste de integração isolado
+.\scripts\test-infra.ps1 run -MavenArgs 'test','-Dtest=AuthenticationIntegrationTest','-Dsurefire.failIfNoSpecifiedTests=false'
+```
+
+Passo a passo, para repetir a suíte ou testes isolados na mesma infraestrutura:
+```powershell
+.\scripts\test-infra.ps1 up        # cria os containers e define as variáveis TEST_* nesta sessão
+cd backend
+.\mvnw.cmd clean test
+cd ..
+.\scripts\test-infra.ps1 down      # remove os containers e limpa as variáveis TEST_* da sessão
+```
+
+Execute o script diretamente (não com dot-source `.`), na mesma sessão do PowerShell que vai rodar o Maven: as variáveis `TEST_*` são definidas só no processo atual e somem ao fechar a sessão. Um terminal novo não as recebe; nele, rode `down` e `up` de novo.
+
+| Recurso | Padrão | Parâmetro |
+| :--- | :--- | :--- |
+| Containers | `rewit-testinfra-local-postgres`, `-redis`, `-storage` (rótulo `rewit.test-infra=local`) | `-Instance <a-z0-9>` |
+| PostgreSQL (database `rewit_test`, roles `rewit_migrator` e `rewit_app`) | `127.0.0.1:35432` | `-PostgresPort` |
+| Redis (sem senha) | `127.0.0.1:36379` | `-RedisPort` |
+| S3 (bucket `rewit-test`) | `127.0.0.1:38333` | `-StoragePort` |
+| Espera pelos serviços | 180 s | `-ReadyTimeoutSeconds` |
+
+**Segurança e isolamento**
+- **Credenciais**: as senhas do PostgreSQL e as chaves do S3 são aleatórias a cada `up`. Chegam ao `docker run` pelo ambiente, sem aparecer na linha de comando, e não são impressas nem gravadas em arquivo. Ficam apenas nas variáveis `TEST_*` da sessão e na configuração do container descartável (`docker inspect`), que deixa de existir no `down`.
+- **Portas recusadas**: as de desenvolvimento (5432, 5433, 6379, 8333, 8888, 9333), as do external-test (15432, 16379, 18333) e as da API (8080, 8081). `TestInfrastructureSafetyValidator` continua recusando as portas compartilhadas na inicialização dos testes.
+- **Conflitos**: antes de criar qualquer recurso, o `up` verifica se já existe container com os mesmos nomes e se as portas estão publicadas por outro container (inclusive parado) ou em uso no host. Em caso de conflito, nada é criado.
+- **Falha no `up`**: se a criação ou a espera falhar, o script remove só os containers desta instância e devolve o erro. Isso inclui um container que ficou no estado `Created` quando a porta não pôde ser publicada.
+- **Limpeza**: `down` remove somente containers com o nome esperado **e** o rótulo da instância, junto com os volumes anônimos deles (`docker rm -f -v`). Um container com o mesmo nome sem esse rótulo não é removido e o comando termina com erro. Containers de desenvolvimento (`rewit-postgres`, `rewit-redis`, `rewit-seaweedfs`), do external-test (`rewit-ext-*`) e quaisquer outros nunca são reiniciados, reconfigurados nem removidos. O `.env` e o `.env.external-test` não são lidos.
+- **Execuções simultâneas**: use outra instância com portas próprias, ex.: `.\scripts\test-infra.ps1 up -Instance ci -PostgresPort 35532 -RedisPort 36479 -StoragePort 38433` (passe os mesmos parâmetros no `down`).
+
+`.\scripts\test-infra.ps1 status` lista os containers de todas as instâncias desta infraestrutura.
+
+Sem o script, a infraestrutura pode ser criada manualmente nas mesmas condições (PostgreSQL com os scripts de init, Redis e S3 próprios, portas fora das recusadas) e as variáveis da tabela acima definidas na sessão antes de:
 ```powershell
 cd backend
 ./mvnw clean test

@@ -36,9 +36,9 @@ Este documento é a **fonte primária de recuperação de contexto** para qualqu
 # 1. Verificar integridade do workspace
 git status
 
-# 2. Executar compilação e suíte completa de testes no PostgreSQL/PostGIS local
-cd backend
-./mvnw clean test
+# 2. Executar compilação e suíte completa de testes em infraestrutura descartável (PostgreSQL/PostGIS, Redis e S3
+#    próprios, criados e removidos pelo script; docs/development/local-setup.md §5.1)
+.\scripts\test-infra.ps1 run
 ```
 *Resultado esperado*: `Tests run: 1988, Failures: 0, Errors: 0, Skipped: 0` e `BUILD SUCCESS` (execução completa na branch `agent/claude/place-commercial-data-owner-invalidation` antes da integração em `main` com o STEP F2.5; baseline histórica do F2.3: 1.981 testes na branch `agent/claude/step-f2-3-product-offers`; baseline do F2.2: 1.948 testes na branch `agent/claude/place-amenities-management`; baseline do F2.1 integrado: 1.914 testes na branch `agent/gemini/commercial-opening-hours`; baseline histórica da Política B: 1.860 testes no commit `8b5dd28`; validação pós-C11 anterior: 1.842 em `7b9473d`; registros históricos: 1.271 testes no STEP 29.3 e 1.462 em `298d0bc`). A suíte usa PostgreSQL, SeaweedFS e Redis reais.
 
