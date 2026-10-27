@@ -21,6 +21,7 @@ import 'package:rewit_mobile/features/place/data/repositories/place_commercial_r
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
 import 'package:rewit_mobile/features/place/data/services/secure_pending_place_registration_persistence.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/interests/data/repositories/interest_repository_impl.dart';
 import 'package:rewit_mobile/features/place_discovery/data/repositories/place_discovery_repository_impl.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
@@ -82,6 +83,7 @@ void main() async {
   final notificationRepository = NotificationRepositoryImpl(httpClient: httpClient);
   final businessRepository = BusinessRepositoryImpl(httpClient: httpClient);
   final businessResponseRepository = BusinessResponseRepositoryImpl(httpClient: httpClient);
+  final interestRepository = InterestRepositoryImpl(httpClient: httpClient);
   // Cadastros de local com foto pendente sobrevivem a logout e reinício, com escopo por usuário
   final pendingRegistrationStore = PendingPlaceRegistrationStore(
     persistence: SecurePendingPlaceRegistrationPersistence(),
@@ -118,6 +120,8 @@ void main() async {
     notificationRepository: notificationRepository,
     businessRepository: businessRepository,
     businessResponseRepository: businessResponseRepository,
+    // Sessão autenticada passa pelo questionário inicial de interesses, se ainda não concluído
+    interestRepository: interestRepository,
     pendingRegistrationStore: pendingRegistrationStore,
   );
 

@@ -16,6 +16,10 @@ class ApiEndpoints {
   static const String meDeactivate = '/api/v1/me/deactivate';
   static const String mePassword = '/api/v1/me/password';
 
+  // Interesses e questionário inicial
+  static const String interestCatalog = '/api/v1/interests/catalog';
+  static const String myInterests = '/api/v1/me/interests';
+
   // Feed e Avaliações
   static const String feed = '/api/v1/feed';
   static const String feedV2 = '/api/v2/feed';
