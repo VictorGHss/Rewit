@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/services/url_launcher_service.dart';
@@ -55,6 +56,7 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
   String? _stateCode;
 
   int _sequence = 0;
+  int _locationSequence = 0;
   bool _isLoading = false;
   String? _errorMessage;
   List<ExternalPlaceCandidate>? _results;
@@ -81,12 +83,15 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
 
   @override
   void dispose() {
+    _sequence++;
+    _locationSequence++;
     _cityController.dispose();
     super.dispose();
   }
 
   void _discardResults() {
     _sequence++;
+    _locationSequence++;
     _isLoading = false;
     _errorMessage = null;
     _results = null;
@@ -173,33 +178,44 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
   Future<void> _locateAndSearch() async {
     final service = widget.locationService;
     if (service == null || _locating) return;
+    final locSeq = ++_locationSequence;
     setState(() {
       _locating = true;
       _locationIssue = null;
       _errorMessage = null;
     });
-    final result = await service.getCurrentLocation();
-    // Opção trocada durante a leitura: a posição é descartada
-    if (!mounted || _mode != ExternalRegionMode.nearby) return;
-    switch (result) {
-      case LocationSuccess(:final location):
-        if (!_isUsableLocation(location)) {
+    try {
+      final result = await service.getCurrentLocation(
+        timeout: const Duration(seconds: 5),
+      );
+      // Opção trocada ou nova leitura disparada durante a leitura: a posição é descartada
+      if (!mounted || locSeq != _locationSequence || _mode != ExternalRegionMode.nearby) return;
+      switch (result) {
+        case LocationSuccess(:final location):
+          if (!_isUsableLocation(location)) {
+            setState(() {
+              _locating = false;
+              _locationIssue = const _LocationIssue.invalid();
+            });
+            return;
+          }
           setState(() {
             _locating = false;
-            _locationIssue = const _LocationIssue.invalid();
+            _nearbyLocation = location;
           });
-          return;
-        }
-        setState(() {
-          _locating = false;
-          _nearbyLocation = location;
-        });
-        if (_hasQuery) await _search();
-      case LocationFailure(:final reason):
-        setState(() {
-          _locating = false;
-          _locationIssue = _LocationIssue(reason);
-        });
+          if (_hasQuery) await _search();
+        case LocationFailure(:final reason):
+          setState(() {
+            _locating = false;
+            _locationIssue = _LocationIssue(reason);
+          });
+      }
+    } catch (_) {
+      if (!mounted || locSeq != _locationSequence || _mode != ExternalRegionMode.nearby) return;
+      setState(() {
+        _locating = false;
+        _locationIssue = const _LocationIssue(LocationFailureReason.error);
+      });
     }
   }
 
@@ -237,6 +253,9 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
   }
 
   static String _messageFor(Object error) {
+    if (error is TimeoutException) {
+      return 'Tempo limite esgotado ao consultar a fonte externa. Tente novamente.';
+    }
     if (error is ApiException) {
       switch (error.errorCode) {
         case 'EXTERNAL_SERVICE_NOT_CONFIGURED':
@@ -255,6 +274,10 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
       }
       if (error.isServerError) {
         return 'A fonte externa não respondeu agora. Tente novamente mais tarde.';
+      }
+      final detail = error.detail.trim();
+      if (detail.startsWith('<') || detail.toLowerCase().contains('<html') || detail.toLowerCase().contains('<!doctype')) {
+        return 'Não foi possível consultar a fonte externa neste momento. Tente novamente mais tarde.';
       }
       return error.detail;
     }

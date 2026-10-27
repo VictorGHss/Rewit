@@ -10,8 +10,13 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
   LocationPermission checkPermissionResult = LocationPermission.always;
   LocationPermission requestPermissionResult = LocationPermission.always;
   Position? positionToReturn;
+  Position? lastKnownPositionToReturn;
   Exception? exceptionOnGetPosition;
+  Exception? exceptionOnGetLastKnownPosition;
   bool openAppSettingsResult = true;
+
+  int getCurrentPositionCallCount = 0;
+  int getLastKnownPositionCallCount = 0;
 
   @override
   Future<bool> isLocationServiceEnabled() async => serviceEnabled;
@@ -23,7 +28,17 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
   Future<LocationPermission> requestPermission() async => requestPermissionResult;
 
   @override
+  Future<Position?> getLastKnownPosition({bool forceLocationManager = false}) async {
+    getLastKnownPositionCallCount++;
+    if (exceptionOnGetLastKnownPosition != null) {
+      throw exceptionOnGetLastKnownPosition!;
+    }
+    return lastKnownPositionToReturn;
+  }
+
+  @override
   Future<Position> getCurrentPosition({LocationSettings? locationSettings}) async {
+    getCurrentPositionCallCount++;
     if (exceptionOnGetPosition != null) {
       throw exceptionOnGetPosition!;
     }
@@ -88,6 +103,268 @@ void main() {
       expect(success.location.longitude, -43.1729);
       expect(success.location.accuracyMeters, 15.5);
       expect(success.location.isApproximate, isFalse);
+    });
+
+    test('prioriza a última posição conhecida em cache quando disponível e válida (evita chamar getCurrentPosition e previne ANR)', () async {
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      fakePlatform.lastKnownPositionToReturn = Position(
+        latitude: -25.4284,
+        longitude: -49.2733,
+        timestamp: DateTime.now(),
+        accuracy: 25.0,
+        altitude: 900.0,
+        altitudeAccuracy: 5.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await service.getCurrentLocation();
+
+      expect(result, isA<LocationSuccess>());
+      final success = result as LocationSuccess;
+      expect(success.location.latitude, -25.4284);
+      expect(success.location.longitude, -49.2733);
+      expect(fakePlatform.getLastKnownPositionCallCount, 1);
+      expect(fakePlatform.getCurrentPositionCallCount, 0, reason: 'Não deve acionar getCurrentPosition se o cache for válido');
+    });
+
+    test('cache recente: aceita posição com timestamp recente (< 5 min) sem chamar obtenção ativa', () async {
+      final fixedNow = DateTime(2026, 10, 26, 12, 0, 0);
+      final customService = GeolocatorLocationService(clock: () => fixedNow);
+
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      fakePlatform.lastKnownPositionToReturn = Position(
+        latitude: -25.4284,
+        longitude: -49.2733,
+        timestamp: fixedNow.subtract(const Duration(minutes: 2)), // 2 minutos atrás (dentro dos 5 min)
+        accuracy: 20.0,
+        altitude: 900.0,
+        altitudeAccuracy: 5.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await customService.getCurrentLocation();
+
+      expect(result, isA<LocationSuccess>());
+      final success = result as LocationSuccess;
+      expect(success.location.latitude, -25.4284);
+      expect(success.location.longitude, -49.2733);
+      expect(fakePlatform.getLastKnownPositionCallCount, 1);
+      expect(fakePlatform.getCurrentPositionCallCount, 0, reason: 'Não deve chamar getCurrentPosition para cache recente');
+    });
+
+    test('cache expirado: rejeita posição com mais de 5 minutos e faz fallback para getCurrentPosition', () async {
+      final fixedNow = DateTime(2026, 10, 26, 12, 0, 0);
+      final customService = GeolocatorLocationService(clock: () => fixedNow);
+
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      // Posição em cache antiga (6 minutos atrás -> expirada)
+      fakePlatform.lastKnownPositionToReturn = Position(
+        latitude: -25.4284,
+        longitude: -49.2733,
+        timestamp: fixedNow.subtract(const Duration(minutes: 6)),
+        accuracy: 20.0,
+        altitude: 900.0,
+        altitudeAccuracy: 5.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+      // Posição ativa atual que deve ser obtida via fallback
+      fakePlatform.positionToReturn = Position(
+        latitude: -25.0994,
+        longitude: -50.1583,
+        timestamp: fixedNow,
+        accuracy: 10.0,
+        altitude: 0.0,
+        altitudeAccuracy: 0.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await customService.getCurrentLocation();
+
+      expect(result, isA<LocationSuccess>());
+      final success = result as LocationSuccess;
+      expect(success.location.latitude, -25.0994, reason: 'Deve retornar a posição da busca ativa');
+      expect(success.location.longitude, -50.1583);
+      expect(fakePlatform.getLastKnownPositionCallCount, 1);
+      expect(fakePlatform.getCurrentPositionCallCount, 1, reason: 'Deve recorrer à obtenção ativa quando o cache expira');
+    });
+
+    test('timestamp incoerente no futuro: rejeita posição no futuro além do skew permitido e faz fallback', () async {
+      final fixedNow = DateTime(2026, 10, 26, 12, 0, 0);
+      final customService = GeolocatorLocationService(clock: () => fixedNow);
+
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      // Timestamp incoerente 15 minutos no futuro (além da tolerância de 1 min de skew)
+      fakePlatform.lastKnownPositionToReturn = Position(
+        latitude: -25.4284,
+        longitude: -49.2733,
+        timestamp: fixedNow.add(const Duration(minutes: 15)),
+        accuracy: 20.0,
+        altitude: 900.0,
+        altitudeAccuracy: 5.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+      fakePlatform.positionToReturn = Position(
+        latitude: -25.0994,
+        longitude: -50.1583,
+        timestamp: fixedNow,
+        accuracy: 10.0,
+        altitude: 0.0,
+        altitudeAccuracy: 0.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await customService.getCurrentLocation();
+
+      expect(result, isA<LocationSuccess>());
+      final success = result as LocationSuccess;
+      expect(success.location.latitude, -25.0994);
+      expect(fakePlatform.getCurrentPositionCallCount, 1, reason: 'Deve acionar busca ativa quando timestamp for incoerente');
+    });
+
+    test('timestamp incoerente no passado remoto: rejeita posição com ano < 2020 (ex: epoch 1970) e faz fallback', () async {
+      final fixedNow = DateTime(2026, 10, 26, 12, 0, 0);
+      final customService = GeolocatorLocationService(clock: () => fixedNow);
+
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      fakePlatform.lastKnownPositionToReturn = Position(
+        latitude: -25.4284,
+        longitude: -49.2733,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(0), // 1970-01-01
+        accuracy: 20.0,
+        altitude: 900.0,
+        altitudeAccuracy: 5.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+      fakePlatform.positionToReturn = Position(
+        latitude: -25.0994,
+        longitude: -50.1583,
+        timestamp: fixedNow,
+        accuracy: 10.0,
+        altitude: 0.0,
+        altitudeAccuracy: 0.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await customService.getCurrentLocation();
+
+      expect(result, isA<LocationSuccess>());
+      expect(fakePlatform.getCurrentPositionCallCount, 1);
+    });
+
+    test('ausência de cache: quando getLastKnownPosition for nulo, recorre à obtenção ativa via getCurrentPosition', () async {
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      fakePlatform.lastKnownPositionToReturn = null; // Sem cache no sistema operacional
+      fakePlatform.positionToReturn = Position(
+        latitude: -25.0994,
+        longitude: -50.1583,
+        timestamp: DateTime.now(),
+        accuracy: 10.0,
+        altitude: 0.0,
+        altitudeAccuracy: 0.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await service.getCurrentLocation();
+
+      expect(result, isA<LocationSuccess>());
+      final success = result as LocationSuccess;
+      expect(success.location.latitude, -25.0994);
+      expect(fakePlatform.getLastKnownPositionCallCount, 1);
+      expect(fakePlatform.getCurrentPositionCallCount, 1, reason: 'Deve acionar getCurrentPosition quando não há cache');
+    });
+
+    test('faz fallback para getCurrentPosition quando a posição em cache for (0,0)', () async {
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      fakePlatform.lastKnownPositionToReturn = Position(
+        latitude: 0.0,
+        longitude: 0.0,
+        timestamp: DateTime.now(),
+        accuracy: 0.0,
+        altitude: 0.0,
+        altitudeAccuracy: 0.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+      fakePlatform.positionToReturn = Position(
+        latitude: -25.0994,
+        longitude: -50.1583,
+        timestamp: DateTime.now(),
+        accuracy: 10.0,
+        altitude: 0.0,
+        altitudeAccuracy: 0.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await service.getCurrentLocation();
+
+      expect(result, isA<LocationSuccess>());
+      final success = result as LocationSuccess;
+      expect(success.location.latitude, -25.0994);
+      expect(success.location.longitude, -50.1583);
+      expect(fakePlatform.getLastKnownPositionCallCount, 1);
+      expect(fakePlatform.getCurrentPositionCallCount, 1);
+    });
+
+    test('faz fallback para getCurrentPosition quando a leitura de cache lançar exceção', () async {
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      fakePlatform.exceptionOnGetLastKnownPosition = Exception('Cache indisponível');
+      fakePlatform.positionToReturn = Position(
+        latitude: -25.0994,
+        longitude: -50.1583,
+        timestamp: DateTime.now(),
+        accuracy: 10.0,
+        altitude: 0.0,
+        altitudeAccuracy: 0.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await service.getCurrentLocation();
+
+      expect(result, isA<LocationSuccess>());
+      expect(fakePlatform.getCurrentPositionCallCount, 1);
     });
 
     test('DeviceLocation identifica acurácia aproximada respeitando o limiar exato (100m)', () {
@@ -184,6 +461,30 @@ void main() {
       expect(result, isA<LocationFailure>());
       final failure = result as LocationFailure;
       expect(failure.reason, LocationFailureReason.error);
+    });
+
+    test('retorna error quando a posição obtida ativamente for inválida (0,0)', () async {
+      fakePlatform.serviceEnabled = true;
+      fakePlatform.checkPermissionResult = LocationPermission.always;
+      fakePlatform.positionToReturn = Position(
+        latitude: 0.0,
+        longitude: 0.0,
+        timestamp: DateTime.now(),
+        accuracy: 0.0,
+        altitude: 0.0,
+        altitudeAccuracy: 0.0,
+        heading: 0.0,
+        headingAccuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+      );
+
+      final result = await service.getCurrentLocation();
+
+      expect(result, isA<LocationFailure>());
+      final failure = result as LocationFailure;
+      expect(failure.reason, LocationFailureReason.error);
+      expect(failure.message, contains('inválida'));
     });
 
     test('openAppSettings repassa para o platform handler', () async {

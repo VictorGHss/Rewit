@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
@@ -36,6 +37,7 @@ class _FakeDiscoveryRepository implements PlaceDiscoveryRepository {
   DiscoveryRegion? lastRegion;
   List<ExternalPlaceCandidate> results = const [];
   Exception? searchError;
+  Completer<List<ExternalPlaceCandidate>>? searchCompleter;
   final List<ExternalPlaceCandidate> adopted = [];
   String adoptedPlaceId = '99999999-9999-9999-9999-999999999999';
 
@@ -48,6 +50,7 @@ class _FakeDiscoveryRepository implements PlaceDiscoveryRepository {
     searchCalls++;
     lastQuery = query;
     lastRegion = region;
+    if (searchCompleter != null) return searchCompleter!.future;
     if (searchError != null) throw searchError!;
     return results;
   }
@@ -76,10 +79,12 @@ class _FakeLocationService implements LocationService {
   LocationResult result = const LocationSuccess(
     DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 20),
   );
+  Completer<LocationResult>? locationCompleter;
 
   @override
   Future<LocationResult> getCurrentLocation({Duration timeout = const Duration(seconds: 10)}) async {
     calls++;
+    if (locationCompleter != null) return locationCompleter!.future;
     return result;
   }
 
@@ -536,5 +541,94 @@ void main() {
     await tester.tap(find.text('Produtos'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('external_place_results_section')), findsNothing);
+  });
+
+  testWidgets('tempo limite (timeout) na busca externa exibe mensagem explicativa e permite tentar novamente', (tester) async {
+    discovery.searchError = TimeoutException('Tempo esgotado');
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await chooseCity(tester, 'Ponta Grossa', 'PR');
+    await tapExternalSearch(tester);
+
+    expect(find.text('Tempo limite esgotado ao consultar a fonte externa. Tente novamente.'), findsOneWidget);
+    expect(find.byKey(const Key('external_search_retry_button')), findsOneWidget);
+
+    discovery.searchError = null;
+    discovery.results = const [_adoptable];
+    await tester.tap(find.byKey(const Key('external_search_retry_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+    expect(find.byKey(const Key('external_search_retry_button')), findsNothing);
+  });
+
+  testWidgets('bloqueio HTML externo (WAF / 403) é sanitizado para mensagem segura sem vazar markup', (tester) async {
+    discovery.searchError = const ApiException(ProblemDetail(
+      type: 'about:blank',
+      title: 'Forbidden',
+      status: 403,
+      detail: '<!DOCTYPE html><html><body>Attention Required! Cloudflare</body></html>',
+    ));
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await chooseCity(tester, 'Ponta Grossa', 'PR');
+    await tapExternalSearch(tester);
+
+    expect(find.text('Não foi possível consultar a fonte externa neste momento. Tente novamente mais tarde.'), findsOneWidget);
+    expect(find.textContaining('<!DOCTYPE'), findsNothing);
+  });
+
+  testWidgets('descarte da tela durante a leitura de localização não causa exceção nem erro de dispose', (tester) async {
+    final completer = Completer<LocationResult>();
+    location.locationCompleter = completer;
+
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await tester.tap(find.byKey(const Key('external_region_mode_nearby')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('external_locating')), findsOneWidget);
+
+    // Desmonta a árvore antes da localização resolver
+    await tester.pumpWidget(const SizedBox());
+
+    completer.complete(const LocationSuccess(DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 10.0)));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('respostas fora de ordem: resposta atrasada da busca antiga não sobrescreve o resultado atual', (tester) async {
+    final completer1 = Completer<List<ExternalPlaceCandidate>>();
+    discovery.searchCompleter = completer1;
+
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await chooseCity(tester, 'Ponta Grossa', 'PR');
+    await tester.ensureVisible(find.byKey(const Key('external_place_search_button')));
+    await tester.tap(find.byKey(const Key('external_place_search_button')));
+    await tester.pump();
+    expect(discovery.searchCalls, 1);
+
+    // Altera a query: isso reseta o estado de carregamento e invalida a busca anterior via _sequence
+    discovery.searchCompleter = null;
+    discovery.results = const [_adoptable];
+    await tester.enterText(find.byType(TextFormField).first, 'confeitaria');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    // Dispara a nova busca para a query atual
+    await tester.tap(find.byKey(const Key('external_place_search_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+
+    // Agora a busca antiga (padaria) completa com outro resultado atrasado
+    completer1.complete(const [_withoutState]);
+    await tester.pumpAndSettle();
+
+    // Deve continuar exibindo o resultado atual da busca mais recente e não o da busca atrasada
+    expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+    expect(find.text('Padaria Super Pão'), findsNothing);
   });
 }
