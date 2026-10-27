@@ -42,6 +42,7 @@ public class RateLimitProperties {
             case LOGIN -> auth.login;
             case REFRESH -> auth.refresh;
             case REGISTRATION -> auth.registration;
+            case SOCIAL_LOGIN -> auth.socialLogin;
             case REPORT_CREATION -> content.reportCreation;
             case DISCUSSION_CREATION -> content.discussionCreation;
             case MEDIA_UPLOAD -> content.mediaUpload;
@@ -178,6 +179,12 @@ public class RateLimitProperties {
         /** Tentativas de cadastro somadas de todos os clientes (sem IP, não há sujeito por cliente). */
         private final Policy registration = new Policy(30, Duration.ofMinutes(1));
 
+        /**
+         * Nonces de login social emitidos, somados de todos os clientes. Cada tentativa de login social consome um
+         * nonce, então o limite também contém as validações de ID token.
+         */
+        private final Policy socialLogin = new Policy(60, Duration.ofMinutes(1));
+
         public Policy getLogin() {
             return login;
         }
@@ -188,6 +195,10 @@ public class RateLimitProperties {
 
         public Policy getRegistration() {
             return registration;
+        }
+
+        public Policy getSocialLogin() {
+            return socialLogin;
         }
     }
 

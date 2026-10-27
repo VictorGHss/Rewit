@@ -39,8 +39,9 @@ public interface UserJpaRepository extends JpaRepository<UserJpaEntity, UUID> {
     @Query("SELECT CASE WHEN COUNT(u) > 0 THEN true ELSE false END FROM UserJpaEntity u WHERE LOWER(u.email) = LOWER(:email)")
     boolean existsByEmailIgnoreCase(@Param("email") String email);
 
-    @Query("SELECT u FROM UserJpaEntity u WHERE u.authProvider = :provider AND u.providerUserId = :providerUserId AND u.deletedAt IS NULL")
-    Optional<UserJpaEntity> findActiveByAuthProviderAndProviderUserId(
+    // Qualquer estado da conta, como a unicidade de uq_users_provider_user_id (V4), que atende a consulta
+    @Query("SELECT u FROM UserJpaEntity u WHERE u.authProvider = :provider AND u.providerUserId = :providerUserId")
+    Optional<UserJpaEntity> findByAuthProviderAndProviderUserId(
             @Param("provider") AuthProvider provider,
             @Param("providerUserId") String providerUserId
     );

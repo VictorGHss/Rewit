@@ -169,3 +169,16 @@ A URL base vem de `--dart-define=API_BASE_URL=<origem>`, sem `/api/v1` (as rotas
 cd apps/mobile
 flutter run --dart-define=API_BASE_URL=https://rewit-app.ctrls.dev.br
 ```
+
+#### Login social (opcional)
+
+Os botões "Continuar com Google" e "Continuar com Apple" ficam desabilitados até a build receber os identificadores públicos do provedor; nenhum segredo vai para o app:
+
+| `--dart-define` | Uso |
+| :--- | :--- |
+| `GOOGLE_SERVER_CLIENT_ID` | Client ID "Web application" do Google Cloud (audiência do ID token). Obrigatório no Android e no iOS |
+| `GOOGLE_IOS_CLIENT_ID` | Client ID iOS (exige também o URL scheme invertido em `ios/Runner/Info.plist`) |
+| `APPLE_SIGNIN_ENABLED` | `true` quando o app iOS tem a capability Sign in with Apple |
+| `APPLE_SERVICE_ID` e `APPLE_REDIRECT_URI` | Services ID e retorno `https://<api>/api/v1/auth/apple/callback` do fluxo web da Apple (Android) |
+
+O backend aceita os mesmos client IDs em `GOOGLE_SIGNIN_CLIENT_IDS` e `APPLE_SIGNIN_CLIENT_IDS` (bundle ID e Services ID). No Android, o Google também exige um client ID "Android" no mesmo projeto do Google Cloud, com o `applicationId` (`app.rewit.mobile`) e o SHA-1 do certificado que assina o APK. Contratos em `docs/api/authentication.md` §7 a §9.

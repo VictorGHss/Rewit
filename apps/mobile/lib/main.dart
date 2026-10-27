@@ -10,6 +10,7 @@ import 'package:rewit_mobile/core/network/session_refresher.dart';
 import 'package:rewit_mobile/core/network/token_refreshing_client.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/repositories/auth_repository_impl.dart';
+import 'package:rewit_mobile/features/auth/data/services/platform_social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/business/data/repositories/business_repository_impl.dart';
 import 'package:rewit_mobile/features/business/data/repositories/business_response_repository_impl.dart';
@@ -88,6 +89,8 @@ void main() async {
 
   authNotifier = AuthNotifier(
     authRepository: authRepository,
+    // Login social com os client IDs públicos definidos por build (--dart-define); sem eles, fica indisponível
+    socialSignInService: PlatformSocialSignInService(config: SocialAuthConfig.fromEnvironment()),
     sessionRefresher: sessionRefresher,
     clearLocalSession: tokenStorage.clearTokens,
   );

@@ -141,7 +141,7 @@ public class UserRepositoryAdapter implements UserRepository {
         if (authProvider == null || providerUserId == null || providerUserId.isBlank()) {
             return Optional.empty();
         }
-        return userJpaRepository.findActiveByAuthProviderAndProviderUserId(authProvider, providerUserId.trim())
+        return userJpaRepository.findByAuthProviderAndProviderUserId(authProvider, providerUserId.trim())
                 .map(UserRepositoryAdapter::toDomain);
     }
 

@@ -19,4 +19,12 @@ void main() {
     expect(internetPermission.hasMatch(withoutComments(manifest.readAsStringSync())), isTrue,
         reason: 'sem android.permission.INTERNET no manifest principal, o build release não acessa a API');
   });
+
+  test('manifest principal registra o retorno do Sign in with Apple (signinwithapple://callback)', () {
+    final manifest = withoutComments(File(mainManifestPath).readAsStringSync());
+
+    expect(manifest, contains('com.aboutyou.dart_packages.sign_in_with_apple.SignInWithAppleCallback'));
+    expect(manifest, contains('android:scheme="signinwithapple"'));
+    expect(manifest, contains('android:path="callback"'));
+  });
 }
