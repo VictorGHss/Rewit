@@ -243,6 +243,15 @@ A versão inicial social e o fallback determinístico de Cold Start encontram-se
 - **Elegibilidade**: Reviews com `status = ACTIVE`, `visibility = PUBLIC` e `userId != requesterId` (auto-exclusão estrita).
 - **Anonimato**: Máscara pública mantida na projeção; `authorId` interno é usado em memória exclusivamente para espaçamento no diversificador.
 
+### 5.3 Interesses do Usuário: contrato para a personalização (V40)
+Os interesses declarados no questionário inicial (`docs/api/me.md` §5) são gravados no backend, que é a fonte de verdade. **O ranking atual não os usa** (§10, item 4); esta seção fixa o que o Feed V2 deve consumir quando a personalização for aprovada.
+
+- **Leitura**: `UserInterestProfileRepository.findByUserId(requesterUserId)`, com o usuário do JWT. O feed não aceita lista de interesses do cliente.
+- **Valor**: `UserInterestProfile.getInterests()`, um conjunto de `InterestCategory` (enum no domínio, espelhado no CHECK `chk_user_interest_category_code`). O código canônico é o nome da constante (`CAFE`, `RESTAURANT`, ...), estável na API e no banco; o rótulo é só exibição.
+- **Peso**: toda seleção explícita é gravada com `user_interests.weight = 1.00`; a coluna fica reservada para sinais futuros.
+- **Ausência**: perfil inexistente (`NOT_STARTED`), rascunho ou lista vazia significam "sem preferência declarada" e devem produzir o ranking atual, sem penalizar ninguém. Contas anteriores à V40 estão concluídas sem interesses.
+- **Ligação com o conteúdo**: `places.category` é texto livre; ainda não existe mapeamento de `InterestCategory` para categorias de locais ou produtos. Esse mapeamento é pré-requisito da personalização e deve ser definido junto com ela.
+
 ---
 
 ## 6. Content Lifecycle — Estado Atual, Arquitetura e Regras de Governança (STEP 25)
@@ -1020,7 +1029,7 @@ As seguintes frentes tecnológicas e melhorias algorítmicas foram **propositada
 3. **Paginação Baseada em Cursor**:
    - *Decisão*: O Feed V2 utiliza offset pagination (`page`, `size`) sobre uma janela delimitada de 100 candidatos. O cursor será avaliado quando for necessário mitigar drift temporal sob alto volume de escrita simultânea.
 4. **Ranking Contextual e Personalização**:
-   - *Decisão*: O ranking baseia-se exclusivamente em sinais factuais auditáveis (social direto, recência exponencial, check-in no local e votos úteis). Personalização baseada em histórico de cliques ou categorias preferidas está suspensa.
+   - *Decisão*: O ranking baseia-se exclusivamente em sinais factuais auditáveis (social direto, recência exponencial, check-in no local e votos úteis). Personalização baseada em histórico de cliques ou categorias preferidas está suspensa. Os interesses declarados no questionário inicial já são persistidos (V40) e têm contrato de leitura definido (§5.3), mas não entram no ranking até esta decisão ser revista.
 5. **Descoberta Geográfica Explícita**:
    - *Decisão*: O Cold Start atual é global e não utiliza localização implícita para evitar tracking e garantir simplicidade operacional.
 6. **Cache Agressivo de Feed em Redis**:

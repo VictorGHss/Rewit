@@ -172,6 +172,8 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 | `place_external_references` | `uq_place_ext_ref` | UNIQUE | `(provider, external_id)` |
 | `user_interests` | `uq_user_interest` | UNIQUE | `(user_id, category_code)` |
 | `user_interests` | `chk_user_interest_weight` | CHECK | `weight >= 0.00 AND weight <= 1.00` |
+| `user_interests` | `chk_user_interest_category_code` | CHECK | `category_code IN (...)`: exatamente os códigos do enum `InterestCategory` (V40) |
+| `user_interest_profiles` | PK / FK | PK, FK | `user_id` (um perfil por conta) `REFERENCES users ON DELETE CASCADE`; `onboarding_completed_at` nulo = questionário em andamento; runtime com `SELECT`, `INSERT`, `UPDATE`, sem `DELETE`; contas existentes na V40 recebem o questionário como concluído (V40) |
 | `review_tags` | `uq_review_tag` | UNIQUE | `(review_id, tag_id)` |
 | `saved_items` | `uq_user_saved_target` | UNIQUE | `(user_id, target_id, item_type)` |
 | `auth_sessions` | `uq_auth_sessions_token_hash` | UNIQUE | `(token_hash)` |
