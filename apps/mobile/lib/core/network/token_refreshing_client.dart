@@ -20,6 +20,9 @@ import 'package:rewit_mobile/core/network/session_refresher.dart';
 /// - falha de rede na renovação vira erro de conexão, sem descartar uma sessão que pode continuar válida;
 /// - só [http.Request] é repetida, porque o corpo fica em memória; upload multipart segue sem repetição;
 /// - no máximo uma renovação e uma repetição por requisição: um novo 401 na repetição é devolvido como está;
+/// - a repetição só acontece com um token do mesmo usuário (claim `sub`) do token original: se outra conta entrou
+///   no aparelho enquanto a requisição estava em voo, a renovação usa o refresh token dela e repetir gravaria na
+///   conta errada; o 401 original é devolvido. Token original sem `sub` legível segue a regra anterior;
 /// - o corpo do 401 é lido até [maxUnauthorizedBodyBytes]; acima disso a leitura é cancelada (liberando a
 ///   conexão) e a resposta não é tratada como recusa de token.
 class TokenRefreshingClient extends http.BaseClient {
@@ -60,6 +63,10 @@ class TokenRefreshingClient extends http.BaseClient {
     final result = await _sessionRefresher.refresh();
     switch (result.outcome) {
       case SessionRefreshOutcome.refreshed:
+        final originalSubject = _subject(authorization.substring('Bearer '.length));
+        if (originalSubject != null && _subject(result.accessToken!) != originalSubject) {
+          return original;
+        }
         replay.headers['authorization'] = 'Bearer ${result.accessToken}';
         return _inner.send(replay);
       case SessionRefreshOutcome.rejected:
@@ -135,6 +142,23 @@ class TokenRefreshingClient extends http.BaseClient {
       persistentConnection: response.persistentConnection,
       reasonPhrase: response.reasonPhrase,
     );
+  }
+
+  /// Claim `sub` do access token, lida sem verificar a assinatura: serve só para comparar dois tokens emitidos pelo
+  /// próprio backend. Nula quando o token não é um JWT legível.
+  static String? _subject(String token) {
+    final parts = token.split('.');
+    if (parts.length != 3) return null;
+    try {
+      final payload = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
+      if (payload is Map<String, dynamic>) {
+        final subject = payload['sub'];
+        return subject is String && subject.isNotEmpty ? subject : null;
+      }
+    } catch (_) {
+      // Token opaco ou malformado: sem identidade para comparar
+    }
+    return null;
   }
 
   static String? _problemCode(List<int> body) {
