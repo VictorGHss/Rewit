@@ -96,6 +96,24 @@ class AuthRepositoryImpl implements AuthRepository {
     return _storeSession(response.body);
   }
 
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) async {
+    final response = await _httpClient.post(
+      ApiEndpoints.authSocialReactivate(provider.apiPath),
+      body: {
+        'idToken': idToken,
+        'nonce': nonce,
+      },
+      requiresAuth: false,
+    );
+
+    return _storeSession(response.body);
+  }
+
   /// Interpreta a resposta de autenticação e persiste o par de tokens no armazenamento seguro.
   Future<Authenticated> _storeSession(String body) async {
     final data = jsonDecode(body) as Map<String, dynamic>;

@@ -35,6 +35,14 @@ class FakeAuthRepoForChangePassword implements AuthRepository {
   }) =>
       throw UnimplementedError();
 
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   bool shouldDelay = false;
   Completer<void>? delayCompleter;
   int changePasswordCallCount = 0;

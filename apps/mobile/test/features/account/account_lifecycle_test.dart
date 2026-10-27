@@ -48,6 +48,14 @@ class TestMockAuthRepo implements AuthRepository {
   }) =>
       throw UnimplementedError();
 
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   bool shouldSucceedReactivate = true;
   bool shouldThrowNetworkOnReactivate = false;
   bool shouldThrowApiErrorOnDeactivate = false;

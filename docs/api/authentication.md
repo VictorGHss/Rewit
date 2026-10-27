@@ -223,7 +223,7 @@ Mesmo corpo do login (`accessToken`, `refreshToken`, `tokenType`, `expiresIn`, `
 - **Mesmo limite do login**: as tentativas consomem a janela `LOGIN` da mesma identidade; não é um segundo orçamento de tentativas.
 - **Sessões**: a transição revoga todas as sessões anteriores antes de criar a nova.
 - **Login de conta desativada**: `POST /api/v1/auth/login` continua respondendo `401 INVALID_CREDENTIALS`; o cliente oferece a reativação como fluxo próprio.
-- **Contas federadas**: contas criadas por login social não têm senha e não são reativadas por aqui.
+- **Contas federadas**: contas criadas por login social não têm senha e não são reativadas por aqui; usam a reativação social (§10).
 
 ---
 
@@ -268,7 +268,7 @@ Valida o ID token OpenID Connect do provedor e emite a sessão do Rewit (mesmo c
 - `nonce`: igual ao SHA-256 do nonce enviado, que precisa ter sido emitido pelo Rewit, estar dentro do prazo e não ter sido usado. O nonce é consumido antes da validação: uma tentativa recusada também o gasta.
 
 ### Conta
-- A conta é localizada somente pelo par provedor + `sub`. Se existir e estiver `ACTIVE`, recebe a sessão; desativada, suspensa ou excluída responde `401 ACCOUNT_DISABLED`, sem distinguir o estado.
+- A conta é localizada somente pelo par provedor + `sub`. Se existir e estiver `ACTIVE`, recebe a sessão; desativada, suspensa ou excluída responde `401 ACCOUNT_DISABLED`, sem distinguir o estado. O login **nunca reativa**: a conta desativada pelo próprio usuário volta pela reativação social (§10), ação explícita.
 - Sem conta vinculada, uma conta federada (sem senha) é criada se o provedor atestar o e-mail (`email_verified`). O handle é gerado (`usuario_` + 10 caracteres aleatórios, sem derivar do e-mail) e o nome de exibição vem da claim `name` (Google) ou é `Usuário Rewit`; os dois podem ser editados em `PATCH /api/v1/me/profile`. A criação conta no limite global de cadastro.
 - **Sem vinculação automática**: se o e-mail do token já pertence a outra conta (local, de outro provedor ou reservado de uma conta excluída), a resposta é `409 SOCIAL_ACCOUNT_EMAIL_CONFLICT` e nada é criado ou alterado. A pessoa entra pelo método usado no cadastro. Vincular uma identidade social a uma conta existente ainda não é suportado.
 
@@ -298,3 +298,21 @@ No Android, o Sign in with Apple roda no navegador e a Apple publica o resultado
 * **Resposta**: `303 See Other` para `intent://callback?<parâmetros>#Intent;package=<APPLE_SIGNIN_ANDROID_PACKAGE>;scheme=signinwithapple;end`, com `Cache-Control: no-store` e `Referrer-Policy: no-referrer`
 
 Somente `code`, `id_token`, `state`, `user` e `error` são repassados, cada um codificado; parâmetro repetido ou maior que 16 KB responde `400 INVALID_SOCIAL_CALLBACK`. Nada é validado nem gravado neste endpoint: o app envia o token a `POST /api/v1/auth/social/apple`. Com a Apple desligada, responde `503 SOCIAL_PROVIDER_UNAVAILABLE`.
+
+---
+
+## 10. Reativação Social de Conta Desativada
+
+Reverte a desativação feita pelo próprio usuário (`POST /api/v1/me/deactivate`) de uma conta criada por login social, que não tem senha para `POST /api/v1/auth/reactivate`.
+
+* **Método**: `POST`
+* **Rotas**: `/api/v1/auth/social/google/reactivate` e `/api/v1/auth/social/apple/reactivate`
+* **Autenticação**: Pública; exige uma autenticação **nova** no provedor
+* **Requisição**: o mesmo corpo do login social (`idToken` e `nonce`), com um nonce novo de `POST /api/v1/auth/social/nonce`. O token passa pela mesma validação do §8 (assinatura, emissor, audiência, validade, `sub` e nonce de uso único)
+* **Resposta**: `200 OK` com o corpo do login. A conta volta a `ACTIVE`; uma conta já ativa apenas autentica
+
+### Regras
+- **Ação explícita**: é um endpoint próprio, chamado pelo app só depois de o usuário confirmar a reativação. O login social nunca reativa.
+- **Somente conta desativada pelo usuário e vinculada à identidade**: suspensa, excluída ou identidade sem conta respondem `401 ACCOUNT_DISABLED`, igual ao login, sem revelar o estado. Nenhuma conta é criada.
+- **Sessões**: a transição revoga todas as sessões anteriores antes de criar a nova, como na reativação local. A linha da conta é travada e o estado relido depois do lock: uma suspensão concorrente confirmada antes vence.
+- **Erros**: os mesmos do §8 (`INVALID_SOCIAL_NONCE`, `INVALID_SOCIAL_TOKEN`, `SOCIAL_PROVIDER_UNAVAILABLE`, `SOCIAL_LOGIN_UNAVAILABLE`), mais `401 ACCOUNT_DISABLED`.

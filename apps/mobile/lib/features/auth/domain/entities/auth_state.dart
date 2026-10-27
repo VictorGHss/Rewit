@@ -1,5 +1,6 @@
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 
 /// Hierarquia tipada de estados de autenticação do usuário.
 abstract class AuthState {
@@ -41,15 +42,23 @@ class Unauthenticated extends AuthState {
   /// Erros por campo devolvidos pela validação do backend (RFC 7807 `fieldErrors`), quando houver.
   final Map<String, String>? fieldErrors;
 
+  /// Provedor social da tentativa que gerou este estado, quando houver.
+  final SocialAuthProvider? socialProvider;
+
   const Unauthenticated({
     this.errorMessage,
     this.errorCode,
     this.retryAfterSeconds,
     this.fieldErrors,
+    this.socialProvider,
   });
 
   bool get isRateLimited => retryAfterSeconds != null && retryAfterSeconds! > 0;
   bool get isInvalidCredentials => errorCode == 'INVALID_CREDENTIALS';
+
+  /// Login social recusado por conta não ativa: o app pode oferecer a reativação como ação explícita do usuário
+  /// (o backend só reativa conta desativada pelo próprio usuário e responde igual para suspensa ou excluída).
+  bool get canOfferSocialReactivation => errorCode == 'ACCOUNT_DISABLED' && socialProvider != null;
 
   @override
   String toString() => 'Unauthenticated(error: $errorMessage, code: $errorCode)';

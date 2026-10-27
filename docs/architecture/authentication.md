@@ -197,7 +197,7 @@ O access token é validado só pelas claims, sem consulta ao banco, e pode ter s
 
 ### 4.8 Ciclo de Vida da Conta (C2)
 
-- **Estados**: `ACTIVE`; `DEACTIVATED` (pelo próprio usuário, que reativa em `POST /api/v1/auth/reactivate`); `SUSPENDED` (ação administrativa, só revertida pela administração); `DELETED` (exclusão lógica definitiva, preservada para integridade e histórico). Transições no domínio (`User.deactivate/reactivate/suspend/reinstate/softDelete`); proibidas respondem `409 ACCOUNT_STATUS_TRANSITION_DENIED` apenas nos fluxos administrativos.
+- **Estados**: `ACTIVE`; `DEACTIVATED` (pelo próprio usuário, que reativa em `POST /api/v1/auth/reactivate`, ou em `POST /api/v1/auth/social/{provider}/reactivate` se a conta for federada, §4.9); `SUSPENDED` (ação administrativa, só revertida pela administração); `DELETED` (exclusão lógica definitiva, preservada para integridade e histórico). Transições no domínio (`User.deactivate/reactivate/suspend/reinstate/softDelete`); proibidas respondem `409 ACCOUNT_STATUS_TRANSITION_DENIED` apenas nos fluxos administrativos.
 - **Sessões**: toda transição que muda o estado revoga as sessões da conta na mesma transação, inclusive a volta para `ACTIVE`. Um refresh concorrente com a desativação pode criar uma sessão que o `UPDATE` de revogação não enxerga (linha nova fora do snapshot do comando); ela não serve enquanto a conta não opera (o refresh lê o estado) e é revogada na reativação ou na reversão, antes de voltar a valer.
 - **Access token**: stateless; não é invalidado. Até expirar, leituras continuam possíveis e toda mutação protegida responde `401 ACCOUNT_DISABLED` (§4.7).
 - **Concorrência**: toda escrita no estado parte de `UserRepository.findByIdForUpdate`, que trava a linha (`FOR NO KEY UPDATE`) e recarrega o estado com `refresh`. Uma consulta com lock não bastaria: se a conta já estiver carregada na transação (a reativação busca por e-mail antes), o Hibernate trava a linha mas devolve a instância com o estado antigo. A troca de senha usa a mesma leitura, porque grava a linha inteira.
@@ -224,7 +224,11 @@ Sem Redis, o login social falha fechado (`503 SOCIAL_LOGIN_UNAVAILABLE`), ao con
 
 **Apple no Android.** O fluxo web publica o resultado em `POST /auth/apple/callback`, que repassa somente `code`, `id_token`, `state`, `user` e `error`, codificados, ao intent `signinwithapple://callback` do pacote configurado (`APPLE_SIGNIN_ANDROID_PACKAGE`). O endpoint não valida nem grava nada; a validação acontece em `POST /auth/social/apple`.
 
-**Limites atuais.** Vincular uma identidade social a uma conta existente (fluxo autenticado pela conta original), reativar conta federada desativada e o `authorization_code`/revogação de token da Apple (exigido pela Apple na exclusão de conta) não estão implementados.
+**Conta federada desativada.** O login social nunca reativa: conta `DEACTIVATED` responde `401 ACCOUNT_DISABLED`, como suspensa e excluída. A reativação é uma ação própria, `POST /auth/social/{provider}/reactivate`, que o app só chama depois da confirmação do usuário e que exige uma autenticação nova no provedor, com nonce novo e a mesma validação do login. `AuthService.reactivateExternalIdentity` espelha a reativação local: só a conta vinculada ao provedor + `sub` e só a partir de `DEACTIVATED` (suspensa, excluída e identidade sem conta respondem `401 ACCOUNT_DISABLED`, sem revelar o estado; nada é criado), lock com releitura do estado (`findByIdForUpdate`, uma suspensão concorrente confirmada antes vence) e revogação das sessões anteriores na mesma transação. Conta já `ACTIVE` apenas autentica.
+
+**App: nonce por tentativa no Google.** Em `google_sign_in` 7.2.0 o nonce só entra pela inicialização. A API de alto nível (`GoogleSignIn.instance.initialize`) deve ser chamada uma única vez, então o app usa `GoogleSignInPlatform`, cujo contrato só exige `init` antes das demais chamadas. Nas implementações auditadas (`google_sign_in_android` 7.2.18, `google_sign_in_ios` 6.3.8), `init` apenas grava configuração e nonce, lidos a cada `authenticate`. Cada tentativa executa `init` (mesma configuração, nonce novo), `authenticate` e `signOut` como seção crítica; uma tentativa simultânea é recusada sem tocar no SDK. As versões estão fixadas e um teste confere o lockfile, para que uma atualização exija nova auditoria.
+
+**Limites atuais.** Vincular uma identidade social a uma conta existente (fluxo autenticado pela conta original) e o `authorization_code`/revogação de token da Apple (exigido pela Apple na exclusão de conta) não estão implementados.
 
 ## 5. Endpoints Implementados
 
@@ -234,6 +238,7 @@ Sem Redis, o login social falha fechado (`503 SOCIAL_LOGIN_UNAVAILABLE`), ao con
 | `POST` | `/api/v1/auth/login` | Pública | Valida credenciais locais, cria sessão e emite tokens. Erros de credenciais são uniformes. |
 | `POST` | `/api/v1/auth/social/nonce` | Pública | Emite nonce de uso único para o login social (§4.9). |
 | `POST` | `/api/v1/auth/social/google`, `/api/v1/auth/social/apple` | Pública | Valida o ID token do provedor, cria ou recupera a conta federada e emite tokens. |
+| `POST` | `/api/v1/auth/social/google/reactivate`, `/api/v1/auth/social/apple/reactivate` | Pública | Reativa conta federada desativada com autenticação nova no provedor (ação explícita). |
 | `POST` | `/api/v1/auth/apple/callback` | Pública | Retorno do fluxo web da Apple (Android), repassado ao app. |
 | `POST` | `/api/v1/auth/refresh` | Pública | Executa rotação de refresh token e emite novo par de tokens. |
 | `POST` | `/api/v1/auth/logout` | Autenticada (Bearer) | Revoga a sessão do refresh token informado. |

@@ -283,6 +283,95 @@ class SocialAuthenticationIntegrationTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    @DisplayName("Conta social desativada: login recusado sem reativar; reativação explícita com nova autenticação válida")
+    void deactivatedSocialAccountLifecycle() throws Exception {
+        String subject = "google-" + UUID.randomUUID();
+        String email = "ciclo." + UUID.randomUUID().toString().substring(0, 8) + "@gmail.com";
+        JsonNode session = json(googleLogin(subject, email).andExpect(status().isOk()));
+        String userId = session.get("user").get("id").asText();
+
+        mockMvc.perform(post("/api/v1/me/deactivate").header("Authorization", "Bearer " + session.get("accessToken").asText()))
+                .andExpect(status().isNoContent());
+        assertEquals(com.rewit.domain.enums.AccountStatus.DEACTIVATED, accountStatus(subject));
+
+        // O login não reativa
+        googleLogin(subject, email)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+        assertEquals(com.rewit.domain.enums.AccountStatus.DEACTIVATED, accountStatus(subject));
+
+        // Reativação com token inválido (audiência de outro app) não altera a conta
+        String badNonce = issueNonce();
+        String wrongAudience = tokens.sign(googleClaims(subject, email, SocialAuthService.hashNonce(badNonce), Instant.now())
+                .audience("outro-app").build());
+        socialReactivate("google", wrongAudience, badNonce)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_SOCIAL_TOKEN"));
+        assertEquals(com.rewit.domain.enums.AccountStatus.DEACTIVATED, accountStatus(subject));
+
+        // Reativação explícita com autenticação nova e válida
+        String nonce = issueNonce();
+        String idToken = tokens.sign(googleClaims(subject, email, SocialAuthService.hashNonce(nonce), Instant.now()).build());
+        JsonNode reactivated = json(socialReactivate("google", idToken, nonce).andExpect(status().isOk()));
+        assertEquals(userId, reactivated.get("user").get("id").asText());
+        assertEquals(com.rewit.domain.enums.AccountStatus.ACTIVE, accountStatus(subject));
+
+        // O mesmo token/nonce não serve de novo; a sessão nova funciona
+        socialReactivate("google", idToken, nonce)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_SOCIAL_NONCE"));
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshRequest(reactivated.get("refreshToken").asText()))))
+                .andExpect(status().isOk());
+        // A sessão anterior à desativação continua revogada (o reúso dela aciona a revogação em massa, §4.4)
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshRequest(session.get("refreshToken").asText()))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("REFRESH_TOKEN_REVOKED"));
+
+        // De volta a ACTIVE, o login social funciona normalmente
+        googleLogin(subject, email).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("Reativação social recusa conta suspensa e identidade sem conta, sem criar nada")
+    void socialReactivationRejectsSuspendedAndUnknown() throws Exception {
+        String subject = "001122." + UUID.randomUUID().toString().replace("-", "") + ".0002";
+        String email = UUID.randomUUID().toString().substring(0, 10) + "@privaterelay.appleid.com";
+        appleLogin(subject, email).andExpect(status().isOk());
+        User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, subject).orElseThrow();
+        user.suspend();
+        userRepository.save(user);
+
+        String nonce = issueNonce();
+        socialReactivate("apple", tokens.sign(appleClaims(subject, email, SocialAuthService.hashNonce(nonce), Instant.now()).build()), nonce)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+        assertEquals(com.rewit.domain.enums.AccountStatus.SUSPENDED,
+                userRepository.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, subject).orElseThrow().getStatus());
+
+        String unknown = "google-" + UUID.randomUUID();
+        String unknownNonce = issueNonce();
+        socialReactivate("google", tokens.sign(googleClaims(unknown, "nova." + UUID.randomUUID() + "@gmail.com",
+                        SocialAuthService.hashNonce(unknownNonce), Instant.now()).build()), unknownNonce)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+        assertTrue(userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, unknown).isEmpty());
+    }
+
+    private com.rewit.domain.enums.AccountStatus accountStatus(String googleSubject) {
+        return userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, googleSubject).orElseThrow().getStatus();
+    }
+
+    private ResultActions socialReactivate(String provider, String idToken, String nonce) throws Exception {
+        return mockMvc.perform(post("/api/v1/auth/social/" + provider + "/reactivate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new SocialLoginRequest(idToken, nonce))));
+    }
+
     private ResultActions googleLogin(String subject, String email) throws Exception {
         String nonce = issueNonce();
         return socialLogin("google", tokens.sign(

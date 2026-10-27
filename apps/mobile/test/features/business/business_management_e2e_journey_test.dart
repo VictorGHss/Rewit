@@ -56,6 +56,14 @@ class _StubAuthRepo implements AuthRepository {
       throw UnimplementedError();
 
   @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
   Future<bool> hasStoredSession() async => true;
   @override
   Future<AuthUserDto> getMe() async => const AuthUserDto(

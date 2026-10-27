@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/register_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/auth/presentation/widgets/social_sign_in_buttons.dart';
@@ -64,6 +65,80 @@ class _LoginScreenState extends State<LoginScreen> {
     );
     // Voltando sem cadastrar, o erro do cadastro não pertence ao login
     if (mounted) widget.authNotifier.clearMessage();
+  }
+
+  /// Reativação de conta social desativada: só depois de confirmação explícita, com nova autenticação no provedor.
+  Future<void> _confirmAndReactivateSocial(SocialAuthProvider provider) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reativar Conta'),
+        content: Text(
+          'Deseja reativar a sua conta Rewit vinculada ao ${provider.label}?\n\n'
+          'Você vai confirmar a sua identidade no ${provider.label} de novo. Ao concluir, a conta volta ao estado '
+          'ativo e você será conectado ao aplicativo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            key: const Key('social_reactivate_confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Reativar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final success = await widget.authNotifier.reactivateWithSocial(provider);
+    if (success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Conta reativada com sucesso! Bem-vindo de volta.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      widget.onLoginSuccess?.call();
+    }
+  }
+
+  Widget _reactivationFooter(ThemeData theme, {Key? key, required String label, required VoidCallback? onPressed}) {
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 8),
+        Divider(height: 1, color: theme.colorScheme.error.withAlpha(60)),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Flexible(
+              child: Text(
+                'Sua conta foi desativada?',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: onPressed,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              ),
+              child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   Future<void> _confirmAndReactivate() async {
@@ -165,39 +240,22 @@ class _LoginScreenState extends State<LoginScreen> {
                             message: errorMessage,
                             retryAfterSeconds: state is Unauthenticated ? state.retryAfterSeconds : null,
                             isSuccess: state is Unauthenticated && state.errorCode == 'PASSWORD_CHANGED',
-                            footer: (state is Unauthenticated && state.isInvalidCredentials)
-                                ? Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const SizedBox(height: 8),
-                                      Divider(height: 1, color: theme.colorScheme.error.withAlpha(60)),
-                                      const SizedBox(height: 6),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Flexible(
-                                            child: Text(
-                                              'Sua conta foi desativada?',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: theme.colorScheme.error,
-                                              ),
-                                            ),
-                                          ),
-                                          TextButton(
-                                            onPressed: isLoading ? null : _confirmAndReactivate,
-                                            style: TextButton.styleFrom(
-                                              visualDensity: VisualDensity.compact,
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                            ),
-                                            child: const Text('Reativar Conta', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                            footer: state is Unauthenticated && state.isInvalidCredentials
+                                ? _reactivationFooter(
+                                    theme,
+                                    label: 'Reativar Conta',
+                                    onPressed: isLoading ? null : _confirmAndReactivate,
                                   )
-                                : null,
+                                : state is Unauthenticated && state.canOfferSocialReactivation
+                                    ? _reactivationFooter(
+                                        theme,
+                                        key: const Key('social_reactivate'),
+                                        label: 'Reativar com ${state.socialProvider!.label}',
+                                        onPressed: isLoading
+                                            ? null
+                                            : () => _confirmAndReactivateSocial(state.socialProvider!),
+                                      )
+                                    : null,
                           ),
                           const SizedBox(height: 20),
                         ],

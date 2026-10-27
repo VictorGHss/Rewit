@@ -340,6 +340,109 @@ void main() {
     });
   });
 
+  group('Conta social desativada: reativação explícita', () {
+    Future<http.Response> disabledBackend(http.Request request) async {
+      switch (request.url.path) {
+        case '/api/v1/auth/social/nonce':
+          return _json({'nonce': _nonce, 'expiresIn': 600}, 200);
+        case '/api/v1/auth/social/google':
+          return _problem(401, 'ACCOUNT_DISABLED', 'Conta desativada ou inexistente');
+        case '/api/v1/auth/social/google/reactivate':
+          return _json(_authPayload(), 200);
+      }
+      return _problem(404, 'NOT_FOUND', 'Rota inesperada');
+    }
+
+    test('login de conta desativada não reativa e oferece a reativação para o mesmo provedor', () async {
+      final backend = _Backend(disabledBackend);
+      final (:repo, :storage) = _repository(backend);
+      final notifier = AuthNotifier(authRepository: repo, socialSignInService: _FakeSocialSignIn());
+
+      expect(await notifier.signInWithSocial(SocialAuthProvider.google), isFalse);
+
+      final state = notifier.state as Unauthenticated;
+      expect(state.errorCode, 'ACCOUNT_DISABLED');
+      expect(state.canOfferSocialReactivation, isTrue);
+      expect(state.socialProvider, SocialAuthProvider.google);
+      expect(backend.paths, ['/api/v1/auth/social/nonce', '/api/v1/auth/social/google']);
+      expect(await storage.hasAccessToken(), isFalse);
+    });
+
+    test('reativação usa autenticação nova (nonce novo) e o endpoint próprio', () async {
+      final backend = _Backend(disabledBackend);
+      final (:repo, :storage) = _repository(backend);
+      final social = _FakeSocialSignIn();
+      final notifier = AuthNotifier(authRepository: repo, socialSignInService: social);
+
+      await notifier.signInWithSocial(SocialAuthProvider.google);
+      expect(await notifier.reactivateWithSocial(SocialAuthProvider.google), isTrue);
+
+      expect(backend.paths, [
+        '/api/v1/auth/social/nonce', '/api/v1/auth/social/google',
+        '/api/v1/auth/social/nonce', '/api/v1/auth/social/google/reactivate',
+      ]);
+      expect(social.receivedNonces.length, 2, reason: 'o provedor é chamado de novo para a reativação');
+      expect(backend.bodyOf('/api/v1/auth/social/google/reactivate'), {'idToken': 'provider-id-token', 'nonce': _nonce});
+      expect(notifier.state, isA<Authenticated>());
+      expect(await storage.getAccessToken(), 'access-1');
+    });
+
+    test('cancelar o provedor durante a reativação não reativa', () async {
+      final backend = _Backend(disabledBackend);
+      final social = _FakeSocialSignIn(outcome: const SocialSignInCancelledException(SocialAuthProvider.google));
+      final notifier = AuthNotifier(authRepository: _repository(backend).repo, socialSignInService: social);
+
+      expect(await notifier.reactivateWithSocial(SocialAuthProvider.google), isFalse);
+      expect((notifier.state as Unauthenticated).errorCode, AuthNotifier.socialSignInCancelledCode);
+      expect(backend.paths, ['/api/v1/auth/social/nonce']);
+    });
+
+    testWidgets('a tela só reativa depois da confirmação explícita do usuário', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final backend = _Backend(disabledBackend);
+      final notifier = AuthNotifier(authRepository: _repository(backend).repo, socialSignInService: _FakeSocialSignIn());
+      await tester.pumpWidget(MaterialApp(home: LoginScreen(authNotifier: notifier)));
+
+      await tester.tap(find.text('Continuar com Google'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reativar com Google'), findsOneWidget);
+      expect(backend.paths.where((p) => p.endsWith('/reactivate')), isEmpty);
+
+      // Cancelar o diálogo não chama provedor nem backend
+      await tester.tap(find.text('Reativar com Google'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(backend.requests.length, 2);
+      expect(notifier.state, isA<Unauthenticated>());
+
+      await tester.tap(find.text('Reativar com Google'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('social_reactivate_confirm')));
+      await tester.pumpAndSettle();
+
+      expect(backend.paths.last, '/api/v1/auth/social/google/reactivate');
+      expect(notifier.state, isA<Authenticated>());
+    });
+
+    testWidgets('erro de credenciais do login local mantém a reativação local, não a social', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final backend = _Backend((_) async => _problem(401, 'INVALID_CREDENTIALS', 'Credenciais inválidas'));
+      final notifier = AuthNotifier(authRepository: _repository(backend).repo, socialSignInService: _FakeSocialSignIn());
+      await tester.pumpWidget(MaterialApp(home: LoginScreen(authNotifier: notifier)));
+
+      await notifier.login('maria@rewit.com', '12345678');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reativar Conta'), findsOneWidget);
+      expect(find.byKey(const Key('social_reactivate')), findsNothing);
+    });
+  });
+
   group('Disponibilidade dos provedores por build e plataforma', () {
     test('sem identificadores públicos nenhum provedor fica disponível', () {
       final service = PlatformSocialSignInService(config: const SocialAuthConfig(), platform: TargetPlatform.android);

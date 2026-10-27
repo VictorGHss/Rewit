@@ -39,6 +39,14 @@ class _FakeAuthRepository implements AuthRepository {
       throw UnimplementedError();
 
   @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
   Future<Authenticated> login({required String email, required String password}) async => _session;
   @override
   Future<Authenticated> reactivate({required String email, required String password}) async => _session;

@@ -75,6 +75,28 @@ public class SocialAuthService {
     }
 
     public AuthResult authenticate(SocialLoginCommand cmd) {
+        ExternalIdentity identity = verifiedIdentity(cmd);
+
+        try {
+            return authService.authenticateExternalIdentity(identity, cmd.userAgent(), cmd.ipAddress());
+        } catch (DataIntegrityViolationException concurrentCreation) {
+            // Criação concorrente da mesma identidade (ou do handle gerado): a nova transação encontra a conta
+            return authService.authenticateExternalIdentity(identity, cmd.userAgent(), cmd.ipAddress());
+        }
+    }
+
+    /**
+     * Reativação de uma conta federada {@code DEACTIVATED} pelo próprio usuário, como ação explícita e separada do
+     * login (o login nunca reativa). Exige uma autenticação nova no provedor, com nonce próprio, validada como no
+     * login; não cria conta.
+     */
+    public AuthResult reactivate(SocialLoginCommand cmd) {
+        ExternalIdentity identity = verifiedIdentity(cmd);
+        return authService.reactivateExternalIdentity(identity, cmd.userAgent(), cmd.ipAddress());
+    }
+
+    /** Provedor ativo, nonce emitido pelo Rewit consumido (uso único) e ID token validado contra o hash do nonce. */
+    private ExternalIdentity verifiedIdentity(SocialLoginCommand cmd) {
         Objects.requireNonNull(cmd, "SocialLoginCommand cannot be null");
 
         AuthProvider provider = cmd.provider();
@@ -95,14 +117,7 @@ public class SocialAuthService {
             throw invalidNonce();
         }
 
-        ExternalIdentity identity = identityVerifier.verify(provider, cmd.idToken(), nonceHash);
-
-        try {
-            return authService.authenticateExternalIdentity(identity, cmd.userAgent(), cmd.ipAddress());
-        } catch (DataIntegrityViolationException concurrentCreation) {
-            // Criação concorrente da mesma identidade (ou do handle gerado): a nova transação encontra a conta
-            return authService.authenticateExternalIdentity(identity, cmd.userAgent(), cmd.ipAddress());
-        }
+        return identityVerifier.verify(provider, cmd.idToken(), nonceHash);
     }
 
     /** Provedor externo configurado neste ambiente. */

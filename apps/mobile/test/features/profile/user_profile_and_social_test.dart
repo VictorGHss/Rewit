@@ -80,6 +80,14 @@ class FakeAuthRepo implements AuthRepository {
   }) =>
       throw UnimplementedError();
 
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   final AuthUserDto user;
 
   FakeAuthRepo({

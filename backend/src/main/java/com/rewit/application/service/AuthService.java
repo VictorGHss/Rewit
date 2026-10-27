@@ -210,7 +210,8 @@ public class AuthService {
      *
      * <ul>
      *   <li>Conta vinculada: autentica se estiver {@code ACTIVE}; em qualquer outro estado (desativada, suspensa,
-     *   excluída) responde {@code 401 ACCOUNT_DISABLED}, sem distinguir o estado.</li>
+     *   excluída) responde {@code 401 ACCOUNT_DISABLED}, sem distinguir o estado. O login nunca reativa: a conta
+     *   desativada volta por {@link #reactivateExternalIdentity}, ação explícita do usuário.</li>
      *   <li>Sem conta vinculada: cria a conta federada (sem senha) e o perfil, desde que o provedor ateste o e-mail
      *   ({@code email_verified}). Um e-mail já usado por outra conta, local ou de outro provedor, inclusive o
      *   reservado de uma conta excluída, responde {@code 409 SOCIAL_ACCOUNT_EMAIL_CONFLICT}: nunca há vinculação
@@ -262,6 +263,42 @@ public class AuthService {
                 new Profile(null, savedUser.getId(), availableGeneratedHandle(), socialDisplayName(identity.name()), null, null));
 
         return createSessionAndGenerateResult(savedUser, savedProfile, userAgent, ipAddress);
+    }
+
+    /**
+     * Reativação de conta federada {@code DEACTIVATED} pelo próprio usuário, a partir de uma identidade externa
+     * recém-verificada ({@link SocialAuthService#reactivate}). Equivale a {@link #reactivate} para contas sem senha.
+     *
+     * <p>Somente a conta vinculada ao par provedor + subject; nada é criado. Conta inexistente, suspensa ou excluída
+     * responde {@code 401 ACCOUNT_DISABLED}, igual ao login social, sem distinguir o estado. Conta {@code ACTIVE}
+     * apenas autentica. A linha é travada e o estado relido depois do lock (uma suspensão concorrente confirmada antes
+     * vence), e a transição revoga as sessões anteriores antes de criar a nova.
+     */
+    @Transactional
+    public AuthResult reactivateExternalIdentity(ExternalIdentity identity, String userAgent, String ipAddress) {
+        Objects.requireNonNull(identity, "ExternalIdentity cannot be null");
+        if (identity.provider() == null || identity.provider() == AuthProvider.LOCAL
+                || identity.subject() == null || identity.subject().isBlank()) {
+            throw new IllegalArgumentException("Identidade externa sem provedor federado ou subject");
+        }
+
+        User linked = userRepository.findByAuthProviderAndProviderUserId(identity.provider(), identity.subject())
+                .filter(u -> isSelfRecoverable(u.getStatus()))
+                .orElseThrow(() -> new BusinessException("Conta desativada ou inexistente", HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED"));
+
+        User locked = userRepository.findByIdForUpdate(linked.getId())
+                .filter(u -> isSelfRecoverable(u.getStatus()))
+                .orElseThrow(() -> new BusinessException("Conta desativada ou inexistente", HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED"));
+
+        if (locked.reactivate()) {
+            userRepository.save(locked);
+            authSessionRepository.revokeAllByUserId(locked.getId());
+        }
+
+        Profile profile = profileRepository.findByUserId(locked.getId())
+                .orElseThrow(() -> new BusinessException("Perfil não encontrado para o usuário", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
+
+        return createSessionAndGenerateResult(locked, profile, userAgent, ipAddress);
     }
 
     private String availableGeneratedHandle() {

@@ -46,16 +46,41 @@ class SocialAuthConfig {
 /// [SocialSignInService] com os SDKs oficiais: Google Sign-In (Credential Manager no Android, GoogleSignIn no iOS)
 /// e Sign in with Apple (nativo no iOS, fluxo web com retorno pelo backend no Android).
 ///
-/// O Google é chamado pela interface de plataforma do `google_sign_in`, que aceita um nonce diferente a cada
-/// tentativa (a API de alto nível fixa o nonce numa inicialização única).
+/// ### Google: nonce por tentativa
+///
+/// Em `google_sign_in` 7.2.0 o nonce só entra por `InitParameters`. A API de alto nível
+/// (`GoogleSignIn.instance.initialize`) deve ser chamada uma única vez: cada chamada assina de novo o stream de
+/// eventos de autenticação e o pacote declara o resultado indefinido. Por isso o app não a usa: fala com
+/// [GoogleSignInPlatform], cujo contrato (`google_sign_in_platform_interface` 3.1.0) só exige `init` antes das
+/// demais chamadas, sem limitar a uma vez. Nas implementações resolvidas e auditadas, `init` apenas grava a
+/// configuração e o nonce, que é lido no momento de cada `authenticate`:
+///
+/// * `google_sign_in_android` 7.2.18: atribui `serverClientId`, `hostedDomain` e `nonce` em campos Dart (o canal
+///   nativo só é consultado sem `serverClientId`, que o app sempre envia); `getCredential` monta o pedido do
+///   Credential Manager com esses campos;
+/// * `google_sign_in_ios` 6.3.8: grava o nonce em Dart e redefine `GIDSignIn.configuration` (propriedade
+///   substituível); o nonce vai como argumento de cada `signIn`.
+///
+/// Cada tentativa executa `init` (mesma configuração, nonce novo), `authenticate` e `signOut` como uma seção
+/// crítica: uma segunda tentativa simultânea é recusada sem tocar no SDK, então um `init` nunca troca o nonce de
+/// um `authenticate` em andamento. As versões ficam fixadas e um teste falha se o lockfile mudar, para que uma
+/// atualização exija nova auditoria. O nonce não é opcional: o backend recusa token sem ele.
 class PlatformSocialSignInService implements SocialSignInService {
   final SocialAuthConfig config;
   final TargetPlatform? _platformOverride;
+  final GoogleSignInPlatform? _googlePlatformOverride;
+  bool _googleAttemptInProgress = false;
 
-  PlatformSocialSignInService({required this.config, @visibleForTesting TargetPlatform? platform})
-      : _platformOverride = platform;
+  PlatformSocialSignInService({
+    required this.config,
+    @visibleForTesting TargetPlatform? platform,
+    @visibleForTesting GoogleSignInPlatform? googlePlatform,
+  })  : _platformOverride = platform,
+        _googlePlatformOverride = googlePlatform;
 
   TargetPlatform get _platform => _platformOverride ?? defaultTargetPlatform;
+
+  GoogleSignInPlatform get _google => _googlePlatformOverride ?? GoogleSignInPlatform.instance;
 
   @override
   bool isAvailable(SocialAuthProvider provider) {
@@ -86,7 +111,11 @@ class PlatformSocialSignInService implements SocialSignInService {
 
   Future<String> _googleIdToken(String providerNonce) async {
     const provider = SocialAuthProvider.google;
-    final google = GoogleSignInPlatform.instance;
+    if (_googleAttemptInProgress) {
+      throw const SocialSignInFailureException(provider, 'Já existe um login com o Google em andamento.');
+    }
+    _googleAttemptInProgress = true;
+    final google = _google;
     try {
       await google.init(InitParameters(
         clientId: _platform == TargetPlatform.iOS ? config.googleIosClientId : null,
@@ -113,6 +142,7 @@ class PlatformSocialSignInService implements SocialSignInService {
       } catch (_) {
         // Sem conta conectada não há o que encerrar
       }
+      _googleAttemptInProgress = false;
     }
   }
 

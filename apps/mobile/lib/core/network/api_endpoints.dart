@@ -11,6 +11,7 @@ class ApiEndpoints {
   static const String authMe = '/api/v1/auth/me';
   static const String authSocialNonce = '/api/v1/auth/social/nonce';
   static String authSocial(String provider) => '/api/v1/auth/social/$provider';
+  static String authSocialReactivate(String provider) => '/api/v1/auth/social/$provider/reactivate';
   static const String meProfile = '/api/v1/me/profile';
   static const String meDeactivate = '/api/v1/me/deactivate';
   static const String mePassword = '/api/v1/me/password';

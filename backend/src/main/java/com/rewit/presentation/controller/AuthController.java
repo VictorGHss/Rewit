@@ -117,6 +117,26 @@ public class AuthController {
         return socialLogin(AuthProvider.APPLE, request, httpRequest);
     }
 
+    @PostMapping("/social/google/reactivate")
+    @Operation(summary = "Reativar a própria conta federada desativada com nova autenticação no Google e emitir tokens")
+    public ResponseEntity<AuthResponse> googleReactivate(
+            @Valid @RequestBody SocialLoginRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        AuthResult result = socialAuthService.reactivate(socialCommand(AuthProvider.GOOGLE, request, httpRequest));
+        return ResponseEntity.ok(toAuthResponse(result));
+    }
+
+    @PostMapping("/social/apple/reactivate")
+    @Operation(summary = "Reativar a própria conta federada desativada com nova autenticação na Apple e emitir tokens")
+    public ResponseEntity<AuthResponse> appleReactivate(
+            @Valid @RequestBody SocialLoginRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        AuthResult result = socialAuthService.reactivate(socialCommand(AuthProvider.APPLE, request, httpRequest));
+        return ResponseEntity.ok(toAuthResponse(result));
+    }
+
     /**
      * Retorno do fluxo web do Sign in with Apple (Android): a Apple publica o resultado neste endpoint
      * ({@code response_mode=form_post}) e ele é repassado ao app pelo intent {@code signinwithapple://callback}.
@@ -155,16 +175,19 @@ public class AuthController {
 
     private ResponseEntity<AuthResponse> socialLogin(AuthProvider provider, SocialLoginRequest request,
                                                      HttpServletRequest httpRequest) {
-        SocialLoginCommand cmd = new SocialLoginCommand(
+        AuthResult result = socialAuthService.authenticate(socialCommand(provider, request, httpRequest));
+        return ResponseEntity.ok(toAuthResponse(result));
+    }
+
+    private SocialLoginCommand socialCommand(AuthProvider provider, SocialLoginRequest request,
+                                             HttpServletRequest httpRequest) {
+        return new SocialLoginCommand(
                 provider,
                 request.idToken(),
                 request.nonce(),
                 httpRequest.getHeader("User-Agent"),
                 extractClientIp(httpRequest)
         );
-
-        AuthResult result = socialAuthService.authenticate(cmd);
-        return ResponseEntity.ok(toAuthResponse(result));
     }
 
     @PostMapping("/reactivate")

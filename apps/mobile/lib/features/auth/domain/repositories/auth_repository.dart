@@ -28,6 +28,14 @@ abstract class AuthRepository {
     required String nonce,
   });
 
+  /// Reativa a própria conta federada desativada com uma autenticação nova no provedor (ação explícita, nunca
+  /// disparada pelo login) via POST /api/v1/auth/social/{provider}/reactivate.
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  });
+
   /// Reativa uma conta previamente desativada usando credenciais locais.
   Future<Authenticated> reactivate({
     required String email,

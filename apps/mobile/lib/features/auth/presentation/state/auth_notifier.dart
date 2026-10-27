@@ -98,8 +98,38 @@ class AuthNotifier extends ChangeNotifier {
   }
 
   /// Login social: nonce do Rewit, fluxo oficial do provedor com o SHA-256 do nonce e validação do ID token
-  /// no backend, que emite a sessão. Cancelamento volta ao estado não autenticado com um aviso neutro.
-  Future<bool> signInWithSocial(SocialAuthProvider provider) async {
+  /// no backend, que emite a sessão. Cancelamento volta ao estado não autenticado com um aviso neutro. Conta
+  /// desativada não é reativada aqui: o estado expõe [Unauthenticated.canOfferSocialReactivation].
+  Future<bool> signInWithSocial(SocialAuthProvider provider) {
+    return _runSocialFlow(
+      provider,
+      statusMessage: 'Entrando com ${provider.label}...',
+      action: 'entrar',
+      exchange: _authRepository.signInWithSocial,
+    );
+  }
+
+  /// Reativa a própria conta federada desativada: ação explícita do usuário (a tela pede confirmação antes),
+  /// com uma autenticação nova no provedor e um nonce novo; nunca chamada pelo login.
+  Future<bool> reactivateWithSocial(SocialAuthProvider provider) {
+    return _runSocialFlow(
+      provider,
+      statusMessage: 'Reativando conta com ${provider.label}...',
+      action: 'reativar a conta',
+      exchange: _authRepository.reactivateWithSocial,
+    );
+  }
+
+  Future<bool> _runSocialFlow(
+    SocialAuthProvider provider, {
+    required String statusMessage,
+    required String action,
+    required Future<Authenticated> Function({
+      required SocialAuthProvider provider,
+      required String idToken,
+      required String nonce,
+    }) exchange,
+  }) async {
     if (isLoading) return false;
 
     final service = _socialSignInService;
@@ -112,24 +142,26 @@ class AuthNotifier extends ChangeNotifier {
       return false;
     }
 
-    _state = Authenticating(statusMessage: 'Entrando com ${provider.label}...');
+    _state = Authenticating(statusMessage: statusMessage);
     notifyListeners();
 
     try {
+      // Nonce novo a cada tentativa, inclusive depois de cancelamento: o anterior expira sem uso no backend
       final nonce = await _authRepository.requestSocialNonce();
       final idToken = await service.obtainIdToken(provider, providerNonce: hashSocialNonce(nonce));
-      _state = await _authRepository.signInWithSocial(provider: provider, idToken: idToken, nonce: nonce);
+      _state = await exchange(provider: provider, idToken: idToken, nonce: nonce);
       notifyListeners();
       return true;
     } on SocialSignInCancelledException {
       _state = Unauthenticated(
         errorMessage: 'Login com ${provider.label} cancelado.',
         errorCode: socialSignInCancelledCode,
+        socialProvider: provider,
       );
       notifyListeners();
       return false;
     } on SocialSignInFailureException catch (e) {
-      _state = Unauthenticated(errorMessage: e.message, errorCode: 'SOCIAL_SIGN_IN_FAILED');
+      _state = Unauthenticated(errorMessage: e.message, errorCode: 'SOCIAL_SIGN_IN_FAILED', socialProvider: provider);
       notifyListeners();
       return false;
     } on ApiException catch (e) {
@@ -137,16 +169,18 @@ class AuthNotifier extends ChangeNotifier {
         errorMessage: e.detail,
         errorCode: e.errorCode,
         retryAfterSeconds: e.retryAfterSeconds,
+        socialProvider: provider,
       );
       notifyListeners();
       return false;
     } on NetworkException catch (e) {
-      _state = Unauthenticated(errorMessage: e.message);
+      _state = Unauthenticated(errorMessage: e.message, socialProvider: provider);
       notifyListeners();
       return false;
     } catch (_) {
       _state = Unauthenticated(
-        errorMessage: 'Ocorreu um erro inesperado ao entrar com ${provider.label}.',
+        errorMessage: 'Ocorreu um erro inesperado ao $action com ${provider.label}.',
+        socialProvider: provider,
       );
       notifyListeners();
       return false;

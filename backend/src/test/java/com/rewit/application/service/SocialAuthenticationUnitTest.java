@@ -291,6 +291,109 @@ class SocialAuthenticationUnitTest {
                 () -> authService.login(new LoginCommand("maria@gmail.com", "qualquerSenha1", null, null)));
     }
 
+    // -----------------------------------------------------------------------------------------------------
+    // Reativação de conta federada (ação explícita, separada do login)
+    // -----------------------------------------------------------------------------------------------------
+
+    private User linkedAccount(String subject, java.util.function.Consumer<User> state) {
+        User user = new User(UUID.randomUUID(), subject + "@gmail.com", null, AuthProvider.GOOGLE, subject);
+        state.accept(user);
+        when(userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, subject)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(user.getId())).thenReturn(Optional.of(user));
+        when(profileRepository.findByUserId(user.getId()))
+                .thenReturn(Optional.of(new Profile(UUID.randomUUID(), user.getId(), "usuario_" + subject, "Maria", null, null)));
+        return user;
+    }
+
+    @Test
+    @DisplayName("Login social de conta desativada responde 401 e não reativa nem abre sessão")
+    void loginNeverReactivates() {
+        User deactivated = linkedAccount("sub-desativada", User::deactivate);
+
+        assertBusiness(HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED",
+                () -> authService.authenticateExternalIdentity(google("sub-desativada", "x@gmail.com"), null, null));
+
+        assertEquals(com.rewit.domain.enums.AccountStatus.DEACTIVATED, deactivated.getStatus());
+        verify(userRepository, never()).findByIdForUpdate(any());
+        verify(authSessionRepository, never()).revokeAllByUserId(any());
+        verify(authSessionRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Reativação com identidade verificada: DEACTIVATED -> ACTIVE, revoga sessões antigas e emite nova")
+    void reactivatesDeactivatedFederatedAccount() {
+        User deactivated = linkedAccount("sub-r", User::deactivate);
+
+        AuthResult result = authService.reactivateExternalIdentity(google("sub-r", "x@gmail.com"), "UA", "127.0.0.1");
+
+        assertEquals(deactivated.getId(), result.user().getId());
+        assertEquals(com.rewit.domain.enums.AccountStatus.ACTIVE, deactivated.getStatus());
+        org.mockito.InOrder order = inOrder(userRepository, authSessionRepository);
+        order.verify(userRepository).findByIdForUpdate(deactivated.getId());
+        order.verify(userRepository).save(deactivated);
+        order.verify(authSessionRepository).revokeAllByUserId(deactivated.getId());
+        order.verify(authSessionRepository).save(any(AuthSession.class));
+        assertNotNull(result.refreshToken());
+    }
+
+    @Test
+    @DisplayName("Reativação de conta ativa apenas autentica, sem transição nem revogação")
+    void reactivateActiveAccountOnlyAuthenticates() {
+        linkedAccount("sub-ativa", u -> { });
+
+        assertNotNull(authService.reactivateExternalIdentity(google("sub-ativa", "x@gmail.com"), null, null).accessToken());
+        verify(userRepository, never()).save(any());
+        verify(authSessionRepository, never()).revokeAllByUserId(any());
+    }
+
+    @Test
+    @DisplayName("Reativação recusa suspensa, excluída e identidade sem conta (401 genérico, nada criado)")
+    void reactivateRejectsNonRecoverableOrUnknown() {
+        User suspended = linkedAccount("sub-s", User::suspend);
+        User deleted = linkedAccount("sub-d", User::softDelete);
+        when(userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "sub-nova")).thenReturn(Optional.empty());
+
+        for (String sub : new String[]{"sub-s", "sub-d", "sub-nova"}) {
+            assertBusiness(HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED",
+                    () -> authService.reactivateExternalIdentity(google(sub, "nova@gmail.com"), null, null));
+        }
+        assertEquals(com.rewit.domain.enums.AccountStatus.SUSPENDED, suspended.getStatus());
+        assertEquals(com.rewit.domain.enums.AccountStatus.DELETED, deleted.getStatus());
+        verify(userRepository, never()).save(any());
+        verify(authSessionRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Suspensão concorrente confirmada antes do lock vence a reativação")
+    void concurrentSuspensionWinsOverReactivation() {
+        User stale = new User(UUID.randomUUID(), "c@gmail.com", null, AuthProvider.GOOGLE, "sub-c");
+        stale.deactivate();
+        User lockedSuspended = new User(stale.getId(), "c@gmail.com", null, AuthProvider.GOOGLE, "sub-c");
+        lockedSuspended.suspend();
+        when(userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "sub-c")).thenReturn(Optional.of(stale));
+        when(userRepository.findByIdForUpdate(stale.getId())).thenReturn(Optional.of(lockedSuspended));
+
+        assertBusiness(HttpStatus.UNAUTHORIZED, "ACCOUNT_DISABLED",
+                () -> authService.reactivateExternalIdentity(google("sub-c", "c@gmail.com"), null, null));
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Reativação passa pela mesma validação do login: nonce consumido e token verificado")
+    void reactivationRequiresVerifiedProviderAuthentication() {
+        when(nonceStore.consume(anyString())).thenReturn(false);
+        assertBusiness(HttpStatus.UNAUTHORIZED, "INVALID_SOCIAL_NONCE",
+                () -> socialAuthService.reactivate(cmd(AuthProvider.GOOGLE, "token", VALID_NONCE)));
+        verify(verifier, never()).verify(any(), any(), any());
+
+        when(nonceStore.consume(anyString())).thenReturn(true);
+        when(verifier.verify(eq(AuthProvider.GOOGLE), eq("token"), anyString()))
+                .thenThrow(new BusinessException("Credencial do provedor inválida", HttpStatus.UNAUTHORIZED, "INVALID_SOCIAL_TOKEN"));
+        assertBusiness(HttpStatus.UNAUTHORIZED, "INVALID_SOCIAL_TOKEN",
+                () -> socialAuthService.reactivate(cmd(AuthProvider.GOOGLE, "token", VALID_NONCE)));
+        verify(userRepository, never()).findByIdForUpdate(any());
+    }
+
     private static SocialLoginCommand cmd(AuthProvider provider, String idToken, String nonce) {
         return new SocialLoginCommand(provider, idToken, nonce, "UA", "127.0.0.1");
     }
