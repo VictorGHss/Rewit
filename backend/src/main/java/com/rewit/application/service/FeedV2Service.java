@@ -2,11 +2,14 @@ package com.rewit.application.service;
 
 import com.rewit.application.dto.feed.FeedV2CandidatePage;
 import com.rewit.application.port.FeedCandidateRepository;
+import com.rewit.application.port.UserInterestProfileRepository;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.domain.enums.InterestCategory;
 import com.rewit.domain.feed.FeedCandidate;
 import com.rewit.domain.feed.FeedV2Diversifier;
 import com.rewit.domain.feed.FeedV2Ranker;
 import com.rewit.domain.feed.RankedFeedCandidate;
+import com.rewit.domain.model.UserInterestProfile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -15,15 +18,17 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
- * Serviço de aplicação para orquestração determinística do Feed V2 (Step 24.4.1).
+ * Serviço de aplicação para orquestração determinística do Feed V2 (Step 24.4.1)
+ * com personalização suave por interesses declarados pelo usuário (V40).
  *
  * <p>Pipeline em 4 estágios:
  * <ol>
  *   <li><b>Retrieval</b>: Recupera candidatos elegíveis do PostgreSQL via {@link FeedCandidateRepository}.</li>
- *   <li><b>Ranking</b>: Pontua e ordena via {@link FeedV2Ranker} com base no instante de referência temporal.</li>
+ *   <li><b>Ranking</b>: Pontua e ordena via {@link FeedV2Ranker} considerando os interesses persistidos e a referência temporal.</li>
  *   <li><b>Diversidade</b>: Aplica espaçamento de autores e alvos via {@link FeedV2Diversifier}.</li>
  *   <li><b>Fatiamento</b>: Recorta a fatia da página em memória sobre a janela ordenada.</li>
  * </ol>
@@ -31,6 +36,7 @@ import java.util.UUID;
  * <p>Responsabilidades e isolamento:
  * <ul>
  *   <li>Não acessa JPA, EntityManager ou SQL diretamente.</li>
+ *   <li>Lê os interesses exclusivamente pelo {@link UserInterestProfileRepository} usando a identidade do solicitante.</li>
  *   <li>Não constrói DTOs HTTP e não realiza hidratação de perfis ou mídias.</li>
  *   <li>Não interfere no Feed V1 nem em endpoints existentes.</li>
  * </ul>
@@ -39,12 +45,20 @@ import java.util.UUID;
 public class FeedV2Service {
 
     private final FeedCandidateRepository feedCandidateRepository;
+    private final UserInterestProfileRepository userInterestProfileRepository;
     private final FeedV2Ranker feedV2Ranker;
     private final FeedV2Diversifier feedV2Diversifier;
 
     @Autowired
+    public FeedV2Service(
+            FeedCandidateRepository feedCandidateRepository,
+            UserInterestProfileRepository userInterestProfileRepository
+    ) {
+        this(feedCandidateRepository, userInterestProfileRepository, new FeedV2Ranker(), new FeedV2Diversifier());
+    }
+
     public FeedV2Service(FeedCandidateRepository feedCandidateRepository) {
-        this(feedCandidateRepository, new FeedV2Ranker(), new FeedV2Diversifier());
+        this(feedCandidateRepository, null, new FeedV2Ranker(), new FeedV2Diversifier());
     }
 
     public FeedV2Service(
@@ -52,13 +66,23 @@ public class FeedV2Service {
             FeedV2Ranker feedV2Ranker,
             FeedV2Diversifier feedV2Diversifier
     ) {
+        this(feedCandidateRepository, null, feedV2Ranker, feedV2Diversifier);
+    }
+
+    public FeedV2Service(
+            FeedCandidateRepository feedCandidateRepository,
+            UserInterestProfileRepository userInterestProfileRepository,
+            FeedV2Ranker feedV2Ranker,
+            FeedV2Diversifier feedV2Diversifier
+    ) {
         this.feedCandidateRepository = Objects.requireNonNull(feedCandidateRepository, "feedCandidateRepository is required");
+        this.userInterestProfileRepository = userInterestProfileRepository;
         this.feedV2Ranker = Objects.requireNonNull(feedV2Ranker, "feedV2Ranker is required");
         this.feedV2Diversifier = Objects.requireNonNull(feedV2Diversifier, "feedV2Diversifier is required");
     }
 
     /**
-     * Orquestra a geração da página de candidatos do Feed V2.
+     * Orquestra a geração da página de candidatos do Feed V2 com personalização por interesses.
      *
      * @param requesterId   identificador interno do usuário autenticado solicitante
      * @param page          índice da página (base 0)
@@ -84,8 +108,17 @@ public class FeedV2Service {
             return new FeedV2CandidatePage(List.of(), page, size, 0);
         }
 
-        // Stage 2: Ranking puro e determinístico
-        List<RankedFeedCandidate> ranked = feedV2Ranker.rank(candidates, referenceTime);
+        // Recupera interesses declarados do usuário autenticado (V40)
+        Set<InterestCategory> userInterests = userInterestProfileRepository != null
+                ? userInterestProfileRepository.findByUserId(requesterId)
+                        .map(UserInterestProfile::getInterests)
+                        .orElse(Set.of())
+                : Set.of();
+
+        // Stage 2: Ranking determinístico com afinidade suave por interesses
+        List<RankedFeedCandidate> ranked = userInterests.isEmpty()
+                ? feedV2Ranker.rank(candidates, referenceTime)
+                : feedV2Ranker.rank(candidates, referenceTime, userInterests);
 
         // Stage 3: Diversidade pura
         List<RankedFeedCandidate> diversified = feedV2Diversifier.diversify(ranked);

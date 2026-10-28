@@ -39,4 +39,14 @@ public interface RateableTargetJpaRepository extends JpaRepository<RateableTarge
             WHERE t.id IN (:ids)
             """, nativeQuery = true)
     List<Object[]> findDisplaysByIds(@Param("ids") Collection<UUID> ids);
+
+    /** id e categoria da especialização place/product de cada alvo em lote. */
+    @Query(value = """
+            SELECT t.id, COALESCE(p.category, pr.category)
+            FROM rateable_targets t
+            LEFT JOIN places p ON p.id = t.id
+            LEFT JOIN products pr ON pr.id = t.id
+            WHERE t.id IN (:ids)
+            """, nativeQuery = true)
+    List<Object[]> findCategoriesByIds(@Param("ids") Collection<UUID> ids);
 }

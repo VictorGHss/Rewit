@@ -243,14 +243,20 @@ A versão inicial social e o fallback determinístico de Cold Start encontram-se
 - **Elegibilidade**: Reviews com `status = ACTIVE`, `visibility = PUBLIC` e `userId != requesterId` (auto-exclusão estrita).
 - **Anonimato**: Máscara pública mantida na projeção; `authorId` interno é usado em memória exclusivamente para espaçamento no diversificador.
 
-### 5.3 Interesses do Usuário: contrato para a personalização (V40)
-Os interesses declarados no questionário inicial (`docs/api/me.md` §5) são gravados no backend, que é a fonte de verdade. **O ranking atual não os usa** (§10, item 4); esta seção fixa o que o Feed V2 deve consumir quando a personalização for aprovada.
+### 5.3 Interesses do Usuário: personalização do Feed V2 (V40 / STEP 24.5.3)
+Os interesses declarados no questionário inicial (`docs/api/me.md` §5) são gravados no backend, que é a fonte canônica de verdade. O Feed V2 consome esses interesses diretamente no pipeline de ranking via afinidade suave (*soft boost*):
 
-- **Leitura**: `UserInterestProfileRepository.findByUserId(requesterUserId)`, com o usuário do JWT. O feed não aceita lista de interesses do cliente.
-- **Valor**: `UserInterestProfile.getInterests()`, um conjunto de `InterestCategory` (enum no domínio, espelhado no CHECK `chk_user_interest_category_code`). O código canônico é o nome da constante (`CAFE`, `RESTAURANT`, ...), estável na API e no banco; o rótulo é só exibição.
-- **Peso**: toda seleção explícita é gravada com `user_interests.weight = 1.00`; a coluna fica reservada para sinais futuros.
-- **Ausência**: perfil inexistente (`NOT_STARTED`), rascunho ou lista vazia significam "sem preferência declarada" e devem produzir o ranking atual, sem penalizar ninguém. Contas anteriores à V40 estão concluídas sem interesses.
-- **Ligação com o conteúdo**: `places.category` é texto livre; ainda não existe mapeamento de `InterestCategory` para categorias de locais ou produtos. Esse mapeamento é pré-requisito da personalização e deve ser definido junto com ela.
+- **Leitura**: `UserInterestProfileRepository.findByUserId(requesterUserId)`, utilizando a identidade do JWT. O feed nunca aceita listas de interesses enviadas pelo cliente.
+- **Valor**: `UserInterestProfile.getInterests()`, um conjunto de `InterestCategory` (enum no domínio, espelhado no CHECK `chk_user_interest_category_code`). O código canônico é o nome da constante (`CAFE`, `RESTAURANT`, `TECHNOLOGY`, `GAMES`, ...), estável na API e no banco; o rótulo é meramente descritivo.
+- **Peso**: toda seleção explícita é gravada com `user_interests.weight = 1.00`.
+- **Ligação com o conteúdo**: `TargetCategoryMapper` realiza a resolução determinística e normalizada das categorias livres dos alvos (`places.category` e `products.category`) para `InterestCategory`. Termos livres desconhecidos (ex.: `"GERAL"`, `"OUTROS"`) ou valores nulos recebem afinidade neutra (sinal `0.0`), sem penalização ou descarte.
+- **Pesos do Ranking V2 (Soma = 1.0)**:
+  - Conexão social direta: `0.35`
+  - Afinidade por interesses: `0.20`
+  - Recência exponencial: `0.25`
+  - Verificação presencial no local: `0.10`
+  - Votos úteis da comunidade: `0.10`
+- **Soft Boost & Ausência de Interesses**: Candidatos não compatíveis com os interesses ou usuários sem respostas cadastradas (`NOT_STARTED` / rascunho) recebem sinal de interesse neutro (`0.0`), preservando a ordenação factual cronológica/social sem qualquer descarte indevido. O diversificador de autores (`MAX_CONSECUTIVE = 2`) continua sendo estritamente respeitado.
 
 ---
 
@@ -1029,7 +1035,7 @@ As seguintes frentes tecnológicas e melhorias algorítmicas foram **propositada
 3. **Paginação Baseada em Cursor**:
    - *Decisão*: O Feed V2 utiliza offset pagination (`page`, `size`) sobre uma janela delimitada de 100 candidatos. O cursor será avaliado quando for necessário mitigar drift temporal sob alto volume de escrita simultânea.
 4. **Ranking Contextual e Personalização**:
-   - *Decisão*: O ranking baseia-se exclusivamente em sinais factuais auditáveis (social direto, recência exponencial, check-in no local e votos úteis). Personalização baseada em histórico de cliques ou categorias preferidas está suspensa. Os interesses declarados no questionário inicial já são persistidos (V40) e têm contrato de leitura definido (§5.3), mas não entram no ranking até esta decisão ser revista.
+   - *Decisão*: O Feed V2 adota personalização determinística e explicável baseada exclusivamente nos interesses declarados no questionário inicial do usuário (V40), aplicando um soft boost de afinidade com peso 0.20 (§5.3). O feed não descarta conteúdo incompatível e mantém relevância factual sem penalizar quem não possui preferências cadastradas. Modelos de Machine Learning, tracking de cliques ou algoritmos de caixa-preta continuam suspensos para preservar a explicabilidade e a privacidade do usuário.
 5. **Descoberta Geográfica Explícita**:
    - *Decisão*: O Cold Start atual é global e não utiliza localização implícita para evitar tracking e garantir simplicidade operacional.
 6. **Cache Agressivo de Feed em Redis**:
