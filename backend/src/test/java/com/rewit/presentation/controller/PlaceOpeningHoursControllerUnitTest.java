@@ -2,10 +2,8 @@ package com.rewit.presentation.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.rewit.application.dto.catalog.PlaceOpeningHoursDtos.DayScheduleCommand;
 import com.rewit.application.dto.catalog.PlaceOpeningHoursDtos.DayScheduleView;
 import com.rewit.application.dto.catalog.PlaceOpeningHoursDtos.PlaceOpeningHoursView;
-import com.rewit.application.dto.catalog.PlaceOpeningHoursDtos.TimeIntervalCommand;
 import com.rewit.application.dto.catalog.PlaceOpeningHoursDtos.TimeIntervalView;
 import com.rewit.application.dto.catalog.PlaceOpeningHoursDtos.UpdatePlaceOpeningHoursCommand;
 import com.rewit.application.usecase.GetPlaceOpeningHoursUseCase;
@@ -33,7 +31,6 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;

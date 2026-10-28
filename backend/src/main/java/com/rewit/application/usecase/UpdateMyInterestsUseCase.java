@@ -15,7 +15,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * Grava as respostas do questionário inicial ou a edição posterior dos interesses do usuário autenticado.

@@ -39,7 +39,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import com.rewit.application.dto.catalog.CatalogDtos;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.CheckInRepository;
 import com.rewit.domain.enums.CheckInStatus;

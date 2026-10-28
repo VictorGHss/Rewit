@@ -3,7 +3,6 @@ package com.rewit.presentation.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.port.*;
-import com.rewit.domain.enums.InterestCategory;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
@@ -537,13 +536,13 @@ class FeedV2PersonalizationIntegrationTest {
         Instant now = Instant.now();
 
         // Autor A publica 4 reviews sobre CAFE (todas com score alto + afinidade 0.20)
-        Review a1 = createReview(authorA.userId(), placeCafe, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(10));
-        Review a2 = createReview(authorA.userId(), placeCafe, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(20));
-        Review a3 = createReview(authorA.userId(), placeCafe, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(30));
-        Review a4 = createReview(authorA.userId(), placeCafe, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(40));
+        createReview(authorA.userId(), placeCafe, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(10));
+        createReview(authorA.userId(), placeCafe, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(20));
+        createReview(authorA.userId(), placeCafe, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(30));
+        createReview(authorA.userId(), placeCafe, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(40));
 
         // Autor B publica 1 review sobre GYM (sem afinidade)
-        Review b1 = createReview(authorB.userId(), placeGym, targetGym, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(50));
+        createReview(authorB.userId(), placeGym, targetGym, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(50));
 
         // Sem diversidade, Author A ocuparia os 4 primeiros lugares.
         // Com MAX_CONSECUTIVE = 2, Author B deve quebrar a sequência na posição index 2!

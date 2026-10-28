@@ -5,7 +5,6 @@ import com.rewit.application.port.PlaceMediaReportRepository;
 import com.rewit.application.port.PlaceMediaRepository;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.UserRepository;
-import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.PlaceMediaStatus;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.Role;
