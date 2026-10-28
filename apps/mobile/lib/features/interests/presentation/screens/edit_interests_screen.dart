@@ -12,6 +12,9 @@ class EditInterestsScreen extends StatefulWidget {
   final String userId;
   final String? Function() currentUserId;
 
+  /// Chamado depois que o backend aceitou os interesses novos (ex.: recarregar o Feed V2, ordenado por eles).
+  final VoidCallback? onSaved;
+
   /// Injeção para testes; sem ele, a tela cria e descarta o próprio notifier.
   final InterestsNotifier? notifier;
 
@@ -20,6 +23,7 @@ class EditInterestsScreen extends StatefulWidget {
     required this.repository,
     required this.userId,
     required this.currentUserId,
+    this.onSaved,
     this.notifier,
   });
 
@@ -59,7 +63,11 @@ class _EditInterestsScreenState extends State<EditInterestsScreen> {
     final notifier = _notifier!;
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
-    if (await notifier.complete() && mounted) {
+    final onSaved = widget.onSaved;
+    final saved = await notifier.complete();
+    // Gravado é gravado: o aviso vale mesmo se a tela já tiver sido fechada
+    if (saved) onSaved?.call();
+    if (saved && mounted) {
       messenger.showSnackBar(const SnackBar(content: Text('Interesses atualizados.')));
       if (navigator.canPop()) navigator.pop();
     }

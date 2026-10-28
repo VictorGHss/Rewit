@@ -17,6 +17,10 @@ import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.d
 import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_state.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:rewit_mobile/features/interests/data/models/interest_dtos.dart';
 import 'package:rewit_mobile/features/interests/data/repositories/interest_repository_impl.dart';
@@ -26,6 +30,9 @@ import 'package:rewit_mobile/features/interests/presentation/screens/edit_intere
 import 'package:rewit_mobile/features/interests/presentation/screens/interests_onboarding_screen.dart';
 import 'package:rewit_mobile/features/interests/presentation/state/interests_notifier.dart';
 import 'package:rewit_mobile/features/interests/presentation/widgets/interests_gate.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/helpful_result.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
+import 'package:rewit_mobile/features/review_detail/domain/entities/update_review_input.dart';
 import 'package:rewit_mobile/shared/widgets/app_button.dart';
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -185,6 +192,54 @@ class _PerUserInterestRepository implements InterestRepository {
   @override
   Future<UserInterests> saveMyInterests({required List<String> codes, required bool completeOnboarding}) =>
       _account.saveMyInterests(codes: codes, completeOnboarding: completeOnboarding);
+}
+
+/// Feed V2 personalizado por conta: cada página traz uma avaliação marcada com a conta da sessão que a pediu.
+class _PerUserFeedRepository implements FeedRepository {
+  final AuthNotifier auth;
+  final List<String> requests = [];
+
+  _PerUserFeedRepository(this.auth);
+
+  @override
+  Future<FeedPage> getFeed({int page = 0, int size = 10}) async {
+    final state = auth.state;
+    if (state is! Authenticated) throw _problem(401, 'AUTHENTICATION_REQUIRED', 'Autenticação necessária');
+    requests.add(state.user.id);
+    return FeedPage(
+      items: [
+        FeedReview(
+          id: 'review-para-${state.user.id}',
+          author: const FeedAuthor(displayName: 'Autora', handle: 'autora'),
+          visibility: 'PUBLIC',
+          status: 'ACTIVE',
+          isHelpfulByMe: state.user.id == 'ana',
+          createdAt: DateTime.utc(2026, 10, 27),
+        ),
+      ],
+      page: 0,
+      size: size,
+      windowSize: 1,
+      totalPages: 1,
+    );
+  }
+
+  @override
+  Future<FeedReview> getReviewById(String reviewId) => throw UnimplementedError();
+  @override
+  Future<HelpfulResult> toggleHelpful(String reviewId, {required bool currentlyHelpful}) =>
+      throw UnimplementedError();
+  @override
+  Future<List<ReviewMediaItem>> getReviewMedia(String reviewId) async => const [];
+  @override
+  Future<FeedReview> updateReview(String reviewId, UpdateReviewInput input) => throw UnimplementedError();
+  @override
+  Future<void> deleteReview(String reviewId) async {}
+}
+
+List<String> _feedReviewIds(FeedNotifier feed) {
+  final state = feed.state;
+  return state is FeedSuccess ? state.reviews.map((r) => r.id).toList() : const [];
 }
 
 InterestsNotifier _notifier(InterestRepository repository, {String user = 'ana', String? Function()? current}) =>
@@ -571,12 +626,17 @@ void main() {
       Map<String, _FakeInterestRepository> accounts, {
       _FakeAuthRepository? authRepository,
       bool signedIn = false,
+      FeedNotifier Function(AuthNotifier auth)? feed,
     }) async {
       final auth = AuthNotifier(authRepository: authRepository ?? _FakeAuthRepository(storedSession: signedIn));
       await auth.checkAuthStatus();
       await tester.pumpWidget(RewitApp(
         config: const AppConfig(apiBaseUrl: 'https://api.rewit.test'),
-        router: AppRouter(authNotifier: auth, interestRepository: _PerUserInterestRepository(auth, accounts)),
+        router: AppRouter(
+          authNotifier: auth,
+          interestRepository: _PerUserInterestRepository(auth, accounts),
+          feedNotifier: feed?.call(auth),
+        ),
       ));
       await tester.pumpAndSettle();
       return auth;
@@ -665,6 +725,96 @@ void main() {
       expect(accounts['ana']!.saves.single.codes, ['CAFE', 'PARK', 'TRAVEL']);
       expect(find.byType(EditInterestsScreen), findsNothing);
       expect(find.text('Interesses atualizados.'), findsOneWidget);
+    });
+
+    testWidgets('Feed V2 só depois da conclusão e sempre da conta da sessão: a conta seguinte não herda o feed anterior',
+        (tester) async {
+      final authRepository = _FakeAuthRepository(loginAs: 'ana', storedSession: true);
+      final accounts = {'ana': _FakeInterestRepository.completed(['CAFE', 'BAR', 'PARK'])};
+      late _PerUserFeedRepository feedRepository;
+      late FeedNotifier feed;
+      final auth = await pumpApp(tester, accounts, authRepository: authRepository, signedIn: true, feed: (auth) {
+        feedRepository = _PerUserFeedRepository(auth);
+        return feed = FeedNotifier(feedRepository: feedRepository);
+      });
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(feedRepository.requests, ['ana']);
+      expect(_feedReviewIds(feed), ['review-para-ana']);
+
+      await auth.logout();
+      await tester.pumpAndSettle();
+      expect(feed.state, isA<FeedInitial>(), reason: 'o feed da conta encerrada é descartado no logout');
+
+      // Conta nova no mesmo aparelho: questionário antes de qualquer pedido de feed
+      authRepository.loginAs = 'bruno';
+      await auth.login('bruno@rewit.test', 'Senha@123');
+      await tester.pumpAndSettle();
+      expect(find.byType(InterestsOnboardingScreen), findsOneWidget);
+      expect(feedRepository.requests, ['ana']);
+
+      await _tap(tester, const Key('interest_option_CAFE'));
+      await _tap(tester, const Key('interest_option_BAR'));
+      await _tap(tester, const Key('interests_next'));
+      await _tap(tester, const Key('interest_option_PARK'));
+      await _tap(tester, const Key('interests_next'));
+      expect(feedRepository.requests, ['ana'], reason: 'rascunhos não liberam o feed');
+      await _tap(tester, const Key('interests_confirm'));
+      expect(feedRepository.requests, ['ana'], reason: 'a tela de conclusão ainda não é o app');
+      await _tap(tester, const Key('interests_start_app'));
+
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(accounts['bruno']!.current.isCompleted, isTrue);
+      expect(feedRepository.requests, ['ana', 'bruno']);
+      expect(_feedReviewIds(feed), ['review-para-bruno']);
+    });
+
+    testWidgets('sessão expirada descarta o feed; o novo login da mesma conta carrega o feed de novo', (tester) async {
+      final accounts = {'ana': _FakeInterestRepository.completed(['CAFE', 'BAR', 'PARK'])};
+      late _PerUserFeedRepository feedRepository;
+      late FeedNotifier feed;
+      final auth = await pumpApp(tester, accounts, signedIn: true, feed: (auth) {
+        feedRepository = _PerUserFeedRepository(auth);
+        return feed = FeedNotifier(feedRepository: feedRepository);
+      });
+      expect(feedRepository.requests, ['ana']);
+
+      await auth.handleSessionExpired();
+      await tester.pumpAndSettle();
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(feed.state, isA<FeedInitial>());
+
+      await auth.login('ana@rewit.test', 'Senha@123');
+      await tester.pumpAndSettle();
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(find.byType(InterestsOnboardingScreen), findsNothing);
+      expect(feedRepository.requests, ['ana', 'ana']);
+      expect(_feedReviewIds(feed), ['review-para-ana']);
+    });
+
+    testWidgets('interesses salvos nas configurações recarregam o Feed V2; gravação recusada não recarrega',
+        (tester) async {
+      final accounts = {'ana': _FakeInterestRepository.completed(['CAFE', 'BAR', 'PARK'])};
+      late _PerUserFeedRepository feedRepository;
+      await pumpApp(tester, accounts, signedIn: true, feed: (auth) {
+        feedRepository = _PerUserFeedRepository(auth);
+        return FeedNotifier(feedRepository: feedRepository);
+      });
+      expect(feedRepository.requests, ['ana']);
+
+      Navigator.of(tester.element(find.byType(HomeScreen))).pushNamed(AppRouter.accountSettings);
+      await tester.pumpAndSettle();
+      await _tap(tester, const Key('edit_interests_tile'));
+      await _tap(tester, const Key('interest_option_TRAVEL'));
+
+      accounts['ana']!.nextSaveError = const NetworkException('Sem conexão com o servidor');
+      await _tap(tester, const Key('edit_interests_save'));
+      expect(find.byKey(const Key('edit_interests_error')), findsOneWidget);
+      expect(feedRepository.requests, ['ana']);
+
+      await _tap(tester, const Key('edit_interests_save'));
+      expect(find.byType(EditInterestsScreen), findsNothing);
+      expect(accounts['ana']!.current.codes, {'CAFE', 'BAR', 'PARK', 'TRAVEL'});
+      expect(feedRepository.requests, ['ana', 'ana']);
     });
 
     testWidgets('edição recusada pelo backend mantém a tela e mostra o erro', (tester) async {
