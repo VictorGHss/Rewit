@@ -204,9 +204,9 @@ O **Feed V2** evolui o feed cronológico do Rewit para um pipeline de relevânci
 |---|---:|---|
 | **Conexão Social Direta** | `0.35` | `1.0` se a avaliação é de autor seguido diretamente; `0.0` se proveniente da descoberta. |
 | **Afinidade por Interesses** | `0.20` | `1.0` se a categoria canônica do alvo corresponde aos interesses do usuário; `0.0` caso contrário. |
-| **Recência Temporal** | `0.25` | Decaimento exponencial suave sobre a idade da avaliação em relação ao instante de referência: $e^{-\lambda \cdot \Delta t}$. |
+| **Recência Temporal** | `0.25` | Decaimento linear sobre janela fixa de 14 dias: $\max(0.0, 1.0 - \frac{\Delta t}{14\text{ dias}})$. |
 | **Verificação Presencial** | `0.10` | `1.0` se a avaliação foi realizada com confirmação presencial no local (`isVerifiedOnSite = true`); `0.0` caso contrário. |
-| **Votos Úteis da Comunidade** | `0.10` | Saturação logarítmica normalizada sobre a contagem de reações úteis: $\frac{\ln(1 + helpfulCount)}{\ln(1 + 50)}$. |
+| **Votos Úteis da Comunidade** | `0.10` | Escala logarítmica base 10 normalizada com cap em 20 votos: $\frac{\log_{10}(1 + \text{helpfulCount})}{\log_{10}(1 + 20)}$. |
 
 * **Afinidade Suave (*Soft Boost*)**:
   - O sinal de afinidade eleva a posição dos conteúdos de interesse do usuário sem descartar candidatos de outros nichos.

@@ -253,7 +253,7 @@ Os interesses declarados no questionário inicial (`docs/api/me.md` §5) são gr
 - **Pesos do Ranking V2 (Soma = 1.0)**:
   - Conexão social direta: `0.35`
   - Afinidade por interesses: `0.20`
-  - Recência exponencial: `0.25`
+  - Recência linear (janela de 14 dias): `0.25`
   - Verificação presencial no local: `0.10`
   - Votos úteis da comunidade: `0.10`
 - **Soft Boost & Ausência de Interesses**: Candidatos não compatíveis com os interesses ou usuários sem respostas cadastradas (`NOT_STARTED` / rascunho) recebem sinal de interesse neutro (`0.0`), preservando a ordenação factual cronológica/social sem qualquer descarte indevido. O diversificador de autores (`MAX_CONSECUTIVE = 2`) continua sendo estritamente respeitado.
