@@ -141,4 +141,3 @@ public final class TargetCategoryMapper {
         return BrazilianState.fold(value).replace("_", " ").trim();
     }
 }
-

@@ -558,4 +558,3 @@ class FeedV2PersonalizationIntegrationTest {
                 .andExpect(jsonPath("$.items[4].author.id").value(authorA.userId().toString()));
     }
 }
-
