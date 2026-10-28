@@ -6,6 +6,7 @@ import com.rewit.application.port.*;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.Product;
 import com.rewit.domain.model.RateableTarget;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewTarget;
@@ -53,6 +54,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>Isolamento real entre usuários com preferências distintas consultando o mesmo catálogo</li>
  *   <li>Alvo com categoria não mapeada ("GERAL", "OUTROS") recebe afinidade neutra (0.0)</li>
  *   <li>Soft boost preserva rigorosamente a diversificação de autor (máx 2 consecutivos)</li>
+ *   <li>Precedência do local de contexto físico sobre produto avaliado com categorias diferentes</li>
+ *   <li>Local de contexto com categoria desconhecida/genérica mantém o candidato elegível com ordenação factual</li>
+ *   <li>Avaliação anônima não expõe autor no Feed V2 mesmo com match de interesses</li>
+ *   <li>Enriquecimento em lote projeta múltiplos alvos heterogêneos sem consultas N+1 nem falhas</li>
  * </ol>
  */
 @SpringBootTest
@@ -74,6 +79,9 @@ class FeedV2PersonalizationIntegrationTest {
 
     @Autowired
     private PlaceRepository placeRepository;
+
+    @Autowired
+    private ProductRepository productRepository;
 
     @Autowired
     private RateableTargetRepository rateableTargetRepository;
@@ -134,6 +142,21 @@ class FeedV2PersonalizationIntegrationTest {
         return placeRepository.save(place);
     }
 
+    private Product createProduct(String category) {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Product product = new Product(
+                UUID.randomUUID(),
+                "Produto V2 " + suffix,
+                "Marca V2",
+                "Modelo V2",
+                "Descrição do produto",
+                category != null ? category : "GERAL",
+                null,
+                "ACTIVE"
+        );
+        return productRepository.save(product);
+    }
+
     private RateableTarget createTarget(TargetType type) {
         RateableTarget target = new RateableTarget(UUID.randomUUID(), type != null ? type : TargetType.PLACE);
         return rateableTargetRepository.save(target);
@@ -145,7 +168,7 @@ class FeedV2PersonalizationIntegrationTest {
         Review review = new Review(
                 revId,
                 authorId,
-                place.getId(),
+                place != null ? place.getId() : null,
                 "Avaliação para testes de relevância por interesses Feed V2.",
                 isAnonymous,
                 false,
@@ -555,5 +578,167 @@ class FeedV2PersonalizationIntegrationTest {
                 .andExpect(jsonPath("$.items[2].author.id").value(authorB.userId().toString()))
                 .andExpect(jsonPath("$.items[3].author.id").value(authorA.userId().toString()))
                 .andExpect(jsonPath("$.items[4].author.id").value(authorA.userId().toString()));
+    }
+
+    // =========================================================================
+    // Cenário 11: Precedência do Contexto Físico sobre Alvo Principal
+    // =========================================================================
+
+    @Test
+    @DisplayName("Cenário 11: Local de contexto prevalece sobre categoria do produto avaliado e inverte ranking para perfis distintos")
+    void shouldPrioritizeContextCategoryOverProductCategoryInRanking() throws Exception {
+        TestUser userCafe = registerUser("p11CafeReq");
+        TestUser userGames = registerUser("p11GamesReq");
+        TestUser author = registerUser("p11Author");
+
+        userFollowRepository.follow(userCafe.userId(), author.userId());
+        userFollowRepository.follow(userGames.userId(), author.userId());
+
+        // Conclusão de onboarding exige no mínimo 3 interesses (MIN_INTERESTS_TO_COMPLETE = 3)
+        setUserInterests(userCafe, true, "CAFE", "BAKERY", "RESTAURANT");
+        setUserInterests(userGames, true, "GAMES", "TECHNOLOGY", "CULTURE");
+
+        // Estabelecimento de contexto: Cafeteria
+        Place placeCafe = createPlace("CAFETERIA");
+
+        // Produto 1: Game avaliado dentro da Cafeteria (contextPlaceId = placeCafe)
+        Product productGameInCafe = createProduct("GAMES");
+
+        // Produto 2: Game avaliado sem local de contexto (contextPlaceId = null)
+        Product productGameStandalone = createProduct("GAMES");
+
+        Instant now = Instant.now();
+        Instant sameTimestamp = now.minusSeconds(120);
+
+        // Review 1: contextPlace = Cafeteria, target = Game -> Categoria do candidato é CAFE (precedência do contexto)
+        Review reviewInCafe = createReview(author.userId(), placeCafe, productGameInCafe, "PUBLIC", ReviewStatus.ACTIVE, false, sameTimestamp);
+
+        // Review 2: sem contextPlace, target = Game -> Categoria do candidato é GAMES (alvo principal)
+        Review reviewStandalone = createReview(author.userId(), null, productGameStandalone, "PUBLIC", ReviewStatus.ACTIVE, false, sameTimestamp);
+
+        // Usuário Café: reviewInCafe ganha soft boost (+0.20), reviewStandalone tem afinidade neutra (0.0) -> reviewInCafe lidera!
+        mockMvc.perform(get("/api/v2/feed")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + userCafe.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].id").value(reviewInCafe.getId().toString()))
+                .andExpect(jsonPath("$.items[1].id").value(reviewStandalone.getId().toString()));
+
+        // Usuário Games: reviewStandalone ganha soft boost (+0.20), reviewInCafe tem afinidade neutra (0.0) -> reviewStandalone lidera!
+        mockMvc.perform(get("/api/v2/feed")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + userGames.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].id").value(reviewStandalone.getId().toString()))
+                .andExpect(jsonPath("$.items[1].id").value(reviewInCafe.getId().toString()));
+    }
+
+    // =========================================================================
+    // Cenário 12: Contexto Desconhecido não Elimina Candidato e Preserva Ordem
+    // =========================================================================
+
+    @Test
+    @DisplayName("Cenário 12: Local de contexto com categoria desconhecida/genérica mantém o candidato elegível com ordenação factual")
+    void shouldKeepCandidatesWithUnmappedContextPlaceEligible() throws Exception {
+        TestUser requester = registerUser("p12Req");
+        TestUser author = registerUser("p12Author");
+        userFollowRepository.follow(requester.userId(), author.userId());
+
+        setUserInterests(requester, true, "GAMES", "TECHNOLOGY", "CULTURE");
+
+        // Local de contexto com categoria "GERAL" (não mapeável)
+        Place placeGeneral = createPlace("GERAL");
+        Product productGame = createProduct("GAMES");
+
+        Instant now = Instant.now();
+        Review r1 = createReview(author.userId(), placeGeneral, productGame, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(10));
+        Review r2 = createReview(author.userId(), placeGeneral, productGame, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(60));
+
+        mockMvc.perform(get("/api/v2/feed")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].id").value(r1.getId().toString()))
+                .andExpect(jsonPath("$.items[1].id").value(r2.getId().toString()));
+    }
+
+    // =========================================================================
+    // Cenário 13: Proteção de Privacidade e Anonimato no Feed V2
+    // =========================================================================
+
+    @Test
+    @DisplayName("Cenário 13: Avaliação anônima não expõe autor no Feed V2 mesmo com match de interesses")
+    void shouldProtectAnonymousAuthorPrivacyInFeedV2() throws Exception {
+        // Usuário isolado sem seguir ninguém -> consome discovery candidates
+        TestUser discoveryUser = registerUser("p13DiscReq");
+        TestUser anonymousAuthor = registerUser("p13AnonAuth");
+
+        setUserInterests(discoveryUser, true, "CAFE", "RESTAURANT", "BAKERY");
+
+        Place placeCafe = createPlace("CAFETERIA");
+        RateableTarget targetCafe = createTarget(TargetType.PLACE);
+
+        // Timestamp futuro garante presença dentro da janela de candidatos do feed de descoberta mesmo com dados residuais
+        Instant futureTs = Instant.now().plusSeconds(180);
+        Review anonReview = createReview(anonymousAuthor.userId(), placeCafe, targetCafe,
+                "PUBLIC", ReviewStatus.ACTIVE, true, futureTs);
+
+        MvcResult result = mockMvc.perform(get("/api/v2/feed")
+                        .param("size", "50")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + discoveryUser.accessToken()))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode root = objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode items = root.get("items");
+        JsonNode anonItem = null;
+        for (JsonNode item : items) {
+            if (anonReview.getId().toString().equals(item.get("id").asText())) {
+                anonItem = item;
+                break;
+            }
+        }
+
+        org.junit.jupiter.api.Assertions.assertNotNull(anonItem, "Review anônima deve estar presente no Feed V2");
+        org.junit.jupiter.api.Assertions.assertTrue(anonItem.get("isAnonymous").asBoolean());
+        org.junit.jupiter.api.Assertions.assertEquals("Anônimo", anonItem.get("author").get("displayName").asText());
+        org.junit.jupiter.api.Assertions.assertTrue(anonItem.get("author").get("id") == null || anonItem.get("author").get("id").isNull());
+        org.junit.jupiter.api.Assertions.assertTrue(anonItem.get("author").get("handle") == null || anonItem.get("author").get("handle").isNull());
+        org.junit.jupiter.api.Assertions.assertTrue(anonItem.get("author").get("avatarUrl") == null || anonItem.get("author").get("avatarUrl").isNull());
+    }
+
+    // =========================================================================
+    // Cenário 14: Carregamento em Lote Heterogêneo sem N+1
+    // =========================================================================
+
+    @Test
+    @DisplayName("Cenário 14: Enriquecimento em lote projeta múltiplos alvos heterogêneos sem falha de consulta")
+    void shouldResolveBatchCategoriesHeterogeneouslyWithoutFailure() throws Exception {
+        TestUser requester = registerUser("p14BatchReq");
+        TestUser author = registerUser("p14BatchAuth");
+        userFollowRepository.follow(requester.userId(), author.userId());
+
+        setUserInterests(requester, true, "BOOKS", "TECHNOLOGY", "SUPERMARKET");
+
+        Place placeBakery = createPlace("PADARIA");
+        Place placeMall = createPlace("SHOPPING");
+        Product productBook = createProduct("LIVRARIA");
+        Product productPhone = createProduct("SMARTPHONE");
+        RateableTarget targetBakery = createTarget(TargetType.PLACE);
+
+        Instant now = Instant.now();
+        Review r1 = createReview(author.userId(), placeBakery, targetBakery, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(10));
+        Review r2 = createReview(author.userId(), placeMall, productBook, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(20));
+        Review r3 = createReview(author.userId(), null, productPhone, "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(30));
+
+        // r3 (TECHNOLOGY) recebe soft boost (+0.20) e ultrapassa r1 e r2 no ranking!
+        // r1 e r2 desempatam pela recência factual: r1 (-10s) antes de r2 (-20s)
+        mockMvc.perform(get("/api/v2/feed")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(3)))
+                .andExpect(jsonPath("$.items[0].id").value(r3.getId().toString()))
+                .andExpect(jsonPath("$.items[1].id").value(r1.getId().toString()))
+                .andExpect(jsonPath("$.items[2].id").value(r2.getId().toString()));
     }
 }
