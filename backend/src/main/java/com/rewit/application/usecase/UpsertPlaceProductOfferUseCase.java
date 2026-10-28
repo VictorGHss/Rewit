@@ -22,7 +22,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Cria ou atualiza a oferta de um produto global num local reivindicado (F2.3, PUT idempotente).

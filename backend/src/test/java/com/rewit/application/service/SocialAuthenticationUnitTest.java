@@ -151,7 +151,8 @@ class SocialAuthenticationUnitTest {
         User existing = new User(UUID.randomUUID(), "maria@gmail.com", null, AuthProvider.GOOGLE, "sub-concorrente");
         Profile profile = new Profile(UUID.randomUUID(), existing.getId(), "usuario_existente", "Maria", null, null);
         when(userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "sub-concorrente"))
-                .thenReturn(Optional.empty(), Optional.of(existing));
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(existing));
         when(userRepository.save(any(User.class))).thenThrow(new DataIntegrityViolationException("uq_users_provider_user_id"));
         when(profileRepository.findByUserId(existing.getId())).thenReturn(Optional.of(profile));
 

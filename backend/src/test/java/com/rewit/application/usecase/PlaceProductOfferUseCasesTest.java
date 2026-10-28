@@ -126,10 +126,10 @@ class PlaceProductOfferUseCasesTest {
     void upsertRefusals() {
         BusinessAccount account = account();
         when(representationPolicy.requireApprovedAccount(actorId, accountId)).thenReturn(account);
-        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(
-                Optional.of(place("ACTIVE", UUID.randomUUID())),
-                Optional.of(place("INACTIVE", accountId)),
-                Optional.of(place("ACTIVE", accountId)));
+        when(placeRepository.findByIdForUpdate(placeId))
+                .thenReturn(Optional.of(place("ACTIVE", UUID.randomUUID())))
+                .thenReturn(Optional.of(place("INACTIVE", accountId)))
+                .thenReturn(Optional.of(place("ACTIVE", accountId)));
         when(productRepository.findById(productId)).thenReturn(Optional.of(product("DISCONTINUED")));
 
         assertCode("BUSINESS_NOT_RESPONSIBLE", command("AVAILABLE", null, null));
@@ -161,8 +161,9 @@ class PlaceProductOfferUseCasesTest {
     @Test
     @DisplayName("GET: titular inelegível ou ausente devolve página vazia sem consultar ofertas")
     void listHidesIneligibleOwner() {
-        when(placeRepository.findById(placeId)).thenReturn(
-                Optional.of(place("ACTIVE", accountId)), Optional.of(place("ACTIVE", null)));
+        when(placeRepository.findById(placeId))
+                .thenReturn(Optional.of(place("ACTIVE", accountId)))
+                .thenReturn(Optional.of(place("ACTIVE", null)));
         when(representationPolicy.currentIneligibility(accountId, placeId))
                 .thenReturn(Set.of(BusinessRepresentationIneligibility.ADMINISTRATOR_NOT_OPERATIONAL));
 
