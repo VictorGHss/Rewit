@@ -184,3 +184,93 @@ Para evitar o problema de N+1 consultas, o serviço executa o enriquecimento est
 * `idx_reviews_status_visibility` (`reviews(status, visibility)`): Filtra eficientemente os registros ativos e elegíveis.
 
 Nenhuma nova migration Flyway foi necessária (Flyway Schema Version mantido em `7`).
+
+
+---
+
+# Documentação da API REST — Feed V2 com Relevância Determinística e Interesses (Step 24 / V40)
+
+O **Feed V2** evolui o feed cronológico do Rewit para um pipeline de relevância explicável, auditável e transparente, combinando sinais sociais, afinidade suave com os interesses declarados no onboarding, recência temporal, verificação presencial e aprovação comunitária.
+
+## 5. Princípios Arquiteturais do Feed V2
+
+* **Identidade Segura e Exclusiva**: Autenticação via JWT (`SecurityContext`). Parâmetros que tentem inspecionar o feed de terceiros (e.g. `?userId=...`) são estritamente ignorados (proteção anti-IDOR).
+* **Consumo Canônico de Interesses (V40)**:
+  - Os interesses são recuperados diretamente da persistência (`UserInterestProfileRepository.findByUserId(requesterId)`). O feed **nunca** aceita parâmetros de interesses enviados pelo cliente HTTP.
+  - A conversão entre categorias livres de alvos (`places.category`, `products.category`) e as constantes canônicas de `InterestCategory` é realizada deterministicamente pelo `TargetCategoryMapper`. Categorias não mapeadas (ex.: `"GERAL"`, `"OUTROS"`, nulo) recebem afinidade neutra (`0.0`).
+* **Sinais e Pesos do Ranking V2 (Soma Exata = 1.0)**:
+
+| Sinal | Peso | Descrição |
+|---|---:|---|
+| **Conexão Social Direta** | `0.35` | `1.0` se a avaliação é de autor seguido diretamente; `0.0` se proveniente da descoberta. |
+| **Afinidade por Interesses** | `0.20` | `1.0` se a categoria canônica do alvo corresponde aos interesses do usuário; `0.0` caso contrário. |
+| **Recência Temporal** | `0.25` | Decaimento linear sobre janela fixa de 14 dias: $\max(0.0, 1.0 - \frac{\Delta t}{14\text{ dias}})$. |
+| **Verificação Presencial** | `0.10` | `1.0` se a avaliação foi realizada com confirmação presencial no local (`isVerifiedOnSite = true`); `0.0` caso contrário. |
+| **Votos Úteis da Comunidade** | `0.10` | Escala logarítmica base 10 normalizada com cap em 20 votos: $\frac{\log_{10}(1 + \text{helpfulCount})}{\log_{10}(1 + 20)}$. |
+
+* **Afinidade Suave (*Soft Boost*)**:
+  - O sinal de afinidade eleva a posição dos conteúdos de interesse do usuário sem descartar candidatos de outros nichos.
+  - Usuários sem questionário preenchido ou sem interesses cadastrados recebem afinidade `0.0` em todos os itens, preservando a ordenação factual sem qualquer degradação.
+* **Diversificação Pura em Memória (`FeedV2Diversifier`)**:
+  - Limita no máximo 2 avaliações consecutivas do mesmo autor (`MAX_CONSECUTIVE_AUTHOR = 2`).
+  - Limita no máximo 2 avaliações consecutivas do mesmo alvo (`MAX_CONSECUTIVE_TARGET = 2`).
+  - O diversificador atua estritamente após o ranking, garantindo variedade de autores e estabelecimentos no feed.
+* **Desempate Determinístico**:
+  - Ordem rigorosa: `score DESC`, `created_at DESC`, `review_id ASC`.
+
+---
+
+## 6. Endpoint do Feed V2
+
+### 6.1 Obter Feed Personalizado Paginado
+* **Método**: `GET`
+* **Rota**: `/api/v2/feed`
+* **Autenticação**: Obrigatória (`Authorization: Bearer <token>`)
+
+#### Parâmetros de Consulta (Query Parameters):
+| Parâmetro | Tipo | Padrão | Descrição | Restrições |
+|---|---|---|---|---|
+| `page` | Integer | `0` | Índice da página (0-indexed) | Deve ser `>= 0` (retorna `400 INVALID_PAGE` se negativo) |
+| `size` | Integer | `10` | Quantidade de itens por página | Deve ser `>= 1` (retorna `400 INVALID_SIZE`) e `<= 50` (retorna `400 PAGE_SIZE_EXCEEDED`) |
+
+#### Resposta de Sucesso (`200 OK`):
+```json
+{
+  "items": [
+    {
+      "id": "7b0d2358-1f6e-4ab4-802b-3e5e7da09101",
+      "author": {
+        "id": "01944883-9366-71d3-a5c8-c672b1234567",
+        "handle": "alice",
+        "displayName": "Alice Cooper",
+        "avatarUrl": "https://cdn.rewit.com/avatars/alice.png",
+        "isAnonymous": false
+      },
+      "contextPlaceId": "c9287311-2e63-4414-87a3-e380e5b7c7b1",
+      "targets": [
+        {
+          "targetId": "c9287311-2e63-4414-87a3-e380e5b7c7b1",
+          "targetType": "PLACE",
+          "name": "Café Central",
+          "rating": 5.0,
+          "comment": "Ambiente acolhedor e café especial excelente."
+        }
+      ],
+      "experienceText": "Excelente experiência matinal.",
+      "isAnonymous": false,
+      "isVerifiedOnSite": true,
+      "status": "ACTIVE",
+      "visibility": "PUBLIC",
+      "createdAt": "2026-10-28T12:00:00Z",
+      "helpfulCount": 4,
+      "isHelpfulByMe": true
+    }
+  ],
+  "page": 0,
+  "size": 10,
+  "windowSize": 18,
+  "totalPages": 2
+}
+```
+
+*Nota de Privacidade e Segurança*: Nenhum sinal interno de pontuação (`score`), multiplicador de peso ou dados confidenciais de perfil é exposto na resposta HTTP do cliente.

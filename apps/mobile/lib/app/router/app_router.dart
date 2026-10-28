@@ -19,6 +19,9 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:rewit_mobile/features/interests/domain/repositories/interest_repository.dart';
+import 'package:rewit_mobile/features/interests/presentation/screens/edit_interests_screen.dart';
+import 'package:rewit_mobile/features/interests/presentation/widgets/interests_gate.dart';
 import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
 import 'package:rewit_mobile/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:rewit_mobile/features/notifications/presentation/state/notifications_notifier.dart';
@@ -65,6 +68,7 @@ class AppRouter {
   static const String accountSettings = '/settings';
   static const String changePassword = '/settings/change-password';
   static const String businessAccounts = '/settings/business-accounts';
+  static const String editInterests = '/settings/interests';
   static const String placeManagement = '/business/place-management';
   static const String placeMediaGallery = '/place/media-gallery';
   static const String placeOpeningHoursEdit = '/business/place-opening-hours-edit';
@@ -93,6 +97,9 @@ class AppRouter {
   final BusinessRepository? businessRepository;
   final BusinessResponseRepository? businessResponseRepository;
 
+  /// Interesses do usuário; com ele, a sessão autenticada passa pelo questionário inicial antes do app.
+  final InterestRepository? interestRepository;
+
   /// Operações pendentes de cadastro de local, com escopo por usuário (MB-1c/MB-1d).
   final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
@@ -118,9 +125,30 @@ class AppRouter {
     this.notificationsNotifier,
     this.businessRepository,
     this.businessResponseRepository,
+    this.interestRepository,
     this.pendingRegistrationStore,
     this.onPickManualPlacePhoto,
   });
+
+  String? _currentUserId() {
+    final state = authNotifier.state;
+    return state is Authenticated ? state.user.id : null;
+  }
+
+  /// App da sessão autenticada; com [interestRepository], passa antes pelo questionário inicial de interesses. O
+  /// portão tem uma chave por usuário: outra conta começa do zero, sem herdar estado nem respostas.
+  Widget _authenticatedHome(BuildContext context, Authenticated session, WidgetBuilder home) {
+    final repository = interestRepository;
+    if (repository == null) return home(context);
+    return InterestsGate(
+      key: ValueKey('interests-gate-${session.user.id}'),
+      userId: session.user.id,
+      repository: repository,
+      currentUserId: _currentUserId,
+      homeBuilder: home,
+      onLogout: authNotifier.logout,
+    );
+  }
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -136,22 +164,26 @@ class AppRouter {
                 );
               }
               if (state is Authenticated) {
-                return HomeScreen(
-                  authNotifier: authNotifier,
-                  feedNotifier: feedNotifier,
-                  reviewCreationRepository: reviewCreationRepository,
-                  mediaRepository: reviewMediaRepository,
-                  mediaPickerService: mediaPickerService,
-                  locationService: locationService,
-                  searchRepository: searchRepository,
-                  placeRepository: placeRepository,
-                  productRepository: productRepository,
-                  placeDiscoveryRepository: placeDiscoveryRepository,
-                  userProfileRepository: userProfileRepository,
-                  notificationRepository: notificationRepository,
-                  notificationsNotifier: notificationsNotifier,
-                  pendingRegistrationStore: pendingRegistrationStore,
-                  onPickManualPlacePhoto: onPickManualPlacePhoto,
+                return _authenticatedHome(
+                  context,
+                  state,
+                  (context) => HomeScreen(
+                    authNotifier: authNotifier,
+                    feedNotifier: feedNotifier,
+                    reviewCreationRepository: reviewCreationRepository,
+                    mediaRepository: reviewMediaRepository,
+                    mediaPickerService: mediaPickerService,
+                    locationService: locationService,
+                    searchRepository: searchRepository,
+                    placeRepository: placeRepository,
+                    productRepository: productRepository,
+                    placeDiscoveryRepository: placeDiscoveryRepository,
+                    userProfileRepository: userProfileRepository,
+                    notificationRepository: notificationRepository,
+                    notificationsNotifier: notificationsNotifier,
+                    pendingRegistrationStore: pendingRegistrationStore,
+                    onPickManualPlacePhoto: onPickManualPlacePhoto,
+                  ),
                 );
               }
               return LoginScreen(authNotifier: authNotifier);
@@ -167,22 +199,26 @@ class AppRouter {
         );
 
       case home:
+        Widget buildHome(BuildContext context) => HomeScreen(
+              authNotifier: authNotifier,
+              feedNotifier: feedNotifier,
+              reviewCreationRepository: reviewCreationRepository,
+              mediaRepository: reviewMediaRepository,
+              mediaPickerService: mediaPickerService,
+              locationService: locationService,
+              searchRepository: searchRepository,
+              placeRepository: placeRepository,
+              productRepository: productRepository,
+              placeDiscoveryRepository: placeDiscoveryRepository,
+              userProfileRepository: userProfileRepository,
+              notificationRepository: notificationRepository,
+              notificationsNotifier: notificationsNotifier,
+            );
         return MaterialPageRoute(
-          builder: (context) => HomeScreen(
-            authNotifier: authNotifier,
-            feedNotifier: feedNotifier,
-            reviewCreationRepository: reviewCreationRepository,
-            mediaRepository: reviewMediaRepository,
-            mediaPickerService: mediaPickerService,
-            locationService: locationService,
-            searchRepository: searchRepository,
-            placeRepository: placeRepository,
-            productRepository: productRepository,
-            placeDiscoveryRepository: placeDiscoveryRepository,
-            userProfileRepository: userProfileRepository,
-            notificationRepository: notificationRepository,
-            notificationsNotifier: notificationsNotifier,
-          ),
+          builder: (context) {
+            final state = authNotifier.state;
+            return state is Authenticated ? _authenticatedHome(context, state, buildHome) : buildHome(context);
+          },
           settings: settings,
         );
 
@@ -417,6 +453,16 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => AccountSettingsScreen(
             authNotifier: authNotifier,
+          ),
+          settings: settings,
+        );
+
+      case editInterests:
+        return MaterialPageRoute(
+          builder: (context) => EditInterestsScreen(
+            repository: interestRepository,
+            userId: _currentUserId() ?? '',
+            currentUserId: _currentUserId,
           ),
           settings: settings,
         );

@@ -502,4 +502,32 @@ class FeedV2ServiceUnitTest {
 
         verify(feedCandidateRepository).retrieveDiscoveryCandidates(eq(requesterId), eq(FeedCandidateRepository.CANDIDATE_WINDOW));
     }
+
+    @Test
+    @DisplayName("6.1 Carrega interesses do usuário e delega para ranker com coleção de interesses")
+    void shouldLoadUserInterestsAndPassToRanker() {
+        com.rewit.application.port.UserInterestProfileRepository profileRepo = mock(com.rewit.application.port.UserInterestProfileRepository.class);
+        FeedV2Service serviceWithInterests = new FeedV2Service(feedCandidateRepository, profileRepo, feedV2Ranker, feedV2Diversifier);
+
+        java.util.Set<com.rewit.domain.enums.InterestCategory> interests = java.util.Set.of(com.rewit.domain.enums.InterestCategory.CAFE);
+        com.rewit.domain.model.UserInterestProfile profile = new com.rewit.domain.model.UserInterestProfile(
+                requesterId, interests, now, now, now
+        );
+        when(profileRepo.findByUserId(requesterId)).thenReturn(java.util.Optional.of(profile));
+
+        FeedCandidate c1 = createCandidate(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), now);
+        RankedFeedCandidate r1 = createRankedCandidate(c1, 0.95);
+
+        when(feedCandidateRepository.retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of(c1));
+        when(feedV2Ranker.rank(List.of(c1), now, interests))
+                .thenReturn(List.of(r1));
+        when(feedV2Diversifier.diversify(List.of(r1)))
+                .thenReturn(List.of(r1));
+
+        FeedV2CandidatePage page = serviceWithInterests.getCandidatePage(requesterId, 0, 10, now);
+
+        assertEquals(1, page.items().size());
+        verify(feedV2Ranker).rank(List.of(c1), now, interests);
+    }
 }

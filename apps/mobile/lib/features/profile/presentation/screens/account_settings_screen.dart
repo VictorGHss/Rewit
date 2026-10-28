@@ -183,6 +183,51 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               const SizedBox(height: 16),
             ],
 
+            // Seção: Preferências (interesses do questionário inicial)
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.tune, color: theme.colorScheme.primary),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Preferências',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ListTile(
+                      key: const Key('edit_interests_tile'),
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.interests_outlined),
+                      title: const Text('Meus interesses', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text(
+                        'Altere os interesses que você escolheu no primeiro acesso.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).pushNamed(AppRouter.editInterests);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
             // Seção: Segurança (C5.11)
             Card(
               elevation: 0,

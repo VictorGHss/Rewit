@@ -644,6 +644,7 @@ void main() {
 
       await tester.pumpWidget(buildSubject(notifier));
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -679,6 +680,7 @@ void main() {
 
       await tester.pumpWidget(buildSubject(notifier));
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -702,6 +704,7 @@ void main() {
         }),
       );
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -725,6 +728,7 @@ void main() {
 
       await tester.pumpWidget(buildSubject(notifier));
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -749,6 +753,7 @@ void main() {
 
       await tester.pumpWidget(buildSubject(notifier));
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
