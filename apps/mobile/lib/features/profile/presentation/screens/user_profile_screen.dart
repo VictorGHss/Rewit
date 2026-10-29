@@ -592,6 +592,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
+              key: const Key('profile_rankings_button'),
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRouter.rankings);
+              },
+              icon: const Icon(Icons.leaderboard_outlined),
+              label: const Text('Rankings da Região'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
               onPressed: () {
                 Navigator.of(context).pushNamed(AppRouter.accountSettings);
               },

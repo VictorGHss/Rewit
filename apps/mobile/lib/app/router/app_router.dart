@@ -9,6 +9,8 @@ import 'package:rewit_mobile/features/business/domain/repositories/business_resp
 import 'package:rewit_mobile/features/business/presentation/screens/my_business_accounts_screen.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/place_management_dashboard_screen.dart';
 import 'package:rewit_mobile/features/check_ins/domain/repositories/check_in_repository.dart';
+import 'package:rewit_mobile/features/rankings/domain/repositories/ranking_repository.dart';
+import 'package:rewit_mobile/features/rankings/presentation/screens/rankings_screen.dart';
 import 'package:rewit_mobile/features/check_ins/presentation/screens/my_check_ins_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
@@ -66,6 +68,7 @@ class AppRouter {
   static const String profile = '/profile';
   static const String myReviews = '/profile/my-reviews';
   static const String myCheckIns = '/profile/my-check-ins';
+  static const String rankings = '/rankings';
   static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
   static const String accountSettings = '/settings';
@@ -109,6 +112,9 @@ class AppRouter {
   /// Locais próximos da aba Check-in e histórico de check-ins verificados.
   final CheckInRepository? checkInRepository;
 
+  /// Rankings da Região e participação voluntária (Configurações da Conta).
+  final RankingRepository? rankingRepository;
+
   /// Seletor da fotografia do cadastro manual; nulo usa a câmera/galeria do dispositivo.
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
@@ -135,6 +141,7 @@ class AppRouter {
     this.pendingRegistrationStore,
     this.onPickManualPlacePhoto,
     this.checkInRepository,
+    this.rankingRepository,
   });
 
   String? _currentUserId() {
@@ -438,6 +445,16 @@ class AppRouter {
           settings: settings,
         );
 
+      case rankings:
+        return MaterialPageRoute(
+          builder: (context) => RankingsScreen(
+            repository: rankingRepository,
+            interestRepository: interestRepository,
+            authNotifier: authNotifier,
+          ),
+          settings: settings,
+        );
+
       case myCheckIns:
         return MaterialPageRoute(
           builder: (context) => MyCheckInsScreen(
@@ -471,6 +488,7 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => AccountSettingsScreen(
             authNotifier: authNotifier,
+            rankingRepository: rankingRepository,
           ),
           settings: settings,
         );

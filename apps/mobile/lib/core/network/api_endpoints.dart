@@ -75,6 +75,12 @@ class ApiEndpoints {
       '/api/v1/me/reviews?page=$page&size=$size';
   static const String myCheckIns = '/api/v1/me/check-ins';
 
+  // Rankings da Região (V1) e participação voluntária
+  static const String rankingCheckIns = '/api/v1/rankings/check-ins';
+  static const String rankingPlacesExplored = '/api/v1/rankings/places-explored';
+  static const String rankingHelpfulVotes = '/api/v1/rankings/helpful-votes';
+  static const String myRankingPreferences = '/api/v1/me/ranking-preferences';
+
   // Discussões e Comentários Comunitários
   static String reviewDiscussions(String reviewId, {int page = 0, int size = 20}) =>
       '/api/v1/reviews/$reviewId/discussions?page=$page&size=$size';
