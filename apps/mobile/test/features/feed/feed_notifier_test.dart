@@ -529,5 +529,58 @@ void main() {
       expect(successFinal.reviews.length, 14);
       expect(successFinal.reviews.map((r) => r.id), containsAll(['rev-11', 'rev-12', 'rev-13', 'rev-14', 'rev-15']));
     });
+
+    test('reset descarta o feed da sessão encerrada e ignora a página ainda em curso', () async {
+      await notifier.loadInitial();
+      final pendingPage = Completer<FeedPage>();
+      repository.customGetFeedHandler = ({int page = 0, int size = 10}) => pendingPage.future;
+      final staleLoad = notifier.refresh();
+
+      notifier.reset();
+      expect(notifier.state, isA<FeedInitial>());
+
+      pendingPage.complete(FeedPage(
+        items: [repository._makeReview('rev-outra-conta')],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 1,
+      ));
+      await staleLoad;
+      expect(notifier.state, isA<FeedInitial>(), reason: 'a resposta pedida pela sessão anterior não é exibida');
+
+      repository.customGetFeedHandler = null;
+      await notifier.loadInitial();
+      expect((notifier.state as FeedSuccess).reviews.map((r) => r.id).toList(), ['rev-1', 'rev-2']);
+    });
+
+    test('reset: voto útil em curso da sessão encerrada não altera nem libera o voto da sessão seguinte', () async {
+      await notifier.loadInitial();
+      final previousVote = Completer<HelpfulResult>();
+      repository.toggleHelpfulCompleter = previousVote;
+      final previousToggle = notifier.toggleHelpful('rev-1');
+
+      notifier.reset();
+      expect(notifier.isTogglingHelpful('rev-1'), isFalse);
+
+      // Outra conta carrega o próprio feed, com a mesma avaliação, e vota nela
+      await notifier.loadInitial();
+      final currentVote = Completer<HelpfulResult>();
+      repository.toggleHelpfulCompleter = currentVote;
+      final currentToggle = notifier.toggleHelpful('rev-1');
+      expect(notifier.isTogglingHelpful('rev-1'), isTrue);
+
+      previousVote.complete(const HelpfulResult(helpful: false, helpfulCount: 42));
+      await previousToggle;
+      final duringCurrentVote = (notifier.state as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-1');
+      expect(duringCurrentVote.isHelpfulByMe, isTrue, reason: 'otimista do voto atual, não o resultado anterior');
+      expect(duringCurrentVote.helpfulCount, 1);
+      expect(notifier.isTogglingHelpful('rev-1'), isTrue);
+
+      currentVote.complete(const HelpfulResult(helpful: true, helpfulCount: 1));
+      await currentToggle;
+      expect(notifier.isTogglingHelpful('rev-1'), isFalse);
+      expect((notifier.state as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-1').isHelpfulByMe, isTrue);
+    });
   });
 }

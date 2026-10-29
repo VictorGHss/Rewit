@@ -223,3 +223,26 @@ Os botões "Continuar com Google" e "Continuar com Apple" ficam desabilitados at
 | `APPLE_SERVICE_ID` e `APPLE_REDIRECT_URI` | Services ID e retorno `https://<api>/api/v1/auth/apple/callback` do fluxo web da Apple (Android) |
 
 O backend aceita os mesmos client IDs em `GOOGLE_SIGNIN_CLIENT_IDS` e `APPLE_SIGNIN_CLIENT_IDS` (bundle ID e Services ID). No Android, o Google também exige um client ID "Android" no mesmo projeto do Google Cloud, com o `applicationId` (`app.rewit.mobile`) e o SHA-1 do certificado que assina o APK. Contratos em `docs/api/authentication.md` §7 a §9.
+
+##### Pendências para o teste com os provedores reais
+
+Até agora o login social foi validado só com provedores simulados: ID tokens assinados por chaves RSA de teste, conferidos contra um JWKS em memória (backend), e SDKs substituídos por fakes (app). Nenhum teste com Google ou Apple de verdade foi feito. Os client IDs do login são identificadores OAuth públicos, sem relação com a chave `GOOGLE_PLACES_API_KEY` (Places API, paga, fora deste fluxo): não é preciso habilitar Places para testar o login.
+
+Google (Android primeiro):
+
+- [ ] Projeto no Google Cloud com a tela de consentimento OAuth configurada; enquanto em "Testing", as contas de teste cadastradas como usuários de teste.
+- [ ] Client ID "Web application": vai em `--dart-define=GOOGLE_SERVER_CLIENT_ID` e em `GOOGLE_SIGNIN_CLIENT_IDS` no backend.
+- [ ] Client ID "Android" com o pacote `app.rewit.mobile` e o SHA-1 do certificado que assina o APK. Hoje o build `release` também assina com a chave de debug (`android/app/build.gradle.kts`), então o SHA-1 é o do `debug.keystore` da máquina que gera o APK: cada máquina precisa do próprio SHA-1 cadastrado, ou de uma chave de assinatura compartilhada.
+- [ ] iOS (opcional): client ID "iOS" para o bundle `app.rewit.mobile` em `GOOGLE_IOS_CLIENT_ID` e o URL scheme invertido desse client ID em `ios/Runner/Info.plist` (`CFBundleURLTypes`, ainda ausente). A audiência do token emitido no iOS deve ser conferida no primeiro teste; se for o client ID iOS, ele entra também em `GOOGLE_SIGNIN_CLIENT_IDS`.
+
+Apple:
+
+- [ ] Conta no Apple Developer Program e App ID `app.rewit.mobile` com a capability Sign in with Apple; o bundle ID entra em `APPLE_SIGNIN_CLIENT_IDS`.
+- [ ] iOS: entitlement `com.apple.developer.applesignin` no target Runner (ainda não existe arquivo `.entitlements` no projeto) e build com `--dart-define=APPLE_SIGNIN_ENABLED=true`.
+- [ ] Android (fluxo web): Services ID associado ao App ID, com o domínio público da API verificado e o Return URL `https://<host público>/api/v1/auth/apple/callback` (HTTPS obrigatório; o túnel do external-test serve). O Services ID vai em `APPLE_SERVICE_ID` e em `APPLE_SIGNIN_CLIENT_IDS`; a mesma URL vai em `APPLE_REDIRECT_URI`. `APPLE_SIGNIN_ANDROID_PACKAGE` continua `app.rewit.mobile`.
+- [ ] Não há chave privada `.p8` nem client secret: o backend só valida o ID token e nunca troca o authorization code.
+
+Backend e roteiro do teste:
+
+- [ ] Saída HTTPS do backend para `www.googleapis.com` e `appleid.apple.com` (JWKS) e Redis ativo (nonces).
+- [ ] Executar e registrar: conta nova criada pelo provedor, segundo login na mesma conta, e-mail de conta local existente (`409`, sem vinculação), cancelamento na tela do provedor, conta desativada (login recusado e reativação explícita) e, na Apple, e-mail oculto (relay `privaterelay.appleid.com`).

@@ -11,6 +11,7 @@ class FeedNotifier extends ChangeNotifier {
   FeedState _state = const FeedInitial();
 
   int _currentRequestId = 0;
+  int _session = 0;
   final Set<String> _pendingHelpfulReviewIds = {};
   final Set<String> _removedReviewIds = {};
   bool _needsPaginationReset = false;
@@ -67,6 +68,21 @@ class FeedNotifier extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  /// Descarta o feed da sessão encerrada (logout, sessão expirada ou troca de conta) e volta a [FeedInitial].
+  ///
+  /// O Feed V2 é do usuário autenticado (ordem pelos interesses dele, `isHelpfulByMe` dos votos dele): a mesma
+  /// instância atende todas as sessões do app, então nada do feed passa de uma conta para outra. Respostas ainda em
+  /// curso da sessão anterior são ignoradas; a próxima exibição do feed carrega do início.
+  void reset() {
+    _currentRequestId++;
+    _session++;
+    _pendingHelpfulReviewIds.clear();
+    _removedReviewIds.clear();
+    _needsPaginationReset = false;
+    _state = const FeedInitial();
+    notifyListeners();
   }
 
   /// Recarrega o feed desde o início (Pull-to-refresh).
@@ -174,6 +190,7 @@ class FeedNotifier extends ChangeNotifier {
     final updatedList = List<FeedReview>.from(currentState.reviews);
     updatedList[index] = optimisticReview;
 
+    final session = _session;
     _pendingHelpfulReviewIds.add(reviewId);
     _state = currentState.copyWith(reviews: updatedList);
     notifyListeners();
@@ -183,6 +200,9 @@ class FeedNotifier extends ChangeNotifier {
         reviewId,
         currentlyHelpful: wasHelpful,
       );
+
+      // Voto de uma sessão já encerrada não altera o feed da sessão atual
+      if (session != _session) return;
 
       // Reconcilia com a resposta canônica do backend
       final latestState = _state;
@@ -202,7 +222,7 @@ class FeedNotifier extends ChangeNotifier {
     } catch (e) {
       // Reversão em caso de falha de rede/API
       final latestState = _state;
-      if (latestState is FeedSuccess) {
+      if (session == _session && latestState is FeedSuccess) {
         final rollbackIndex = latestState.reviews.indexWhere((r) => r.id == reviewId);
         if (rollbackIndex != -1) {
           final rollbackList = List<FeedReview>.from(latestState.reviews);
@@ -213,8 +233,11 @@ class FeedNotifier extends ChangeNotifier {
       }
       rethrow;
     } finally {
-      _pendingHelpfulReviewIds.remove(reviewId);
-      notifyListeners();
+      // Depois de reset, a marca pendente pode ser de um voto da sessão atual na mesma avaliação
+      if (session == _session) {
+        _pendingHelpfulReviewIds.remove(reviewId);
+        notifyListeners();
+      }
     }
   }
 

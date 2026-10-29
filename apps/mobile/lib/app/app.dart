@@ -8,6 +8,9 @@ import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 ///
 /// Quando a sessão expira de fato, volta a pilha à rota raiz. Antes, a rota raiz trocava para o login por baixo
 /// das telas abertas e o usuário só descobria ao pressionar voltar, como se o app o tivesse deslogado ali.
+///
+/// Ao fim de cada sessão (logout, expiração ou outra conta), descarta o feed compartilhado entre as sessões: a conta
+/// seguinte, inclusive a que acaba de concluir o questionário de interesses, carrega o próprio Feed V2.
 class RewitApp extends StatefulWidget {
   final AppConfig config;
   final AppRouter router;
@@ -25,9 +28,13 @@ class RewitApp extends StatefulWidget {
 class _RewitAppState extends State<RewitApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
+  /// Usuário da última sessão resolvida (autenticada ou encerrada); estados intermediários não contam.
+  String? _sessionUserId;
+
   @override
   void initState() {
     super.initState();
+    _sessionUserId = _resolvedUserId(widget.router.authNotifier.state);
     widget.router.authNotifier.addListener(_onAuthChanged);
   }
 
@@ -48,10 +55,20 @@ class _RewitAppState extends State<RewitApp> {
 
   void _onAuthChanged() {
     final state = widget.router.authNotifier.state;
+    // Authenticating (ex.: troca de senha recusada) não encerra a sessão: só Authenticated e Unauthenticated contam
+    if (state is Authenticated || state is Unauthenticated) {
+      final userId = _resolvedUserId(state);
+      if (userId != _sessionUserId) {
+        _sessionUserId = userId;
+        widget.router.feedNotifier?.reset();
+      }
+    }
     if (state is Unauthenticated && state.errorCode == 'SESSION_EXPIRED') {
       _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     }
   }
+
+  static String? _resolvedUserId(AuthState state) => state is Authenticated ? state.user.id : null;
 
   @override
   Widget build(BuildContext context) {

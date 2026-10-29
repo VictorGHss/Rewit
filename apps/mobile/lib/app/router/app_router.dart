@@ -459,11 +459,19 @@ class AppRouter {
 
       case editInterests:
         return MaterialPageRoute(
-          builder: (context) => EditInterestsScreen(
-            repository: interestRepository,
-            userId: _currentUserId() ?? '',
-            currentUserId: _currentUserId,
-          ),
+          builder: (context) {
+            final userId = _currentUserId() ?? '';
+            return EditInterestsScreen(
+              repository: interestRepository,
+              userId: userId,
+              currentUserId: _currentUserId,
+              // O Feed V2 é ordenado pelos interesses: a volta ao app já mostra o feed com a seleção nova. Se a
+              // sessão terminou enquanto gravava, o feed já foi descartado e não é recarregado para outra sessão
+              onSaved: () {
+                if (_currentUserId() == userId) feedNotifier?.refresh();
+              },
+            );
+          },
           settings: settings,
         );
 
