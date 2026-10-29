@@ -35,81 +35,105 @@ public final class TargetCategoryMapper {
         // 2. FOOD_AND_DRINK
         register(map, InterestCategory.RESTAURANT,
                 "restaurante", "restaurantes", "restaurant", "restauracao", "gastronomia",
-                "churrascaria", "pizzaria", "cantina", "bistro", "culinaria");
+                "churrascaria", "churrascarias", "pizzaria", "pizzarias", "cantina", "cantinas",
+                "bistro", "bistros", "culinaria", "catering.restaurant");
 
         register(map, InterestCategory.FAST_FOOD,
                 "fast food", "fast_food", "fastfood", "lanchonete", "lanchonetes",
-                "hamburgueria", "hamburguerias", "pastelaria", "lanches", "pastel");
+                "hamburgueria", "hamburguerias", "hamburguer", "hamburgueres",
+                "burger", "burgers", "pastelaria", "pastelarias", "lanches", "pastel",
+                "catering.fast_food");
 
         register(map, InterestCategory.CAFE,
-                "cafe", "cafes", "cafeteria", "cafeterias", "coffee shop", "casa de cha");
+                "cafe", "cafes", "cafeteria", "cafeterias", "coffee shop", "casa de cha", "casas de cha",
+                "catering.cafe");
 
         register(map, InterestCategory.BAKERY,
-                "padaria", "padarias", "panificadora", "panificadoras", "bakery", "confeitaria", "doceria");
+                "padaria", "padarias", "panificadora", "panificadoras", "bakery",
+                "confeitaria", "confeitarias", "commercial.food_and_drink.bakery");
 
         register(map, InterestCategory.BAR,
-                "bar", "bares", "pub", "pubs", "choperia", "boteco", "botequim", "cervejaria");
+                "bar", "bares", "pub", "pubs", "choperia", "choperias", "boteco", "botecos",
+                "botequim", "botequins", "cervejaria", "cervejarias", "catering.bar", "catering.pub");
 
         register(map, InterestCategory.ICE_CREAM,
-                "sorveteria", "sorveterias", "sorvete", "gelateria", "ice cream", "ice_cream", "acai");
+                "sorveteria", "sorveterias", "sorvete", "sorvetes", "gelateria", "gelaterias",
+                "ice cream", "ice_cream", "acai", "doceria", "docerias", "doces", "catering.ice_cream");
 
         // 3. SHOPPING_AND_SERVICES
         register(map, InterestCategory.SUPERMARKET,
-                "supermercado", "supermercados", "mercado", "mercados", "mercearia", "mercearias",
-                "feira", "feiras", "feira livre", "sacolao", "hortifruti", "quitanda", "supermarket");
+                "supermercado", "supermercados", "hipermercado", "hipermercados",
+                "minimercado", "minimercados", "mercado", "mercados", "mercearia", "mercearias",
+                "loja de conveniencia", "conveniencia", "feira", "feiras", "feira livre",
+                "sacolao", "hortifruti", "hortifrutis", "quitanda", "quitandas", "supermarket",
+                "commercial.supermarket", "commercial.convenience", "commercial.marketplace");
 
         register(map, InterestCategory.FASHION,
-                "moda", "vestuario", "roupa", "roupas", "loja de roupas", "calcados", "sapataria", "fashion");
+                "moda", "vestuario", "roupa", "roupas", "loja de roupas", "lojas de roupas",
+                "calcado", "calcados", "sapataria", "sapatarias", "boutique", "boutiques", "fashion",
+                "commercial.clothing");
 
         register(map, InterestCategory.BOOKS,
-                "livraria", "livrarias", "livro", "livros", "sebo", "papelaria", "books");
+                "livraria", "livrarias", "livro", "livros", "sebo", "sebos", "papelaria", "papelarias", "books",
+                "commercial.books");
 
         register(map, InterestCategory.TECHNOLOGY,
-                "tecnologia", "eletronicos", "informatica", "loja de informatica", "loja de eletronicos",
-                "computadores", "celulares", "smartphones", "eletronica", "technology");
+                "tecnologia", "eletronico", "eletronicos", "informatica", "loja de informatica",
+                "loja de eletronicos", "computador", "computadores", "celular", "celulares",
+                "smartphone", "smartphones", "eletronica", "technology");
 
         register(map, InterestCategory.SHOPPING_MALL,
-                "shopping", "shoppings", "shopping center", "shopping mall", "shopping_mall", "galeria");
+                "shopping", "shoppings", "shopping center", "shopping mall", "shopping_mall", "galeria", "galerias",
+                "commercial.shopping_mall");
 
         register(map, InterestCategory.BEAUTY,
-                "beleza", "barbearia", "barbearias", "salao de beleza", "cabeleireiro",
-                "cabeleireiros", "estetica", "manicure", "beauty");
+                "beleza", "barbearia", "barbearias", "salao de beleza", "saloes de beleza",
+                "cabeleireiro", "cabeleireiros", "estetica", "manicure", "esmalteria", "esmalterias", "beauty",
+                "service.beauty.hairdresser");
 
         register(map, InterestCategory.PET,
-                "pet", "pet shop", "pet_shop", "petshop", "veterinario", "veterinaria",
-                "clinica veterinaria", "pet shops");
+                "pet", "pets", "pet shop", "pet_shop", "petshop", "veterinario", "veterinarios",
+                "veterinaria", "clinica veterinaria", "clinicas veterinarias", "pet shops",
+                "pet.shop", "pet.veterinary");
 
         register(map, InterestCategory.AUTOMOTIVE,
-                "automotivo", "posto", "postos", "posto de gasolina", "posto de combustivel",
-                "oficina", "oficinas", "oficina mecanica", "mecanica", "auto eletrica", "automotive");
+                "automotivo", "posto", "postos", "posto de gasolina", "postos de gasolina",
+                "posto de combustivel", "postos de combustivel", "oficina", "oficinas",
+                "oficina mecanica", "mecanica", "auto eletrica", "auto eletricas",
+                "borracharia", "borracharias", "lava rapido", "automotive",
+                "service.vehicle.fuel", "service.vehicle.repair.car");
 
         // 4. LEISURE_AND_WELLBEING
         register(map, InterestCategory.PARK,
-                "parque", "parques", "praca", "bosque", "jardim", "parque ecologico", "park");
+                "parque", "parques", "praca", "pracas", "bosque", "bosques",
+                "jardim", "jardins", "parque ecologico", "park", "parks", "leisure.park");
 
         register(map, InterestCategory.FITNESS,
                 "academia", "academias", "esporte", "esportes", "fitness", "ginastica",
-                "crossfit", "pilates", "quadra esportiva");
+                "crossfit", "pilates", "quadra esportiva", "quadras esportivas", "sport.fitness.gym");
 
         register(map, InterestCategory.CULTURE,
                 "cultura", "cinema", "cinemas", "teatro", "teatros", "museu", "museus",
-                "galeria de arte", "exposicao", "culture");
+                "galeria de arte", "galerias de arte", "exposicao", "exposicoes", "culture", "museum", "museums");
 
         register(map, InterestCategory.EVENTS,
                 "evento", "eventos", "show", "shows", "festival", "festivais",
-                "casa de shows", "casa de eventos", "events");
+                "casa de shows", "casas de shows", "casa de eventos", "casas de eventos", "events");
 
         register(map, InterestCategory.GAMES,
-                "games", "game", "jogo", "jogos", "jogos eletronicos", "videogame",
-                "loja de games", "loja de jogos", "fliperama", "arcade", "lan house", "entretenimento", "gaming");
+                "games", "game", "jogo", "jogos", "jogos eletronicos", "videogame", "videogames",
+                "loja de games", "lojas de games", "loja de jogos", "lojas de jogos",
+                "fliperama", "fliperamas", "arcade", "arcades", "lan house", "entretenimento", "gaming");
 
         register(map, InterestCategory.TRAVEL,
-                "hotel", "hoteis", "pousada", "pousadas", "resort", "hostel",
-                "albergue", "viagem", "viagens", "travel");
+                "hotel", "hoteis", "hotels", "pousada", "pousadas", "resort", "resorts",
+                "hostel", "hostels", "albergue", "albergues", "viagem", "viagens", "travel",
+                "accommodation.hotel", "accommodation.hostel");
 
         register(map, InterestCategory.HEALTH,
-                "saude", "farmacia", "farmacias", "drogaria", "drogarias", "hospital",
-                "hospitais", "clinica", "clinicas", "dentista", "odontologia", "health");
+                "saude", "farmacia", "farmacias", "drogaria", "drogarias", "pharmacy", "pharmacies",
+                "hospital", "hospitais", "clinica", "clinicas", "dentista", "dentistas", "odontologia", "health",
+                "healthcare.pharmacy", "healthcare.hospital", "healthcare.clinic_or_praxis", "healthcare.dentist");
 
         MAPPING = Collections.unmodifiableMap(map);
     }
@@ -138,6 +162,6 @@ public final class TargetCategoryMapper {
     }
 
     private static String normalize(String value) {
-        return BrazilianState.fold(value).replace("_", " ").trim();
+        return BrazilianState.fold(value).replace("_", " ").replace(".", " ").replaceAll("\\s+", " ").trim();
     }
 }
