@@ -5,8 +5,11 @@ import com.rewit.domain.model.BrazilianState;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Mapeador determinístico entre categorias textuais de alvos (locais e produtos)
@@ -153,6 +156,28 @@ public final class TargetCategoryMapper {
         }
         String normalized = normalize(rawCategory);
         return Optional.ofNullable(MAPPING.get(normalized));
+    }
+
+    /**
+     * Retorna o conjunto de todas as chaves/termos mapeados que correspondem à categoria informada,
+     * incluindo a constante do enum em maiúsculo e minúsculo.
+     *
+     * @param category constante canônica de {@link InterestCategory}
+     * @return conjunto imutável de strings correspondentes
+     */
+    public static Set<String> getMatchingTerms(InterestCategory category) {
+        if (category == null) {
+            return Collections.emptySet();
+        }
+        Set<String> terms = new HashSet<>();
+        terms.add(category.name());
+        terms.add(category.name().toLowerCase(Locale.ROOT));
+        for (Map.Entry<String, InterestCategory> entry : MAPPING.entrySet()) {
+            if (entry.getValue() == category) {
+                terms.add(entry.getKey());
+            }
+        }
+        return Collections.unmodifiableSet(terms);
     }
 
     private static void register(Map<String, InterestCategory> map, InterestCategory category, String... terms) {

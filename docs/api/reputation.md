@@ -37,7 +37,8 @@ O subsistema de reputação garante:
 * **Reports (Denúncias)**: não são utilizados como sinal, penalidade ou peso oculto. O quantitativo de denúncias e a identidade de denunciantes nunca são expostos.
 * **Check-In / Geolocalização**: a verificação presencial é utilizada exclusivamente como flag booleana (`is_verified_on_site`). Nenhuma latitude, longitude, raio, distância ou precisão de GPS é armazenada ou exposta na reputação.
 * **Dados Pessoais (PII)**: nenhum e-mail, hash de senha ou dado privado de perfil é retornado.
-* **Sinais Deliberadamente Excluídos**: contagem de seguidores/seguindo (pertencem ao grafo social factual) e rankings competitivos globais.
+* **Sinais Deliberadamente Excluídos**: contagem de seguidores/seguindo (pertencem ao grafo social factual), rankings competitivos globais perpétuos e scores numéricos compostos/opacos.
+* **Rankings Dimensionais e Locais V1 ([ADR-016](../decisions/ADR-016-rankings-dimensionais-locais.md))**: embora rankings competitivos globais e scores unificados permaneçam proibidos, o Rewit disponibiliza rankings locais e dimensionais sob `/api/v1/rankings/*` (`/check-ins`, `/places-explored` e `/helpful-votes`). Esses rankings são segmentados no tempo (`WEEK`, `MONTH` em `America/Sao_Paulo`) e no espaço (UF obrigatória, cidade opcional, categoria canônica opcional), operam estritamente sob regime de opt-in voluntário (`profiles.show_in_rankings`, gerenciado em `GET/PUT /api/v1/me/ranking-preferences`), e não utilizam o snapshot de `UserReputation` nem `profiles.reputation_score` como peso ou multiplicador.
 
 ### 1.6 Ciclo de Vida dos Status de Review
 * **`ACTIVE`**: contabilizada em `activeReviews`, `verifiedReviews` (se presencial), `helpfulVotesReceived` e `distinctTargetsReviewed`.

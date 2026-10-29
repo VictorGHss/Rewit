@@ -8,7 +8,7 @@ import java.util.UUID;
 
 /**
  * Entidade JPA mapeando a tabela profiles no PostgreSQL.
- * Valida com o schema gerado pelas migrations Flyway V1 -> V4.
+ * Valida com o schema gerado pelas migrations Flyway V1 -> V4 e V42.
  * Mantida estritamente isolada na camada de infraestrutura.
  */
 @Entity
@@ -40,6 +40,9 @@ public class ProfileJpaEntity {
 
     @Column(name = "is_anonymous_default", nullable = false)
     private boolean isAnonymousDefault = false;
+
+    @Column(name = "show_in_rankings", nullable = false)
+    private boolean showInRankings = false;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -82,6 +85,7 @@ public class ProfileJpaEntity {
                 this.avatarUrl,
                 this.reputationScore,
                 this.isAnonymousDefault,
+                this.showInRankings,
                 this.createdAt,
                 this.updatedAt
         );
@@ -102,6 +106,7 @@ public class ProfileJpaEntity {
         entity.setAvatarUrl(profile.getAvatarUrl());
         entity.setReputationScore(profile.getReputationScore());
         entity.setAnonymousDefault(profile.isAnonymousDefault());
+        entity.setShowInRankings(profile.isShowInRankings());
         entity.setCreatedAt(profile.getCreatedAt());
         entity.setUpdatedAt(profile.getUpdatedAt());
         return entity;
@@ -117,6 +122,7 @@ public class ProfileJpaEntity {
         this.avatarUrl = profile.getAvatarUrl();
         this.reputationScore = profile.getReputationScore();
         this.isAnonymousDefault = profile.isAnonymousDefault();
+        this.showInRankings = profile.isShowInRankings();
         this.updatedAt = profile.getUpdatedAt() != null ? profile.getUpdatedAt() : Instant.now();
     }
 
@@ -182,6 +188,14 @@ public class ProfileJpaEntity {
 
     public void setAnonymousDefault(boolean anonymousDefault) {
         isAnonymousDefault = anonymousDefault;
+    }
+
+    public boolean isShowInRankings() {
+        return showInRankings;
+    }
+
+    public void setShowInRankings(boolean showInRankings) {
+        this.showInRankings = showInRankings;
     }
 
     public Instant getCreatedAt() {
