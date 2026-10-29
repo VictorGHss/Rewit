@@ -210,7 +210,7 @@ O **Feed V2** evolui o feed cronológico do Rewit para um pipeline de relevânci
 
 * **Afinidade Suave (*Soft Boost*)**:
   - O sinal de afinidade eleva a posição dos conteúdos de interesse do usuário sem descartar candidatos de outros nichos.
-  - Usuários sem questionário preenchido ou sem interesses cadastrados recebem afinidade `0.0` em todos os itens, preservando a ordenação factual sem qualquer degradação.
+  - Usuários sem questionário concluído (`NOT_STARTED` ou rascunho `IN_PROGRESS`) ou sem interesses cadastrados recebem afinidade `0.0` em todos os itens, preservando a ordenação factual sem qualquer degradação. Depois da conclusão, cada edição dos interesses vale a partir da consulta seguinte.
 * **Diversificação Pura em Memória (`FeedV2Diversifier`)**:
   - Limita no máximo 2 avaliações consecutivas do mesmo autor (`MAX_CONSECUTIVE_AUTHOR = 2`).
   - Limita no máximo 2 avaliações consecutivas do mesmo alvo (`MAX_CONSECUTIVE_TARGET = 2`).

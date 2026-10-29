@@ -530,4 +530,30 @@ class FeedV2ServiceUnitTest {
         assertEquals(1, page.items().size());
         verify(feedV2Ranker).rank(List.of(c1), now, interests);
     }
+
+    @Test
+    @DisplayName("6.2 Rascunho do questionário (não concluído) não personaliza: ranker recebe só os candidatos")
+    void shouldIgnoreInterestsOfUnfinishedOnboarding() {
+        com.rewit.application.port.UserInterestProfileRepository profileRepo = mock(com.rewit.application.port.UserInterestProfileRepository.class);
+        FeedV2Service serviceWithInterests = new FeedV2Service(feedCandidateRepository, profileRepo, feedV2Ranker, feedV2Diversifier);
+
+        com.rewit.domain.model.UserInterestProfile draft = new com.rewit.domain.model.UserInterestProfile(
+                requesterId, java.util.Set.of(com.rewit.domain.enums.InterestCategory.CAFE), null, now, now
+        );
+        when(profileRepo.findByUserId(requesterId)).thenReturn(java.util.Optional.of(draft));
+
+        FeedCandidate c1 = createCandidate(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), now);
+        RankedFeedCandidate r1 = createRankedCandidate(c1, 0.95);
+
+        when(feedCandidateRepository.retrieveCandidates(requesterId, FeedCandidateRepository.CANDIDATE_WINDOW))
+                .thenReturn(List.of(c1));
+        when(feedV2Ranker.rank(List.of(c1), now)).thenReturn(List.of(r1));
+        when(feedV2Diversifier.diversify(List.of(r1))).thenReturn(List.of(r1));
+
+        FeedV2CandidatePage page = serviceWithInterests.getCandidatePage(requesterId, 0, 10, now);
+
+        assertEquals(1, page.items().size());
+        verify(feedV2Ranker).rank(List.of(c1), now);
+        verify(feedV2Ranker, never()).rank(anyList(), any(Instant.class), anySet());
+    }
 }

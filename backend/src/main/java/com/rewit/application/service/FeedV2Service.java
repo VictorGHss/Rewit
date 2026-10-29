@@ -108,9 +108,11 @@ public class FeedV2Service {
             return new FeedV2CandidatePage(List.of(), page, size, 0);
         }
 
-        // Recupera interesses declarados do usuário autenticado (V40)
+        // Recupera interesses declarados do usuário autenticado (V40). Só o questionário concluído vale como
+        // preferência: o rascunho de um questionário interrompido recebe afinidade neutra, como quem não começou
         Set<InterestCategory> userInterests = userInterestProfileRepository != null
                 ? userInterestProfileRepository.findByUserId(requesterId)
+                        .filter(UserInterestProfile::isOnboardingCompleted)
                         .map(UserInterestProfile::getInterests)
                         .orElse(Set.of())
                 : Set.of();

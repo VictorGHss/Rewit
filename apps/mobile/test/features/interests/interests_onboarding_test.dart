@@ -791,6 +791,43 @@ void main() {
       expect(_feedReviewIds(feed), ['review-para-ana']);
     });
 
+    testWidgets('reinício no meio do questionário: a sessão restaurada retoma o rascunho e só depois carrega o feed',
+        (tester) async {
+      final accounts = <String, _FakeInterestRepository>{};
+      await pumpApp(tester, accounts, signedIn: true);
+      await _tap(tester, const Key('interest_option_CAFE'));
+      await _tap(tester, const Key('interest_option_BAR'));
+      await _tap(tester, const Key('interests_next'));
+      expect(accounts['ana']!.current.status, InterestOnboardingStatus.inProgress);
+
+      // Reinício: app, sessão e feed novos; só o backend e os tokens guardados sobrevivem. Desmontar antes evita
+      // que o novo RewitApp herde o estado e as rotas do anterior
+      await tester.pumpWidget(const SizedBox.shrink());
+      late _PerUserFeedRepository feedRepository;
+      late FeedNotifier feed;
+      final auth = await pumpApp(tester, accounts, signedIn: true, feed: (auth) {
+        feedRepository = _PerUserFeedRepository(auth);
+        return feed = FeedNotifier(feedRepository: feedRepository);
+      });
+      expect(auth.state, isA<Authenticated>());
+      expect(find.text('Pergunta 2 de 2'), findsOneWidget);
+      expect(feedRepository.requests, isEmpty, reason: 'questionário pendente: nada de feed');
+
+      await _tap(tester, const Key('interests_back'));
+      expect(tester.widget<FilterChip>(find.byKey(const Key('interest_option_BAR'))).selected, isTrue,
+          reason: 'as respostas gravadas antes do reinício voltam selecionadas');
+      await _tap(tester, const Key('interests_next'));
+      await _tap(tester, const Key('interest_option_PARK'));
+      await _tap(tester, const Key('interests_next'));
+      await _tap(tester, const Key('interests_confirm'));
+      await _tap(tester, const Key('interests_start_app'));
+
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(accounts['ana']!.current.codes, {'CAFE', 'BAR', 'PARK'});
+      expect(feedRepository.requests, ['ana']);
+      expect(_feedReviewIds(feed), ['review-para-ana']);
+    });
+
     testWidgets('interesses salvos nas configurações recarregam o Feed V2; gravação recusada não recarrega',
         (tester) async {
       final accounts = {'ana': _FakeInterestRepository.completed(['CAFE', 'BAR', 'PARK'])};

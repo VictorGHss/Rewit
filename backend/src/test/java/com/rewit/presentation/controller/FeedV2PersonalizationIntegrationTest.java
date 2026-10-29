@@ -10,6 +10,7 @@ import com.rewit.domain.model.Product;
 import com.rewit.domain.model.RateableTarget;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewTarget;
+import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.RegisterRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -58,6 +59,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>Local de contexto com categoria desconhecida/genérica mantém o candidato elegível com ordenação factual</li>
  *   <li>Avaliação anônima não expõe autor no Feed V2 mesmo com match de interesses</li>
  *   <li>Enriquecimento em lote projeta múltiplos alvos heterogêneos sem consultas N+1 nem falhas</li>
+ *   <li>Preferência FAST_FOOD prioriza fast food e não restaurante tradicional</li>
+ *   <li>Jornada da conta nova: rascunho não personaliza; conclusão, novo login e edição, sim</li>
  * </ol>
  */
 @SpringBootTest
@@ -96,14 +99,16 @@ class FeedV2PersonalizationIntegrationTest {
                 .build();
     }
 
-    private record TestUser(String accessToken, UUID userId, String handle, String displayName) {}
+    private static final String PASSWORD = "SenhaSegura123!";
+
+    private record TestUser(String accessToken, UUID userId, String handle, String displayName, String email) {}
 
     private TestUser registerUser(String prefix) throws Exception {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String email = (prefix + "." + suffix + "@rewit.com").toLowerCase(java.util.Locale.ROOT);
         String handle = (prefix + "_" + suffix).toLowerCase(java.util.Locale.ROOT);
 
-        RegisterRequest request = new RegisterRequest(email, "SenhaSegura123!", handle, "Nome " + prefix);
+        RegisterRequest request = new RegisterRequest(email, PASSWORD, handle, "Nome " + prefix);
 
         MvcResult result = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -114,7 +119,31 @@ class FeedV2PersonalizationIntegrationTest {
         JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
         String token = json.get("accessToken").asText();
         UUID userId = UUID.fromString(json.get("user").get("id").asText());
-        return new TestUser(token, userId, handle, "Nome " + prefix);
+        return new TestUser(token, userId, handle, "Nome " + prefix, email);
+    }
+
+    /** Novo login com as credenciais do cadastro: outra sessão, com outro access token, para a mesma conta. */
+    private TestUser login(TestUser user) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest(user.email(), PASSWORD))))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
+        assertEquals(user.userId().toString(), json.get("user").get("id").asText());
+        return new TestUser(json.get("accessToken").asText(), user.userId(), user.handle(), user.displayName(), user.email());
+    }
+
+    private List<String> feedIds(TestUser user) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v2/feed")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.accessToken()))
+                .andExpect(status().isOk())
+                .andReturn();
+        List<String> ids = new java.util.ArrayList<>();
+        objectMapper.readTree(result.getResponse().getContentAsString()).get("items")
+                .forEach(item -> ids.add(item.get("id").asText()));
+        return ids;
     }
 
     private Place createPlace(String category) {
@@ -785,5 +814,63 @@ class FeedV2PersonalizationIntegrationTest {
                 .andExpect(jsonPath("$.items", hasSize(2)))
                 .andExpect(jsonPath("$.items[0].id").value(rRestaurant.getId().toString()))
                 .andExpect(jsonPath("$.items[1].id").value(rBurger.getId().toString()));
+    }
+
+    // =========================================================================
+    // Cenário 16: Jornada da Conta Nova, do Cadastro à Edição dos Interesses
+    // =========================================================================
+
+    @Test
+    @DisplayName("Cenário 16: Conta nova só tem o Feed V2 personalizado depois de concluir o questionário; "
+            + "o rascunho fica neutro e a personalização sobrevive a um novo login e acompanha a edição")
+    void shouldPersonalizeNewAccountOnlyAfterCompletionAcrossLoginAndEdit() throws Exception {
+        TestUser requester = registerUser("p16New");
+        TestUser authorA = registerUser("p16AuthA");
+        TestUser authorB = registerUser("p16AuthB");
+        userFollowRepository.follow(requester.userId(), authorA.userId());
+        userFollowRepository.follow(requester.userId(), authorB.userId());
+
+        // Recência separa os três por segundos (diferença desprezível diante do boost de 0.20); dois autores
+        // impedem que a diversificação (máx. 2 consecutivos do mesmo autor) interfira na ordem
+        Instant now = Instant.now();
+        String gym = createReview(authorA.userId(), createPlace("ACADEMIA"), createTarget(TargetType.PLACE),
+                "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(10)).getId().toString();
+        String cafe = createReview(authorB.userId(), createPlace("CAFETERIA"), createTarget(TargetType.PLACE),
+                "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(50)).getId().toString();
+        String games = createReview(authorA.userId(), createPlace("LOJA DE GAMES"), createTarget(TargetType.PLACE),
+                "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(90)).getId().toString();
+        List<String> factual = List.of(gym, cafe, games);
+
+        // 1. Cadastro: questionário pendente e feed factual
+        mockMvc.perform(get("/api/v1/me/interests")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingStatus").value("NOT_STARTED"));
+        assertEquals(factual, feedIds(requester));
+
+        // 2. Rascunho (questionário interrompido): ainda não é preferência declarada, o feed segue factual
+        setUserInterests(requester, false, "GAMES");
+        assertEquals(factual, feedIds(requester), "rascunho não personaliza o Feed V2");
+
+        // 3. Conclusão: os interesses confirmados passam a ordenar o feed
+        setUserInterests(requester, true, "CAFE", "RESTAURANT", "BAKERY");
+        assertEquals(List.of(cafe, gym, games), feedIds(requester));
+
+        // 4. Novo login da mesma conta: interesses preservados e o mesmo feed personalizado
+        TestUser relogged = login(requester);
+        mockMvc.perform(get("/api/v1/me/interests")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + relogged.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingStatus").value("COMPLETED"))
+                .andExpect(jsonPath("$.interests[*].code", containsInAnyOrder("CAFE", "RESTAURANT", "BAKERY")));
+        assertEquals(List.of(cafe, gym, games), feedIds(relogged));
+
+        // 5. Edição nas configurações: a seleção nova reordena o feed na consulta seguinte
+        setUserInterests(relogged, true, "GAMES", "TECHNOLOGY", "CULTURE");
+        assertEquals(List.of(games, gym, cafe), feedIds(relogged));
+
+        // Edição enviada sem completeOnboarding não desfaz a conclusão: a personalização continua valendo
+        setUserInterests(relogged, false, "CAFE", "RESTAURANT", "BAKERY");
+        assertEquals(List.of(cafe, gym, games), feedIds(relogged));
     }
 }
