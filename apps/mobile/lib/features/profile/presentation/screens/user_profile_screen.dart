@@ -469,7 +469,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
           const SizedBox(height: 24),
 
-          // Painel de Estatísticas Factuais
+          // Painel de Estatísticas Factuais: contagens do backend (avaliações ativas e não anônimas), nunca um score
           Card(
             elevation: 0,
             shape: RoundedRectangleBorder(
@@ -478,33 +478,51 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 12.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+              child: Column(
                 children: [
-                  _buildStatItem(
-                    context: context,
-                    label: 'Seguidores',
-                    count: profile.stats.followersCount,
-                    onTap: !isDeleted ? () => _openFollowList(FollowListTab.followers) : null,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildStatItem(
+                        context: context,
+                        label: 'Seguidores',
+                        count: profile.stats.followersCount,
+                        onTap: !isDeleted ? () => _openFollowList(FollowListTab.followers) : null,
+                      ),
+                      _buildStatItem(
+                        context: context,
+                        label: 'Seguindo',
+                        count: profile.stats.followingCount,
+                        onTap: !isDeleted ? () => _openFollowList(FollowListTab.following) : null,
+                      ),
+                    ],
                   ),
-                  _buildStatItem(
-                    context: context,
-                    label: 'Seguindo',
-                    count: profile.stats.followingCount,
-                    onTap: !isDeleted ? () => _openFollowList(FollowListTab.following) : null,
-                  ),
-                  _buildStatItem(
-                    context: context,
-                    label: 'Avaliações',
-                    count: profile.stats.totalReviews,
-                    onTap: _isMyProfile
-                        ? () => Navigator.of(context).pushNamed(AppRouter.myReviews)
-                        : null,
-                  ),
-                  _buildStatItem(
-                    context: context,
-                    label: 'Votos Úteis',
-                    count: profile.stats.helpfulVotesReceived,
+                  const Divider(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildStatItem(
+                        context: context,
+                        label: 'Avaliações publicadas',
+                        count: profile.stats.totalReviews,
+                        onTap: _isMyProfile
+                            ? () => Navigator.of(context).pushNamed(AppRouter.myReviews)
+                            : null,
+                      ),
+                      _buildStatItem(
+                        context: context,
+                        label: 'Check-ins verificados',
+                        count: profile.stats.verifiedReviewsCount,
+                        onTap: _isMyProfile
+                            ? () => Navigator.of(context).pushNamed(AppRouter.myCheckIns)
+                            : null,
+                      ),
+                      _buildStatItem(
+                        context: context,
+                        label: 'Votos úteis recebidos',
+                        count: profile.stats.helpfulVotesReceived,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -562,6 +580,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               },
               icon: const Icon(Icons.rate_review_outlined),
               label: const Text('Minhas avaliações'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('my_check_ins_button'),
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRouter.myCheckIns);
+              },
+              icon: const Icon(Icons.place_outlined),
+              label: const Text('Meus check-ins'),
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(

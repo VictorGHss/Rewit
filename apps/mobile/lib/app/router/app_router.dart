@@ -8,6 +8,8 @@ import 'package:rewit_mobile/features/business/domain/repositories/business_repo
 import 'package:rewit_mobile/features/business/domain/repositories/business_response_repository.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/my_business_accounts_screen.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/place_management_dashboard_screen.dart';
+import 'package:rewit_mobile/features/check_ins/domain/repositories/check_in_repository.dart';
+import 'package:rewit_mobile/features/check_ins/presentation/screens/my_check_ins_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
@@ -63,6 +65,7 @@ class AppRouter {
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
   static const String myReviews = '/profile/my-reviews';
+  static const String myCheckIns = '/profile/my-check-ins';
   static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
   static const String accountSettings = '/settings';
@@ -103,6 +106,9 @@ class AppRouter {
   /// Operações pendentes de cadastro de local, com escopo por usuário (MB-1c/MB-1d).
   final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
+  /// Locais próximos da aba Check-in e histórico de check-ins verificados.
+  final CheckInRepository? checkInRepository;
+
   /// Seletor da fotografia do cadastro manual; nulo usa a câmera/galeria do dispositivo.
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
@@ -128,6 +134,7 @@ class AppRouter {
     this.interestRepository,
     this.pendingRegistrationStore,
     this.onPickManualPlacePhoto,
+    this.checkInRepository,
   });
 
   String? _currentUserId() {
@@ -183,6 +190,7 @@ class AppRouter {
                     notificationsNotifier: notificationsNotifier,
                     pendingRegistrationStore: pendingRegistrationStore,
                     onPickManualPlacePhoto: onPickManualPlacePhoto,
+                    checkInRepository: checkInRepository,
                   ),
                 );
               }
@@ -213,6 +221,7 @@ class AppRouter {
               userProfileRepository: userProfileRepository,
               notificationRepository: notificationRepository,
               notificationsNotifier: notificationsNotifier,
+              checkInRepository: checkInRepository,
             );
         return MaterialPageRoute(
           builder: (context) {
@@ -425,6 +434,15 @@ class AppRouter {
           builder: (context) => MyReviewsScreen(
             repository: userProfileRepository!,
             mediaRepository: reviewMediaRepository,
+          ),
+          settings: settings,
+        );
+
+      case myCheckIns:
+        return MaterialPageRoute(
+          builder: (context) => MyCheckInsScreen(
+            repository: checkInRepository,
+            onOpenReview: (reviewId) => Navigator.of(context).pushNamed(reviewDetail, arguments: reviewId),
           ),
           settings: settings,
         );

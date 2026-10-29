@@ -4,6 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/check_ins/domain/repositories/check_in_repository.dart';
+import 'package:rewit_mobile/features/check_ins/presentation/screens/check_in_screen.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
@@ -43,6 +45,9 @@ class HomeScreen extends StatefulWidget {
   /// Operações pendentes de cadastro de local, com escopo por usuário (MB-1c/MB-1d).
   final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
+  /// Locais próximos e histórico da aba Check-in; sem ele, a aba informa que o check-in está indisponível.
+  final CheckInRepository? checkInRepository;
+
   /// Seletor da fotografia do cadastro manual; nulo usa a câmera/galeria do dispositivo.
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
@@ -63,6 +68,7 @@ class HomeScreen extends StatefulWidget {
     this.notificationsNotifier,
     this.pendingRegistrationStore,
     this.onPickManualPlacePhoto,
+    this.checkInRepository,
   });
 
   @override
@@ -71,7 +77,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   static const int _feedTabIndex = 0;
-  static const int _profileTabIndex = 3;
+  static const int _profileTabIndex = 4;
 
   int _currentIndex = _feedTabIndex;
   NotificationsNotifier? _notificationsNotifier;
@@ -225,27 +231,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: TextStyle(
                           color: theme.colorScheme.onSurface.withAlpha(160),
                           fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.star, size: 14, color: Colors.amber[700]),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          'Reputação: ${user.reputationScore}',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: theme.colorScheme.onSurface.withAlpha(200),
-                          ),
                         ),
                       ),
                     ],
@@ -418,6 +403,13 @@ class _HomeScreenState extends State<HomeScreen> {
             },
 
           ),
+          CheckInScreen(
+            reviewCreationRepository: widget.reviewCreationRepository,
+            locationService: widget.locationService,
+            checkInRepository: widget.checkInRepository,
+            onOpenHistory: () => Navigator.of(context).pushNamed(AppRouter.myCheckIns),
+            onReviewCreated: (_) => widget.feedNotifier?.refresh(),
+          ),
           ProfilePlaceholderScreen(
             authNotifier: widget.authNotifier,
             userProfileRepository: widget.userProfileRepository,
@@ -541,6 +533,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: Icon(Icons.add_circle_outline),
                 selectedIcon: Icon(Icons.add_circle),
                 label: 'Avaliar',
+              ),
+              NavigationDestination(
+                key: Key('home_check_in_tab'),
+                icon: Icon(Icons.where_to_vote_outlined),
+                selectedIcon: Icon(Icons.where_to_vote),
+                label: 'Check-in',
               ),
               NavigationDestination(
                 icon: Icon(Icons.person_outline),

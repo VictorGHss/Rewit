@@ -14,6 +14,7 @@ import 'package:rewit_mobile/features/auth/data/services/platform_social_sign_in
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/business/data/repositories/business_repository_impl.dart';
 import 'package:rewit_mobile/features/business/data/repositories/business_response_repository_impl.dart';
+import 'package:rewit_mobile/features/check_ins/data/repositories/check_in_repository_impl.dart';
 import 'package:rewit_mobile/features/discussions/data/repositories/discussion_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/data/repositories/feed_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
@@ -84,6 +85,7 @@ void main() async {
   final businessRepository = BusinessRepositoryImpl(httpClient: httpClient);
   final businessResponseRepository = BusinessResponseRepositoryImpl(httpClient: httpClient);
   final interestRepository = InterestRepositoryImpl(httpClient: httpClient);
+  final checkInRepository = CheckInRepositoryImpl(httpClient: httpClient);
   // Cadastros de local com foto pendente sobrevivem a logout e reinício, com escopo por usuário
   final pendingRegistrationStore = PendingPlaceRegistrationStore(
     persistence: SecurePendingPlaceRegistrationPersistence(),
@@ -123,6 +125,8 @@ void main() async {
     // Sessão autenticada passa pelo questionário inicial de interesses, se ainda não concluído
     interestRepository: interestRepository,
     pendingRegistrationStore: pendingRegistrationStore,
+    // Aba Check-in: locais próximos do catálogo do Rewit (sem provedor externo) e histórico de check-ins
+    checkInRepository: checkInRepository,
   );
 
 

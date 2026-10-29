@@ -67,6 +67,8 @@ Todos os endpoints utilizam JSON (`Content-Type: application/json;charset=UTF-8`
 }
 ```
 
+`validationRadiusMeters` é o raio da verificação de presença (check-in): opcional, padrão 50, de 1 a **250 metros**. Acima disso a criação (e a adoção em `/places/adopt`) responde `400`; o banco recusa o mesmo valor por CHECK (`chk_places_validation_radius_max`, V41). Ver `docs/api/reviews.md` §2.3.
+
 #### Resposta (`201 Created`)
 ```json
 {

@@ -2,7 +2,10 @@ package com.rewit.application.service;
 
 import com.rewit.application.dto.ReviewDto.CreateReviewCommand;
 import com.rewit.application.dto.ReviewDto.CreateReviewTargetCommand;
+import com.rewit.application.dto.ReviewDto.CreatedReviewPublicView;
+import com.rewit.application.dto.ReviewDto.ReviewCreationResult;
 import com.rewit.application.dto.ReviewDto.ReviewDetailView;
+import com.rewit.application.dto.catalog.CatalogDtos.SpatialValidationResult;
 import com.rewit.application.dto.ReviewDto.ReviewTargetView;
 import com.rewit.application.dto.ReviewDto.PublicAuthorView;
 import com.rewit.application.dto.ReviewDto.ReviewPublicView;
@@ -42,9 +45,11 @@ import java.util.stream.Collectors;
 import com.rewit.application.dto.common.PageResult;
 import com.rewit.application.port.CheckInRepository;
 import com.rewit.domain.enums.CheckInStatus;
+import com.rewit.domain.enums.PresenceVerificationOutcome;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.VerificationMethod;
 import com.rewit.domain.model.CheckIn;
+import com.rewit.domain.model.PresenceVerificationPolicy;
 
 /**
  * Serviço de aplicação para orquestração de publicações de avaliação multi-alvo (Reviews).
@@ -140,6 +145,15 @@ public class ReviewService {
      */
     @Transactional
     public ReviewDetailView createReview(CreateReviewCommand cmd) {
+        return createReviewWithPresence(cmd).review();
+    }
+
+    /**
+     * Cria a avaliação como {@link #createReview} e devolve também o resultado da verificação de presença, que o
+     * backend decide sozinho (ver {@link PresenceVerificationPolicy}).
+     */
+    @Transactional
+    public ReviewCreationResult createReviewWithPresence(CreateReviewCommand cmd) {
         Objects.requireNonNull(cmd, "CreateReviewCommand cannot be null");
 
         // 1. Validação do autor
@@ -227,44 +241,46 @@ public class ReviewService {
         Review savedReview = reviewRepository.save(review);
         List<ReviewTarget> savedTargets = reviewTargetRepository.saveAll(review.getTargets());
 
-        // 6. Avaliação de presença física e registro de CheckIn (Step 12.0)
-        // Locais cadastrados sem coordenadas geográficas retornam Optional.empty() em validateProximity
-        // e a avaliação é publicada normalmente sem check-in verificado no local.
+        // 6. Avaliação de presença física e registro de CheckIn (Step 12.0, check-in V1)
+        // A avaliação é publicada em qualquer caso; só a presença confirmada gera check-in VERIFIED. Recusas com
+        // medição (precisão, distância ou frequência) ficam registradas como REJECTED. Locais sem coordenadas
+        // retornam Optional.empty() em validateProximity e não geram check-in.
+        PresenceVerificationOutcome presence = PresenceVerificationOutcome.NOT_REQUESTED;
         if (checkInRepository != null && cmd.contextPlaceId() != null && cmd.userLatitude() != null && cmd.userLongitude() != null) {
-            placeRepository.validateProximity(cmd.contextPlaceId(), cmd.userLatitude(), cmd.userLongitude())
-                    .ifPresent(spatialResult -> {
-                        CheckIn checkIn;
-                        if (spatialResult.isWithinRadius()) {
-                            checkIn = new CheckIn(
-                                    UUID.randomUUID(),
-                                    savedReview.getId(),
-                                    author.getId(),
-                                    cmd.contextPlaceId(),
-                                    cmd.userLatitude(),
-                                    cmd.userLongitude(),
-                                    spatialResult.distanceMeters(),
-                                    CheckInStatus.VERIFIED,
-                                    VerificationMethod.GPS,
-                                    Instant.now()
-                            );
-                        } else {
-                            checkIn = new CheckIn(
-                                    UUID.randomUUID(),
-                                    savedReview.getId(),
-                                    author.getId(),
-                                    cmd.contextPlaceId(),
-                                    cmd.userLatitude(),
-                                    cmd.userLongitude(),
-                                    spatialResult.distanceMeters(),
-                                    CheckInStatus.REJECTED,
-                                    VerificationMethod.GPS,
-                                    null
-                            );
-                        }
+            Optional<SpatialValidationResult> spatial =
+                    placeRepository.validateProximity(cmd.contextPlaceId(), cmd.userLatitude(), cmd.userLongitude());
+            if (spatial.isEmpty()) {
+                presence = PresenceVerificationOutcome.PLACE_WITHOUT_COORDINATES;
+            } else {
+                SpatialValidationResult spatialResult = spatial.get();
+                presence = PresenceVerificationPolicy.evaluateLocation(
+                        cmd.locationAccuracyMeters(), spatialResult.distanceMeters(), spatialResult.isWithinRadius());
+                if (presence == PresenceVerificationOutcome.VERIFIED) {
+                    // Trava até o commit: uma verificação concorrente do mesmo usuário e local espera e, em
+                    // READ COMMITTED, passa a enxergar o check-in desta transação na consulta da janela
+                    checkInRepository.lockPresenceVerification(author.getId(), cmd.contextPlaceId());
+                    Instant windowStart = Instant.now().minus(PresenceVerificationPolicy.VERIFIED_CHECK_IN_WINDOW);
+                    if (checkInRepository.existsVerifiedSince(author.getId(), cmd.contextPlaceId(), windowStart)) {
+                        presence = PresenceVerificationOutcome.RECENT_CHECK_IN;
+                    }
+                }
 
-                        CheckIn savedCheckIn = checkInRepository.save(checkIn);
-                        savedReview.attachCheckIn(savedCheckIn);
-                    });
+                boolean verified = presence == PresenceVerificationOutcome.VERIFIED;
+                CheckIn checkIn = new CheckIn(
+                        UUID.randomUUID(),
+                        savedReview.getId(),
+                        author.getId(),
+                        cmd.contextPlaceId(),
+                        cmd.userLatitude(),
+                        cmd.userLongitude(),
+                        spatialResult.distanceMeters(),
+                        verified ? CheckInStatus.VERIFIED : CheckInStatus.REJECTED,
+                        VerificationMethod.GPS,
+                        verified ? Instant.now() : null
+                );
+                CheckIn savedCheckIn = checkInRepository.save(checkIn);
+                savedReview.attachCheckIn(savedCheckIn);
+            }
         }
 
         // 7. Atualização determinística e consistente de estatísticas por alvo (Step 13.0)
@@ -287,7 +303,7 @@ public class ReviewService {
             reputationService.recalculateAndSave(author.getId());
         }
 
-        return toDetailView(savedReview, savedTargets);
+        return new ReviewCreationResult(toDetailView(savedReview, savedTargets), presence);
     }
 
     @Transactional(readOnly = true)
@@ -382,10 +398,11 @@ public class ReviewService {
     }
 
     @Transactional
-    public ReviewPublicView createReviewAndGetPublicView(CreateReviewCommand cmd) {
-        ReviewDetailView detail = createReview(cmd);
+    public CreatedReviewPublicView createReviewAndGetPublicView(CreateReviewCommand cmd) {
+        ReviewCreationResult creation = createReviewWithPresence(cmd);
+        ReviewDetailView detail = creation.review();
         PublicAuthorView authorView = resolvePublicAuthor(detail.userId(), detail.isAnonymous());
-        return new ReviewPublicView(
+        return new CreatedReviewPublicView(new ReviewPublicView(
                 detail.id(),
                 authorView,
                 detail.contextPlaceId(),
@@ -401,7 +418,7 @@ public class ReviewService {
                 false,
                 // createReview exige cmd.authorUserId() e grava a avaliação com esse autor: quem cria é sempre o dono
                 true
-        );
+        ), creation.presence());
     }
 
     @Transactional(readOnly = true)

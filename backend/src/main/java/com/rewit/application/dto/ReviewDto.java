@@ -1,5 +1,6 @@
 package com.rewit.application.dto;
 
+import com.rewit.domain.enums.PresenceVerificationOutcome;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Profile;
 
@@ -100,6 +101,18 @@ public final class ReviewDto {
             Instant createdAt,
             Instant updatedAt,
             List<ReviewTargetView> targets
+    ) {}
+
+    /** Avaliação criada e o resultado da verificação de presença feita na criação. */
+    public record ReviewCreationResult(
+            ReviewDetailView review,
+            PresenceVerificationOutcome presence
+    ) {}
+
+    /** Visão pública da avaliação criada, com o resultado da verificação de presença feita na criação. */
+    public record CreatedReviewPublicView(
+            ReviewPublicView review,
+            PresenceVerificationOutcome presence
     ) {}
 
     public record PublicAuthorView(

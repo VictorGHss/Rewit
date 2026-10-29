@@ -2,6 +2,7 @@ package com.rewit.presentation.controller;
 
 import com.rewit.application.dto.ReviewDto.CreateReviewCommand;
 import com.rewit.application.dto.ReviewDto.CreateReviewTargetCommand;
+import com.rewit.application.dto.ReviewDto.CreatedReviewPublicView;
 import com.rewit.application.dto.ReviewDto.PublicAuthorView;
 import com.rewit.application.dto.ReviewDto.ReviewPublicView;
 import com.rewit.application.dto.ReviewDto.ReviewTargetView;
@@ -10,6 +11,7 @@ import com.rewit.application.service.ReviewService;
 import com.rewit.application.usecase.DeleteReviewUseCase;
 import com.rewit.application.usecase.UpdateReviewUseCase;
 import com.rewit.common.exception.BusinessException;
+import com.rewit.presentation.dto.review.ReviewPresentationDtos.CheckInResultResponse;
 import com.rewit.presentation.dto.review.ReviewPresentationDtos.CreateReviewRequest;
 import com.rewit.presentation.dto.review.ReviewPresentationDtos.ReviewAuthorResponse;
 import com.rewit.presentation.dto.review.ReviewPresentationDtos.ReviewResponse;
@@ -90,9 +92,10 @@ public class ReviewController {
                 targetCommands
         );
 
-        ReviewPublicView created = reviewService.createReviewAndGetPublicView(cmd);
-        URI location = URI.create("/api/v1/reviews/" + created.id());
-        return ResponseEntity.created(location).body(toResponse(created));
+        CreatedReviewPublicView created = reviewService.createReviewAndGetPublicView(cmd);
+        URI location = URI.create("/api/v1/reviews/" + created.review().id());
+        return ResponseEntity.created(location).body(toResponse(created.review())
+                .withCheckIn(CheckInResultResponse.from(created.presence())));
     }
 
     @GetMapping("/{id}")
@@ -179,7 +182,8 @@ public class ReviewController {
                 targetResponses,
                 view.helpfulCount(),
                 view.isHelpfulByMe(),
-                view.isMine()
+                view.isMine(),
+                null
         );
     }
 

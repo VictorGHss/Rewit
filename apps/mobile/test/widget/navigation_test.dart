@@ -128,7 +128,9 @@ void main() {
 
       expect(find.text('Ana Paula'), findsOneWidget);
       expect(find.text('@anapaula'), findsOneWidget);
-      expect(find.text('Reputação: 120'), findsOneWidget);
+      // profiles.reputation_score não é atualizado e a documentação exclui score numérico: a Home não o exibe
+      expect(find.textContaining('Reputação'), findsNothing);
+      expect(find.textContaining('120'), findsNothing);
       expect(find.byIcon(Icons.verified), findsOneWidget);
       expect(find.text('Feed de Atividades'), findsOneWidget);
     });

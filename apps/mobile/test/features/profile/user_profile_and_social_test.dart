@@ -1334,6 +1334,7 @@ void main() {
           isFollowing: true,
           stats: UserStats(
             totalReviews: 1234567,
+            verifiedReviewsCount: 765432,
             followersCount: 7654321,
             followingCount: 98765,
             helpfulVotesReceived: 4567890,
@@ -1355,13 +1356,25 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
-      for (final label in ['Seguidores', 'Avaliações', 'Votos Úteis']) {
-        expect(find.text(label), findsOneWidget);
+      const labels = [
+        'Seguidores',
+        'Seguindo',
+        'Avaliações publicadas',
+        'Check-ins verificados',
+        'Votos úteis recebidos',
+      ];
+      // "Seguindo" também é o rótulo do botão de seguir: os contadores ficam no cartão de estatísticas
+      Finder stat(String label) => find.descendant(of: find.byType(Card), matching: find.text(label));
+      for (final label in labels) {
+        expect(stat(label), findsOneWidget);
       }
-      // Os quatro contadores dividem a largura: nenhum invade o vizinho
-      final followers = tester.getRect(find.text('Seguidores'));
-      final reviews = tester.getRect(find.text('Avaliações'));
-      expect(followers.overlaps(reviews), isFalse);
+      // Os contadores de cada linha dividem a largura: nenhum invade o vizinho
+      final rects = [for (final label in labels) tester.getRect(stat(label))];
+      for (var i = 0; i < rects.length; i++) {
+        for (var j = i + 1; j < rects.length; j++) {
+          expect(rects[i].overlaps(rects[j]), isFalse, reason: '${labels[i]} x ${labels[j]}');
+        }
+      }
     });
   });
 }

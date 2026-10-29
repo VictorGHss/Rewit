@@ -134,6 +134,9 @@ class FeedReviewDto {
   final bool isHelpfulByMe;
   final bool? isMine;
 
+  /// Só na resposta de `POST /api/v1/reviews`.
+  final CheckInResult? checkIn;
+
   const FeedReviewDto({
     required this.id,
     required this.author,
@@ -149,6 +152,7 @@ class FeedReviewDto {
     this.helpfulCount = 0,
     this.isHelpfulByMe = false,
     this.isMine,
+    this.checkIn,
   });
 
   factory FeedReviewDto.fromJson(Map<String, dynamic> json) {
@@ -197,6 +201,7 @@ class FeedReviewDto {
       helpfulCount: (json['helpfulCount'] as num?)?.toInt() ?? 0,
       isHelpfulByMe: json['isHelpfulByMe'] as bool? ?? false,
       isMine: json['isMine'] as bool?,
+      checkIn: CheckInResult.fromJson(json['checkIn']),
     );
   }
 
@@ -235,6 +240,7 @@ class FeedReviewDto {
       helpfulCount: helpfulCount,
       isHelpfulByMe: isHelpfulByMe,
       isMine: isMine,
+      checkIn: checkIn,
     );
   }
 }

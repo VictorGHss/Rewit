@@ -47,6 +47,46 @@ class FeedTarget {
   bool get isService => targetType?.toUpperCase() == 'SERVICE';
 }
 
+/// Situação da verificação de presença devolvida pelo backend na criação de uma avaliação.
+enum CheckInResultStatus {
+  /// Presença confirmada: a avaliação gerou um check-in verificado.
+  verified,
+
+  /// Avaliação publicada sem check-in verificado; [CheckInResult.reason] diz o motivo.
+  notVerified,
+
+  /// Nenhuma verificação pedida (sem local de contexto ou sem localização enviada).
+  notRequested,
+
+  /// Valor desconhecido para esta versão do app; nunca tratado como presença confirmada.
+  unknown,
+}
+
+/// Resultado da verificação de presença: o backend decide sozinho, e o app só exibe o que ele respondeu.
+class CheckInResult {
+  final CheckInResultStatus status;
+
+  /// Motivo de uma presença não verificada (`OUTSIDE_RADIUS`, `ACCURACY_TOO_LOW`, `ACCURACY_UNAVAILABLE`,
+  /// `RECENT_CHECK_IN`, `PLACE_WITHOUT_COORDINATES`); nulo nos demais casos.
+  final String? reason;
+
+  const CheckInResult({required this.status, this.reason});
+
+  bool get isVerified => status == CheckInResultStatus.verified;
+
+  static CheckInResult? fromJson(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final status = switch (json['status']) {
+      'VERIFIED' => CheckInResultStatus.verified,
+      'NOT_VERIFIED' => CheckInResultStatus.notVerified,
+      'NOT_REQUESTED' => CheckInResultStatus.notRequested,
+      _ => CheckInResultStatus.unknown,
+    };
+    final reason = json['reason'];
+    return CheckInResult(status: status, reason: reason is String ? reason : null);
+  }
+}
+
 /// Entidade representacional de uma avaliação ranqueada e diversificada no Feed V2.
 class FeedReview {
   final String id;
@@ -68,6 +108,9 @@ class FeedReview {
   /// Nulo quando o payload de origem não informa (ex.: feed e listagens).
   final bool? isMine;
 
+  /// Resultado da verificação de presença; presente só na resposta da criação da avaliação.
+  final CheckInResult? checkIn;
+
   const FeedReview({
     required this.id,
     required this.author,
@@ -84,6 +127,7 @@ class FeedReview {
     this.isHelpfulByMe = false,
     this.mediaItems,
     this.isMine,
+    this.checkIn,
   });
 
   FeedReview copyWith({
@@ -101,6 +145,7 @@ class FeedReview {
     bool? isHelpfulByMe,
     List<ReviewMediaItem>? mediaItems,
     bool? isMine,
+    CheckInResult? checkIn,
   }) {
     return FeedReview(
       id: id,
@@ -118,6 +163,7 @@ class FeedReview {
       isHelpfulByMe: isHelpfulByMe ?? this.isHelpfulByMe,
       mediaItems: mediaItems ?? this.mediaItems,
       isMine: isMine ?? this.isMine,
+      checkIn: checkIn ?? this.checkIn,
     );
   }
 

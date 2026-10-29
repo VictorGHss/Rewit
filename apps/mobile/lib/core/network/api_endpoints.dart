@@ -33,6 +33,7 @@ class ApiEndpoints {
   static String placeMediaPrimary(String placeId, String mediaId) =>
       '/api/v1/places/$placeId/media/$mediaId/primary';
   static String placeDetail(String id) => '/api/v1/places/$id';
+  static const String nearbyPlaces = '/api/v1/places/nearby';
   // Descoberta externa e adoção no catálogo
   static const String placeDiscoverySearch = '/api/v1/places/discovery/search';
   static const String placeAdopt = '/api/v1/places/adopt';
@@ -72,6 +73,7 @@ class ApiEndpoints {
   static const String myReviewsPath = '/api/v1/me/reviews';
   static String myReviews({int page = 0, int size = 10}) =>
       '/api/v1/me/reviews?page=$page&size=$size';
+  static const String myCheckIns = '/api/v1/me/check-ins';
 
   // Discussões e Comentários Comunitários
   static String reviewDiscussions(String reviewId, {int page = 0, int size = 20}) =>

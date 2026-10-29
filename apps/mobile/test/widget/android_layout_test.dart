@@ -122,8 +122,9 @@ void main() {
 
       await tester.tap(find.byKey(const Key('home_user_header_card')));
       await tester.pumpAndSettle();
-      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 3);
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 3);
+      // Perfil é a quinta aba: Início, Buscar, Avaliar, Check-in, Perfil
+      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 4);
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 4);
 
       // Voltar do Android numa aba que não é o Início volta ao Início, sem fechar o app
       await tester.binding.handlePopRoute();
@@ -157,8 +158,8 @@ void main() {
 
       await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Perfil')));
       await tester.pumpAndSettle();
-      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 3);
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 3);
+      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 4);
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 4);
     });
 
     testWidgets('scanner do AppBar continua abrindo a rota do scanner', (tester) async {

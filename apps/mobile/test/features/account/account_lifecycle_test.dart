@@ -818,6 +818,9 @@ void main() {
       final configButton = find.widgetWithText(OutlinedButton, 'Configurações da Conta');
       expect(configButton, findsOneWidget);
 
+      // O perfil rola: com o atalho "Meus check-ins" o botão pode ficar abaixo da área visível
+      await tester.ensureVisible(configButton);
+      await tester.pumpAndSettle();
       await tester.tap(configButton);
       await tester.pumpAndSettle();
 
