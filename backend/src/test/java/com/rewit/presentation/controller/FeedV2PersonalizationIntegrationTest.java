@@ -741,4 +741,49 @@ class FeedV2PersonalizationIntegrationTest {
                 .andExpect(jsonPath("$.items[1].id").value(r1.getId().toString()))
                 .andExpect(jsonPath("$.items[2].id").value(r2.getId().toString()));
     }
+
+    // =========================================================================
+    // Cenário 15: Semântica Distinta de FAST_FOOD vs RESTAURANT no Ranking
+    // =========================================================================
+
+    @Test
+    @DisplayName("Cenário 15: Preferência FAST_FOOD prioriza hamburgueria/fast food e não restaurante tradicional")
+    void shouldPrioritizeFastFoodOverRestaurantWhenFastFoodInterestSelected() throws Exception {
+        TestUser requesterFastFood = registerUser("p15FfReq");
+        TestUser requesterRestaurant = registerUser("p15RestReq");
+        TestUser author = registerUser("p15Auth");
+
+        userFollowRepository.follow(requesterFastFood.userId(), author.userId());
+        userFollowRepository.follow(requesterRestaurant.userId(), author.userId());
+
+        // requesterFastFood tem FAST_FOOD (mas NÃO RESTAURANT)
+        setUserInterests(requesterFastFood, true, "FAST_FOOD", "CAFE", "BAKERY");
+        // requesterRestaurant tem RESTAURANT (mas NÃO FAST_FOOD)
+        setUserInterests(requesterRestaurant, true, "RESTAURANT", "CAFE", "BAKERY");
+
+        Place placeBurger = createPlace("HAMBURGUERIA"); // maps to FAST_FOOD
+        Place placeBistro = createPlace("RESTAURANTE");  // maps to RESTAURANT
+
+        Instant now = Instant.now();
+        Review rBurger = createReview(author.userId(), placeBurger, createTarget(TargetType.PLACE),
+                "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(10));
+        Review rRestaurant = createReview(author.userId(), placeBistro, createTarget(TargetType.PLACE),
+                "PUBLIC", ReviewStatus.ACTIVE, false, now.minusSeconds(10));
+
+        // Para requesterFastFood: rBurger ganha boost de interesse (+0.20) e fica em 1º
+        mockMvc.perform(get("/api/v2/feed")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requesterFastFood.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].id").value(rBurger.getId().toString()))
+                .andExpect(jsonPath("$.items[1].id").value(rRestaurant.getId().toString()));
+
+        // Para requesterRestaurant: rRestaurant ganha boost de interesse (+0.20) e fica em 1º
+        mockMvc.perform(get("/api/v2/feed")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + requesterRestaurant.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].id").value(rRestaurant.getId().toString()))
+                .andExpect(jsonPath("$.items[1].id").value(rBurger.getId().toString()));
+    }
 }

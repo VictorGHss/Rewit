@@ -34,6 +34,7 @@ class TargetCategoryMapperUnitTest {
                 "cantinas, RESTAURANT",
                 "bistrô, RESTAURANT",
                 "bistros, RESTAURANT",
+                "catering.restaurant, RESTAURANT",
                 "café, CAFE",
                 "Cafés, CAFE",
                 "cafeteria, CAFE",
@@ -41,14 +42,14 @@ class TargetCategoryMapperUnitTest {
                 "coffee shop, CAFE",
                 "casa de chá, CAFE",
                 "casas de cha, CAFE",
+                "catering.cafe, CAFE",
                 "padaria, BAKERY",
                 "Padarias, BAKERY",
                 "panificadora, BAKERY",
                 "panificadoras, BAKERY",
                 "confeitaria, BAKERY",
                 "confeitarias, BAKERY",
-                "doceria, BAKERY",
-                "docerias, BAKERY",
+                "commercial.food_and_drink.bakery, BAKERY",
                 "bar, BAR",
                 "Bares, BAR",
                 "pub, BAR",
@@ -61,6 +62,8 @@ class TargetCategoryMapperUnitTest {
                 "botequins, BAR",
                 "cervejaria, BAR",
                 "cervejarias, BAR",
+                "catering.bar, BAR",
+                "catering.pub, BAR",
                 "fast food, FAST_FOOD",
                 "FAST_FOOD, FAST_FOOD",
                 "fastfood, FAST_FOOD",
@@ -70,23 +73,54 @@ class TargetCategoryMapperUnitTest {
                 "hamburguerias, FAST_FOOD",
                 "hambúrguer, FAST_FOOD",
                 "hamburgueres, FAST_FOOD",
+                "burger, FAST_FOOD",
+                "burgers, FAST_FOOD",
                 "pastelaria, FAST_FOOD",
                 "pastelarias, FAST_FOOD",
                 "pastel, FAST_FOOD",
                 "lanches, FAST_FOOD",
+                "catering.fast_food, FAST_FOOD",
                 "sorveteria, ICE_CREAM",
                 "sorveterias, ICE_CREAM",
                 "sorvete, ICE_CREAM",
                 "sorvetes, ICE_CREAM",
                 "gelateria, ICE_CREAM",
                 "gelaterias, ICE_CREAM",
-                "açaí, ICE_CREAM"
+                "açaí, ICE_CREAM",
+                "doceria, ICE_CREAM",
+                "docerias, ICE_CREAM",
+                "doces, ICE_CREAM",
+                "catering.ice_cream, ICE_CREAM"
         })
         @DisplayName("Mapeia corretamente termos de alimentação e bebidas")
         void shouldMapFoodAndDrink(String rawTerm, InterestCategory expectedCategory) {
             Optional<InterestCategory> result = TargetCategoryMapper.map(rawTerm);
             assertTrue(result.isPresent(), () -> "Deveria mapear o termo: " + rawTerm);
             assertEquals(expectedCategory, result.get());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "fast food",
+                "fast_food",
+                "fastfood",
+                "lanchonete",
+                "lanchonetes",
+                "hamburgueria",
+                "hamburguerias",
+                "hambúrguer",
+                "burger",
+                "pastelaria",
+                "pastelarias",
+                "catering.fast_food"
+        })
+        @DisplayName("Garante que termos de fast food produzem FAST_FOOD e NUNCA RESTAURANT")
+        void shouldProduceFastFoodAndNeverRestaurant(String rawTerm) {
+            Optional<InterestCategory> result = TargetCategoryMapper.map(rawTerm);
+            assertTrue(result.isPresent(), () -> "Termo deveria ser mapeado: " + rawTerm);
+            assertEquals(InterestCategory.FAST_FOOD, result.get(),
+                    () -> "Termo " + rawTerm + " deve produzir FAST_FOOD, e não RESTAURANT");
+            assertNotEquals(InterestCategory.RESTAURANT, result.get());
         }
     }
 
@@ -116,6 +150,8 @@ class TargetCategoryMapperUnitTest {
                 "hortifrutis, SUPERMARKET",
                 "quitanda, SUPERMARKET",
                 "quitandas, SUPERMARKET",
+                "commercial.supermarket, SUPERMARKET",
+                "commercial.clothing, FASHION",
                 "moda, FASHION",
                 "vestuário, FASHION",
                 "roupa, FASHION",
@@ -136,6 +172,7 @@ class TargetCategoryMapperUnitTest {
                 "sebos, BOOKS",
                 "papelaria, BOOKS",
                 "papelarias, BOOKS",
+                "commercial.books, BOOKS",
                 "tecnologia, TECHNOLOGY",
                 "eletrônico, TECHNOLOGY",
                 "eletrônicos, TECHNOLOGY",
@@ -151,6 +188,7 @@ class TargetCategoryMapperUnitTest {
                 "shopping, SHOPPING_MALL",
                 "shoppings, SHOPPING_MALL",
                 "shopping center, SHOPPING_MALL",
+                "commercial.shopping_mall, SHOPPING_MALL",
                 "galeria, SHOPPING_MALL",
                 "galerias, SHOPPING_MALL",
                 "beleza, BEAUTY",
@@ -160,6 +198,7 @@ class TargetCategoryMapperUnitTest {
                 "salões de beleza, BEAUTY",
                 "cabeleireiro, BEAUTY",
                 "cabeleireiros, BEAUTY",
+                "service.beauty.hairdresser, BEAUTY",
                 "estética, BEAUTY",
                 "manicure, BEAUTY",
                 "esmalteria, BEAUTY",
@@ -169,11 +208,13 @@ class TargetCategoryMapperUnitTest {
                 "pet shop, PET",
                 "petshop, PET",
                 "pet shops, PET",
+                "pet.shop, PET",
                 "veterinário, PET",
                 "veterinários, PET",
                 "veterinária, PET",
                 "clínica veterinária, PET",
                 "clinicas veterinarias, PET",
+                "pet.veterinary, PET",
                 "automotivo, AUTOMOTIVE",
                 "posto, AUTOMOTIVE",
                 "postos, AUTOMOTIVE",
@@ -181,10 +222,12 @@ class TargetCategoryMapperUnitTest {
                 "postos de gasolina, AUTOMOTIVE",
                 "posto de combustível, AUTOMOTIVE",
                 "postos de combustivel, AUTOMOTIVE",
+                "service.vehicle.fuel, AUTOMOTIVE",
                 "oficina, AUTOMOTIVE",
                 "oficinas, AUTOMOTIVE",
                 "oficina mecânica, AUTOMOTIVE",
                 "mecânica, AUTOMOTIVE",
+                "service.vehicle.repair.car, AUTOMOTIVE",
                 "auto elétrica, AUTOMOTIVE",
                 "auto eletricas, AUTOMOTIVE",
                 "borracharia, AUTOMOTIVE",
@@ -215,6 +258,7 @@ class TargetCategoryMapperUnitTest {
                 "jardins, PARK",
                 "parque ecológico, PARK",
                 "parks, PARK",
+                "leisure.park, PARK",
                 "academia, FITNESS",
                 "academias, FITNESS",
                 "esporte, FITNESS",
@@ -225,6 +269,7 @@ class TargetCategoryMapperUnitTest {
                 "pilates, FITNESS",
                 "quadra esportiva, FITNESS",
                 "quadras esportivas, FITNESS",
+                "sport.fitness.gym, FITNESS",
                 "cultura, CULTURE",
                 "cinema, CULTURE",
                 "cinemas, CULTURE",
@@ -278,6 +323,8 @@ class TargetCategoryMapperUnitTest {
                 "albergues, TRAVEL",
                 "viagem, TRAVEL",
                 "viagens, TRAVEL",
+                "accommodation.hotel, TRAVEL",
+                "accommodation.hostel, TRAVEL",
                 "saúde, HEALTH",
                 "farmácia, HEALTH",
                 "farmácias, HEALTH",
@@ -291,7 +338,11 @@ class TargetCategoryMapperUnitTest {
                 "clínicas, HEALTH",
                 "dentista, HEALTH",
                 "dentistas, HEALTH",
-                "odontologia, HEALTH"
+                "odontologia, HEALTH",
+                "healthcare.pharmacy, HEALTH",
+                "healthcare.hospital, HEALTH",
+                "healthcare.clinic_or_praxis, HEALTH",
+                "healthcare.dentist, HEALTH"
         })
         @DisplayName("Mapeia corretamente termos de lazer, cultura, games e bem-estar")
         void shouldMapLeisureAndWellbeing(String rawTerm, InterestCategory expectedCategory) {
