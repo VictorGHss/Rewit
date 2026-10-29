@@ -85,7 +85,7 @@ public final class TargetCategoryMapper {
                 "cabeleireiro", "cabeleireiros", "estetica", "manicure", "esmalteria", "esmalterias", "beauty");
 
         register(map, InterestCategory.PET,
-                "pet", "pet shop", "pet_shop", "petshop", "veterinario", "veterinarios",
+                "pet", "pets", "pet shop", "pet_shop", "petshop", "veterinario", "veterinarios",
                 "veterinaria", "clinica veterinaria", "clinicas veterinarias", "pet shops");
 
         register(map, InterestCategory.AUTOMOTIVE,
@@ -97,7 +97,7 @@ public final class TargetCategoryMapper {
         // 4. LEISURE_AND_WELLBEING
         register(map, InterestCategory.PARK,
                 "parque", "parques", "praca", "pracas", "bosque", "bosques",
-                "jardim", "jardins", "parque ecologico", "park");
+                "jardim", "jardins", "parque ecologico", "park", "parks");
 
         register(map, InterestCategory.FITNESS,
                 "academia", "academias", "esporte", "esportes", "fitness", "ginastica",
@@ -105,7 +105,7 @@ public final class TargetCategoryMapper {
 
         register(map, InterestCategory.CULTURE,
                 "cultura", "cinema", "cinemas", "teatro", "teatros", "museu", "museus",
-                "galeria de arte", "galerias de arte", "exposicao", "exposicoes", "culture");
+                "galeria de arte", "galerias de arte", "exposicao", "exposicoes", "culture", "museum", "museums");
 
         register(map, InterestCategory.EVENTS,
                 "evento", "eventos", "show", "shows", "festival", "festivais",
@@ -117,12 +117,12 @@ public final class TargetCategoryMapper {
                 "fliperama", "fliperamas", "arcade", "arcades", "lan house", "entretenimento", "gaming");
 
         register(map, InterestCategory.TRAVEL,
-                "hotel", "hoteis", "pousada", "pousadas", "resort", "resorts",
+                "hotel", "hoteis", "hotels", "pousada", "pousadas", "resort", "resorts",
                 "hostel", "hostels", "albergue", "albergues", "viagem", "viagens", "travel");
 
         register(map, InterestCategory.HEALTH,
-                "saude", "farmacia", "farmacias", "drogaria", "drogarias", "hospital",
-                "hospitais", "clinica", "clinicas", "dentista", "dentistas", "odontologia", "health");
+                "saude", "farmacia", "farmacias", "drogaria", "drogarias", "pharmacy", "pharmacies",
+                "hospital", "hospitais", "clinica", "clinicas", "dentista", "dentistas", "odontologia", "health");
 
         MAPPING = Collections.unmodifiableMap(map);
     }

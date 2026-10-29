@@ -165,6 +165,7 @@ class TargetCategoryMapperUnitTest {
                 "esmalteria, BEAUTY",
                 "esmalterias, BEAUTY",
                 "pet, PET",
+                "pets, PET",
                 "pet shop, PET",
                 "petshop, PET",
                 "pet shops, PET",
@@ -213,6 +214,7 @@ class TargetCategoryMapperUnitTest {
                 "jardim, PARK",
                 "jardins, PARK",
                 "parque ecológico, PARK",
+                "parks, PARK",
                 "academia, FITNESS",
                 "academias, FITNESS",
                 "esporte, FITNESS",
@@ -230,6 +232,8 @@ class TargetCategoryMapperUnitTest {
                 "teatros, CULTURE",
                 "museu, CULTURE",
                 "museus, CULTURE",
+                "museum, CULTURE",
+                "museums, CULTURE",
                 "galeria de arte, CULTURE",
                 "galerias de arte, CULTURE",
                 "exposição, CULTURE",
@@ -263,6 +267,7 @@ class TargetCategoryMapperUnitTest {
                 "entretenimento, GAMES",
                 "hotel, TRAVEL",
                 "hotéis, TRAVEL",
+                "hotels, TRAVEL",
                 "pousada, TRAVEL",
                 "pousadas, TRAVEL",
                 "resort, TRAVEL",
@@ -278,6 +283,8 @@ class TargetCategoryMapperUnitTest {
                 "farmácias, HEALTH",
                 "drogaria, HEALTH",
                 "drogarias, HEALTH",
+                "pharmacy, HEALTH",
+                "pharmacies, HEALTH",
                 "hospital, HEALTH",
                 "hospitais, HEALTH",
                 "clínica, HEALTH",
@@ -330,6 +337,13 @@ class TargetCategoryMapperUnitTest {
                 "otica",
                 "igreja",
                 "templo",
+                "gourmet",
+                "delicatessen",
+                "specialty_food",
+                "services",
+                "servicos",
+                "serviços",
+                "nightlife",
                 "",
                 "   "
         })
@@ -359,6 +373,23 @@ class TargetCategoryMapperUnitTest {
                 Optional<InterestCategory> result = TargetCategoryMapper.map(category.name());
                 assertTrue(result.isPresent(), () -> "Constante de enum não mapeada: " + category.name());
                 assertEquals(category, result.get());
+            }
+        }
+
+        @Test
+        @DisplayName("Garante que rótulos ilustrativos não são membros canônicos do enum InterestCategory")
+        void shouldConfirmIllustrativeLabelsAreNotEnumConstants() {
+            java.util.List<String> illustrativeLabels = java.util.List.of(
+                    "PETS", "PARKS", "GOURMET", "SPECIALTY_FOOD",
+                    "PHARMACY", "SERVICES", "MUSEUM", "NIGHTLIFE", "HOTEL"
+            );
+            java.util.List<String> canonicalNames = java.util.Arrays.stream(InterestCategory.values())
+                    .map(Enum::name)
+                    .toList();
+
+            for (String label : illustrativeLabels) {
+                assertFalse(canonicalNames.contains(label),
+                        () -> "Rótulo ilustrativo não deve ser constante do enum: " + label);
             }
         }
     }
