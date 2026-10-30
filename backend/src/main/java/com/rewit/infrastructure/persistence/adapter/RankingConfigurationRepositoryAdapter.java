@@ -29,4 +29,3 @@ public class RankingConfigurationRepositoryAdapter implements RankingConfigurati
                 .orElse(Instant.EPOCH);
     }
 }
-

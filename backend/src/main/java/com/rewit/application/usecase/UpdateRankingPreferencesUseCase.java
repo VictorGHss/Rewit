@@ -45,4 +45,3 @@ public class UpdateRankingPreferencesUseCase {
         return new RankingPreferencesDto(saved.isShowInRankings());
     }
 }
-

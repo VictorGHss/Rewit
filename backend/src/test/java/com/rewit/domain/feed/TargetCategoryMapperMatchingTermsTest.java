@@ -34,4 +34,3 @@ class TargetCategoryMapperMatchingTermsTest {
         assertTrue(terms.isEmpty());
     }
 }
-

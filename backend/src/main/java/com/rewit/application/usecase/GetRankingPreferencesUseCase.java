@@ -40,4 +40,3 @@ public class GetRankingPreferencesUseCase {
                 .orElseThrow(() -> new BusinessException("Perfil do usuário não encontrado", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
     }
 }
-
