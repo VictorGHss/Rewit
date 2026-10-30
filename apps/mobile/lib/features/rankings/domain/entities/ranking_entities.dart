@@ -121,13 +121,15 @@ class RankingPage {
   final int totalElements;
   final bool isLast;
 
-  /// Início efetivo da contagem (pode ser posterior ao início do período, quando a funcionalidade começou depois).
+  /// Início efetivo da contagem (`metadata.effectiveStart`): pode ser posterior ao início do período, quando os
+  /// rankings foram ativados depois dele.
   final DateTime? periodStart;
 
-  /// Fim exclusivo do período.
+  /// Fim exclusivo do período (`metadata.periodEnd`).
   final DateTime? periodEndExclusive;
 
-  /// O período ainda não cobre o intervalo completo (ex.: primeira semana após a ativação dos rankings).
+  /// O período ainda não cobre o intervalo completo (`metadata.isPartialPeriod`), como na primeira semana após a
+  /// ativação dos rankings.
   final bool partialPeriod;
 
   const RankingPage({

@@ -9,7 +9,8 @@ import '../../domain/repositories/ranking_repository.dart';
 /// Implementação de [RankingRepository] sobre a API REST do Rewit.
 ///
 /// O essencial do contrato é estrito: sem `content`, `rankPosition`, `score` inteiros ou `user.displayName`, a resposta
-/// é inválida e vira [FormatException]. Os metadados do período são opcionais e lidos na raiz ou em `metadata`.
+/// é inválida e vira [FormatException]. O mesmo vale para `metadata`, que o backend sempre devolve com
+/// `effectiveStart` (início efetivo), `periodEnd` (fim exclusivo), ambos em ISO-8601, e `isPartialPeriod`.
 class RankingRepositoryImpl implements RankingRepository {
   final RewitHttpClient httpClient;
 
@@ -72,16 +73,38 @@ class RankingRepositoryImpl implements RankingRepository {
     if (content is! List) {
       throw const FormatException('Resposta inválida do servidor ao carregar o ranking.');
     }
-    final metadata = json['metadata'] is Map<String, dynamic> ? json['metadata'] as Map<String, dynamic> : json;
+    final metadata = json['metadata'];
+    if (metadata is! Map<String, dynamic>) {
+      throw const FormatException('Resposta do ranking sem os metadados do período.');
+    }
+    final effectiveStart = _requiredInstant(metadata['effectiveStart']);
+    final periodEnd = _requiredInstant(metadata['periodEnd']);
+    final isPartialPeriod = metadata['isPartialPeriod'];
+    if (isPartialPeriod is! bool) {
+      throw const FormatException('Metadados do período inválidos na resposta do ranking.');
+    }
+    // Janela inativa (antes da ativação) vem com início efetivo igual ao fim; o início nunca passa do fim
+    if (effectiveStart.isAfter(periodEnd)) {
+      throw const FormatException('Metadados do período inválidos na resposta do ranking.');
+    }
     return RankingPage(
       entries: [for (final item in content) _entry(item)],
       pageNumber: (json['pageNumber'] as num?)?.toInt() ?? requestedPage,
       totalElements: (json['totalElements'] as num?)?.toInt() ?? content.length,
       isLast: json['isLast'] as bool? ?? true,
-      periodStart: _date(metadata['periodStart']),
-      periodEndExclusive: _date(metadata['periodEndExclusive']),
-      partialPeriod: metadata['partialPeriod'] == true,
+      periodStart: effectiveStart,
+      periodEndExclusive: periodEnd,
+      partialPeriod: isPartialPeriod,
     );
+  }
+
+  /// Data obrigatória dos metadados: ausente ou fora de ISO-8601 é resposta inválida, nunca um valor padrão.
+  static DateTime _requiredInstant(Object? value) {
+    final parsed = value is String ? DateTime.tryParse(value) : null;
+    if (parsed == null) {
+      throw const FormatException('Metadados do período inválidos na resposta do ranking.');
+    }
+    return parsed;
   }
 
   static RankingEntry _entry(Object? item) {

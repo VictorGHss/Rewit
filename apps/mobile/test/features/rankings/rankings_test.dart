@@ -10,6 +10,8 @@ import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
+import 'package:rewit_mobile/core/network/session_refresher.dart';
+import 'package:rewit_mobile/core/network/token_refreshing_client.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
@@ -222,6 +224,50 @@ List<String> _positions(WidgetTester tester) => [
         tester.widget<Text>(find.byKey(Key('ranking_position_$i'))).data!,
     ];
 
+/// Item no formato de `RankingItemResponse` do backend (agent/gemini/rankings-v1-backend @ 2b0ff7a).
+Map<String, dynamic> _apiItem(int position, String name, int score,
+        {bool me = false, String? handle, String? lastContributedAt}) =>
+    {
+      'rankPosition': position,
+      'user': {'id': 'id-$name', 'handle': handle, 'displayName': name, 'avatarUrl': null},
+      'score': score,
+      'lastContributedAt': lastContributedAt ?? '2026-10-29T18:00:00Z',
+      'isCurrentUser': me,
+    };
+
+/// Resposta no formato exato de `RankingPagedResponse` do backend: envelope paginado e `metadata` com
+/// `effectiveStart`, `periodEnd` (fim exclusivo) e `isPartialPeriod`.
+Map<String, dynamic> _apiPage({
+  List<Map<String, dynamic>> content = const [],
+  String rankingType = 'CHECK_INS',
+  String period = 'WEEK',
+  String state = 'PR',
+  String? city,
+  String? category,
+  String effectiveStart = '2026-11-02T03:00:00Z',
+  String periodEnd = '2026-11-09T03:00:00Z',
+  bool isPartialPeriod = false,
+  int? totalPages,
+}) =>
+    {
+      'content': content,
+      'pageNumber': 0,
+      'pageSize': 20,
+      'totalElements': content.length,
+      'totalPages': totalPages ?? (content.isEmpty ? 0 : 1),
+      'isLast': true,
+      'metadata': {
+        'rankingType': rankingType,
+        'period': period,
+        'state': state,
+        'city': city,
+        'category': category,
+        'effectiveStart': effectiveStart,
+        'periodEnd': periodEnd,
+        'isPartialPeriod': isPartialPeriod,
+      },
+    };
+
 class _Handler extends http.BaseClient {
   final Future<http.StreamedResponse> Function(http.BaseRequest request) handler;
 
@@ -250,9 +296,10 @@ void main() {
       return (RankingRepositoryImpl(httpClient: client), requests);
     }
 
-    test('cada métrica usa a própria rota, com período, UF, cidade, categoria e página; nenhum id de usuário',
+    test('cada métrica usa a própria rota, com período, UF, cidade, categoria e página; JWT da sessão, nenhum id',
         () async {
-      final (repo, requests) = await build({'content': [], 'pageNumber': 1, 'totalElements': 0, 'isLast': true});
+      final (repo, requests) = await build(_apiPage(period: 'MONTH', state: 'PR', city: 'Curitiba',
+          category: 'CAFE', effectiveStart: '2026-12-01T03:00:00Z', periodEnd: '2027-01-01T03:00:00Z'));
       const filters =
           RankingFilters(period: RankingPeriod.month, state: 'PR', city: '  Curitiba ', category: 'CAFE');
 
@@ -273,62 +320,181 @@ void main() {
         'page': '1',
         'size': '20',
       });
-      expect(requests.first.headers['authorization'], 'Bearer token');
+      for (final request in requests) {
+        expect(request.headers['authorization'], 'Bearer token', reason: request.url.path);
+        expect(request.url.queryParameters.keys, isNot(contains('userId')));
+      }
 
       await repo.getRanking(RankingMetric.checkIns, const RankingFilters(state: 'SP', city: '  '));
       expect(requests.last.url.queryParameters, {'period': 'WEEK', 'state': 'SP', 'page': '0', 'size': '20'});
       expect(() => repo.getRanking(RankingMetric.checkIns, const RankingFilters()), throwsArgumentError);
     });
 
-    test('lê posições empatadas, usuário da sessão e metadados do período (na raiz ou em metadata)', () async {
-      final (repo, _) = await build({
-        'content': [
-          {'rankPosition': 1, 'user': {'id': 'u1', 'handle': 'ana', 'displayName': 'Ana', 'avatarUrl': null},
-            'score': 9, 'lastContributedAt': '2026-10-28T10:00:00Z', 'isCurrentUser': true},
-          {'rankPosition': 1, 'user': {'displayName': 'Bruno'}, 'score': 9},
-          {'rankPosition': 3, 'user': {'displayName': 'Carla'}, 'score': 4, 'futureField': 'ignored'},
-        ],
-        'pageNumber': 0,
-        'pageSize': 20,
-        'totalElements': 3,
-        'totalPages': 1,
-        'isLast': true,
-        'metadata': {
-          'period': 'WEEK',
-          'periodStart': '2026-10-29T03:00:00Z',
-          'periodEndExclusive': '2026-11-02T03:00:00Z',
-          'partialPeriod': true,
-        },
+    test('401 AUTHENTICATION_REQUIRED nos rankings passa pela renovação de sessão existente e repete uma vez',
+        () async {
+      final storage = InMemoryTokenStorage();
+      await storage.saveTokens(accessToken: 'token-vencido', refreshToken: 'refresh');
+      final authorizations = <String?>[];
+      var refreshes = 0;
+      final inner = _Handler((request) async {
+        authorizations.add(request.headers['authorization']);
+        if (request.headers['authorization'] == 'Bearer token-vencido') {
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode({'status': 401, 'code': 'AUTHENTICATION_REQUIRED'}))),
+            401,
+            headers: {'content-type': 'application/problem+json'},
+          );
+        }
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(_apiPage(content: [_apiItem(1, 'Ana', 3, me: true)])))),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
       });
+      final client = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        tokenStorage: storage,
+        client: TokenRefreshingClient(
+          inner: inner,
+          sessionRefresher: SessionRefresher(refreshAccessToken: () async {
+            refreshes++;
+            await storage.saveTokens(accessToken: 'token-novo', refreshToken: 'refresh-2');
+            return 'token-novo';
+          }),
+        ),
+      );
 
-      final page = await repo.getRanking(RankingMetric.helpfulVotes, const RankingFilters(state: 'PR'));
+      final page = await RankingRepositoryImpl(httpClient: client)
+          .getRanking(RankingMetric.placesExplored, const RankingFilters(state: 'PR'));
 
-      expect(page.entries.map((e) => e.rankPosition), [1, 1, 3]);
+      expect(refreshes, 1);
+      expect(authorizations, ['Bearer token-vencido', 'Bearer token-novo']);
+      expect(page.entries.single.isCurrentUser, isTrue);
+    });
+
+    test('posições empatadas, usuário da sessão e campos extras do contrato real', () {
+      final page = RankingRepositoryImpl.parsePage(
+        _apiPage(
+          rankingType: 'HELPFUL_VOTES',
+          content: [
+            _apiItem(1, 'Ana', 9, me: true, handle: 'ana', lastContributedAt: '2026-10-28T10:00:00Z'),
+            _apiItem(1, 'Bruno', 9),
+            _apiItem(2, 'Carla', 4),
+          ],
+        ),
+        requestedPage: 0,
+      );
+
+      expect(page.entries.map((e) => e.rankPosition), [1, 1, 2], reason: 'DENSE_RANK do backend');
       expect(page.entries.first.isCurrentUser, isTrue);
+      expect(page.entries.first.user.id, 'id-Ana');
       expect(page.entries.first.lastContributedAt, DateTime.utc(2026, 10, 28, 10));
       expect(page.entries[1].user.handle, isNull);
       expect(page.entries[1].isCurrentUser, isFalse);
-      expect(page.partialPeriod, isTrue);
-      expect(page.periodStart, DateTime.utc(2026, 10, 29, 3));
-      expect(page.periodEndExclusive, DateTime.utc(2026, 11, 2, 3));
-
-      final flat = RankingRepositoryImpl.parsePage(
-          {'content': [], 'partialPeriod': false, 'periodStart': '2026-10-26T03:00:00Z'}, requestedPage: 0);
-      expect(flat.partialPeriod, isFalse);
-      expect(flat.periodStart, DateTime.utc(2026, 10, 26, 3));
+      expect(page.totalElements, 3);
+      expect(page.isLast, isTrue);
     });
 
-    test('erros estruturais não viram lista vazia', () {
-      for (final body in <Map<String, dynamic>>[
-        {'items': []},
-        {'content': [{'rankPosition': '1', 'user': {'displayName': 'A'}, 'score': 1}]},
-        {'content': [{'rankPosition': 1, 'user': {'displayName': 'A'}, 'score': 1.5}]},
-        {'content': [{'rankPosition': 1, 'user': {}, 'score': 1}]},
-        {'content': [{'rankPosition': 0, 'user': {'displayName': 'A'}, 'score': 1}]},
+    group('metadados do período (nomes do backend: effectiveStart, periodEnd, isPartialPeriod)', () {
+      test('semana completa', () {
+        final page = RankingRepositoryImpl.parsePage(
+          _apiPage(period: 'WEEK', effectiveStart: '2026-11-02T03:00:00Z', periodEnd: '2026-11-09T03:00:00Z'),
+          requestedPage: 0,
+        );
+        expect(page.periodStart, DateTime.utc(2026, 11, 2, 3));
+        expect(page.periodEndExclusive, DateTime.utc(2026, 11, 9, 3));
+        expect(page.partialPeriod, isFalse);
+      });
+
+      test('mês completo', () {
+        final page = RankingRepositoryImpl.parsePage(
+          _apiPage(period: 'MONTH', effectiveStart: '2026-12-01T03:00:00Z', periodEnd: '2027-01-01T03:00:00Z'),
+          requestedPage: 0,
+        );
+        expect(page.periodStart, DateTime.utc(2026, 12, 1, 3));
+        expect(page.periodEndExclusive, DateTime.utc(2027, 1, 1, 3));
+        expect(page.partialPeriod, isFalse);
+      });
+
+      test('primeiro período parcial: o início efetivo é a ativação, com fração de segundo do Instant', () {
+        final page = RankingRepositoryImpl.parsePage(
+          _apiPage(
+            period: 'WEEK',
+            effectiveStart: '2026-10-29T22:18:56.123456Z',
+            periodEnd: '2026-11-02T03:00:00Z',
+            isPartialPeriod: true,
+            content: [_apiItem(1, 'Ana', 2)],
+          ),
+          requestedPage: 0,
+        );
+        expect(page.partialPeriod, isTrue);
+        expect(page.periodStart, DateTime.utc(2026, 10, 29, 22, 18, 56, 123, 456));
+        expect(page.periodEndExclusive, DateTime.utc(2026, 11, 2, 3));
+        expect(page.entries, hasLength(1));
+      });
+
+      test('período anterior à ativação: lista vazia, início efetivo igual ao fim e sem período parcial', () {
+        final page = RankingRepositoryImpl.parsePage(
+          _apiPage(
+            period: 'WEEK',
+            effectiveStart: '2026-10-26T03:00:00Z',
+            periodEnd: '2026-10-26T03:00:00Z',
+            totalPages: 0,
+          ),
+          requestedPage: 0,
+        );
+        expect(page.entries, isEmpty);
+        expect(page.totalElements, 0);
+        expect(page.isLast, isTrue);
+        expect(page.partialPeriod, isFalse);
+        expect(page.periodStart, page.periodEndExclusive);
+      });
+
+      test('metadados ausentes ou inválidos são erro de formato, nunca valores padrão', () {
+        final valid = _apiPage();
+        Map<String, dynamic> withMetadata(void Function(Map<String, dynamic> metadata) change) {
+          final copy = jsonDecode(jsonEncode(valid)) as Map<String, dynamic>;
+          change(copy['metadata'] as Map<String, dynamic>);
+          return copy;
+        }
+
+        final cases = <String, Map<String, dynamic>>{
+          'sem metadata': (jsonDecode(jsonEncode(valid)) as Map<String, dynamic>)..remove('metadata'),
+          'metadata nulo': (jsonDecode(jsonEncode(valid)) as Map<String, dynamic>)..['metadata'] = null,
+          'sem effectiveStart': withMetadata((m) => m.remove('effectiveStart')),
+          'effectiveStart nulo': withMetadata((m) => m['effectiveStart'] = null),
+          'effectiveStart inválido': withMetadata((m) => m['effectiveStart'] = 'ontem'),
+          'periodEnd numérico': withMetadata((m) => m['periodEnd'] = 1793325466),
+          'sem isPartialPeriod': withMetadata((m) => m.remove('isPartialPeriod')),
+          'isPartialPeriod como texto': withMetadata((m) => m['isPartialPeriod'] = 'true'),
+          'início depois do fim': withMetadata((m) => m['effectiveStart'] = '2026-11-10T03:00:00Z'),
+          'só os nomes antigos': withMetadata((m) {
+            m['periodStart'] = m.remove('effectiveStart');
+            m['periodEndExclusive'] = m.remove('periodEnd');
+            m['partialPeriod'] = m.remove('isPartialPeriod');
+          }),
+        };
+        for (final entry in cases.entries) {
+          expect(() => RankingRepositoryImpl.parsePage(entry.value, requestedPage: 0), throwsFormatException,
+              reason: entry.key);
+        }
+        expect(RankingRepositoryImpl.parsePage(valid, requestedPage: 0).partialPeriod, isFalse);
+      });
+    });
+
+    test('erros estruturais das posições não viram lista vazia', () {
+      for (final content in <List<Object?>>[
+        [{'rankPosition': '1', 'user': {'displayName': 'A'}, 'score': 1}],
+        [{'rankPosition': 1, 'user': {'displayName': 'A'}, 'score': 1.5}],
+        [{'rankPosition': 1, 'user': {}, 'score': 1}],
+        [{'rankPosition': 0, 'user': {'displayName': 'A'}, 'score': 1}],
       ]) {
+        final body = _apiPage()..['content'] = content;
         expect(() => RankingRepositoryImpl.parsePage(body, requestedPage: 0), throwsFormatException,
-            reason: jsonEncode(body));
+            reason: jsonEncode(content));
       }
+      final withoutContent = _apiPage()..remove('content');
+      expect(() => RankingRepositoryImpl.parsePage(withoutContent, requestedPage: 0), throwsFormatException);
     });
 
     test('preferência: GET e PUT só com showInRankings; resposta sem booleano é inválida', () async {
@@ -446,6 +612,33 @@ void main() {
       expect(find.text('Bruno'), findsOneWidget);
       expect(find.byKey(const Key('rankings_partial_period')), findsOneWidget);
       expect(find.textContaining('A contagem começou em 29/10'), findsOneWidget);
+    });
+
+    testWidgets('resposta real do backend: período parcial mostra o aviso; semana completa não', (tester) async {
+      final auth = await _signedIn();
+      var partial = true;
+      final repository = _FakeRankingRepository(
+        auth: auth,
+        responder: (_) => RankingRepositoryImpl.parsePage(
+          _apiPage(
+            content: [_apiItem(1, 'Ana', 2, me: true, handle: 'ana')],
+            effectiveStart: partial ? '2026-10-29T15:00:00Z' : '2026-11-02T03:00:00Z',
+            periodEnd: partial ? '2026-11-02T03:00:00Z' : '2026-11-09T03:00:00Z',
+            isPartialPeriod: partial,
+          ),
+          requestedPage: 0,
+        ),
+      );
+      await _pumpRankings(tester, auth, repository);
+      await _chooseState(tester, 'PR');
+      expect(find.byKey(const Key('rankings_partial_period')), findsOneWidget);
+      expect(find.textContaining('A contagem começou em 29/10'), findsOneWidget);
+      expect(find.text('Ana (você)'), findsOneWidget);
+
+      partial = false;
+      await _chooseState(tester, 'SP');
+      expect(find.byKey(const Key('rankings_partial_period')), findsNothing);
+      expect(find.text('Ana (você)'), findsOneWidget);
     });
 
     testWidgets('paginação até o Top 100 e lista vazia', (tester) async {
