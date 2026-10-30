@@ -51,13 +51,23 @@ São suportados exatamente três rankings autônomos, sem ponderação cruzada n
   - Se a data de ativação for posterior ao encerramento do período, a consulta retorna resultado vazio válido.
 
 ### 5. Escopo Geográfico e Catálogo de Categorias
-- **Geografia**: `state` (UF brasileira de 2 letras) é obrigatório, validado contra `BrazilianState`. `city` é opcional e normalizado. Filtro por bairro (`neighborhood`) não é suportado pelo schema na V1.
-- **Categorias**: Filtro opcional via catálogo canônico de `InterestCategory` (onboarding V40), mapeado deterministicamente para as categorias de locais via `TargetCategoryMapper`. Não é criado nenhum catálogo paralelo.
+- **Geografia**: `state` (UF brasileira de 2 letras) é obrigatório, validado contra `BrazilianState`. `city` é opcional e comparado sob a normalização canônica `rewit_search_normalize` (insensível a acentuação, maiúsculas/minúsculas e espaços excedentes). Cidades homônimas em estados diferentes são isoladas com segurança pela obrigatoriedade da UF. Filtro por bairro (`neighborhood`) não é suportado pelo schema na V1.
+- **Categorias**: Filtro opcional via catálogo canônico de `InterestCategory` (onboarding V40), mapeado deterministicamente para as categorias de locais via `TargetCategoryMapper` e comparado no SQL com a mesma regra de normalização canônica (`rewit_search_normalize` e unificação de separadores). Não é criado nenhum catálogo paralelo e não ocorrem falsos positivos entre categorias distintas (ex.: `RESTAURANT` vs `FAST_FOOD`).
 
 ### 6. Empates Reais, Ordenação e Paginação
 - **Empate Real (`DENSE_RANK()`)**: Usuários com a mesma pontuação recebem a mesma posição no ranking (ex.: dois líderes com 10 check-ins ocupam ambos a posição 1; o próximo com 9 check-ins ocupa a posição 2).
 - **Ordenação Determinística**: A listagem é ordenada por `score DESC`, com desempate secundário estável por `user_id ASC`.
 - **Teto e Paginação**: Limite máximo de 100 participantes (`TOP 100`) por ranking. Paginação padronizada (`page`, `size` padrão 20, teto 50).
+
+### 7. Segurança, Autenticação e Governança de Contas
+- **Autenticação Obrigatória nos Rankings**: Os três endpoints (`GET /api/v1/rankings/*`) exigem autenticação centralizada via Spring Security (`Bearer <JWT>`). Não são expostos nomes, handles, avatares, localização e horários de contribuição para clientes não autenticados.
+- **Identificação do Usuário Logado**: A flag `isCurrentUser` nos DTOs de resposta é derivada estritamente da identidade do JWT (`authentication.getName()`), marcando `true` somente para o participante que coincide com o usuário logado.
+- **Política de Estado de Conta (`AccountStatusPolicy`)**: Endpoints de leitura e gravação de preferências (`GET/PUT /api/v1/me/ranking-preferences`) exigem conta operacional. Contas com status `SUSPENDED`, `DEACTIVATED` ou `DELETED` têm acesso recusado com `401 ACCOUNT_DISABLED`.
+
+### 8. Distinção entre Contadores Pessoais e Rankings Públicos
+- **Contadores de Perfil e Reputação Pessoal (`verifiedReviewsCount`, `UserStatsView`, `UserReputation`)**: Apresentam um agregado factual acumulado de todo o histórico do ciclo de vida da conta do próprio usuário. São computados sobre todas as contribuições ativas e não anônimas do usuário, independentemente de adesão voluntária a rankings ou recortes de cidade/estado/categoria.
+- **Rankings Públicos (`GET /api/v1/rankings/*`)**: Apresentam agregados analíticos locais e públicos, estritamente limitados à janela temporal solicitada (`WEEK`, `MONTH`), ao escopo geográfico (`state`, `city`) e de categoria, restritos exclusivamente a contas ativas operacionais que ativaram explicitamente a preferência de participação (`profiles.show_in_rankings = TRUE`).
+- **Invariante**: O valor de `verifiedReviewsCount` de um usuário não reflete nem deve coincidir com sua pontuação no ranking de check-ins, visto que este último possui recorte temporal, geográfico e filtro de opt-in.
 
 ---
 

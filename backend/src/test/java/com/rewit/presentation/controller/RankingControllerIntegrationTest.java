@@ -69,9 +69,10 @@ class RankingControllerIntegrationTest {
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private String defaultCallerToken;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
                 .apply(springSecurity())
                 .build();
@@ -81,6 +82,8 @@ class RankingControllerIntegrationTest {
                 "rankings_activated_at",
                 Instant.now().minus(30, ChronoUnit.DAYS)
         ));
+
+        defaultCallerToken = registerUserWithOptIn("caller", false).accessToken();
     }
 
     private record TestUser(String accessToken, UUID userId, String handle, String displayName) {}
@@ -184,51 +187,259 @@ class RankingControllerIntegrationTest {
     }
 
     // =========================================================================
-    // 1. Validações HTTP e Tratamento RFC 7807
+    // 1. Autenticação Obrigatória nos Rankings (ADR-016 / Item 4)
     // =========================================================================
 
     @Test
-    @DisplayName("1. Falta de parâmetro obrigatório state retorna 400 MISSING_PARAMETER ou MISSING_STATE")
+    @DisplayName("Requisição sem token nos endpoints de rankings retorna 401 Unauthorized")
+    void shouldRequireAuthenticationForRankingEndpoints() throws Exception {
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/v1/rankings/places-explored?state=SP"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/v1/rankings/helpful-votes?state=SP"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Requisição com token inválido retorna 401 Unauthorized")
+    void shouldRejectInvalidToken() throws Exception {
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP")
+                        .header("Authorization", "Bearer token_completamente_invalido_xyz"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Requisição com token válido é permitida")
+    void shouldAllowAuthenticatedUser() throws Exception {
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("isCurrentUser é true somente para a conta autenticada correspondente")
+    void shouldSetIsCurrentUserOnlyForAuthenticatedUser() throws Exception {
+        String city = "SaoPauloAuth" + UUID.randomUUID().toString().substring(0, 6);
+        Place place = createPlace("Teatro Municipal", "CULTURE", city, "SP");
+
+        TestUser participantA = registerUserWithOptIn("parta", true);
+        TestUser participantB = registerUserWithOptIn("partb", true);
+
+        ReviewJpaEntity revA = createReview(participantA.userId(), place.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(participantA.userId(), place.getId(), revA.getId(), "VERIFIED");
+
+        ReviewJpaEntity revB = createReview(participantB.userId(), place.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(participantB.userId(), place.getId(), revB.getId(), "VERIFIED");
+
+        // Consulta autenticada como participantA: item de A tem isCurrentUser=true, item de B tem false
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city)
+                        .header("Authorization", "Bearer " + participantA.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(2)))
+                .andExpect(jsonPath("$.content[?(@.user.id == '" + participantA.userId() + "')].isCurrentUser").value(contains(true)))
+                .andExpect(jsonPath("$.content[?(@.user.id == '" + participantB.userId() + "')].isCurrentUser").value(contains(false)));
+
+        // Consulta autenticada como participantB: item de B tem isCurrentUser=true, item de A tem false
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city)
+                        .header("Authorization", "Bearer " + participantB.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(2)))
+                .andExpect(jsonPath("$.content[?(@.user.id == '" + participantA.userId() + "')].isCurrentUser").value(contains(false)))
+                .andExpect(jsonPath("$.content[?(@.user.id == '" + participantB.userId() + "')].isCurrentUser").value(contains(true)));
+    }
+
+    // =========================================================================
+    // 2. Validações HTTP e Tratamento RFC 7807 (Autenticado)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Falta de parâmetro obrigatório state retorna 400 MISSING_PARAMETER ou MISSING_STATE")
     void shouldRequireStateParameter() throws Exception {
-        mockMvc.perform(get("/api/v1/rankings/check-ins"))
+        mockMvc.perform(get("/api/v1/rankings/check-ins")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MISSING_PARAMETER"));
 
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state="))
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MISSING_STATE"));
     }
 
     @Test
-    @DisplayName("2. Sigla de estado inválida retorna 400 INVALID_STATE")
+    @DisplayName("Sigla de estado inválida retorna 400 INVALID_STATE")
     void shouldRejectInvalidStateCode() throws Exception {
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=XX"))
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=XX")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_STATE"));
     }
 
     @Test
-    @DisplayName("3. Período inválido ou não suportado (ex: ALL_TIME) retorna 400 INVALID_RANKING_PERIOD")
+    @DisplayName("Período inválido ou não suportado (ex: ALL_TIME) retorna 400 INVALID_RANKING_PERIOD")
     void shouldRejectAllTimeOrInvalidPeriod() throws Exception {
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&period=ALL_TIME"))
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&period=ALL_TIME")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_RANKING_PERIOD"));
     }
 
     @Test
-    @DisplayName("4. Categoria fora do catálogo e não mapeável retorna 400 INVALID_CATEGORY")
+    @DisplayName("Categoria fora do catálogo e não mapeável retorna 400 INVALID_CATEGORY")
     void shouldRejectInvalidCategory() throws Exception {
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&category=CATEGORIA_TOTALMENTE_INVALIDA"))
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&category=CATEGORIA_TOTALMENTE_INVALIDA")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_CATEGORY"));
     }
 
     // =========================================================================
-    // 2. Opt-in e Exclusão de Não Participantes (Privacidade)
+    // 3. Normalização de Categorias e Isolamento sem Falsos Positivos (Item 1)
     // =========================================================================
 
     @Test
-    @DisplayName("5. Usuário sem opt-in (showInRankings=false) não aparece nos rankings")
+    @DisplayName("Normalização canônica de categorias: Café, Bistrô, Hambúrguer, catering.restaurant, catering.fast_food")
+    void shouldNormalizeCategoriesAndPreventFalsePositives() throws Exception {
+        String city = "CatTest" + UUID.randomUUID().toString().substring(0, 6);
+
+        Place cafePlace = createPlace("Aroma Café", "Café", city, "SP");
+        Place bistroPlace = createPlace("Le Paris", "Bistrô", city, "SP");
+        Place burgerPlace = createPlace("Burger House", "Hambúrguer", city, "SP");
+        Place catRestPlace = createPlace("Restaurante Vila", "catering.restaurant", city, "SP");
+        Place catFastPlace = createPlace("Snack Express", "catering.fast_food", city, "SP");
+
+        TestUser userCafe = registerUserWithOptIn("ucafe", true);
+        TestUser userBistro = registerUserWithOptIn("ubistro", true);
+        TestUser userBurger = registerUserWithOptIn("uburger", true);
+        TestUser userCatRest = registerUserWithOptIn("ucatrest", true);
+        TestUser userCatFast = registerUserWithOptIn("ucatfast", true);
+
+        // Check-in no Café
+        ReviewJpaEntity r1 = createReview(userCafe.userId(), cafePlace.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(userCafe.userId(), cafePlace.getId(), r1.getId(), "VERIFIED");
+
+        // Check-in no Bistrô
+        ReviewJpaEntity r2 = createReview(userBistro.userId(), bistroPlace.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(userBistro.userId(), bistroPlace.getId(), r2.getId(), "VERIFIED");
+
+        // Check-in no Hambúrguer
+        ReviewJpaEntity r3 = createReview(userBurger.userId(), burgerPlace.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(userBurger.userId(), burgerPlace.getId(), r3.getId(), "VERIFIED");
+
+        // Check-in no catering.restaurant
+        ReviewJpaEntity r4 = createReview(userCatRest.userId(), catRestPlace.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(userCatRest.userId(), catRestPlace.getId(), r4.getId(), "VERIFIED");
+
+        // Check-in no catering.fast_food
+        ReviewJpaEntity r5 = createReview(userCatFast.userId(), catFastPlace.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(userCatFast.userId(), catFastPlace.getId(), r5.getId(), "VERIFIED");
+
+        // 1. Consulta category=CAFE: somente userCafe aparece
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city + "&category=CAFE")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].user.id").value(userCafe.userId().toString()));
+
+        // 2. Consulta category=RESTAURANT: aparecem Bistrô e catering.restaurant, NÃO aparece Hambúrguer nem catering.fast_food
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city + "&category=RESTAURANT")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(2)))
+                .andExpect(jsonPath("$.content[*].user.id", containsInAnyOrder(
+                        userBistro.userId().toString(),
+                        userCatRest.userId().toString()
+                )))
+                .andExpect(jsonPath("$.content[*].user.id", not(hasItem(userBurger.userId().toString()))))
+                .andExpect(jsonPath("$.content[*].user.id", not(hasItem(userCatFast.userId().toString()))));
+
+        // 3. Consulta category=FAST_FOOD: aparecem Hambúrguer e catering.fast_food, NÃO aparece Bistrô nem catering.restaurant
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city + "&category=FAST_FOOD")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(2)))
+                .andExpect(jsonPath("$.content[*].user.id", containsInAnyOrder(
+                        userBurger.userId().toString(),
+                        userCatFast.userId().toString()
+                )))
+                .andExpect(jsonPath("$.content[*].user.id", not(hasItem(userBistro.userId().toString()))))
+                .andExpect(jsonPath("$.content[*].user.id", not(hasItem(userCatRest.userId().toString()))));
+    }
+
+    // =========================================================================
+    // 4. Normalização de Cidade com rewit_search_normalize (Item 2)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Normalização de cidade trata acentos, caixa e espaços, e isola cidades homônimas pela UF")
+    void shouldNormalizeCityAndIsolateHomonymousAcrossStates() throws Exception {
+        String cityFloripa = "Florianópolis";
+        Place placeFloripa = createPlace("Pizzaria Lagoa", "RESTAURANT", cityFloripa, "SC");
+
+        TestUser floripaUser = registerUserWithOptIn("flp", true);
+        ReviewJpaEntity r1 = createReview(floripaUser.userId(), placeFloripa.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(floripaUser.userId(), placeFloripa.getId(), r1.getId(), "VERIFIED");
+
+        // 1. Diferença de acento: busca "Florianopolis" encontra "Florianópolis"
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SC&city=Florianopolis")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].user.id").value(floripaUser.userId().toString()));
+
+        // 2. Maiúsculas e minúsculas: busca "FLORIANOPOLIS" e "florianopolis"
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SC&city=FLORIANOPOLIS")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].user.id").value(floripaUser.userId().toString()));
+
+        // 3. Espaços antes e depois: busca "  Florianopolis  "
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SC")
+                        .param("city", "  Florianopolis  ")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].user.id").value(floripaUser.userId().toString()));
+
+        // 4. Cidades homônimas em estados diferentes permanecem isoladas pela UF
+        String homonymCity = "Cruzeiro" + UUID.randomUUID().toString().substring(0, 4);
+        Place placeSP = createPlace("Local SP", "BAR", homonymCity, "SP");
+        Place placeDF = createPlace("Local DF", "BAR", homonymCity, "DF");
+
+        TestUser userSP = registerUserWithOptIn("usp", true);
+        TestUser userDF = registerUserWithOptIn("udf", true);
+
+        ReviewJpaEntity rSP = createReview(userSP.userId(), placeSP.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(userSP.userId(), placeSP.getId(), rSP.getId(), "VERIFIED");
+
+        ReviewJpaEntity rDF = createReview(userDF.userId(), placeDF.getId(), false, "ACTIVE", "PUBLIC");
+        createCheckIn(userDF.userId(), placeDF.getId(), rDF.getId(), "VERIFIED");
+
+        // Consulta em SP: retorna apenas userSP
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + homonymCity)
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].user.id").value(userSP.userId().toString()));
+
+        // Consulta no DF: retorna apenas userDF
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=DF&city=" + homonymCity)
+                        .header("Authorization", "Bearer " + defaultCallerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].user.id").value(userDF.userId().toString()));
+    }
+
+    // =========================================================================
+    // 5. Opt-in e Exclusão de Não Participantes (Privacidade)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Usuário sem opt-in (showInRankings=false) não aparece nos rankings")
     void shouldExcludeUsersWithoutOptIn() throws Exception {
         String city = "CampinasOpt" + UUID.randomUUID().toString().substring(0, 6);
         Place place = createPlace("Padaria do Centro", "BAKERY", city, "SP");
@@ -243,7 +454,8 @@ class RankingControllerIntegrationTest {
         ReviewJpaEntity r2 = createReview(userWithOptIn.userId(), place.getId(), false, "ACTIVE", "PUBLIC");
         createCheckIn(userWithOptIn.userId(), place.getId(), r2.getId(), "VERIFIED");
 
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city))
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city)
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(1)))
                 .andExpect(jsonPath("$.content[0].user.id").value(userWithOptIn.userId().toString()))
@@ -251,11 +463,11 @@ class RankingControllerIntegrationTest {
     }
 
     // =========================================================================
-    // 3. Ranking de Check-ins: Status VERIFIED e Avaliações Elegíveis
+    // 6. Ranking de Check-ins: Status VERIFIED e Avaliações Elegíveis
     // =========================================================================
 
     @Test
-    @DisplayName("6. Ranking de check-ins conta apenas VERIFIED, avaliações públicas não anônimas e respeita o estado")
+    @DisplayName("Ranking de check-ins conta apenas VERIFIED, avaliações públicas não anônimas e respeita o estado")
     void shouldFilterCheckInsCorrectly() throws Exception {
         String citySP = "CitySP" + UUID.randomUUID().toString().substring(0, 6);
         String cityRJ = "CityRJ" + UUID.randomUUID().toString().substring(0, 6);
@@ -289,7 +501,8 @@ class RankingControllerIntegrationTest {
         ReviewJpaEntity r6 = createReview(leader.userId(), placeRJ.getId(), false, "ACTIVE", "PUBLIC");
         createCheckIn(leader.userId(), placeRJ.getId(), r6.getId(), "VERIFIED");
 
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + citySP + "&period=WEEK"))
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + citySP + "&period=WEEK")
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].user.id").value(leader.userId().toString()))
                 .andExpect(jsonPath("$.content[0].score").value(2))
@@ -302,11 +515,11 @@ class RankingControllerIntegrationTest {
     }
 
     // =========================================================================
-    // 4. Ranking de Locais Distintos Explorados (/places-explored)
+    // 7. Ranking de Locais Distintos Explorados (/places-explored)
     // =========================================================================
 
     @Test
-    @DisplayName("7. Ranking de locais explorados conta DISTINCT context_place_id (múltiplas avaliações no mesmo local contam 1)")
+    @DisplayName("Ranking de locais explorados conta DISTINCT context_place_id (múltiplas avaliações no mesmo local contam 1)")
     void shouldCountDistinctPlacesExplored() throws Exception {
         String city = "Santos" + UUID.randomUUID().toString().substring(0, 6);
         Place placeA = createPlace("Café Aroma", "CAFE", city, "SP");
@@ -321,7 +534,8 @@ class RankingControllerIntegrationTest {
         // Explorer avalia Place B uma vez
         createReview(explorer.userId(), placeB.getId(), false, "ACTIVE", "PUBLIC");
 
-        mockMvc.perform(get("/api/v1/rankings/places-explored?state=SP&city=" + city))
+        mockMvc.perform(get("/api/v1/rankings/places-explored?state=SP&city=" + city)
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].user.id").value(explorer.userId().toString()))
                 .andExpect(jsonPath("$.content[0].score").value(2)) // 2 locais distintos, mesmo com 3 avaliações
@@ -330,11 +544,11 @@ class RankingControllerIntegrationTest {
     }
 
     // =========================================================================
-    // 5. Ranking de Votos Úteis (/helpful-votes)
+    // 8. Ranking de Votos Úteis (/helpful-votes)
     // =========================================================================
 
     @Test
-    @DisplayName("8. Ranking de votos úteis conta reações HELPFUL excluindo voto próprio e avaliações anônimas")
+    @DisplayName("Ranking de votos úteis conta reações HELPFUL excluindo voto próprio e avaliações anônimas")
     void shouldCountHelpfulVotesCorrectly() throws Exception {
         String city = "CampinasVot" + UUID.randomUUID().toString().substring(0, 6);
         Place place = createPlace("Churrascaria Gaúcha", "RESTAURANT", city, "SP");
@@ -359,7 +573,8 @@ class RankingControllerIntegrationTest {
         ReviewJpaEntity reviewAnon = createReview(author.userId(), place.getId(), true, "ACTIVE", "PUBLIC");
         createReaction(voter1.userId(), reviewAnon.getId(), "HELPFUL");
 
-        mockMvc.perform(get("/api/v1/rankings/helpful-votes?state=SP&city=" + city))
+        mockMvc.perform(get("/api/v1/rankings/helpful-votes?state=SP&city=" + city)
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].user.id").value(author.userId().toString()))
                 .andExpect(jsonPath("$.content[0].score").value(2))
@@ -368,11 +583,11 @@ class RankingControllerIntegrationTest {
     }
 
     // =========================================================================
-    // 6. Empate Real via DENSE_RANK() e Ordenação Determinística
+    // 9. Empate Real via DENSE_RANK() e Ordenação Determinística
     // =========================================================================
 
     @Test
-    @DisplayName("9. Empates reais recebem a mesma posição via DENSE_RANK() e ordenação secundária por userId ASC")
+    @DisplayName("Empates reais recebem a mesma posição via DENSE_RANK() e ordenação secundária por userId ASC")
     void shouldHandleDenseRankTiesDeterministically() throws Exception {
         String city = "Ribeirao" + UUID.randomUUID().toString().substring(0, 6);
         Place place = createPlace("Livraria Cultura", "BOOKS", city, "SP");
@@ -396,69 +611,15 @@ class RankingControllerIntegrationTest {
         ReviewJpaEntity rc1 = createReview(userC.userId(), place.getId(), false, "ACTIVE", "PUBLIC");
         createCheckIn(userC.userId(), place.getId(), rc1.getId(), "VERIFIED");
 
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city))
+        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city)
+                        .header("Authorization", "Bearer " + defaultCallerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(3)))
-                // Primeiros dois empatados com score 2 têm rankPosition = 1
                 .andExpect(jsonPath("$.content[0].rankPosition").value(1))
                 .andExpect(jsonPath("$.content[0].score").value(2))
                 .andExpect(jsonPath("$.content[1].rankPosition").value(1))
                 .andExpect(jsonPath("$.content[1].score").value(2))
-                // Terceiro usuário tem rankPosition = 2 (DENSE_RANK não salta para 3)
                 .andExpect(jsonPath("$.content[2].rankPosition").value(2))
                 .andExpect(jsonPath("$.content[2].score").value(1));
-    }
-
-    // =========================================================================
-    // 7. Contexto de Usuário Autenticado (isCurrentUser)
-    // =========================================================================
-
-    @Test
-    @DisplayName("10. isCurrentUser é true apenas para o participante autenticado, e false em consulta anônima")
-    void shouldEnrichIsCurrentUserFlag() throws Exception {
-        String city = "SaoPauloUser" + UUID.randomUUID().toString().substring(0, 6);
-        Place place = createPlace("Teatro Municipal", "CULTURE", city, "SP");
-
-        TestUser participant = registerUserWithOptIn("part", true);
-        ReviewJpaEntity rev = createReview(participant.userId(), place.getId(), false, "ACTIVE", "PUBLIC");
-        createCheckIn(participant.userId(), place.getId(), rev.getId(), "VERIFIED");
-
-        // Consulta autenticada pelo próprio participante
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city)
-                        .header("Authorization", "Bearer " + participant.accessToken()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].isCurrentUser").value(true));
-
-        // Consulta anônima (sem header Authorization)
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].isCurrentUser").value(false));
-    }
-
-    // =========================================================================
-    // 8. Filtro por Categoria Mapeada via InterestCategory
-    // =========================================================================
-
-    @Test
-    @DisplayName("11. Filtro category=RESTAURANT retorna apenas locais cuja categoria mapeia para RESTAURANT")
-    void shouldFilterByCategory() throws Exception {
-        String city = "CampinasCat" + UUID.randomUUID().toString().substring(0, 6);
-        Place restaurantPlace = createPlace("Bistrô Francês", "bistro", city, "SP");
-        Place gymPlace = createPlace("Academia Top", "academia", city, "SP");
-
-        TestUser foodLover = registerUserWithOptIn("food", true);
-        TestUser athlete = registerUserWithOptIn("ath", true);
-
-        ReviewJpaEntity rFood = createReview(foodLover.userId(), restaurantPlace.getId(), false, "ACTIVE", "PUBLIC");
-        createCheckIn(foodLover.userId(), restaurantPlace.getId(), rFood.getId(), "VERIFIED");
-
-        ReviewJpaEntity rGym = createReview(athlete.userId(), gymPlace.getId(), false, "ACTIVE", "PUBLIC");
-        createCheckIn(athlete.userId(), gymPlace.getId(), rGym.getId(), "VERIFIED");
-
-        mockMvc.perform(get("/api/v1/rankings/check-ins?state=SP&city=" + city + "&category=RESTAURANT"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content", hasSize(1)))
-                .andExpect(jsonPath("$.content[0].user.id").value(foodLover.userId().toString()))
-                .andExpect(jsonPath("$.metadata.category").value("RESTAURANT"));
     }
 }

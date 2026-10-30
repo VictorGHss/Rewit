@@ -83,8 +83,6 @@ public class SecurityConfig {
                                 "/api/v1/auth/social/apple", "/api/v1/auth/social/google/reactivate",
                                 "/api/v1/auth/social/apple/reactivate", "/api/v1/auth/apple/callback").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
-                        // Rankings V1 públicos (ADR-016)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/rankings/**").permitAll()
                         // Endpoints de autenticação protegidos
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").authenticated()

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -31,6 +32,9 @@ class RankingPreferencesControllerIntegrationTest {
 
     @Autowired
     private WebApplicationContext webApplicationContext;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -115,5 +119,80 @@ class RankingPreferencesControllerIntegrationTest {
                         .header("Authorization", "Bearer " + user.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.showInRankings").value(false));
+    }
+
+    @Test
+    @DisplayName("Conta ACTIVE: GET e PUT em preferências permitidos com 200 OK")
+    void shouldAllowGetAndPutForActiveAccount() throws Exception {
+        TestUser user = registerUser("active");
+
+        mockMvc.perform(get("/api/v1/me/ranking-preferences")
+                        .header("Authorization", "Bearer " + user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.showInRankings").value(false));
+
+        mockMvc.perform(put("/api/v1/me/ranking-preferences")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"showInRankings\": true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.showInRankings").value(true));
+    }
+
+    @Test
+    @DisplayName("Conta SUSPENDED: GET e PUT recusados com 401 ACCOUNT_DISABLED")
+    void shouldRejectGetAndPutForSuspendedAccount() throws Exception {
+        TestUser user = registerUser("susp");
+        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", user.userId());
+
+        mockMvc.perform(get("/api/v1/me/ranking-preferences")
+                        .header("Authorization", "Bearer " + user.accessToken()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+
+        mockMvc.perform(put("/api/v1/me/ranking-preferences")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"showInRankings\": true}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+    }
+
+    @Test
+    @DisplayName("Conta DEACTIVATED: GET e PUT recusados com 401 ACCOUNT_DISABLED")
+    void shouldRejectGetAndPutForDeactivatedAccount() throws Exception {
+        TestUser user = registerUser("deact");
+        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = false WHERE id = ?", user.userId());
+
+        mockMvc.perform(get("/api/v1/me/ranking-preferences")
+                        .header("Authorization", "Bearer " + user.accessToken()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+
+        mockMvc.perform(put("/api/v1/me/ranking-preferences")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"showInRankings\": true}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+    }
+
+    @Test
+    @DisplayName("Conta DELETED: GET e PUT recusados com 401 ACCOUNT_DISABLED")
+    void shouldRejectGetAndPutForDeletedAccount() throws Exception {
+        TestUser user = registerUser("del");
+        jdbcTemplate.update("UPDATE users SET account_status = 'DELETED', is_active = false, deleted_at = now() WHERE id = ?", user.userId());
+
+        mockMvc.perform(get("/api/v1/me/ranking-preferences")
+                        .header("Authorization", "Bearer " + user.accessToken()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
+
+        mockMvc.perform(put("/api/v1/me/ranking-preferences")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"showInRankings\": true}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"));
     }
 }

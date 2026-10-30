@@ -170,6 +170,7 @@ public final class TargetCategoryMapper {
             return Collections.emptySet();
         }
         Set<String> terms = new HashSet<>();
+        terms.add(normalize(category.name()));
         terms.add(category.name());
         terms.add(category.name().toLowerCase(Locale.ROOT));
         for (Map.Entry<String, InterestCategory> entry : MAPPING.entrySet()) {
@@ -186,7 +187,10 @@ public final class TargetCategoryMapper {
         }
     }
 
-    private static String normalize(String value) {
+    public static String normalize(String value) {
+        if (value == null) {
+            return "";
+        }
         return BrazilianState.fold(value).replace("_", " ").replace(".", " ").replaceAll("\\s+", " ").trim();
     }
 }

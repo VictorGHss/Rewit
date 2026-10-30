@@ -1,6 +1,7 @@
 package com.rewit.infrastructure.persistence.adapter;
 
 import com.rewit.application.port.RankingRepository;
+import com.rewit.domain.feed.TargetCategoryMapper;
 import com.rewit.domain.model.BrazilianState;
 import com.rewit.domain.model.RankingItem;
 import jakarta.persistence.EntityManager;
@@ -211,10 +212,10 @@ public class RankingRepositoryAdapter implements RankingRepository {
 
     private void applyOptionalFilters(StringBuilder sql, String city, Set<String> categories) {
         if (city != null && !city.isBlank()) {
-            sql.append(" AND LOWER(TRIM(pl.city)) = LOWER(TRIM(:city)) ");
+            sql.append(" AND btrim(rewit_search_normalize(pl.city)) = btrim(rewit_search_normalize(:city)) ");
         }
         if (categories != null && !categories.isEmpty()) {
-            sql.append(" AND LOWER(TRIM(pl.category)) IN (:categories) ");
+            sql.append(" AND (pl.category IS NOT NULL AND btrim(regexp_replace(replace(replace(rewit_search_normalize(pl.category), '_', ' '), '.', ' '), '\\s+', ' ', 'g')) IN (:categories)) ");
         }
     }
 
@@ -224,7 +225,8 @@ public class RankingRepositoryAdapter implements RankingRepository {
         }
         if (categories != null && !categories.isEmpty()) {
             Set<String> normalizedCategories = categories.stream()
-                    .map(c -> c.trim().toLowerCase())
+                    .map(TargetCategoryMapper::normalize)
+                    .filter(s -> !s.isBlank())
                     .collect(Collectors.toSet());
             query.setParameter("categories", normalizedCategories);
         }
