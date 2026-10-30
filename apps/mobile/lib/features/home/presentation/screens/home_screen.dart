@@ -6,6 +6,7 @@ import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/check_ins/domain/repositories/check_in_repository.dart';
 import 'package:rewit_mobile/features/check_ins/presentation/screens/check_in_screen.dart';
+import 'package:rewit_mobile/features/rankings/presentation/widgets/rankings_entry_card.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
@@ -251,6 +252,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return Column(
         children: [
           _buildUserHeaderCard(context, auth),
+          const RankingsEntryCard(),
           Expanded(
             child: FeedView(
               feedNotifier: widget.feedNotifier!,
@@ -301,6 +303,7 @@ class _HomeScreenState extends State<HomeScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildUserHeaderCard(context, auth),
+          const RankingsEntryCard(),
           const SizedBox(height: 24),
 
           // Seção de Feed Inicial

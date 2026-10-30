@@ -3,6 +3,8 @@ import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/rankings/domain/repositories/ranking_repository.dart';
+import 'package:rewit_mobile/features/rankings/presentation/widgets/ranking_participation_section.dart';
 import 'package:rewit_mobile/shared/widgets/error_banner.dart';
 
 /// Tela de configurações e gerenciamento de conta do usuário autenticado.
@@ -10,10 +12,14 @@ class AccountSettingsScreen extends StatefulWidget {
   final AuthNotifier authNotifier;
   final VoidCallback? onDeactivated;
 
+  /// Participação nos Rankings da Região; sem ele, a seção não aparece.
+  final RankingRepository? rankingRepository;
+
   const AccountSettingsScreen({
     super.key,
     required this.authNotifier,
     this.onDeactivated,
+    this.rankingRepository,
   });
 
   @override
@@ -227,6 +233,48 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               ),
             ),
             const SizedBox(height: 16),
+
+            // Seção: Rankings da Região (participação voluntária, desativada até a pessoa ativar)
+            if (widget.rankingRepository != null && authenticatedUser != null) ...[
+              Card(
+                key: const Key('ranking_participation_card'),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.leaderboard_outlined, color: theme.colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Rankings da Região',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      RankingParticipationSection(
+                        repository: widget.rankingRepository!,
+                        userId: authenticatedUser.id,
+                        currentUserId: () {
+                          final current = widget.authNotifier.state;
+                          return current is Authenticated ? current.user.id : null;
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Seção: Segurança (C5.11)
             Card(
