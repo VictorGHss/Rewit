@@ -58,4 +58,3 @@ public class RankingTimeWindowCalculator {
         return RankingTimeWindow.active(periodStart, periodEnd, periodStart, false);
     }
 }
-

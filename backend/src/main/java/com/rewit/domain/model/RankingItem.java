@@ -30,4 +30,3 @@ public record RankingItem(
         Objects.requireNonNull(displayName, "displayName must not be null");
     }
 }
-

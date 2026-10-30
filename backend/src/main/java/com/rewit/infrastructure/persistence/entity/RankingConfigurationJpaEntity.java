@@ -58,4 +58,3 @@ public class RankingConfigurationJpaEntity {
         this.updatedAt = updatedAt;
     }
 }
-

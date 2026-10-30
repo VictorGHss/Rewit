@@ -48,4 +48,3 @@ public interface RankingRepository {
             int limit
     );
 }
-

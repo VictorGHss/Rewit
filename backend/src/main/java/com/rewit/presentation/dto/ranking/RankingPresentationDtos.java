@@ -117,4 +117,3 @@ public final class RankingPresentationDtos {
         }
     }
 }
-

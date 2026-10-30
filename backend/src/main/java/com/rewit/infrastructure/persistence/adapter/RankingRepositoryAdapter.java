@@ -275,4 +275,3 @@ public class RankingRepositoryAdapter implements RankingRepository {
         return Instant.parse(value.toString());
     }
 }
-

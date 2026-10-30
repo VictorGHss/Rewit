@@ -10,4 +10,3 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface RankingConfigurationJpaRepository extends JpaRepository<RankingConfigurationJpaEntity, String> {
 }
-

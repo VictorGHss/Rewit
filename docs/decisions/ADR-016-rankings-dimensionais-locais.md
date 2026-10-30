@@ -82,4 +82,3 @@ São suportados exatamente três rankings autônomos, sem ponderação cruzada n
 ### Negativas / Restrições:
 - Usuários que esquecerem de habilitar o opt-in não aparecem nos rankings até ativarem nas configurações.
 - Consultas analíticas exigem índices parciais no banco de dados e execução de agregações locais sob demanda.
-

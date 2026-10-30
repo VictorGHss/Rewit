@@ -36,4 +36,3 @@ public record RankingTimeWindow(
         return new RankingTimeWindow(periodStart, periodEnd, effectiveStart, isPartialPeriod, true);
     }
 }
-

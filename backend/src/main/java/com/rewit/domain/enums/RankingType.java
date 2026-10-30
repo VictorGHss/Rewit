@@ -9,4 +9,3 @@ public enum RankingType {
     PLACES_EXPLORED,
     HELPFUL_VOTES
 }
-

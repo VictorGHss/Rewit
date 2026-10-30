@@ -35,4 +35,3 @@ class RankingPeriodUnitTest {
         assertEquals("INVALID_RANKING_PERIOD", ex.getErrorCode());
     }
 }
-
