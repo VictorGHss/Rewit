@@ -325,6 +325,49 @@ class _StubProductRepo implements ProductRepository {
   Future<Uint8List> getProductImageBytes(String imageUrl) async => Uint8List(0);
 }
 
+Future<void> _verifyScreenInTheme({
+  required WidgetTester tester,
+  required String screenName,
+  required Widget screen,
+  required ThemeData theme,
+}) async {
+  final isDark = theme.brightness == Brightness.dark;
+  final themeLabel = isDark ? 'escuro' : 'claro';
+
+  await tester.pumpWidget(
+    MaterialApp(
+      themeAnimationDuration: Duration.zero,
+      theme: theme,
+      home: screen,
+    ),
+  );
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 50));
+
+  expect(
+    tester.takeException(),
+    isNull,
+    reason: 'Nenhuma exceção de renderização/layout em $screenName ($themeLabel)',
+  );
+
+  if (isDark) {
+    final cards = tester.widgetList<Card>(find.byType(Card));
+    for (final card in cards) {
+      final resolvedColor = card.color ?? theme.cardTheme.color!;
+      expect(
+        resolvedColor,
+        isNot(Colors.white),
+        reason: '$screenName não pode ter Card branco no modo escuro',
+      );
+      expect(
+        resolvedColor.computeLuminance(),
+        lessThan(0.05),
+        reason: '$screenName deve manter superfícies escuras em Cards',
+      );
+    }
+  }
+}
+
 void main() {
   group('9. Componentes compartilhados nos temas claro e escuro', () {
     for (final entry in {
@@ -454,95 +497,91 @@ void main() {
       'claro': AppTheme.lightTheme,
       'escuro': AppTheme.darkTheme,
     }.entries) {
-      testWidgets('renderiza Home/Feed, Rankings, Search, Check-in, Perfil, Configurações, Notificações, ReviewDetail e Scanner no tema ${entry.key}',
-          (tester) async {
-        final theme = entry.value;
-        final isDark = theme.brightness == Brightness.dark;
+      final themeLabel = entry.key;
+      final theme = entry.value;
+
+      testWidgets('HomeScreen e ReviewCard no tema $themeLabel', (tester) async {
         final authNotifier = AuthNotifier(authRepository: _StubAuthRepo());
         await authNotifier.checkAuthStatus();
         final feedRepo = _StubFeedRepo();
         final feedNotifier = FeedNotifier(feedRepository: feedRepo);
         await feedNotifier.loadInitial();
 
-        Future<void> verifyScreen(String screenName, Widget screen) async {
-          await tester.pumpWidget(
-            MaterialApp(
-              themeAnimationDuration: Duration.zero,
-              theme: theme,
-              home: screen,
-            ),
-          );
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 50));
-
-          expect(
-            tester.takeException(),
-            isNull,
-            reason: 'Nenhuma exceção de renderização/layout em $screenName (${entry.key})',
-          );
-
-          if (isDark) {
-            final cards = tester.widgetList<Card>(find.byType(Card));
-            for (final card in cards) {
-              final resolvedColor = card.color ?? theme.cardTheme.color!;
-              expect(
-                resolvedColor,
-                isNot(Colors.white),
-                reason: '$screenName não pode ter Card branco no modo escuro',
-              );
-              expect(
-                resolvedColor.computeLuminance(),
-                lessThan(0.05),
-                reason: '$screenName deve manter superfícies escuras em Cards',
-              );
-            }
-          }
-        }
-
-        // 1. Home + Feed + ReviewCard
-        await verifyScreen(
-          'HomeScreen',
-          HomeScreen(
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'HomeScreen',
+          screen: HomeScreen(
             authNotifier: authNotifier,
             feedNotifier: feedNotifier,
             searchRepository: _StubSearchRepo(),
             notificationRepository: _StubNotificationRepo(),
           ),
+          theme: theme,
         );
+
         expect(find.text('Lucas Andrade'), findsOneWidget);
         expect(find.text('Ótimo atendimento e pão artesanal fresquinho.'), findsOneWidget);
         expect(find.text('Local • 4.5'), findsOneWidget);
 
-        // 2. Rankings
-        await verifyScreen(
-          'RankingsScreen',
-          RankingsScreen(
+        feedNotifier.dispose();
+        authNotifier.dispose();
+      });
+
+      testWidgets('RankingsScreen no tema $themeLabel', (tester) async {
+        final authNotifier = AuthNotifier(authRepository: _StubAuthRepo());
+        await authNotifier.checkAuthStatus();
+
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'RankingsScreen',
+          screen: RankingsScreen(
             repository: _StubRankingRepo(),
             authNotifier: authNotifier,
           ),
+          theme: theme,
         );
 
-        // 3. Search + SearchResultCard
-        final searchScreen = SearchScreen(
-          searchRepository: _StubSearchRepo(),
-          authNotifier: authNotifier,
-        );
-        await verifyScreen('SearchScreen', searchScreen);
+        authNotifier.dispose();
+      });
 
-        // 4. Check-in
-        await verifyScreen(
-          'CheckInScreen',
-          CheckInScreen(
+      testWidgets('SearchScreen e SearchResultCard no tema $themeLabel', (tester) async {
+        final authNotifier = AuthNotifier(authRepository: _StubAuthRepo());
+        await authNotifier.checkAuthStatus();
+
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'SearchScreen',
+          screen: SearchScreen(
+            searchRepository: _StubSearchRepo(),
+            authNotifier: authNotifier,
+          ),
+          theme: theme,
+        );
+
+        authNotifier.dispose();
+      });
+
+      testWidgets('CheckInScreen no tema $themeLabel', (tester) async {
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'CheckInScreen',
+          screen: CheckInScreen(
             reviewCreationRepository: _StubReviewCreationRepo(),
             locationService: null,
             checkInRepository: _StubCheckInRepo(),
           ),
+          theme: theme,
         );
+      });
 
-        // 5. Perfil
-        await verifyScreen(
-          'UserProfileScreen',
-          UserProfileScreen(
+      testWidgets('UserProfileScreen no tema $themeLabel', (tester) async {
+        final authNotifier = AuthNotifier(authRepository: _StubAuthRepo());
+        await authNotifier.checkAuthStatus();
+
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'UserProfileScreen',
+          screen: UserProfileScreen(
             authNotifier: authNotifier,
             initialProfile: const UserProfile(
               id: 'u-1',
@@ -558,50 +597,73 @@ void main() {
               ),
             ),
           ),
+          theme: theme,
         );
 
-        // 6. Configurações da Conta
-        await verifyScreen(
-          'AccountSettingsScreen',
-          AccountSettingsScreen(
+        authNotifier.dispose();
+      });
+
+      testWidgets('AccountSettingsScreen no tema $themeLabel', (tester) async {
+        final authNotifier = AuthNotifier(authRepository: _StubAuthRepo());
+        await authNotifier.checkAuthStatus();
+
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'AccountSettingsScreen',
+          screen: AccountSettingsScreen(
             authNotifier: authNotifier,
             themeController: ThemeController(storage: InMemoryThemePreferenceStorage()),
           ),
+          theme: theme,
         );
 
-        // 7. Notificações + NotificationItemCard
-        await verifyScreen(
-          'NotificationsScreen',
-          NotificationsScreen(repository: _StubNotificationRepo()),
-        );
+        authNotifier.dispose();
+      });
 
-        // 8. Review Detail
-        await verifyScreen(
-          'ReviewDetailScreen',
-          ReviewDetailScreen(
+      testWidgets('NotificationsScreen no tema $themeLabel', (tester) async {
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'NotificationsScreen',
+          screen: NotificationsScreen(repository: _StubNotificationRepo()),
+          theme: theme,
+        );
+      });
+
+      testWidgets('ReviewDetailScreen no tema $themeLabel', (tester) async {
+        final feedRepo = _StubFeedRepo();
+
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'ReviewDetailScreen',
+          screen: ReviewDetailScreen(
             reviewId: feedRepo.sampleReview.id,
             initialReview: feedRepo.sampleReview,
             feedRepository: feedRepo,
           ),
+          theme: theme,
         );
+      });
 
-        // 9. Scanner (ativa + resultado de produto encontrado em card inferior elevado)
+      testWidgets('ScannerScreen e resultado de produto no tema $themeLabel', (tester) async {
         final scannerNotifier = ScannerNotifier(productRepository: _StubProductRepo());
-        await verifyScreen(
-          'ScannerScreen (scanning)',
-          ScannerScreen(
+
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'ScannerScreen (scanning)',
+          screen: ScannerScreen(
             notifier: scannerNotifier,
             cameraBuilder: (_, __) => const ColoredBox(color: Color(0xFF000000)),
           ),
+          theme: theme,
         );
+
         await scannerNotifier.onCodeDetected('7891234567895');
         await tester.pump();
         expect(find.text('Produto encontrado'), findsOneWidget);
         expect(find.textContaining('Café Torrado Especial'), findsOneWidget);
         expect(tester.takeException(), isNull);
+
         scannerNotifier.dispose();
-        feedNotifier.dispose();
-        authNotifier.dispose();
       });
     }
   });

@@ -147,4 +147,3 @@ class ThemeControllerScope extends InheritedNotifier<ThemeController> {
         ?.notifier;
   }
 }
-
