@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
 
 /// Componente visual reutilizável para exibição de banners contextuais de erro
 /// ou sucesso, suporte a detalhes de erro (RFC 7807), aviso de espera por
@@ -20,7 +22,7 @@ class ErrorBanner extends StatelessWidget {
     this.icon,
     this.footer,
     this.margin,
-    this.padding = const EdgeInsets.all(12),
+    this.padding = RewitSpacing.bannerPadding,
   });
 
   /// Formata a mensagem padronizada de espera para rate limiting (HTTP 429).
@@ -33,18 +35,10 @@ class ErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final bannerColor = isSuccess ? Colors.green : theme.colorScheme.error;
-    final bannerIcon = icon ?? (isSuccess ? Icons.check_circle_outline : Icons.error_outline);
-    final backgroundColor = isSuccess
-        ? Colors.green.withAlpha(25)
-        : theme.colorScheme.errorContainer.withAlpha(120);
-    final borderColor = isSuccess
-        ? Colors.green.withAlpha(100)
-        : theme.colorScheme.error.withAlpha(80);
-    final textColor = isSuccess
-        ? Colors.green.shade800
-        : theme.colorScheme.onErrorContainer;
+    final semantic = RewitSemanticColors.of(context);
+    final tone = isSuccess ? semantic.success : semantic.danger;
+    final bannerIcon =
+        icon ?? (isSuccess ? Icons.check_circle_outline : Icons.error_outline);
 
     return Semantics(
       container: true,
@@ -54,9 +48,9 @@ class ErrorBanner extends StatelessWidget {
         margin: margin,
         padding: padding,
         decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: borderColor),
+          color: tone.container,
+          borderRadius: RewitRadius.borderMd,
+          border: Border.all(color: tone.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -67,15 +61,15 @@ class ErrorBanner extends StatelessWidget {
               children: [
                 Icon(
                   bannerIcon,
-                  color: bannerColor,
+                  color: tone.accent,
                   size: 20,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: RewitSpacing.sm),
                 Expanded(
                   child: Text(
                     message,
                     style: TextStyle(
-                      color: textColor,
+                      color: tone.onContainer,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                     ),
@@ -90,7 +84,7 @@ class ErrorBanner extends StatelessWidget {
                 child: Text(
                   formatRetryAfter(retryAfterSeconds!),
                   style: TextStyle(
-                    color: bannerColor,
+                    color: tone.accent,
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),

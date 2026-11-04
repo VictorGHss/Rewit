@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
 
 /// Diálogo acessível para submissão de denúncia contra um comentário.
@@ -15,7 +16,8 @@ class ReportDiscussionDialog extends StatefulWidget {
   static Future<void> show(
     BuildContext context, {
     required String discussionId,
-    required Future<String> Function(ReportReason reason, String? detail) onConfirm,
+    required Future<String> Function(ReportReason reason, String? detail)
+        onConfirm,
   }) {
     return showDialog(
       context: context,
@@ -51,15 +53,22 @@ class _ReportDiscussionDialogState extends State<ReportDiscussionDialog> {
     try {
       final message = await widget.onConfirm(
         _selectedReason,
-        _detailController.text.trim().isNotEmpty ? _detailController.text.trim() : null,
+        _detailController.text.trim().isNotEmpty
+            ? _detailController.text.trim()
+            : null,
       );
 
       if (mounted) {
+        final semantic = RewitSemanticColors.of(context);
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.green.shade700,
+            content: Text(
+              message,
+              style: TextStyle(color: semantic.success.onContainer),
+            ),
+            backgroundColor: semantic.success.container,
           ),
         );
       }
@@ -67,7 +76,8 @@ class _ReportDiscussionDialogState extends State<ReportDiscussionDialog> {
       if (mounted) {
         setState(() {
           _isSubmitting = false;
-          _errorMessage = 'Falha ao enviar denúncia. Tente novamente mais tarde.';
+          _errorMessage =
+              'Falha ao enviar denúncia. Tente novamente mais tarde.';
         });
       }
     }
@@ -75,6 +85,8 @@ class _ReportDiscussionDialogState extends State<ReportDiscussionDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return AlertDialog(
       title: const Text('Denunciar Comentário'),
       content: SingleChildScrollView(
@@ -91,12 +103,15 @@ class _ReportDiscussionDialogState extends State<ReportDiscussionDialog> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: scheme.errorContainer,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   _errorMessage!,
-                  style: TextStyle(color: Colors.red.shade800, fontSize: 12),
+                  style: TextStyle(
+                    color: scheme.onErrorContainer,
+                    fontSize: 12,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -112,15 +127,16 @@ class _ReportDiscussionDialogState extends State<ReportDiscussionDialog> {
                 children: ReportReason.values.map((reason) {
                   return RadioListTile<ReportReason>(
                     value: reason,
-                    title: Text(reason.label, style: const TextStyle(fontSize: 13)),
+                    title: Text(
+                      reason.label,
+                      style: const TextStyle(fontSize: 13),
+                    ),
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                   );
                 }).toList(),
               ),
             ),
-
-
             const SizedBox(height: 12),
             TextField(
               controller: _detailController,
@@ -145,10 +161,13 @@ class _ReportDiscussionDialogState extends State<ReportDiscussionDialog> {
         FilledButton(
           onPressed: _isSubmitting ? null : _submit,
           child: _isSubmitting
-              ? const SizedBox(
+              ? SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 )
               : const Text('Enviar denúncia'),
         ),

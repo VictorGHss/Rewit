@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../app/theme/rewit_semantic_colors.dart';
 import '../../domain/repositories/place_commercial_repository.dart';
 import '../state/place_amenities_edit_notifier.dart';
 import '../../../../shared/widgets/error_view.dart';
@@ -73,19 +74,27 @@ class _PlaceAmenitiesEditScreenState extends State<PlaceAmenitiesEditScreen> {
     );
 
     if (!mounted) return;
+    final semantic = RewitSemanticColors.of(context);
+    final scheme = Theme.of(context).colorScheme;
 
     if (success) {
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text(_notifier.successMessage ?? 'Comodidades atualizadas com sucesso.'),
-          backgroundColor: Colors.green,
+          content: Text(
+            _notifier.successMessage ?? 'Comodidades atualizadas com sucesso.',
+            style: TextStyle(color: semantic.success.onContainer),
+          ),
+          backgroundColor: semantic.success.container,
         ),
       );
     } else if (_notifier.errorMessage != null) {
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text(_notifier.errorMessage!),
-          backgroundColor: Theme.of(context).colorScheme.error,
+          content: Text(
+            _notifier.errorMessage!,
+            style: TextStyle(color: scheme.onErrorContainer),
+          ),
+          backgroundColor: scheme.errorContainer,
         ),
       );
     }
@@ -217,10 +226,13 @@ class _PlaceAmenitiesEditScreenState extends State<PlaceAmenitiesEditScreen> {
           key: const Key('save_amenities_bottom_button'),
           onPressed: _notifier.isSaving ? null : _handleSave,
           icon: _notifier.isSaving
-              ? const SizedBox(
+              ? SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 )
               : const Icon(Icons.save),
           label: const Text('Salvar Comodidades'),

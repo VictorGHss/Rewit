@@ -19,15 +19,29 @@ class AppButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final effectiveOnPressed = isLoading ? null : onPressed;
 
-    Widget childWidget = isLoading
-        ? const SizedBox(
+    final outlinedSpinnerColor = theme.outlinedButtonTheme.style?.foregroundColor
+            ?.resolve(const <WidgetState>{}) ??
+        theme.colorScheme.primary;
+    final filledBackground = theme.elevatedButtonTheme.style?.backgroundColor
+            ?.resolve(const <WidgetState>{}) ??
+        theme.colorScheme.primary;
+    final filledSpinnerColor = theme.elevatedButtonTheme.style?.foregroundColor
+            ?.resolve(const <WidgetState>{}) ??
+        theme.colorScheme.onPrimary;
+
+    final spinnerColor =
+        isOutlined ? outlinedSpinnerColor : filledSpinnerColor;
+
+    final Widget childWidget = isLoading
+        ? SizedBox(
             height: 20,
             width: 20,
             child: CircularProgressIndicator(
               strokeWidth: 2.5,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              valueColor: AlwaysStoppedAnimation<Color>(spinnerColor),
             ),
           )
         : (icon != null
@@ -50,6 +64,12 @@ class AppButton extends StatelessWidget {
 
     return ElevatedButton(
       onPressed: effectiveOnPressed,
+      style: isLoading
+          ? ElevatedButton.styleFrom(
+              disabledBackgroundColor: filledBackground,
+              disabledForegroundColor: filledSpinnerColor,
+            )
+          : null,
       child: childWidget,
     );
   }

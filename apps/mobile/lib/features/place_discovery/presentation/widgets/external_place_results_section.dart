@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/services/url_launcher_service.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
@@ -297,6 +298,7 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = RewitSemanticColors.of(context);
     final results = _results;
     final mutedStyle = TextStyle(fontSize: 11, color: theme.colorScheme.onSurface.withAlpha(150));
 
@@ -330,7 +332,7 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
           const SizedBox(height: 2),
           Text('Fora do catálogo Rewit. O local só entra no catálogo quando você o adota.', style: mutedStyle),
           const SizedBox(height: 8),
-          _buildRegionSelector(theme, mutedStyle),
+          _buildRegionSelector(theme, semantic, mutedStyle),
           const SizedBox(height: 6),
           Align(
             alignment: Alignment.centerLeft,
@@ -386,7 +388,9 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: _resultsRegion is UnrestrictedRegion ? Colors.orange.shade900 : theme.colorScheme.tertiary,
+                color: _resultsRegion is UnrestrictedRegion
+                    ? semantic.warning.onContainer
+                    : theme.colorScheme.tertiary,
               ),
             ),
           ],
@@ -430,7 +434,11 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
     );
   }
 
-  Widget _buildRegionSelector(ThemeData theme, TextStyle mutedStyle) {
+  Widget _buildRegionSelector(
+    ThemeData theme,
+    RewitSemanticColors semantic,
+    TextStyle mutedStyle,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -504,7 +512,11 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
           ExternalRegionMode.anywhere => Text(
               'Sem restrição geográfica: os resultados podem ser de qualquer cidade.',
               key: const Key('external_region_anywhere_hint'),
-              style: TextStyle(fontSize: 11, color: Colors.orange.shade900, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                fontSize: 11,
+                color: semantic.warning.onContainer,
+                fontWeight: FontWeight.w500,
+              ),
             ),
         },
       ],

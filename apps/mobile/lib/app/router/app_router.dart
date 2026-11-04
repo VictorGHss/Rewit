@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:rewit_mobile/app/theme/theme_controller.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -115,6 +116,9 @@ class AppRouter {
   /// Rankings da Região e participação voluntária (Configurações da Conta).
   final RankingRepository? rankingRepository;
 
+  /// Controlador local de aparência do aplicativo (`ThemeMode.system`, `light` ou `dark`).
+  final ThemeController? themeController;
+
   /// Seletor da fotografia do cadastro manual; nulo usa a câmera/galeria do dispositivo.
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
@@ -142,6 +146,7 @@ class AppRouter {
     this.onPickManualPlacePhoto,
     this.checkInRepository,
     this.rankingRepository,
+    this.themeController,
   });
 
   String? _currentUserId() {
@@ -489,6 +494,7 @@ class AppRouter {
           builder: (context) => AccountSettingsScreen(
             authNotifier: authNotifier,
             rankingRepository: rankingRepository,
+            themeController: themeController,
           ),
           settings: settings,
         );

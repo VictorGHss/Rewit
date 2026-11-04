@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/config/app_config.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
+import 'package:rewit_mobile/app/theme/theme_controller.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 
 /// Widget raiz do aplicativo Rewit.
@@ -14,11 +15,13 @@ import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 class RewitApp extends StatefulWidget {
   final AppConfig config;
   final AppRouter router;
+  final ThemeController? themeController;
 
   const RewitApp({
     super.key,
     required this.config,
     required this.router,
+    this.themeController,
   });
 
   @override
@@ -30,6 +33,12 @@ class _RewitAppState extends State<RewitApp> {
 
   /// Usuário da última sessão resolvida (autenticada ou encerrada); estados intermediários não contam.
   String? _sessionUserId;
+  ThemeController? _fallbackThemeController;
+
+  ThemeController get _effectiveThemeController =>
+      widget.themeController ??
+      widget.router.themeController ??
+      (_fallbackThemeController ??= ThemeController());
 
   @override
   void initState() {
@@ -50,6 +59,7 @@ class _RewitAppState extends State<RewitApp> {
   @override
   void dispose() {
     widget.router.authNotifier.removeListener(_onAuthChanged);
+    _fallbackThemeController?.dispose();
     super.dispose();
   }
 
@@ -68,17 +78,29 @@ class _RewitAppState extends State<RewitApp> {
     }
   }
 
-  static String? _resolvedUserId(AuthState state) => state is Authenticated ? state.user.id : null;
+  static String? _resolvedUserId(AuthState state) =>
+      state is Authenticated ? state.user.id : null;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: _navigatorKey,
-      title: widget.config.appName,
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      initialRoute: AppRouter.root,
-      onGenerateRoute: widget.router.onGenerateRoute,
+    final themeController = _effectiveThemeController;
+    return ThemeControllerScope(
+      controller: themeController,
+      child: ListenableBuilder(
+        listenable: themeController,
+        builder: (context, _) {
+          return MaterialApp(
+            navigatorKey: _navigatorKey,
+            title: widget.config.appName,
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: themeController.themeMode,
+            initialRoute: AppRouter.root,
+            onGenerateRoute: widget.router.onGenerateRoute,
+          );
+        },
+      ),
     );
   }
 }

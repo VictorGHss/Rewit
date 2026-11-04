@@ -2,11 +2,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/check_ins/domain/repositories/check_in_repository.dart';
 import 'package:rewit_mobile/features/check_ins/presentation/screens/check_in_screen.dart';
-import 'package:rewit_mobile/features/rankings/presentation/widgets/rankings_entry_card.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/screens/feed_view.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
@@ -19,6 +19,7 @@ import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/profile_placeholder_screen.dart';
+import 'package:rewit_mobile/features/rankings/presentation/widgets/rankings_entry_card.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
@@ -109,7 +110,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _notificationsNotifier = widget.notificationsNotifier;
       _internalNotificationsNotifier = false;
     } else if (widget.notificationRepository != null) {
-      _notificationsNotifier = NotificationsNotifier(repository: widget.notificationRepository!);
+      _notificationsNotifier =
+          NotificationsNotifier(repository: widget.notificationRepository!);
       _internalNotificationsNotifier = true;
     }
     _notificationsNotifier?.fetchUnreadCount();
@@ -138,23 +140,27 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _confirmLogout() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Encerrar Sessão'),
-        content: const Text('Deseja realmente sair da sua conta?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          title: const Text('Encerrar Sessão'),
+          content: const Text('Deseja realmente sair da sua conta?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
             ),
-            child: const Text('Sair'),
-          ),
-        ],
-      ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              child: const Text('Sair'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirmed == true && mounted) {
@@ -172,11 +178,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildUserHeaderCard(BuildContext context, Authenticated auth) {
     final user = auth.user;
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return Card(
-      elevation: 0.5,
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         key: const Key('home_user_header_card'),
@@ -185,18 +190,21 @@ class _HomeScreenState extends State<HomeScreen> {
           button: true,
           hint: 'Abrir meu perfil',
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor: theme.colorScheme.primary.withAlpha(30),
+                  backgroundColor: scheme.secondaryContainer,
                   child: Text(
-                    user.displayName.isNotEmpty ? user.displayName[0].toUpperCase() : 'U',
+                    user.displayName.isNotEmpty
+                        ? user.displayName[0].toUpperCase()
+                        : 'U',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.primary,
+                      color: scheme.onSecondaryContainer,
                     ),
                   ),
                 ),
@@ -221,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             Icon(
                               Icons.verified,
                               size: 14,
-                              color: theme.colorScheme.primary,
+                              color: scheme.primary,
                             ),
                           ],
                         ],
@@ -230,7 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         '@${user.handle}',
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: theme.colorScheme.onSurface.withAlpha(160),
+                          color: scheme.onSurfaceVariant,
                           fontSize: 12,
                         ),
                       ),
@@ -238,7 +246,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.onSurface.withAlpha(120)),
+                Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: scheme.onSurfaceVariant,
+                ),
               ],
             ),
           ),
@@ -269,7 +281,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   widget.feedNotifier?.removeReview(id);
                 }
               },
-
               onAuthorTap: (authorId) {
                 Navigator.of(context).pushNamed(
                   AppRouter.profile,
@@ -296,9 +307,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
+      padding: RewitSpacing.screenPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -317,20 +329,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // Estado vazio / Placeholder do Feed
           Card(
-            elevation: 0,
-            color: theme.colorScheme.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.grey.withAlpha(50)),
-            ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 36.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20.0,
+                vertical: 36.0,
+              ),
               child: Column(
                 children: [
                   Icon(
                     Icons.dynamic_feed_outlined,
                     size: 48,
-                    color: theme.colorScheme.primary.withAlpha(150),
+                    color: scheme.primary,
                   ),
                   const SizedBox(height: 16),
                   Text(
@@ -344,7 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     'A fundação técnica de rede e autenticação está ativa. Em breve você verá aqui avaliações de lugares ao seu redor.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: theme.colorScheme.onSurface.withAlpha(160),
+                      color: scheme.onSurfaceVariant,
                       fontSize: 14,
                     ),
                   ),
@@ -404,13 +413,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 widget.feedNotifier?.removeReview(id);
               }
             },
-
           ),
           CheckInScreen(
             reviewCreationRepository: widget.reviewCreationRepository,
             locationService: widget.locationService,
             checkInRepository: widget.checkInRepository,
-            onOpenHistory: () => Navigator.of(context).pushNamed(AppRouter.myCheckIns),
+            onOpenHistory: () =>
+                Navigator.of(context).pushNamed(AppRouter.myCheckIns),
             onReviewCreated: (_) => widget.feedNotifier?.refresh(),
           ),
           ProfilePlaceholderScreen(
@@ -444,12 +453,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     return IconButton(
                       icon: Badge(
                         isLabelVisible: unreadCount > 0,
-                        label: Text(unreadCount > 99 ? '99+' : '$unreadCount'),
+                        label:
+                            Text(unreadCount > 99 ? '99+' : '$unreadCount'),
                         child: const Icon(Icons.notifications_outlined),
                       ),
                       tooltip: 'Notificações',
                       onPressed: () async {
-                        await Navigator.of(context).pushNamed(AppRouter.notifications);
+                        await Navigator.of(context)
+                            .pushNamed(AppRouter.notifications);
                         if (mounted) {
                           _notificationsNotifier?.fetchUnreadCount();
                         }
@@ -464,7 +475,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSelected: (action) {
                   switch (action) {
                     case _HomeMenuAction.settings:
-                      Navigator.of(context).pushNamed(AppRouter.accountSettings);
+                      Navigator.of(context)
+                          .pushNamed(AppRouter.accountSettings);
                     case _HomeMenuAction.logout:
                       _confirmLogout();
                   }

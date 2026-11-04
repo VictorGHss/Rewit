@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_privacy_rules.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
@@ -52,7 +54,8 @@ class ReviewCard extends StatelessWidget {
       return target.targetType!.toUpperCase();
     }
     // Quando o targetId coincide com contextPlaceId da avaliação, é comprovadamente um LOCAL
-    if (review.contextPlaceId != null && review.contextPlaceId == target.targetId) {
+    if (review.contextPlaceId != null &&
+        review.contextPlaceId == target.targetId) {
       return 'PLACE';
     }
     return null;
@@ -61,44 +64,54 @@ class ReviewCard extends StatelessWidget {
   void _showMediaPreviewDialog(BuildContext context, ReviewMediaItem media) {
     showDialog<void>(
       context: context,
-      builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AppBar(
-              title: Text(media.mimeType.split('/').last.toUpperCase()),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(ctx).pop(),
-                ),
-              ],
-            ),
-            AspectRatio(
-              aspectRatio: 4 / 3,
-              child: mediaRepository != null
-                  ? AuthenticatedImage(
-                      url: media.url,
-                      mediaRepository: mediaRepository!,
-                      fit: BoxFit.contain,
-                    )
-                  : Container(
-                      color: Colors.grey.shade200,
-                      child: const Center(
-                        child: Icon(Icons.image, size: 48, color: Colors.grey),
+      builder: (ctx) {
+        final dialogScheme = Theme.of(ctx).colorScheme;
+        return Dialog(
+          insetPadding: RewitSpacing.screenPadding,
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppBar(
+                title: Text(media.mimeType.split('/').last.toUpperCase()),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+              AspectRatio(
+                aspectRatio: 4 / 3,
+                child: mediaRepository != null
+                    ? AuthenticatedImage(
+                        url: media.url,
+                        mediaRepository: mediaRepository!,
+                        fit: BoxFit.contain,
+                      )
+                    : Container(
+                        color: dialogScheme.surfaceContainerHighest,
+                        child: Center(
+                          child: Icon(
+                            Icons.image,
+                            size: 48,
+                            color: dialogScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ),
-                    ),
-            ),
-          ],
-        ),
-      ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildTargetChip(BuildContext context, FeedTarget target) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
     final resolvedType = _resolveTargetType(target);
     final isPlace = resolvedType == 'PLACE';
     final isProduct = resolvedType == 'PRODUCT';
@@ -107,44 +120,51 @@ class ReviewCard extends StatelessWidget {
 
     IconData icon;
     String labelText;
-    Color? chipBgColor;
-    Color? chipBorderColor;
-    Color? chipTextColor;
+    Color chipBgColor;
+    Color chipBorderColor;
+    Color chipTextColor;
+    Color chipIconColor;
     String? tooltipMessage;
 
     if (isPlace) {
       icon = Icons.place_outlined;
       labelText = 'Local • ${target.rating.toStringAsFixed(1)}';
-      // Azul da marca para Local; Produto segue em índigo, como na busca e na criação da avaliação
-      chipBgColor = Colors.blue.shade50;
-      chipBorderColor = Colors.blue.shade200;
-      chipTextColor = Colors.blue.shade900;
+      chipBgColor = semantic.placeTarget.container;
+      chipBorderColor = semantic.placeTarget.border;
+      chipTextColor = semantic.placeTarget.onContainer;
+      chipIconColor = semantic.placeTarget.accent;
       tooltipMessage = 'Ver detalhes do local';
     } else if (isProduct) {
       icon = Icons.shopping_bag_outlined;
       labelText = 'Produto • ${target.rating.toStringAsFixed(1)}';
-      chipBgColor = Colors.indigo.shade50;
-      chipBorderColor = Colors.indigo.shade200;
-      chipTextColor = Colors.indigo.shade900;
+      chipBgColor = semantic.productTarget.container;
+      chipBorderColor = semantic.productTarget.border;
+      chipTextColor = semantic.productTarget.onContainer;
+      chipIconColor = semantic.productTarget.accent;
       tooltipMessage = 'Ver detalhes do produto';
     } else if (isService) {
       icon = Icons.room_service_outlined;
       labelText = 'Serviço • ${target.rating.toStringAsFixed(1)}';
-      chipBgColor = Colors.orange.shade50;
-      chipBorderColor = Colors.orange.shade200;
-      chipTextColor = Colors.orange.shade900;
+      chipBgColor = semantic.serviceTarget.container;
+      chipBorderColor = semantic.serviceTarget.border;
+      chipTextColor = semantic.serviceTarget.onContainer;
+      chipIconColor = semantic.serviceTarget.accent;
     } else {
       icon = Icons.star;
       labelText = target.rating.toStringAsFixed(1);
+      chipBgColor = scheme.surfaceContainerHigh;
+      chipBorderColor = scheme.outlineVariant;
+      chipTextColor = scheme.onSurface;
+      chipIconColor = semantic.starFilled;
     }
 
     final chipWidget = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: chipBgColor ?? theme.colorScheme.surfaceContainerHighest.withAlpha(80),
-        borderRadius: BorderRadius.circular(6),
+        color: chipBgColor,
+        borderRadius: RewitRadius.borderSm,
         border: Border.all(
-          color: chipBorderColor ?? theme.colorScheme.outlineVariant.withAlpha(100),
+          color: chipBorderColor,
           width: 0.8,
         ),
       ),
@@ -154,7 +174,7 @@ class ReviewCard extends StatelessWidget {
           Icon(
             icon,
             size: 13,
-            color: chipTextColor ?? (isPlace || isProduct || isService ? null : Colors.amber.shade700),
+            color: chipIconColor,
           ),
           const SizedBox(width: 4),
           Flexible(
@@ -163,7 +183,7 @@ class ReviewCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: chipTextColor ?? theme.colorScheme.onSurface,
+                color: chipTextColor,
               ),
             ),
           ),
@@ -172,7 +192,7 @@ class ReviewCard extends StatelessWidget {
             Icon(
               Icons.chevron_right,
               size: 13,
-              color: chipTextColor ?? theme.colorScheme.onSurface.withAlpha(150),
+              color: chipTextColor,
             ),
           ],
         ],
@@ -184,7 +204,7 @@ class ReviewCard extends StatelessWidget {
         message: tooltipMessage ?? '',
         child: InkWell(
           onTap: () => onTargetTap?.call(target.targetId, resolvedType!),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: RewitRadius.borderSm,
           child: chipWidget,
         ),
       );
@@ -195,7 +215,7 @@ class ReviewCard extends StatelessWidget {
 
   /// Visibilidade efetiva: `PRIVATE` nunca aparece como pública, e uma avaliação antiga anônima com `FOLLOWERS`
   /// aparece como visível só para o autor, que é como o backend a trata.
-  Widget _buildVisibilityLabel(ThemeData theme) {
+  Widget _buildVisibilityLabel(ColorScheme scheme) {
     final label = ReviewPrivacyRules.visibilityLabel(
       isAnonymous: review.isAnonymous,
       visibility: review.visibility,
@@ -213,7 +233,7 @@ class ReviewCard extends StatelessWidget {
       'PRIVATE' => Icons.lock_outline,
       _ => Icons.public,
     };
-    final color = theme.colorScheme.onSurface.withAlpha(140);
+    final color = scheme.onSurfaceVariant;
 
     return Tooltip(
       message: description,
@@ -242,6 +262,8 @@ class ReviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
     final author = review.author;
     final avgRating = review.averageRating;
     final authorId = author.id;
@@ -251,17 +273,12 @@ class ReviewCard extends StatelessWidget {
         author.displayName != 'Usuário excluído';
 
     return Card(
-      elevation: 0.5,
       margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
-      ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: RewitRadius.borderLg,
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: RewitSpacing.cardPadding,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -271,24 +288,30 @@ class ReviewCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: InkWell(
-                      onTap: canNavigateToAuthor ? () => onAuthorTap?.call(authorId) : null,
-                      borderRadius: BorderRadius.circular(6),
+                      onTap: canNavigateToAuthor
+                          ? () => onAuthorTap?.call(authorId)
+                          : null,
+                      borderRadius: RewitRadius.borderSm,
                       child: Row(
                         children: [
                           // Avatar
                           CircleAvatar(
                             radius: 20,
                             backgroundColor: review.isAnonymous
-                                ? Colors.grey.shade300
-                                : theme.colorScheme.primary.withAlpha(30),
+                                ? semantic.anonymousAvatarBackground
+                                : scheme.secondaryContainer,
                             child: review.isAnonymous
-                                ? Icon(Icons.person_off_outlined, size: 20, color: Colors.grey.shade700)
+                                ? Icon(
+                                    Icons.person_off_outlined,
+                                    size: 20,
+                                    color: semantic.anonymousAvatarForeground,
+                                  )
                                 : Text(
                                     author.displayName.isNotEmpty
                                         ? author.displayName[0].toUpperCase()
                                         : 'U',
                                     style: TextStyle(
-                                      color: theme.colorScheme.primary,
+                                      color: scheme.onSecondaryContainer,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
@@ -304,7 +327,8 @@ class ReviewCard extends StatelessWidget {
                                     Flexible(
                                       child: Text(
                                         author.displayName,
-                                        style: theme.textTheme.titleSmall?.copyWith(
+                                        style:
+                                            theme.textTheme.titleSmall?.copyWith(
                                           fontWeight: FontWeight.bold,
                                         ),
                                         overflow: TextOverflow.ellipsis,
@@ -313,16 +337,23 @@ class ReviewCard extends StatelessWidget {
                                     if (review.isAnonymous) ...[
                                       const SizedBox(width: 6),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
                                         decoration: BoxDecoration(
-                                          color: Colors.grey.shade200,
-                                          borderRadius: BorderRadius.circular(4),
+                                          color: scheme.surfaceContainerHigh,
+                                          borderRadius: RewitRadius.borderXs,
+                                          border: Border.all(
+                                            color: scheme.outlineVariant,
+                                            width: 0.8,
+                                          ),
                                         ),
                                         child: Text(
                                           'Anônimo',
                                           style: TextStyle(
                                             fontSize: 10,
-                                            color: Colors.grey.shade700,
+                                            color: scheme.onSurfaceVariant,
                                             fontWeight: FontWeight.w500,
                                           ),
                                         ),
@@ -330,11 +361,12 @@ class ReviewCard extends StatelessWidget {
                                     ],
                                   ],
                                 ),
-                                if (!review.isAnonymous && author.handle != null) ...[
+                                if (!review.isAnonymous &&
+                                    author.handle != null) ...[
                                   Text(
                                     '@${author.handle}',
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.onSurface.withAlpha(160),
+                                      color: scheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ],
@@ -352,7 +384,7 @@ class ReviewCard extends StatelessWidget {
                       formatRelativeTime(review.createdAt),
                       textAlign: TextAlign.end,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withAlpha(140),
+                        color: scheme.onSurfaceVariant,
                         fontSize: 11,
                       ),
                     ),
@@ -364,23 +396,28 @@ class ReviewCard extends StatelessWidget {
               if (review.isVerifiedOnSite) ...[
                 const SizedBox(height: 10),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.green.shade50,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.green.shade200),
+                    color: semantic.verified.container,
+                    borderRadius: RewitRadius.borderSm,
+                    border: Border.all(color: semantic.verified.border),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.verified, size: 14, color: Colors.green.shade700),
+                      Icon(
+                        Icons.verified,
+                        size: 14,
+                        color: semantic.verified.accent,
+                      ),
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
                           'Presença confirmada no local',
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.green.shade800,
+                            color: semantic.verified.onContainer,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -395,7 +432,7 @@ class ReviewCard extends StatelessWidget {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    const Icon(Icons.star, color: Colors.amber, size: 18),
+                    Icon(Icons.star, color: semantic.starFilled, size: 18),
                     const SizedBox(width: 4),
                     Text(
                       avgRating.toStringAsFixed(1),
@@ -410,7 +447,7 @@ class ReviewCard extends StatelessWidget {
                             ? '(${review.targets.length} item avaliado)'
                             : '(${review.targets.length} itens avaliados)',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withAlpha(160),
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -419,7 +456,8 @@ class ReviewCard extends StatelessWidget {
               ],
 
               // Texto da experiência
-              if (review.experienceText != null && review.experienceText!.isNotEmpty) ...[
+              if (review.experienceText != null &&
+                  review.experienceText!.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Text(
                   review.experienceText!,
@@ -444,7 +482,8 @@ class ReviewCard extends StatelessWidget {
               ],
 
               // Prévia de mídia (renderizada apenas quando presente no modelo, sem chamadas N+1)
-              if (review.mediaItems != null && review.mediaItems!.isNotEmpty) ...[
+              if (review.mediaItems != null &&
+                  review.mediaItems!.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   height: 72,
@@ -455,7 +494,7 @@ class ReviewCard extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final media = review.mediaItems![index];
                       return ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: RewitRadius.borderMd,
                         child: InkWell(
                           onTap: () => _showMediaPreviewDialog(context, media),
                           child: SizedBox(
@@ -468,9 +507,13 @@ class ReviewCard extends StatelessWidget {
                                     fit: BoxFit.cover,
                                   )
                                 : Container(
-                                    color: Colors.grey.shade200,
-                                    child: const Center(
-                                      child: Icon(Icons.image, size: 24, color: Colors.grey),
+                                    color: scheme.surfaceContainerHighest,
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.image,
+                                        size: 24,
+                                        color: scheme.onSurfaceVariant,
+                                      ),
                                     ),
                                   ),
                           ),
@@ -491,17 +534,23 @@ class ReviewCard extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Tooltip(
-                      message: review.isHelpfulByMe ? 'Remover voto útil' : 'Marcar como útil',
+                      message: review.isHelpfulByMe
+                          ? 'Remover voto útil'
+                          : 'Marcar como útil',
                       child: Material(
-                        color: Colors.transparent,
+                        type: MaterialType.transparency,
                         child: InkWell(
                           key: Key('review_card_helpful_${review.id}'),
                           onTap: isHelpfulLoading ? null : onHelpfulTap,
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: RewitRadius.borderMd,
                           child: ConstrainedBox(
-                            constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+                            constraints: const BoxConstraints(
+                              minHeight: 48,
+                              minWidth: 48,
+                            ),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -509,15 +558,19 @@ class ReviewCard extends StatelessWidget {
                                     const SizedBox(
                                       width: 16,
                                       height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
                                     )
                                   else
                                     Icon(
-                                      review.isHelpfulByMe ? Icons.thumb_up : Icons.thumb_up_outlined,
+                                      review.isHelpfulByMe
+                                          ? Icons.thumb_up
+                                          : Icons.thumb_up_outlined,
                                       size: 16,
                                       color: review.isHelpfulByMe
-                                          ? theme.colorScheme.primary
-                                          : theme.colorScheme.onSurface.withAlpha(180),
+                                          ? scheme.primary
+                                          : scheme.onSurfaceVariant,
                                     ),
                                   const SizedBox(width: 6),
                                   Flexible(
@@ -526,9 +579,11 @@ class ReviewCard extends StatelessWidget {
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: review.isHelpfulByMe
-                                            ? theme.colorScheme.primary
-                                            : theme.colorScheme.onSurface.withAlpha(180),
-                                        fontWeight: review.isHelpfulByMe ? FontWeight.w600 : FontWeight.normal,
+                                            ? scheme.primary
+                                            : scheme.onSurfaceVariant,
+                                        fontWeight: review.isHelpfulByMe
+                                            ? FontWeight.w600
+                                            : FontWeight.normal,
                                       ),
                                     ),
                                   ),
@@ -544,7 +599,7 @@ class ReviewCard extends StatelessWidget {
                   Flexible(
                     child: Align(
                       alignment: Alignment.centerRight,
-                      child: _buildVisibilityLabel(theme),
+                      child: _buildVisibilityLabel(scheme),
                     ),
                   ),
                 ],

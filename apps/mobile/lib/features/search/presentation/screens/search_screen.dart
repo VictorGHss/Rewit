@@ -1,13 +1,15 @@
-import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
-import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
+import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
-import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
+import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
 import '../../domain/entities/search_entities.dart';
 import '../../domain/entities/search_filter.dart';
 import '../../domain/repositories/search_repository.dart';
@@ -18,7 +20,11 @@ import '../widgets/search_result_card.dart';
 /// Fallback sem efeito colateral para ambientes de teste onde o SearchRepository não é injetado.
 class _FallbackSearchRepository implements SearchRepository {
   @override
-  Future<SearchPage> search({required String query, int page = 0, int size = 20}) async {
+  Future<SearchPage> search({
+    required String query,
+    int page = 0,
+    int size = 20,
+  }) async {
     return const SearchPage(
       items: [],
       pageNumber: 0,
@@ -36,7 +42,8 @@ class SearchScreen extends StatefulWidget {
   final PlaceRepository? placeRepository;
   final SearchNotifier? searchNotifier;
   final void Function(SearchResultItem item)? onTargetTap;
-  final void Function(ManualPlaceRegistrationResult result)? onManualPlaceRegistered;
+  final void Function(ManualPlaceRegistrationResult result)?
+      onManualPlaceRegistered;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
   final AuthNotifier? authNotifier;
   final String? currentUserId;
@@ -74,7 +81,8 @@ class _SearchScreenState extends State<SearchScreen>
   int _pendingLoadGeneration = 0;
 
   PendingPlaceRegistrationStore get _store =>
-      widget.pendingRegistrationStore ?? PendingPlaceRegistrationStore.processLocal;
+      widget.pendingRegistrationStore ??
+      PendingPlaceRegistrationStore.processLocal;
 
   PendingPlaceRegistration? get pendingRegistration => _pendingRegistration;
 
@@ -90,7 +98,8 @@ class _SearchScreenState extends State<SearchScreen>
       _notifier = SearchNotifier(searchRepository: widget.searchRepository!);
       _ownsNotifier = true;
     } else {
-      _notifier = SearchNotifier(searchRepository: _FallbackSearchRepository());
+      _notifier =
+          SearchNotifier(searchRepository: _FallbackSearchRepository());
       _ownsNotifier = true;
     }
 
@@ -105,7 +114,11 @@ class _SearchScreenState extends State<SearchScreen>
     final generation = ++_pendingLoadGeneration;
     final userId = _scopedUserId;
     final loaded = userId == null ? null : await _store.loadLatest(userId);
-    if (!mounted || generation != _pendingLoadGeneration || userId != _getCurrentUserId()) return;
+    if (!mounted ||
+        generation != _pendingLoadGeneration ||
+        userId != _getCurrentUserId()) {
+      return;
+    }
     setState(() {
       _pendingRegistration = loaded;
     });
@@ -171,10 +184,14 @@ class _SearchScreenState extends State<SearchScreen>
     final result = await ManualPlaceRegistrationSheet.show(
       context,
       placeRepository: widget.placeRepository!,
-      initialName: initialPending != null ? initialPending.place.name : (initialQuery ?? '').trim(),
+      initialName: initialPending != null
+          ? initialPending.place.name
+          : (initialQuery ?? '').trim(),
       initialPendingPlace: initialPending?.place,
       initialUploadIdempotencyKey: initialPending?.uploadIdempotencyKey,
-      initialPhoto: (initialPending?.photoUnavailable ?? false) ? null : initialPending?.photoFile,
+      initialPhoto: (initialPending?.photoUnavailable ?? false)
+          ? null
+          : initialPending?.photoFile,
       currentUserId: currentUid,
       pendingRegistrationStore: _store,
       authNotifier: widget.authNotifier,
@@ -202,17 +219,19 @@ class _SearchScreenState extends State<SearchScreen>
         _pendingRegistration = pending;
       });
       if (mounted) {
+        final warningTone = RewitSemanticColors.of(context).warning;
         PendingRegistrationNotices.show(
           context,
           currentUid,
           SnackBar(
             content: Text(
               'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente.',
+              style: TextStyle(color: warningTone.onContainer),
             ),
-            backgroundColor: Colors.orange.shade800,
+            backgroundColor: warningTone.container,
             action: SnackBarAction(
               label: 'Retomar',
-              textColor: Colors.white,
+              textColor: warningTone.accent,
               onPressed: () {
                 // O aviso pode sobreviver à tela ou à sessão que o exibiu
                 if (!mounted || _getCurrentUserId() != currentUid) return;
@@ -281,6 +300,7 @@ class _SearchScreenState extends State<SearchScreen>
   Widget build(BuildContext context) {
     super.build(context);
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -318,8 +338,8 @@ class _SearchScreenState extends State<SearchScreen>
                                 onPressed: _clearSearch,
                               )
                             : null,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                    border: const OutlineInputBorder(
+                      borderRadius: RewitRadius.borderLg,
                     ),
                     isDense: true,
                   ),
@@ -337,7 +357,8 @@ class _SearchScreenState extends State<SearchScreen>
 
               return SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 child: Row(
                   children: [
                     _buildFilterChip(
@@ -352,7 +373,8 @@ class _SearchScreenState extends State<SearchScreen>
                       label: SearchFilter.places.displayName,
                       selected: activeFilter == SearchFilter.places,
                       icon: Icons.storefront_rounded,
-                      onSelected: () => _notifier.setFilter(SearchFilter.places),
+                      onSelected: () =>
+                          _notifier.setFilter(SearchFilter.places),
                     ),
                     const SizedBox(width: 8),
                     _buildFilterChip(
@@ -360,7 +382,8 @@ class _SearchScreenState extends State<SearchScreen>
                       label: SearchFilter.products.displayName,
                       selected: activeFilter == SearchFilter.products,
                       icon: Icons.inventory_2_outlined,
-                      onSelected: () => _notifier.setFilter(SearchFilter.products),
+                      onSelected: () =>
+                          _notifier.setFilter(SearchFilter.products),
                     ),
                   ],
                 ),
@@ -376,13 +399,16 @@ class _SearchScreenState extends State<SearchScreen>
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: theme.colorScheme.secondaryContainer,
+                color: scheme.secondaryContainer,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: theme.colorScheme.secondary.withAlpha(80)),
+                border: Border.all(color: scheme.outlineVariant),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.pending_actions, color: theme.colorScheme.secondary),
+                  Icon(
+                    Icons.pending_actions,
+                    color: scheme.onSecondaryContainer,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -390,16 +416,23 @@ class _SearchScreenState extends State<SearchScreen>
                       children: [
                         Text(
                           'Foto pendente: ${_pendingRegistration!.place.name}',
-                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: scheme.onSecondaryContainer,
+                          ),
                         ),
                         Text(
                           _pendingRegistration!.photoUnavailable
                               ? 'A fotografia não está mais disponível neste dispositivo. Retome selecionando uma nova foto para o mesmo local.'
                               : 'O local foi criado. Toque para concluir o envio da fotografia.',
                           key: _pendingRegistration!.photoUnavailable
-                              ? const Key('search_pending_photo_unavailable_text')
+                              ? const Key(
+                                  'search_pending_photo_unavailable_text',
+                                )
                               : const Key('search_pending_photo_pending_text'),
-                          style: theme.textTheme.bodySmall,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSecondaryContainer,
+                          ),
                         ),
                       ],
                     ),
@@ -457,12 +490,18 @@ class _SearchScreenState extends State<SearchScreen>
     required VoidCallback onSelected,
     IconData? icon,
   }) {
+    final scheme = theme.colorScheme;
     return ChoiceChip(
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 16, color: selected ? theme.colorScheme.onPrimary : null),
+            Icon(
+              icon,
+              size: 16,
+              color:
+                  selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 6),
           ],
           Text(label),
@@ -470,9 +509,9 @@ class _SearchScreenState extends State<SearchScreen>
       ),
       selected: selected,
       onSelected: (_) => onSelected(),
-      selectedColor: theme.colorScheme.primary,
+      selectedColor: scheme.secondaryContainer,
       labelStyle: TextStyle(
-        color: selected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+        color: selected ? scheme.onSecondaryContainer : scheme.onSurface,
         fontWeight: selected ? FontWeight.bold : FontWeight.normal,
       ),
       visualDensity: VisualDensity.compact,
@@ -480,23 +519,24 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   Widget _buildInitialState(ThemeData theme) {
+    final scheme = theme.colorScheme;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.search, size: 64, color: Colors.grey),
+            Icon(Icons.search, size: 64, color: scheme.outline),
             const SizedBox(height: 16),
             Text(
               'Busca de Lugares',
               style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Busca geográfica de estabelecimentos e avaliações físicas.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             Text(
@@ -504,7 +544,7 @@ class _SearchScreenState extends State<SearchScreen>
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,
-                color: theme.colorScheme.onSurface.withAlpha(140),
+                color: scheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -522,7 +562,7 @@ class _SearchScreenState extends State<SearchScreen>
           const SizedBox(height: 16),
           Text(
             'Buscando no catálogo...',
-            style: TextStyle(color: theme.colorScheme.onSurface.withAlpha(160)),
+            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -530,29 +570,32 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   Widget _buildEmptyState(ThemeData theme, String query) {
+    final scheme = theme.colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.search_off_rounded, size: 56, color: Colors.grey.shade400),
+            Icon(Icons.search_off_rounded, size: 56, color: scheme.outline),
             const SizedBox(height: 16),
             Text(
               'Nenhum resultado encontrado',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
               'Nenhum item encontrado para "$query". Verifique a digitação ou tente outro termo.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: theme.colorScheme.onSurface.withAlpha(150)),
+              style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             if (widget.placeRepository != null) ...[
               const SizedBox(height: 16),
               FilledButton.tonalIcon(
                 key: const Key('search_register_manual_place_button'),
-                onPressed: () => _openManualPlaceRegistration(initialQuery: query),
+                onPressed: () =>
+                    _openManualPlaceRegistration(initialQuery: query),
                 icon: const Icon(Icons.add_location_alt_outlined),
                 label: const Text('Cadastrar local manualmente'),
               ),
@@ -564,23 +607,25 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   Widget _buildErrorState(ThemeData theme, SearchError error) {
+    final scheme = theme.colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
+            Icon(Icons.error_outline, size: 48, color: scheme.error),
             const SizedBox(height: 16),
             Text(
               'Não foi possível concluir a busca',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
               error.message,
               textAlign: TextAlign.center,
-              style: TextStyle(color: theme.colorScheme.onSurface.withAlpha(160)),
+              style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             if (error.retryAfterSeconds != null) ...[
               const SizedBox(height: 8),
@@ -588,7 +633,7 @@ class _SearchScreenState extends State<SearchScreen>
                 'Aguarde ${error.retryAfterSeconds} segundos antes de tentar novamente.',
                 style: TextStyle(
                   fontSize: 12,
-                  color: theme.colorScheme.error,
+                  color: scheme.error,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -607,6 +652,7 @@ class _SearchScreenState extends State<SearchScreen>
 
   Widget _buildResultsState(ThemeData theme, SearchResults state) {
     final filtered = state.filteredItems;
+    final scheme = theme.colorScheme;
 
     if (filtered.isEmpty) {
       final categoryName = state.filter == SearchFilter.places
@@ -621,12 +667,12 @@ class _SearchScreenState extends State<SearchScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.filter_list_off, size: 48, color: Colors.grey.shade400),
+              Icon(Icons.filter_list_off, size: 48, color: scheme.outline),
               const SizedBox(height: 12),
               Text(
                 'Nenhum $categoryName encontrado nos resultados carregados.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: theme.colorScheme.onSurface.withAlpha(150)),
+                style: TextStyle(color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 12),
               TextButton(
@@ -674,23 +720,25 @@ class _SearchScreenState extends State<SearchScreen>
     }
 
     if (state.loadMoreError != null) {
+      final danger = RewitSemanticColors.of(context).danger;
       return Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: theme.colorScheme.errorContainer.withAlpha(80),
-          borderRadius: BorderRadius.circular(8),
+          color: danger.container,
+          borderRadius: RewitRadius.borderMd,
+          border: Border.all(color: danger.border),
         ),
         child: Row(
           children: [
-            Icon(Icons.error_outline, size: 18, color: theme.colorScheme.error),
+            Icon(Icons.error_outline, size: 18, color: danger.accent),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 state.loadMoreError!,
                 style: TextStyle(
                   fontSize: 12,
-                  color: theme.colorScheme.onErrorContainer,
+                  color: danger.onContainer,
                 ),
               ),
             ),

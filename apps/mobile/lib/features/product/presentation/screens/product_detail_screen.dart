@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/widgets/review_card.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
@@ -208,6 +209,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   ) {
     final product = state.product;
     final stats = state.stats;
+    final semantic = RewitSemanticColors.of(context);
 
     return RefreshIndicator(
       onRefresh: () => _notifier.refresh(),
@@ -286,7 +288,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
               child: Row(
                 children: [
-                  const Icon(Icons.star_rounded, color: Colors.amber, size: 32),
+                  Icon(Icons.star_rounded, color: semantic.starFilled, size: 32),
                   const SizedBox(width: 8),
                   if (stats != null && stats.hasReviews) ...[
                     Text(
@@ -649,4 +651,3 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 }
-

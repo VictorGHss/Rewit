@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
+import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
@@ -77,8 +78,10 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
   late final ReviewCreateNotifier _notifier;
   bool _ownsNotifier = false;
 
-  final TextEditingController _contextPlaceIdController = TextEditingController();
-  final TextEditingController _experienceTextController = TextEditingController();
+  final TextEditingController _contextPlaceIdController =
+      TextEditingController();
+  final TextEditingController _experienceTextController =
+      TextEditingController();
 
   @override
   void initState() {
@@ -100,7 +103,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
       _ownsNotifier = true;
     }
 
-    if (_notifier.contextPlaceId != null && _notifier.contextPlaceId!.isNotEmpty) {
+    if (_notifier.contextPlaceId != null &&
+        _notifier.contextPlaceId!.isNotEmpty) {
       _contextPlaceIdController.text = _notifier.contextPlaceId!;
     }
 
@@ -121,14 +125,16 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
       }
       _lastHandledSuccessReviewId = state.createdReview.id;
       final createdReview = state.createdReview;
+      final semantic = RewitSemanticColors.of(context);
 
       if (state.hasMediaFailures) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               'Avaliação criada com sucesso! Porém ${state.failedMediaCount} anexo(s) falharam no upload.',
+              style: TextStyle(color: semantic.warning.onContainer),
             ),
-            backgroundColor: Colors.orange.shade800,
+            backgroundColor: semantic.warning.container,
             duration: const Duration(seconds: 5),
           ),
         );
@@ -139,8 +145,9 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
               state.uploadedMediaCount > 0
                   ? 'Avaliação publicada com ${state.uploadedMediaCount} foto(s) anexada(s)!'
                   : 'Avaliação publicada com sucesso!',
+              style: TextStyle(color: semantic.success.onContainer),
             ),
-            backgroundColor: Colors.green,
+            backgroundColor: semantic.success.container,
           ),
         );
       }
@@ -168,30 +175,33 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
   Future<void> _requestLocationConsent() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.location_on_outlined, color: Colors.blue),
-            SizedBox(width: 8),
-            Text('Validação de Presença'),
+      builder: (ctx) {
+        final dialogScheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.location_on_outlined, color: dialogScheme.primary),
+              const SizedBox(width: 8),
+              const Text('Validação de Presença'),
+            ],
+          ),
+          content: const Text(
+            'Para validar que você está no local, o Rewit precisa usar sua localização atual por alguns instantes.\n\nA localização não será acompanhada em segundo plano.',
+          ),
+          actions: [
+            TextButton(
+              key: const Key('location_consent_cancel_button'),
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              key: const Key('location_consent_confirm_button'),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Continuar'),
+            ),
           ],
-        ),
-        content: const Text(
-          'Para validar que você está no local, o Rewit precisa usar sua localização atual por alguns instantes.\n\nA localização não será acompanhada em segundo plano.',
-        ),
-        actions: [
-          TextButton(
-            key: const Key('location_consent_cancel_button'),
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            key: const Key('location_consent_confirm_button'),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Continuar'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (confirmed == true && mounted) {
@@ -207,6 +217,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -226,12 +238,12 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 // Banner de Erro RFC 7807 / Validação Local
                 if (state is ReviewCreateError) ...[
                   Card(
-                    color: theme.colorScheme.errorContainer,
+                    color: scheme.errorContainer,
                     elevation: 0,
                     margin: const EdgeInsets.only(bottom: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: theme.colorScheme.error.withAlpha(80)),
+                      side: BorderSide(color: scheme.error.withAlpha(80)),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(14.0),
@@ -240,7 +252,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                         children: [
                           Icon(
                             Icons.error_outline,
-                            color: theme.colorScheme.error,
+                            color: scheme.error,
                             size: 24,
                           ),
                           const SizedBox(width: 12),
@@ -257,7 +269,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 14,
-                                        color: theme.colorScheme.onErrorContainer,
+                                        color: scheme.onErrorContainer,
                                       ),
                                     ),
                                     if (state.errorCode != null) ...[
@@ -268,15 +280,16 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                                           vertical: 2,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: theme.colorScheme.error.withAlpha(30),
-                                          borderRadius: BorderRadius.circular(4),
+                                          color: scheme.error.withAlpha(30),
+                                          borderRadius:
+                                              BorderRadius.circular(4),
                                         ),
                                         child: Text(
                                           state.errorCode!,
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
-                                            color: theme.colorScheme.error,
+                                            color: scheme.error,
                                           ),
                                         ),
                                       ),
@@ -288,7 +301,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                                   state.message,
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: theme.colorScheme.onErrorContainer,
+                                    color: scheme.onErrorContainer,
                                   ),
                                 ),
                                 if (state.hasFieldErrors) ...[
@@ -301,7 +314,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                                         style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w500,
-                                          color: theme.colorScheme.onErrorContainer,
+                                          color: scheme.onErrorContainer,
                                         ),
                                       ),
                                     ),
@@ -314,7 +327,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: theme.colorScheme.error,
+                                      color: scheme.error,
                                     ),
                                   ),
                                 ],
@@ -341,7 +354,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                       '${_notifier.targets.length} alvo(s)',
                       style: TextStyle(
                         fontSize: 12,
-                        color: theme.colorScheme.onSurface.withAlpha(150),
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -351,7 +364,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                   'Avalie o estabelecimento e/ou itens e serviços específicos.',
                   style: TextStyle(
                     fontSize: 12,
-                    color: theme.colorScheme.onSurface.withAlpha(160),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -369,8 +382,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     productRepository: widget.productRepository,
                     placeDiscoveryRepository: widget.placeDiscoveryRepository,
                     locationService: widget.locationService,
-                    isTargetSelectedElsewhere: (targetId) =>
-                        _notifier.isTargetAlreadySelected(targetId, excludeIndex: index),
+                    isTargetSelectedElsewhere: (targetId) => _notifier
+                        .isTargetAlreadySelected(targetId, excludeIndex: index),
                     onTargetSelected: (item) {
                       _notifier.selectTarget(index, item);
                     },
@@ -424,20 +437,21 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     _notifier.contextPlaceName!.isNotEmpty)
                   Container(
                     key: const Key('selected_context_place_banner'),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest.withAlpha(60),
+                      color: scheme.secondaryContainer.withAlpha(110),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: theme.colorScheme.primary.withAlpha(70),
-                      ),
+                      border: Border.all(color: scheme.outlineVariant),
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.place_outlined,
                           size: 20,
-                          color: theme.colorScheme.primary,
+                          color: scheme.primary,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -484,7 +498,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                   maxLength: 2000,
                   decoration: const InputDecoration(
                     labelText: 'Conte sua experiência geral...',
-                    hintText: 'O que achou do ambiente, tempo de espera, custo-benefício?',
+                    hintText:
+                        'O que achou do ambiente, tempo de espera, custo-benefício?',
                     border: OutlineInputBorder(),
                     alignLabelWithHint: true,
                   ),
@@ -519,7 +534,9 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     ),
                     DropdownMenuItem(
                       value: 'FOLLOWERS',
-                      enabled: _notifier.isVisibilityOptionAvailable('FOLLOWERS'),
+                      enabled: _notifier.isVisibilityOptionAvailable(
+                        'FOLLOWERS',
+                      ),
                       child: const Text('Seguidores (apenas quem te segue)'),
                     ),
                     const DropdownMenuItem(
@@ -539,10 +556,13 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
 
                 if (_notifier.isAnonymous) ...[
                   const SizedBox(height: 6),
-                  const Text(
+                  Text(
                     ReviewPrivacyRules.followersUnavailableForAnonymous,
-                    key: Key('create_followers_unavailable_hint'),
-                    style: TextStyle(fontSize: 12),
+                    key: const Key('create_followers_unavailable_hint'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 6),
@@ -552,7 +572,9 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                   contentPadding: EdgeInsets.zero,
                   value: _notifier.isAnonymous,
                   // Ligar o anonimato com "Seguidores" fica bloqueado; desligar é sempre possível
-                  onChanged: isSubmitting || (!_notifier.isAnonymous && !_notifier.canEnableAnonymous)
+                  onChanged: isSubmitting ||
+                          (!_notifier.isAnonymous &&
+                              !_notifier.canEnableAnonymous)
                       ? null
                       : (val) {
                           _notifier.setAnonymous(val);
@@ -569,7 +591,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 const SizedBox(height: 12),
 
                 // Seção: Presença Geográfica e Check-in no Local (C5.10)
-                _buildLocationSection(theme, isSubmitting),
+                _buildLocationSection(theme, semantic, isSubmitting),
                 const SizedBox(height: 16),
 
                 // Seção de Seleção e Upload de Fotos/Mídias
@@ -583,19 +605,22 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 SizedBox(
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: (!isSubmitting && !_notifier.isRequestingLocation) ? _submit : null,
+                    onPressed:
+                        (!isSubmitting && !_notifier.isRequestingLocation)
+                            ? _submit
+                            : null,
                     style: ElevatedButton.styleFrom(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                     child: isSubmitting
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 22,
                             height: 22,
                             child: CircularProgressIndicator(
                               strokeWidth: 2.5,
-                              color: Colors.white,
+                              color: scheme.onSurfaceVariant,
                             ),
                           )
                         : const Row(
@@ -623,7 +648,12 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
     );
   }
 
-  Widget _buildLocationSection(ThemeData theme, bool isSubmitting) {
+  Widget _buildLocationSection(
+    ThemeData theme,
+    RewitSemanticColors semantic,
+    bool isSubmitting,
+  ) {
+    final scheme = theme.colorScheme;
     final status = _notifier.locationStatus;
     final hasLocation = _notifier.hasLocation;
 
@@ -631,7 +661,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -643,7 +673,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 Icon(
                   Icons.my_location,
                   size: 20,
-                  color: hasLocation ? Colors.green.shade700 : theme.colorScheme.primary,
+                  color: hasLocation ? semantic.verified.accent : scheme.primary,
                 ),
                 const SizedBox(width: 8),
                 Text(
@@ -660,15 +690,18 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
               'A localização é obtida sob demanda e nunca rastreada em segundo plano.',
               style: TextStyle(
                 fontSize: 12,
-                color: theme.colorScheme.onSurface.withAlpha(160),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 12),
             if (status == LocationCaptureStatus.requesting) ...[
               Container(
-                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                  horizontal: 16,
+                ),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+                  color: scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Row(
@@ -682,33 +715,41 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                     SizedBox(width: 12),
                     Text(
                       'Obtendo localização...',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ],
                 ),
               ),
-            ] else if (status == LocationCaptureStatus.captured && hasLocation) ...[
+            ] else if (status == LocationCaptureStatus.captured &&
+                hasLocation) ...[
               if (_notifier.hasContextPlace)
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.green.withAlpha(20),
+                    color: semantic.verified.container,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green.withAlpha(80)),
+                    border: Border.all(color: semantic.verified.border),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                          Icon(
+                            Icons.check_circle,
+                            color: semantic.verified.accent,
+                            size: 20,
+                          ),
                           const SizedBox(width: 8),
-                          const Text(
+                          Text(
                             'Presença capturada',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
-                              color: Colors.green,
+                              color: semantic.verified.onContainer,
                             ),
                           ),
                           const Spacer(),
@@ -717,7 +758,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                               'Precisão aproximada: ${_notifier.locationAccuracyMeters!.round()} m',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: theme.colorScheme.onSurface.withAlpha(160),
+                                color: semantic.verified.onContainer,
                               ),
                             ),
                         ],
@@ -727,20 +768,24 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.amber.withAlpha(30),
+                            color: semantic.warning.container,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.amber.withAlpha(100)),
+                            border: Border.all(color: semantic.warning.border),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.info_outline, size: 16, color: Colors.orange),
+                              Icon(
+                                Icons.info_outline,
+                                size: 16,
+                                color: semantic.warning.accent,
+                              ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   'Localização aproximada concedida. A precisão pode não ser suficiente para validar presença no local.',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: Colors.amber.shade900,
+                                    color: semantic.warning.onContainer,
                                   ),
                                 ),
                               ),
@@ -755,16 +800,20 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+                    color: scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+                    border: Border.all(color: scheme.outlineVariant),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.info_outline, color: theme.colorScheme.primary, size: 20),
+                          Icon(
+                            Icons.info_outline,
+                            color: scheme.primary,
+                            size: 20,
+                          ),
                           const SizedBox(width: 8),
                           const Expanded(
                             child: Text(
@@ -782,7 +831,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                         'Sua localização foi obtida sob demanda, mas a validação de presença no local exige informar o estabelecimento de contexto da avaliação.',
                         style: TextStyle(
                           fontSize: 12,
-                          color: theme.colorScheme.onSurface.withAlpha(180),
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -794,18 +843,27 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                   Expanded(
                     child: OutlinedButton.icon(
                       key: const Key('update_location_button'),
-                      onPressed: isSubmitting ? null : () => _notifier.captureLocation(),
+                      onPressed:
+                          isSubmitting ? null : () => _notifier.captureLocation(),
                       icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text('Atualizar localização', style: TextStyle(fontSize: 12)),
+                      label: const Text(
+                        'Atualizar localização',
+                        style: TextStyle(fontSize: 12),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton.icon(
                       key: const Key('remove_checkin_button'),
-                      onPressed: isSubmitting ? null : () => _notifier.clearCoordinates(),
+                      onPressed: isSubmitting
+                          ? null
+                          : () => _notifier.clearCoordinates(),
                       icon: const Icon(Icons.close, size: 16),
-                      label: const Text('Remover check-in', style: TextStyle(fontSize: 12)),
+                      label: const Text(
+                        'Remover check-in',
+                        style: TextStyle(fontSize: 12),
+                      ),
                     ),
                   ),
                 ],
@@ -814,23 +872,28 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.errorContainer.withAlpha(90),
+                  color: scheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: theme.colorScheme.error.withAlpha(80)),
+                  border: Border.all(color: scheme.error.withAlpha(80)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.location_off, size: 20, color: theme.colorScheme.error),
+                        Icon(
+                          Icons.location_off,
+                          size: 20,
+                          color: scheme.error,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            _notifier.locationErrorMessage ?? 'Não foi possível obter sua localização agora.',
+                            _notifier.locationErrorMessage ??
+                                'Não foi possível obter sua localização agora.',
                             style: TextStyle(
                               fontSize: 13,
-                              color: theme.colorScheme.onErrorContainer,
+                              color: scheme.onErrorContainer,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -843,24 +906,40 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                         Expanded(
                           child: OutlinedButton(
                             key: const Key('retry_location_button'),
-                            onPressed: isSubmitting ? null : () => _notifier.captureLocation(),
-                            child: const Text('Tentar novamente', style: TextStyle(fontSize: 12)),
+                            onPressed: isSubmitting
+                                ? null
+                                : () => _notifier.captureLocation(),
+                            child: const Text(
+                              'Tentar novamente',
+                              style: TextStyle(fontSize: 12),
+                            ),
                           ),
                         ),
-                        if (_notifier.locationFailureReason == LocationFailureReason.permissionDeniedForever) ...[
+                        if (_notifier.locationFailureReason ==
+                            LocationFailureReason.permissionDeniedForever) ...[
                           const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton(
                               key: const Key('open_settings_button'),
-                              onPressed: isSubmitting ? null : () => _notifier.openAppSettings(),
-                              child: const Text('Abrir configurações', style: TextStyle(fontSize: 12)),
+                              onPressed: isSubmitting
+                                  ? null
+                                  : () => _notifier.openAppSettings(),
+                              child: const Text(
+                                'Abrir configurações',
+                                style: TextStyle(fontSize: 12),
+                              ),
                             ),
                           ),
                         ],
                         const SizedBox(width: 8),
                         TextButton(
-                          onPressed: isSubmitting ? null : () => _notifier.clearCoordinates(),
-                          child: const Text('Ignorar', style: TextStyle(fontSize: 12)),
+                          onPressed: isSubmitting
+                              ? null
+                              : () => _notifier.clearCoordinates(),
+                          child: const Text(
+                            'Ignorar',
+                            style: TextStyle(fontSize: 12),
+                          ),
                         ),
                       ],
                     ),
@@ -871,16 +950,19 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
+                      color: scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
                       'Sem check-in',
                       style: TextStyle(
                         fontSize: 12,
-                        color: theme.colorScheme.onSurface.withAlpha(180),
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -904,6 +986,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
 class _FallbackReviewCreationRepository implements ReviewCreationRepository {
   @override
   Future<FeedReview> createReview(CreateReviewInput input) async {
-    throw UnimplementedError('Nenhum repositório de criação de avaliações fornecido.');
+    throw UnimplementedError(
+      'Nenhum repositório de criação de avaliações fornecido.',
+    );
   }
 }

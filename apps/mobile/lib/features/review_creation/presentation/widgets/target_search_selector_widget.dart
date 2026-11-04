@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -69,10 +70,12 @@ class TargetSearchSelectorWidget extends StatefulWidget {
   });
 
   @override
-  State<TargetSearchSelectorWidget> createState() => _TargetSearchSelectorWidgetState();
+  State<TargetSearchSelectorWidget> createState() =>
+      _TargetSearchSelectorWidgetState();
 }
 
-class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget> {
+class _TargetSearchSelectorWidgetState
+    extends State<TargetSearchSelectorWidget> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _manualUuidController = TextEditingController();
 
@@ -100,10 +103,13 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     }
   }
 
-  bool get _canRegisterPlace => widget.placeRepository != null && _kindFilter != TargetKindFilter.product;
-  bool get _canRegisterProduct => widget.productRepository != null && _kindFilter != TargetKindFilter.place;
+  bool get _canRegisterPlace =>
+      widget.placeRepository != null && _kindFilter != TargetKindFilter.product;
+  bool get _canRegisterProduct =>
+      widget.productRepository != null && _kindFilter != TargetKindFilter.place;
   bool get _canDiscoverExternally =>
-      widget.placeDiscoveryRepository != null && _kindFilter != TargetKindFilter.product;
+      widget.placeDiscoveryRepository != null &&
+      _kindFilter != TargetKindFilter.product;
 
   // Cache em memória durante a sessão da tela para evitar requisições idênticas
   final Map<String, List<SearchResultItem>> _queryCache = {};
@@ -112,7 +118,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   int _pendingLoadGeneration = 0;
 
   PendingPlaceRegistrationStore get _store =>
-      widget.pendingRegistrationStore ?? PendingPlaceRegistrationStore.processLocal;
+      widget.pendingRegistrationStore ??
+      PendingPlaceRegistrationStore.processLocal;
 
   @override
   void initState() {
@@ -132,7 +139,10 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     if (oldWidget.currentUserId != widget.currentUserId ||
         oldWidget.authNotifier != widget.authNotifier ||
         oldWidget.pendingRegistrationStore != widget.pendingRegistrationStore) {
-      _onIdentityMaybeChanged(force: oldWidget.pendingRegistrationStore != widget.pendingRegistrationStore);
+      _onIdentityMaybeChanged(
+        force: oldWidget.pendingRegistrationStore !=
+            widget.pendingRegistrationStore,
+      );
     }
   }
 
@@ -164,7 +174,11 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     final generation = ++_pendingLoadGeneration;
     final userId = _scopedUserId;
     final loaded = userId == null ? null : await _store.loadLatest(userId);
-    if (!mounted || generation != _pendingLoadGeneration || userId != _getCurrentUserId()) return;
+    if (!mounted ||
+        generation != _pendingLoadGeneration ||
+        userId != _getCurrentUserId()) {
+      return;
+    }
     setState(() {
       _pendingRegistration = loaded;
     });
@@ -304,7 +318,11 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   /// Cadastra um produto inexistente e o seleciona como alvo; nota, comentários, demais alvos e mídia ficam no
   /// formulário da avaliação, que este seletor não toca.
   Future<void> _openManualProductRegistration() async {
-    if (!widget.enabled || widget.productRepository == null || _isOpeningProductRegistration) return;
+    if (!widget.enabled ||
+        widget.productRepository == null ||
+        _isOpeningProductRegistration) {
+      return;
+    }
     _isOpeningProductRegistration = true;
     try {
       final currentUid = _getCurrentUserId();
@@ -328,7 +346,10 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
       final normalizedQuery = _searchController.text.trim().toLowerCase();
       if (normalizedQuery.isNotEmpty) {
         final existing = _queryCache[normalizedQuery] ?? const [];
-        _queryCache[normalizedQuery] = [createdItem, ...existing.where((e) => e.id != createdItem.id)];
+        _queryCache[normalizedQuery] = [
+          createdItem,
+          ...existing.where((e) => e.id != createdItem.id),
+        ];
       }
       widget.onTargetSelected(createdItem);
     } finally {
@@ -341,7 +362,9 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     if (widget.isTargetSelectedElsewhere?.call(adopted.id) ?? false) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('O local "${adopted.name}" já foi adicionado a esta avaliação.'),
+          content: Text(
+            'O local "${adopted.name}" já foi adicionado a esta avaliação.',
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -350,29 +373,39 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     final normalizedQuery = _searchController.text.trim().toLowerCase();
     if (normalizedQuery.isNotEmpty) {
       final existing = _queryCache[normalizedQuery] ?? const [];
-      _queryCache[normalizedQuery] = [adopted, ...existing.where((e) => e.id != adopted.id)];
+      _queryCache[normalizedQuery] = [
+        adopted,
+        ...existing.where((e) => e.id != adopted.id),
+      ];
     }
     widget.onTargetSelected(adopted);
   }
 
   Future<void> _resumePendingRegistration() async {
-    if (!widget.enabled || widget.placeRepository == null || _pendingRegistration == null) return;
+    if (!widget.enabled ||
+        widget.placeRepository == null ||
+        _pendingRegistration == null) {
+      return;
+    }
 
     final currentUid = _getCurrentUserId();
     final pending = _pendingRegistration!;
 
     File? photoToUse = pending.photoFile;
-    if (pending.photoUnavailable || (photoToUse != null && !photoToUse.existsSync())) {
+    if (pending.photoUnavailable ||
+        (photoToUse != null && !photoToUse.existsSync())) {
       photoToUse = null;
       if (mounted) {
+        final semantic = RewitSemanticColors.of(context);
         PendingRegistrationNotices.show(
           context,
           currentUid,
           SnackBar(
             content: Text(
               'A fotografia anterior do local "${pending.place.name}" não está mais disponível no dispositivo. Selecione uma nova foto.',
+              style: TextStyle(color: semantic.warning.onContainer),
             ),
-            backgroundColor: Colors.orange.shade900,
+            backgroundColor: semantic.warning.container,
           ),
         );
       }
@@ -400,7 +433,10 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     await _handleRegistrationResult(result, currentUid);
   }
 
-  Future<void> _handleRegistrationResult(ManualPlaceRegistrationResult result, String? currentUid) async {
+  Future<void> _handleRegistrationResult(
+    ManualPlaceRegistrationResult result,
+    String? currentUid,
+  ) async {
     if (result.isPhotoPending) {
       final pending = PendingPlaceRegistration(
         place: result.place,
@@ -446,6 +482,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     // Sem ação no aviso: o local criado vira o alvo e este seletor é desmontado em seguida, então a
     // retomada fica no aviso de pendência do seletor (botão "Trocar" do alvo ou nova avaliação).
     if (result.isPhotoPending && mounted) {
+      final semantic = RewitSemanticColors.of(context);
       PendingRegistrationNotices.show(
         context,
         currentUid,
@@ -453,8 +490,9 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           content: Text(
             'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente. '
             'Retome o envio pelo aviso de pendência na busca de alvos.',
+            style: TextStyle(color: semantic.warning.onContainer),
           ),
-          backgroundColor: Colors.orange.shade800,
+          backgroundColor: semantic.warning.container,
         ),
       );
     }
@@ -468,6 +506,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
 
     if (_showManualInput) {
       return Column(
@@ -518,13 +558,17 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.orange.shade50,
+              color: semantic.warning.container,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange.shade300),
+              border: Border.all(color: semantic.warning.border),
             ),
             child: Row(
               children: [
-                Icon(Icons.warning_amber_rounded, size: 20, color: Colors.orange.shade800),
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 20,
+                  color: semantic.warning.accent,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -537,7 +581,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                         : const Key('target_pending_photo_pending_text'),
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.orange.shade900,
+                      color: semantic.warning.onContainer,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -647,7 +691,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                   'Buscando alvos...',
                   style: TextStyle(
                     fontSize: 13,
-                    color: theme.colorScheme.onSurface.withAlpha(160),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -661,23 +705,27 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             margin: const EdgeInsets.only(top: 8),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: theme.colorScheme.errorContainer.withAlpha(120),
+              color: scheme.errorContainer,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: theme.colorScheme.error.withAlpha(80)),
+              border: Border.all(color: scheme.error.withAlpha(80)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Icon(Icons.error_outline, size: 18, color: theme.colorScheme.error),
+                    Icon(
+                      Icons.error_outline,
+                      size: 18,
+                      color: scheme.error,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _errorMessage!,
                         style: TextStyle(
                           fontSize: 12,
-                          color: theme.colorScheme.onErrorContainer,
+                          color: scheme.onErrorContainer,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -690,7 +738,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     'Aguarde $_retryAfterSeconds segundos antes de tentar novamente.',
                     style: TextStyle(
                       fontSize: 11,
-                      color: theme.colorScheme.error,
+                      color: scheme.error,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -705,10 +753,16 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                       }
                     },
                     icon: const Icon(Icons.refresh, size: 14),
-                    label: const Text('Tentar novamente', style: TextStyle(fontSize: 11)),
+                    label: const Text(
+                      'Tentar novamente',
+                      style: TextStyle(fontSize: 11),
+                    ),
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
                     ),
                   ),
                 ),
@@ -729,7 +783,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                 Icon(
                   Icons.info_outline,
                   size: 16,
-                  color: theme.colorScheme.onSurface.withAlpha(130),
+                  color: scheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -737,7 +791,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     'Digite ao menos 2 caracteres para buscar locais e produtos.',
                     style: TextStyle(
                       fontSize: 11,
-                      color: theme.colorScheme.onSurface.withAlpha(140),
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -755,7 +809,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             margin: const EdgeInsets.only(top: 8),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
@@ -766,7 +820,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     Icon(
                       Icons.search_off_rounded,
                       size: 20,
-                      color: theme.colorScheme.onSurface.withAlpha(150),
+                      color: scheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -775,9 +829,12 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                         children: [
                           Text(
                             switch (_kindFilter) {
-                              TargetKindFilter.all => 'Nenhum resultado para "${_searchController.text.trim()}".',
-                              TargetKindFilter.place => 'Nenhum local para "${_searchController.text.trim()}".',
-                              TargetKindFilter.product => 'Nenhum produto para "${_searchController.text.trim()}".',
+                              TargetKindFilter.all =>
+                                'Nenhum resultado para "${_searchController.text.trim()}".',
+                              TargetKindFilter.place =>
+                                'Nenhum local para "${_searchController.text.trim()}".',
+                              TargetKindFilter.product =>
+                                'Nenhum produto para "${_searchController.text.trim()}".',
                             },
                             style: const TextStyle(
                               fontSize: 12,
@@ -789,7 +846,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                             'Verifique a digitação ou tente outro nome.',
                             style: TextStyle(
                               fontSize: 11,
-                              color: theme.colorScheme.onSurface.withAlpha(150),
+                              color: scheme.onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -801,7 +858,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(
                     key: const Key('register_manual_place_button'),
-                    onPressed: widget.enabled ? _openManualPlaceRegistration : null,
+                    onPressed:
+                        widget.enabled ? _openManualPlaceRegistration : null,
                     icon: const Icon(Icons.add_location_alt_outlined, size: 18),
                     label: const Text('Cadastrar local manualmente'),
                   ),
@@ -810,7 +868,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                   const SizedBox(height: 8),
                   FilledButton.tonalIcon(
                     key: const Key('register_manual_product_button'),
-                    onPressed: widget.enabled ? _openManualProductRegistration : null,
+                    onPressed:
+                        widget.enabled ? _openManualProductRegistration : null,
                     icon: const Icon(Icons.add_box_outlined, size: 18),
                     label: const Text('Cadastrar produto'),
                   ),
@@ -826,10 +885,10 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             margin: const EdgeInsets.only(top: 8),
             constraints: const BoxConstraints(maxHeight: 280),
             child: Material(
-              color: theme.colorScheme.surface,
+              color: theme.cardTheme.color ?? scheme.surfaceContainerLow,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
-                side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(100)),
+                side: BorderSide(color: scheme.outlineVariant),
               ),
               child: ListView.separated(
                 shrinkWrap: true,
@@ -837,7 +896,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                 itemCount: _visibleResults!.length,
                 separatorBuilder: (context, _) => Divider(
                   height: 1,
-                  color: theme.colorScheme.outlineVariant.withAlpha(60),
+                  color: scheme.outlineVariant,
                 ),
                 itemBuilder: (context, index) {
                   final item = _visibleResults![index];
@@ -874,7 +933,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               alignment: Alignment.centerRight,
               child: TextButton.icon(
                 key: const Key('register_manual_product_footer_button'),
-                onPressed: widget.enabled ? _openManualProductRegistration : null,
+                onPressed:
+                    widget.enabled ? _openManualProductRegistration : null,
                 icon: const Icon(Icons.add_box_outlined, size: 16),
                 label: const Text(
                   'Não encontrou o produto? Cadastrar',
@@ -891,7 +951,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             query: _searchController.text,
             enabled: widget.enabled,
             onAdopted: _onExternalPlaceAdopted,
-            onRegisterManually: _canRegisterPlace ? _openManualPlaceRegistration : null,
+            onRegisterManually:
+                _canRegisterPlace ? _openManualPlaceRegistration : null,
             locationService: widget.locationService,
           ),
       ],
@@ -904,10 +965,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     required SearchResultItem item,
     required bool isAlreadySelected,
   }) {
-    // Ícone e cores distintivas por tipo de alvo
-    final style = TargetTypeStyle.of(item.targetType, theme.colorScheme);
-    final IconData typeIcon = style.icon;
-    final Color badgeColor = style.color;
+    final scheme = theme.colorScheme;
+    final style = TargetTypeStyle.of(item.targetType, scheme);
 
     return ListTile(
       dense: true,
@@ -916,19 +975,17 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: badgeColor.withAlpha(25),
+          color: style.containerColor,
           shape: BoxShape.circle,
         ),
-        child: Icon(typeIcon, size: 20, color: badgeColor),
+        child: Icon(style.icon, size: 20, color: style.color),
       ),
       title: Text(
         item.name,
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.bold,
-          color: isAlreadySelected
-              ? theme.colorScheme.onSurface.withAlpha(100)
-              : theme.colorScheme.onSurface,
+          color: isAlreadySelected ? scheme.onSurfaceVariant : scheme.onSurface,
         ),
       ),
       subtitle: Row(
@@ -936,7 +993,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
             decoration: BoxDecoration(
-              color: badgeColor.withAlpha(25),
+              color: style.containerColor,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
@@ -944,7 +1001,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
-                color: badgeColor,
+                color: style.onContainerColor,
               ),
             ),
           ),
@@ -955,7 +1012,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                 '• ${item.category!}',
                 style: TextStyle(
                   fontSize: 11,
-                  color: theme.colorScheme.onSurface.withAlpha(140),
+                  color: scheme.onSurfaceVariant,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -967,7 +1024,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
+                color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -975,15 +1032,19 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: theme.colorScheme.onSurface.withAlpha(140),
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
             )
           : TextButton(
-              onPressed: widget.enabled ? () => widget.onTargetSelected(item) : null,
+              onPressed:
+                  widget.enabled ? () => widget.onTargetSelected(item) : null,
               style: TextButton.styleFrom(
                 visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 2,
+                ),
               ),
               child: const Text('Selecionar', style: TextStyle(fontSize: 12)),
             ),
@@ -991,7 +1052,9 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           ? () {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('O alvo "${item.name}" já foi adicionado a esta avaliação.'),
+                  content: Text(
+                    'O alvo "${item.name}" já foi adicionado a esta avaliação.',
+                  ),
                   duration: const Duration(seconds: 2),
                 ),
               );

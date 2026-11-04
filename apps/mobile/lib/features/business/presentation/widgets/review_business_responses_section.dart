@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
@@ -54,6 +55,32 @@ class _ReviewBusinessResponsesSectionState
     }
   }
 
+  void _showSuccessSnackBar(String message) {
+    final semantic = RewitSemanticColors.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: semantic.success.onContainer),
+        ),
+        backgroundColor: semantic.success.container,
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    final scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: scheme.onErrorContainer),
+        ),
+        backgroundColor: scheme.errorContainer,
+      ),
+    );
+  }
+
   Future<void> _loadInitialData() async {
     setState(() {
       _isLoading = true;
@@ -64,7 +91,8 @@ class _ReviewBusinessResponsesSectionState
       // 1. Carregar contas controladas pelo usuário autenticado (para autorização de exclusão)
       if (widget.businessRepository != null) {
         try {
-          final accounts = await widget.businessRepository!.getMyBusinessAccounts();
+          final accounts =
+              await widget.businessRepository!.getMyBusinessAccounts();
           _myBusinessAccountIds = accounts.map((a) => a.id).toSet();
         } catch (_) {
           _myBusinessAccountIds = {};
@@ -80,13 +108,15 @@ class _ReviewBusinessResponsesSectionState
 
       // 3. Consultar elegibilidade para responder
       try {
-        _eligibility = await widget.repository.getReviewEligibility(widget.reviewId);
+        _eligibility =
+            await widget.repository.getReviewEligibility(widget.reviewId);
       } catch (_) {
         _eligibility = null;
       }
 
       if (_myBusinessAccountIds.isEmpty && _eligibility != null) {
-        _myBusinessAccountIds = _eligibility!.accounts.map((a) => a.businessAccountId).toSet();
+        _myBusinessAccountIds =
+            _eligibility!.accounts.map((a) => a.businessAccountId).toSet();
       }
 
       if (mounted) {
@@ -117,9 +147,11 @@ class _ReviewBusinessResponsesSectionState
   BusinessResponseEligibility? get _effectiveEligibility {
     if (_eligibility == null) return null;
     final availableAccounts = _eligibility!.accounts.where((account) {
-      final alreadyResponded =
-          _responses.any((r) => r.businessAccountId == account.businessAccountId);
-      return account.canPublish && account.places.isNotEmpty && !alreadyResponded;
+      final alreadyResponded = _responses
+          .any((r) => r.businessAccountId == account.businessAccountId);
+      return account.canPublish &&
+          account.places.isNotEmpty &&
+          !alreadyResponded;
     }).toList();
 
     return BusinessResponseEligibility(
@@ -157,12 +189,7 @@ class _ReviewBusinessResponsesSectionState
         setState(() {
           _isLoadingMore = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Falha ao carregar mais respostas: ${e.detail}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Falha ao carregar mais respostas: ${e.detail}');
       }
     } catch (_) {
       if (mounted) {
@@ -190,15 +217,8 @@ class _ReviewBusinessResponsesSectionState
           _deletingResponseId = null;
         });
 
-        // Recarrega elegibilidade (empresa pode voltar a estar elegível após remoção)
         _reloadEligibility();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Resposta oficial removida com sucesso.'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        _showSuccessSnackBar('Resposta oficial removida com sucesso.');
       }
     } on ApiException catch (e) {
       if (mounted) {
@@ -211,24 +231,14 @@ class _ReviewBusinessResponsesSectionState
         if (e.isNotFound || e.isConflict) {
           _reloadEligibility();
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Falha ao remover resposta: ${e.detail}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Falha ao remover resposta: ${e.detail}');
       }
     } catch (_) {
       if (mounted) {
         setState(() {
           _deletingResponseId = null;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Erro inesperado ao remover resposta.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Erro inesperado ao remover resposta.');
       }
     }
   }
@@ -253,21 +263,15 @@ class _ReviewBusinessResponsesSectionState
         _showPublishForm = false;
       });
 
-      // Recarrega elegibilidade após publicação
       _reloadEligibility();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Resposta oficial publicada com sucesso!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _showSuccessSnackBar('Resposta oficial publicada com sucesso!');
     }
   }
 
   Future<void> _reloadEligibility() async {
     try {
-      final updated = await widget.repository.getReviewEligibility(widget.reviewId);
+      final updated =
+          await widget.repository.getReviewEligibility(widget.reviewId);
       if (mounted) {
         setState(() {
           _eligibility = updated;
@@ -282,7 +286,6 @@ class _ReviewBusinessResponsesSectionState
     final effectiveEligibility = _effectiveEligibility;
     final canPublish = effectiveEligibility?.hasEligibleAccounts ?? false;
 
-    // Se estiver carregando inicialmente
     if (_isLoading) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 12.0),
@@ -292,7 +295,6 @@ class _ReviewBusinessResponsesSectionState
       );
     }
 
-    // Se houve erro e nenhuma resposta está em cache
     if (_errorMessage != null && _responses.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -304,7 +306,6 @@ class _ReviewBusinessResponsesSectionState
       );
     }
 
-    // Se não há respostas e o usuário não pode publicar
     if (_responses.isEmpty && !canPublish) {
       return const SizedBox.shrink();
     }
@@ -350,7 +351,9 @@ class _ReviewBusinessResponsesSectionState
         const SizedBox(height: 8),
 
         // Formulário de Publicação (quando aberto)
-        if (canPublish && _showPublishForm && effectiveEligibility != null) ...[
+        if (canPublish &&
+            _showPublishForm &&
+            effectiveEligibility != null) ...[
           PublishBusinessResponseForm(
             eligibility: effectiveEligibility,
             onSubmit: _handlePublish,
@@ -366,7 +369,8 @@ class _ReviewBusinessResponsesSectionState
         // Lista de Respostas Oficiais
         if (_responses.isNotEmpty) ...[
           ..._responses.map((resp) {
-            final canDeleteThis = _myBusinessAccountIds.contains(resp.businessAccountId);
+            final canDeleteThis =
+                _myBusinessAccountIds.contains(resp.businessAccountId);
             final isDeletingThis = _deletingResponseId == resp.id;
 
             return BusinessResponseCard(
