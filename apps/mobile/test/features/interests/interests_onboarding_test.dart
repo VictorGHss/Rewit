@@ -225,6 +225,10 @@ class _PerUserFeedRepository implements FeedRepository {
   }
 
   @override
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10}) async =>
+      getFeed(page: page, size: size);
+
+  @override
   Future<FeedReview> getReviewById(String reviewId) => throw UnimplementedError();
   @override
   Future<HelpfulResult> toggleHelpful(String reviewId, {required bool currentlyHelpful}) =>

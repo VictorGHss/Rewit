@@ -245,13 +245,15 @@ class FeedReviewDto {
   }
 }
 
-/// DTO de resposta paginada do Feed V2 (/api/v2/feed).
+/// DTO de resposta paginada aceitando os envelopes de Feed V1 (/api/v1/feed) e Feed V2 (/api/v2/feed).
 class FeedPageDto {
   final List<FeedReviewDto> items;
   final int page;
   final int size;
   final int windowSize;
   final int totalPages;
+  final int? totalElements;
+  final bool? isLast;
 
   const FeedPageDto({
     required this.items,
@@ -259,24 +261,103 @@ class FeedPageDto {
     required this.size,
     required this.windowSize,
     required this.totalPages,
+    this.totalElements,
+    this.isLast,
   });
 
   factory FeedPageDto.fromJson(Map<String, dynamic> json) {
-    final rawItems = json['items'] as List<dynamic>?;
-    final itemsList = rawItems != null
-        ? rawItems
-            .whereType<Map<String, dynamic>>()
-            .map((item) => FeedReviewDto.fromJson(item))
-            .toList()
-        : <FeedReviewDto>[];
+    // 1. Validação estrutural do envelope: exige explicitamente a presença de 'items' (V2) ou 'content' (V1).
+    // Não transforma silenciosamente respostas estruturalmente inválidas (ex.: {}, payloads de erro) em páginas vazias.
+    if (!json.containsKey('items') && !json.containsKey('content')) {
+      throw const FormatException(
+        'Envelope de feed inválido: esperado "items" (V2) ou "content" (V1)',
+      );
+    }
+
+    final dynamic rawList = json['items'] ?? json['content'];
+    if (rawList is! List) {
+      throw const FormatException(
+        'Envelope de feed inválido: a lista de itens ("items" ou "content") deve ser uma lista',
+      );
+    }
+
+    final itemsList = <FeedReviewDto>[];
+    for (final element in rawList) {
+      if (element is! Map<String, dynamic>) {
+        throw const FormatException(
+          'Elemento de avaliação inválido dentro da lista do feed',
+        );
+      }
+      itemsList.add(FeedReviewDto.fromJson(element));
+    }
+
+    // 2. Extração segura dos metadados de paginação com conversão robusta para int
+    final bool isV1 = json.containsKey('content') &&
+        (!json.containsKey('items') || json.containsKey('pageNumber'));
+
+    final int page = _parseInt(
+      isV1 ? (json['pageNumber'] ?? json['page']) : (json['page'] ?? json['pageNumber']),
+      defaultValue: 0,
+    );
+
+    final int size = _parseInt(
+      isV1 ? (json['pageSize'] ?? json['size']) : (json['size'] ?? json['pageSize']),
+      defaultValue: 10,
+    );
+
+    final int? totalElements = _parseNullableInt(json['totalElements']);
+    final int totalPages = _parseInt(json['totalPages'], defaultValue: 0);
+
+    final int windowSize = _parseInt(
+      json['windowSize'],
+      defaultValue: isV1 ? (totalElements ?? 0) : 0,
+    );
+
+    final bool? isLast = _parseNullableBool(json['isLast']) ??
+        (isV1 || json.containsKey('isLast')
+            ? (totalPages == 0 || page >= totalPages - 1)
+            : null);
 
     return FeedPageDto(
       items: itemsList,
-      page: (json['page'] as num?)?.toInt() ?? 0,
-      size: (json['size'] as num?)?.toInt() ?? 10,
-      windowSize: (json['windowSize'] as num?)?.toInt() ?? 0,
-      totalPages: (json['totalPages'] as num?)?.toInt() ?? 0,
+      page: page,
+      size: size,
+      windowSize: windowSize,
+      totalPages: totalPages,
+      totalElements: totalElements,
+      isLast: isLast,
     );
+  }
+
+  static int _parseInt(dynamic value, {int defaultValue = 0}) {
+    if (value == null) return defaultValue;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) {
+      return int.tryParse(value) ?? defaultValue;
+    }
+    return defaultValue;
+  }
+
+  static int? _parseNullableInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) {
+      return int.tryParse(value);
+    }
+    return null;
+  }
+
+  static bool? _parseNullableBool(dynamic value) {
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized == 'true') return true;
+      if (normalized == 'false') return false;
+    }
+    return null;
   }
 
   FeedPage toEntity() {
@@ -286,6 +367,8 @@ class FeedPageDto {
       size: size,
       windowSize: windowSize,
       totalPages: totalPages,
+      totalElements: totalElements,
+      isLast: isLast,
     );
   }
 }

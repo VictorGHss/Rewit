@@ -155,6 +155,10 @@ class _StubFeedRepo implements FeedRepository {
       );
 
   @override
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10}) async =>
+      getFeed(page: page, size: size);
+
+  @override
   Future<FeedReview> getReviewById(String reviewId) async => sampleReview;
 
   @override

@@ -334,6 +334,10 @@ class FakeFeedRepoForSocial implements FeedRepository {
       FeedPage(items: [review], page: 0, size: 10, windowSize: 1, totalPages: 1);
 
   @override
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10}) async =>
+      getFeed(page: page, size: size);
+
+  @override
   Future<FeedReview> getReviewById(String reviewId) async => review;
 
   @override

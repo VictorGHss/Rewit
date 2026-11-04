@@ -232,4 +232,238 @@ void main() {
       expect(FeedReviewDto.fromJson(reviewJson(includeIsMine: false)).toEntity().isMine, isNull);
     });
   });
+
+  group('Feed V1 (Following) and Envelope Interoperability', () {
+    test('deve deserializar envelope completo de Feed V1 (content, pageNumber, pageSize, totalElements, totalPages, isLast)', () {
+      final json = {
+        'content': [
+          {
+            'id': 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
+            'author': {
+              'id': 'user-v1-uuid',
+              'handle': 'carlos',
+              'displayName': 'Carlos Silva',
+              'avatarUrl': 'https://cdn.rewit.com/avatars/carlos.png',
+              'isAnonymous': false,
+            },
+            'contextPlaceId': 'place-uuid-123',
+            'experienceText': 'Ótima experiência no restaurante italiano!',
+            'status': 'ACTIVE',
+            'visibility': 'PUBLIC',
+            'isAnonymous': false,
+            'isVerifiedOnSite': true,
+            'helpfulCount': 12,
+            'isHelpfulByMe': false,
+            'isMine': true,
+            'targets': [
+              {
+                'id': 'tgt-v1-1',
+                'targetId': 'target-place-uuid',
+                'targetType': 'PLACE',
+                'targetName': 'Cantina do Nono',
+                'rating': 4.8,
+                'specificComment': 'Massa artesanal excelente',
+                'createdAt': '2026-11-04T01:00:00Z',
+              }
+            ],
+            'createdAt': '2026-11-04T01:00:00Z',
+            'updatedAt': '2026-11-04T01:10:00Z',
+          }
+        ],
+        'pageNumber': 1,
+        'pageSize': 10,
+        'totalElements': 25,
+        'totalPages': 3,
+        'isLast': false,
+      };
+
+      final dto = FeedPageDto.fromJson(json);
+      final entity = dto.toEntity();
+
+      expect(dto.page, 1);
+      expect(dto.size, 10);
+      expect(dto.totalElements, 25);
+      expect(dto.totalPages, 3);
+      expect(dto.isLast, isFalse);
+      expect(dto.windowSize, 25); // derivado de totalElements para V1
+      expect(dto.items.length, 1);
+
+      expect(entity.page, 1);
+      expect(entity.size, 10);
+      expect(entity.totalElements, 25);
+      expect(entity.totalPages, 3);
+      expect(entity.isLast, isFalse);
+      expect(entity.hasMore, isTrue);
+      expect(entity.isEmpty, isFalse);
+      expect(entity.items.length, 1);
+
+      final review = entity.items.first;
+      expect(review.id, 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d');
+      expect(review.author.displayName, 'Carlos Silva');
+      expect(review.author.handle, 'carlos');
+      expect(review.author.displayHandle, '@carlos');
+      expect(review.isVerifiedOnSite, isTrue);
+      expect(review.helpfulCount, 12);
+      expect(review.isMine, isTrue);
+      expect(review.targets.length, 1);
+      expect(review.targets.first.targetName, 'Cantina do Nono');
+      expect(review.targets.first.rating, 4.8);
+    });
+
+    test('deve deserializar envelope de Feed V1 vazio (content vazio e isLast true)', () {
+      final json = {
+        'content': [],
+        'pageNumber': 0,
+        'pageSize': 10,
+        'totalElements': 0,
+        'totalPages': 0,
+        'isLast': true,
+      };
+
+      final dto = FeedPageDto.fromJson(json);
+      final entity = dto.toEntity();
+
+      expect(dto.items, isEmpty);
+      expect(dto.page, 0);
+      expect(dto.size, 10);
+      expect(dto.totalElements, 0);
+      expect(dto.totalPages, 0);
+      expect(dto.isLast, isTrue);
+
+      expect(entity.isEmpty, isTrue);
+      expect(entity.hasMore, isFalse);
+      expect(entity.items, isEmpty);
+    });
+
+    test('deve converter com segurança metadados numéricos de paginação de múltiplos tipos (int, double, string)', () {
+      // V1 com tipos mistos (double e string numérica)
+      final jsonV1 = {
+        'content': [],
+        'pageNumber': 2.0,
+        'pageSize': '15',
+        'totalElements': 45.0,
+        'totalPages': '3',
+        'isLast': false,
+      };
+
+      final dtoV1 = FeedPageDto.fromJson(jsonV1);
+      expect(dtoV1.page, 2);
+      expect(dtoV1.size, 15);
+      expect(dtoV1.totalElements, 45);
+      expect(dtoV1.totalPages, 3);
+      expect(dtoV1.isLast, isFalse);
+      expect(dtoV1.toEntity().hasMore, isTrue);
+
+      // V2 com tipos mistos
+      final jsonV2 = {
+        'items': [],
+        'page': 1.0,
+        'size': '20',
+        'windowSize': 60.0,
+        'totalPages': '4',
+      };
+
+      final dtoV2 = FeedPageDto.fromJson(jsonV2);
+      expect(dtoV2.page, 1);
+      expect(dtoV2.size, 20);
+      expect(dtoV2.windowSize, 60);
+      expect(dtoV2.totalPages, 4);
+      expect(dtoV2.toEntity().hasMore, isTrue);
+    });
+
+    test('deve preservar campos opcionais e valores nulos do contrato em V1 e V2', () {
+      final jsonMinimal = {
+        'content': [
+          {
+            'id': 'rev-minimal',
+            'author': {
+              'id': null,
+              'handle': null,
+              'displayName': 'Anônimo',
+              'avatarUrl': null,
+              'isAnonymous': true,
+            },
+            'contextPlaceId': null,
+            'experienceText': null,
+            'status': 'ACTIVE',
+            'visibility': 'PUBLIC',
+            'isAnonymous': true,
+            'isVerifiedOnSite': false,
+            'helpfulCount': 0,
+            'isHelpfulByMe': false,
+            'isMine': null,
+            'targets': [],
+            'createdAt': '2026-11-04T02:00:00Z',
+            'updatedAt': null,
+          }
+        ],
+        'pageNumber': 0,
+        'pageSize': 10,
+        'totalElements': null,
+        'totalPages': 1,
+        'isLast': true,
+      };
+
+      final entity = FeedPageDto.fromJson(jsonMinimal).toEntity();
+      expect(entity.items.length, 1);
+      final review = entity.items.first;
+      expect(review.contextPlaceId, isNull);
+      expect(review.experienceText, isNull);
+      expect(review.updatedAt, isNull);
+      expect(review.isMine, isNull);
+      expect(review.targets, isEmpty);
+      expect(review.author.id, isNull);
+      expect(entity.totalElements, isNull);
+      expect(entity.isLast, isTrue);
+      expect(entity.hasMore, isFalse);
+    });
+
+    test('deve lançar FormatException ao receber resposta estruturalmente inválida ou sem lista de itens', () {
+      // 1. Objeto vazio sem 'items' nem 'content'
+      expect(
+        () => FeedPageDto.fromJson({}),
+        throwsA(isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('Envelope de feed inválido: esperado "items" (V2) ou "content" (V1)'),
+        )),
+      );
+
+      // 2. Resposta de erro do servidor
+      expect(
+        () => FeedPageDto.fromJson({'error': 'Internal server error', 'status': 500}),
+        throwsA(isA<FormatException>()),
+      );
+
+      // 3. 'items' presente mas não é lista
+      expect(
+        () => FeedPageDto.fromJson({'items': 'not-a-list', 'page': 0}),
+        throwsA(isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('deve ser uma lista'),
+        )),
+      );
+
+      // 4. 'content' presente mas não é lista
+      expect(
+        () => FeedPageDto.fromJson({'content': 12345, 'pageNumber': 0}),
+        throwsA(isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('deve ser uma lista'),
+        )),
+      );
+
+      // 5. Elemento dentro da lista corrompido (não é Map)
+      expect(
+        () => FeedPageDto.fromJson({'items': ['item-invalido-string']}),
+        throwsA(isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('Elemento de avaliação inválido'),
+        )),
+      );
+    });
+  });
 }

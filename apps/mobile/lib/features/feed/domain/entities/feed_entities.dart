@@ -176,7 +176,7 @@ class FeedReview {
 }
 
 
-/// Página de feed ranqueada devolvida pelo backend.
+/// Página de feed devolvida pelo backend (Feed V1 social ou Feed V2 ranqueado).
 class FeedPage {
   final List<FeedReview> items;
   final int page;
@@ -184,14 +184,28 @@ class FeedPage {
   final int windowSize;
   final int totalPages;
 
+  /// Total geral de elementos em todas as páginas (informado pelo Feed V1 / PagedResponse).
+  final int? totalElements;
+
+  /// Indicador explícito de última página (informado pelo Feed V1 / PagedResponse).
+  final bool? isLast;
+
   const FeedPage({
     required this.items,
     required this.page,
     required this.size,
     required this.windowSize,
     required this.totalPages,
+    this.totalElements,
+    this.isLast,
   });
 
-  bool get hasMore => page + 1 < totalPages;
+  /// Indica se existem mais páginas a carregar.
+  /// Prioriza [isLast] quando presente (Feed V1); caso contrário, avalia [page + 1 < totalPages] (Feed V2).
+  bool get hasMore {
+    if (isLast != null) return !isLast!;
+    return page + 1 < totalPages;
+  }
+
   bool get isEmpty => items.isEmpty;
 }

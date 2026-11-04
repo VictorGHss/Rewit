@@ -8,6 +8,9 @@ abstract class FeedRepository {
   /// Obtém página do Feed V2 (ranqueado e diversificado pelo backend).
   Future<FeedPage> getFeed({int page = 0, int size = 10});
 
+  /// Obtém página do Feed V1 (timeline social dos usuários seguidos: /api/v1/feed).
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10});
+
   /// Consulta detalhes públicos de uma avaliação específica pelo seu ID.
   Future<FeedReview> getReviewById(String reviewId);
 

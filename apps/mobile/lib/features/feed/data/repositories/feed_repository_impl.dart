@@ -33,6 +33,22 @@ class FeedRepositoryImpl implements FeedRepository {
   }
 
   @override
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10}) async {
+    final response = await _httpClient.get(
+      ApiEndpoints.feed,
+      queryParameters: {
+        'page': page,
+        'size': size,
+      },
+      requiresAuth: true,
+    );
+
+    final Map<String, dynamic> jsonMap = jsonDecode(response.body) as Map<String, dynamic>;
+    final dto = FeedPageDto.fromJson(jsonMap);
+    return dto.toEntity();
+  }
+
+  @override
   Future<FeedReview> getReviewById(String reviewId) async {
     final response = await _httpClient.get(
       ApiEndpoints.reviewDetail(reviewId),

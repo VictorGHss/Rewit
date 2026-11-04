@@ -311,5 +311,117 @@ void main() {
         throwsA(isA<ApiException>().having((e) => e.errorCode, 'code', 'REVIEW_NOT_OWNED')),
       );
     });
+    test('getFollowingFeed consome /api/v1/feed com envelope V1, paginação e token Bearer', () async {
+      final mockClient = MockHttpHandler((request) async {
+        expect(request.url.path, '/api/v1/feed');
+        expect(request.url.queryParameters['page'], '2');
+        expect(request.url.queryParameters['size'], '20');
+        expect(request.headers['authorization'], 'Bearer feed-valid-jwt');
+
+        final responsePayload = {
+          'content': [
+            {
+              'id': 'rev-following-1',
+              'author': {
+                'id': 'user-followed-1',
+                'handle': 'beatriz',
+                'displayName': 'Beatriz Souza',
+              },
+              'experienceText': 'Excelente cafeteria com cafés especiais!',
+              'status': 'ACTIVE',
+              'visibility': 'PUBLIC',
+              'isAnonymous': false,
+              'isVerifiedOnSite': true,
+              'createdAt': '2026-11-04T02:15:00Z',
+              'targets': [],
+              'helpfulCount': 8,
+              'isHelpfulByMe': false,
+              'isMine': false,
+            }
+          ],
+          'pageNumber': 2,
+          'pageSize': 20,
+          'totalElements': 45,
+          'totalPages': 3,
+          'isLast': false,
+        };
+
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(responsePayload))),
+          200,
+        );
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+      );
+
+      final repo = FeedRepositoryImpl(httpClient: httpClient);
+      final feedPage = await repo.getFollowingFeed(page: 2, size: 20);
+
+      expect(feedPage.page, 2);
+      expect(feedPage.size, 20);
+      expect(feedPage.totalElements, 45);
+      expect(feedPage.totalPages, 3);
+      expect(feedPage.isLast, isFalse);
+      expect(feedPage.hasMore, isTrue);
+      expect(feedPage.items.length, 1);
+      expect(feedPage.items.first.author.displayName, 'Beatriz Souza');
+      expect(feedPage.items.first.author.handle, 'beatriz');
+    });
+
+    test('getFollowingFeed e getFeed diferenciam corretamente seus respectivos endpoints', () async {
+      final requestedPaths = <String>[];
+
+      final mockClient = MockHttpHandler((request) async {
+        requestedPaths.add(request.url.path);
+
+        if (request.url.path == '/api/v1/feed') {
+          final payloadV1 = {
+            'content': [],
+            'pageNumber': 0,
+            'pageSize': 10,
+            'totalElements': 0,
+            'totalPages': 0,
+            'isLast': true,
+          };
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(payloadV1))),
+            200,
+          );
+        } else if (request.url.path == '/api/v2/feed') {
+          final payloadV2 = {
+            'items': [],
+            'page': 0,
+            'size': 10,
+            'windowSize': 0,
+            'totalPages': 0,
+          };
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(payloadV2))),
+            200,
+          );
+        }
+
+        return http.StreamedResponse(Stream.value([]), 404);
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+      );
+
+      final repo = FeedRepositoryImpl(httpClient: httpClient);
+
+      final v2Page = await repo.getFeed(page: 0, size: 10);
+      final v1Page = await repo.getFollowingFeed(page: 0, size: 10);
+
+      expect(v2Page.isEmpty, isTrue);
+      expect(v1Page.isEmpty, isTrue);
+      expect(requestedPaths, ['/api/v2/feed', '/api/v1/feed']);
+    });
   });
 }
