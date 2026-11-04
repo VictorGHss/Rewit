@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/register_screen.dart';
@@ -61,7 +62,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _openRegistration() async {
     widget.authNotifier.clearMessage();
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => RegisterScreen(authNotifier: widget.authNotifier)),
+      MaterialPageRoute<void>(
+        builder: (_) => RegisterScreen(authNotifier: widget.authNotifier),
+      ),
     );
     // Voltando sem cadastrar, o erro do cadastro não pertence ao login
     if (mounted) widget.authNotifier.clearMessage();
@@ -96,24 +99,34 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final success = await widget.authNotifier.reactivateWithSocial(provider);
     if (success && mounted) {
+      final successTone = RewitSemanticColors.of(context).success;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Conta reativada com sucesso! Bem-vindo de volta.'),
-          backgroundColor: Colors.green,
+        SnackBar(
+          content: Text(
+            'Conta reativada com sucesso! Bem-vindo de volta.',
+            style: TextStyle(color: successTone.onContainer),
+          ),
+          backgroundColor: successTone.container,
         ),
       );
       widget.onLoginSuccess?.call();
     }
   }
 
-  Widget _reactivationFooter(ThemeData theme, {Key? key, required String label, required VoidCallback? onPressed}) {
+  Widget _reactivationFooter(
+    BuildContext context, {
+    Key? key,
+    required String label,
+    required VoidCallback? onPressed,
+  }) {
+    final danger = RewitSemanticColors.of(context).danger;
     return Column(
       key: key,
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         const SizedBox(height: 8),
-        Divider(height: 1, color: theme.colorScheme.error.withAlpha(60)),
+        Divider(height: 1, color: danger.border),
         const SizedBox(height: 6),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -123,7 +136,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 'Sua conta foi desativada?',
                 style: TextStyle(
                   fontSize: 12,
-                  color: theme.colorScheme.error,
+                  color: danger.onContainer,
                 ),
               ),
             ),
@@ -131,9 +144,14 @@ class _LoginScreenState extends State<LoginScreen> {
               onPressed: onPressed,
               style: TextButton.styleFrom(
                 visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               ),
-              child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              child: Text(
+                label,
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),
@@ -175,10 +193,14 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (success && mounted) {
+        final successTone = RewitSemanticColors.of(context).success;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Conta reativada com sucesso! Bem-vindo de volta.'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text(
+              'Conta reativada com sucesso! Bem-vindo de volta.',
+              style: TextStyle(color: successTone.onContainer),
+            ),
+            backgroundColor: successTone.container,
           ),
         );
         widget.onLoginSuccess?.call();
@@ -189,12 +211,14 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 400),
               child: Form(
@@ -204,7 +228,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   builder: (context, _) {
                     final state = widget.authNotifier.state;
                     final isLoading = state is Authenticating;
-                    final errorMessage = state is Unauthenticated ? state.errorMessage : null;
+                    final errorMessage =
+                        state is Unauthenticated ? state.errorMessage : null;
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -213,7 +238,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         Icon(
                           Icons.location_on,
                           size: 64,
-                          color: theme.colorScheme.primary,
+                          color: scheme.primary,
                         ),
                         const SizedBox(height: 12),
                         Text(
@@ -221,7 +246,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           textAlign: TextAlign.center,
                           style: theme.textTheme.headlineMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.primary,
+                            color: scheme.primary,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -229,7 +254,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           'Avaliações reais do mundo físico',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurface.withAlpha(180),
+                            color: scheme.onSurfaceVariant,
                           ),
                         ),
                         const SizedBox(height: 32),
@@ -238,22 +263,32 @@ class _LoginScreenState extends State<LoginScreen> {
                         if (errorMessage != null) ...[
                           ErrorBanner(
                             message: errorMessage,
-                            retryAfterSeconds: state is Unauthenticated ? state.retryAfterSeconds : null,
-                            isSuccess: state is Unauthenticated && state.errorCode == 'PASSWORD_CHANGED',
-                            footer: state is Unauthenticated && state.isInvalidCredentials
+                            retryAfterSeconds: state is Unauthenticated
+                                ? state.retryAfterSeconds
+                                : null,
+                            isSuccess: state is Unauthenticated &&
+                                state.errorCode == 'PASSWORD_CHANGED',
+                            footer: state is Unauthenticated &&
+                                    state.isInvalidCredentials
                                 ? _reactivationFooter(
-                                    theme,
+                                    context,
                                     label: 'Reativar Conta',
-                                    onPressed: isLoading ? null : _confirmAndReactivate,
+                                    onPressed: isLoading
+                                        ? null
+                                        : _confirmAndReactivate,
                                   )
-                                : state is Unauthenticated && state.canOfferSocialReactivation
+                                : state is Unauthenticated &&
+                                        state.canOfferSocialReactivation
                                     ? _reactivationFooter(
-                                        theme,
+                                        context,
                                         key: const Key('social_reactivate'),
-                                        label: 'Reativar com ${state.socialProvider!.label}',
+                                        label:
+                                            'Reativar com ${state.socialProvider!.label}',
                                         onPressed: isLoading
                                             ? null
-                                            : () => _confirmAndReactivateSocial(state.socialProvider!),
+                                            : () => _confirmAndReactivateSocial(
+                                                  state.socialProvider!,
+                                                ),
                                       )
                                     : null,
                           ),
@@ -291,7 +326,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                              _obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
                             ),
                             onPressed: () {
                               setState(() {
@@ -324,7 +361,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         // Link para Reativar Conta Desativada
                         TextButton.icon(
                           onPressed: isLoading ? null : _confirmAndReactivate,
-                          icon: const Icon(Icons.settings_backup_restore_rounded, size: 18),
+                          icon: const Icon(
+                            Icons.settings_backup_restore_rounded,
+                            size: 18,
+                          ),
                           label: const Text('Reativar conta desativada'),
                         ),
                         const SizedBox(height: 12),
@@ -334,7 +374,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             const Expanded(child: Divider()),
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
                               child: Text('ou', style: theme.textTheme.bodySmall),
                             ),
                             const Expanded(child: Divider()),

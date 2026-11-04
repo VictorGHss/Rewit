@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../../app/theme/rewit_semantic_colors.dart';
 import '../../../../shared/widgets/error_view.dart';
 import '../../../../shared/widgets/loading_indicator.dart';
 import '../../../search/domain/entities/search_entities.dart';
@@ -110,10 +111,14 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
     }
 
     if (_notifier.successMessage != null) {
+      final semantic = RewitSemanticColors.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_notifier.successMessage!),
-          backgroundColor: Colors.green,
+          content: Text(
+            _notifier.successMessage!,
+            style: TextStyle(color: semantic.success.onContainer),
+          ),
+          backgroundColor: semantic.success.container,
         ),
       );
       _notifier.clearMessages();
@@ -157,6 +162,8 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
     );
 
     if (!mounted) return;
+    final semantic = RewitSemanticColors.of(context);
+    final scheme = Theme.of(context).colorScheme;
 
     if (success) {
       if (_scrollController.hasClients) {
@@ -164,16 +171,22 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
       }
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text(_notifier.successMessage ?? 'Oferta retirada da vitrine.'),
-          backgroundColor: Colors.green,
+          content: Text(
+            _notifier.successMessage ?? 'Oferta retirada da vitrine.',
+            style: TextStyle(color: semantic.success.onContainer),
+          ),
+          backgroundColor: semantic.success.container,
         ),
       );
       _notifier.clearMessages();
     } else if (_notifier.errorMessage != null) {
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text(_notifier.errorMessage!),
-          backgroundColor: Theme.of(context).colorScheme.error,
+          content: Text(
+            _notifier.errorMessage!,
+            style: TextStyle(color: scheme.onErrorContainer),
+          ),
+          backgroundColor: scheme.errorContainer,
         ),
       );
       _notifier.clearMessages();
@@ -291,7 +304,7 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
           }
 
           final offer = _notifier.offers[index];
-          return _buildOfferCard(offer, theme);
+          return _buildOfferCard(context, offer, theme);
         },
       ),
     );
@@ -330,7 +343,7 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
     );
   }
 
-  Widget _buildOfferCard(PlaceProductOffer offer, ThemeData theme) {
+  Widget _buildOfferCard(BuildContext context, PlaceProductOffer offer, ThemeData theme) {
     final isDeletingThis = _notifier.isDeleting && _notifier.deletingProductId == offer.product.id;
 
     return Card(
@@ -376,7 +389,7 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
                     ],
                   ),
                 ),
-                _buildAvailabilityChip(offer.isAvailable, theme, offer.product.id),
+                _buildAvailabilityChip(context, offer.isAvailable, theme, offer.product.id),
               ],
             ),
             const Divider(height: 24),
@@ -435,17 +448,28 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
     );
   }
 
-  Widget _buildAvailabilityChip(bool isAvailable, ThemeData theme, String productId) {
-    final color = isAvailable ? Colors.green : Colors.grey;
+  Widget _buildAvailabilityChip(
+    BuildContext context,
+    bool isAvailable,
+    ThemeData theme,
+    String productId,
+  ) {
+    final semantic = RewitSemanticColors.of(context);
+    final scheme = theme.colorScheme;
+    final containerColor =
+        isAvailable ? semantic.success.container : scheme.surfaceContainerHighest;
+    final borderColor = isAvailable ? semantic.success.border : scheme.outlineVariant;
+    final dotColor = isAvailable ? semantic.success.accent : scheme.onSurfaceVariant;
+    final textColor = isAvailable ? semantic.success.onContainer : scheme.onSurfaceVariant;
     final label = isAvailable ? 'Disponível' : 'Sem estoque';
 
     return Container(
       key: Key('offer_availability_$productId'),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withAlpha(25),
+        color: containerColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withAlpha(100)),
+        border: Border.all(color: borderColor),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -453,13 +477,13 @@ class _PlaceOffersManagementScreenState extends State<PlaceOffersManagementScree
           Container(
             width: 8,
             height: 8,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
           Text(
             label,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: color,
+              color: textColor,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -684,9 +708,9 @@ class _OfferFormSheetState extends State<_OfferFormSheet> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  _buildSearchResultsSection(theme),
+                  _buildSearchResultsSection(context, theme),
                 ] else ...[
-                  _buildSelectedProductCard(theme, isEditing),
+                  _buildSelectedProductCard(context, theme, isEditing),
                   const SizedBox(height: 20),
                   _buildAvailabilitySection(theme),
                   const SizedBox(height: 20),
@@ -721,7 +745,9 @@ class _OfferFormSheetState extends State<_OfferFormSheet> {
     );
   }
 
-  Widget _buildSearchResultsSection(ThemeData theme) {
+  Widget _buildSearchResultsSection(BuildContext context, ThemeData theme) {
+    final semantic = RewitSemanticColors.of(context);
+
     if (widget.notifier.isSearching) {
       return const Padding(
         padding: EdgeInsets.all(24.0),
@@ -782,13 +808,17 @@ class _OfferFormSheetState extends State<_OfferFormSheet> {
                 ? Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withAlpha(40),
+                      color: semantic.warning.container,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.amber.withAlpha(120)),
+                      border: Border.all(color: semantic.warning.border),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Na vitrine',
-                      style: TextStyle(fontSize: 11, color: Colors.amber, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: semantic.warning.onContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   )
                 : const Icon(Icons.arrow_forward_ios, size: 14),
@@ -799,7 +829,9 @@ class _OfferFormSheetState extends State<_OfferFormSheet> {
     );
   }
 
-  Widget _buildSelectedProductCard(ThemeData theme, bool isEditing) {
+  Widget _buildSelectedProductCard(BuildContext context, ThemeData theme, bool isEditing) {
+    final semantic = RewitSemanticColors.of(context);
+
     return Container(
       key: const Key('selected_product_card'),
       padding: const EdgeInsets.all(14),
@@ -861,18 +893,22 @@ class _OfferFormSheetState extends State<_OfferFormSheet> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.amber.withAlpha(25),
+                color: semantic.warning.container,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber.withAlpha(100)),
+                border: Border.all(color: semantic.warning.border),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.info_outline, size: 16, color: Colors.amber),
-                  SizedBox(width: 8),
+                  Icon(Icons.info_outline, size: 16, color: semantic.warning.accent),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Este produto já possui oferta cadastrada. A operação atualizará os termos existentes.',
-                      style: TextStyle(fontSize: 12, color: Colors.amber, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: semantic.warning.onContainer,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],

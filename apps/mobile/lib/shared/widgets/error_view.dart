@@ -42,7 +42,7 @@ class ErrorView extends StatelessWidget {
               message,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withAlpha(180),
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             if (onRetry != null) ...[

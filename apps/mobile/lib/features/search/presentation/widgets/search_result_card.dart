@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
 import '../../domain/entities/search_entities.dart';
 import 'target_type_style.dart';
 
@@ -19,20 +20,14 @@ class SearchResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = TargetTypeStyle.of(item.targetType, theme.colorScheme);
-    final IconData typeIcon = style.icon;
-    final Color badgeColor = style.color;
+    final scheme = theme.colorScheme;
+    final style = TargetTypeStyle.of(item.targetType, scheme);
 
     return Card(
-      elevation: 0.5,
       margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
-      ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: RewitRadius.borderLg,
         child: Padding(
           padding: const EdgeInsets.all(12.0),
           child: Row(
@@ -42,10 +37,11 @@ class SearchResultCard extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: badgeColor.withAlpha(25),
+                  color: style.tone.container,
                   shape: BoxShape.circle,
+                  border: Border.all(color: style.tone.border, width: 0.8),
                 ),
-                child: Icon(typeIcon, size: 24, color: badgeColor),
+                child: Icon(style.icon, size: 24, color: style.tone.accent),
               ),
               const SizedBox(width: 14),
 
@@ -67,28 +63,36 @@ class SearchResultCard extends StatelessWidget {
                       children: [
                         // Badge do tipo (Local / Produto)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: badgeColor.withAlpha(25),
-                            borderRadius: BorderRadius.circular(4),
+                            color: style.tone.container,
+                            borderRadius: RewitRadius.borderXs,
+                            border: Border.all(
+                              color: style.tone.border,
+                              width: 0.8,
+                            ),
                           ),
                           child: Text(
                             item.targetType.displayName,
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: badgeColor,
+                              color: style.tone.onContainer,
                             ),
                           ),
                         ),
-                        if (item.category != null && item.category!.isNotEmpty) ...[
+                        if (item.category != null &&
+                            item.category!.isNotEmpty) ...[
                           const SizedBox(width: 6),
                           Flexible(
                             child: Text(
                               '• ${item.category!}',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: theme.colorScheme.onSurface.withAlpha(140),
+                                color: scheme.onSurfaceVariant,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -104,7 +108,7 @@ class SearchResultCard extends StatelessWidget {
               Icon(
                 Icons.chevron_right,
                 size: 20,
-                color: theme.colorScheme.onSurface.withAlpha(100),
+                color: scheme.onSurfaceVariant,
               ),
             ],
           ),

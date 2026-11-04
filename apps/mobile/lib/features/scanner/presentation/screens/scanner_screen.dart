@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import '../../domain/entities/scanned_code.dart';
 import '../../domain/entities/scanner_state.dart';
@@ -11,7 +12,10 @@ import '../widgets/scanner_overlay.dart';
 class ScannerScreen extends StatefulWidget {
   final ProductRepository? productRepository;
   final ScannerNotifier? notifier;
-  final Widget Function(BuildContext context, void Function(BarcodeCapture) onDetect)? cameraBuilder;
+  final Widget Function(
+    BuildContext context,
+    void Function(BarcodeCapture) onDetect,
+  )? cameraBuilder;
   final bool autoStartCamera;
 
   const ScannerScreen({
@@ -26,7 +30,8 @@ class ScannerScreen extends StatefulWidget {
   State<ScannerScreen> createState() => _ScannerScreenState();
 }
 
-class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserver {
+class _ScannerScreenState extends State<ScannerScreen>
+    with WidgetsBindingObserver {
   late final ScannerNotifier _notifier;
   bool _ownsNotifier = false;
 
@@ -81,9 +86,11 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_cameraController == null) return;
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
       _cameraController?.stop();
-    } else if (state == AppLifecycleState.resumed && _notifier.state is ScannerScanning) {
+    } else if (state == AppLifecycleState.resumed &&
+        _notifier.state is ScannerScanning) {
       _cameraController?.start();
     }
   }
@@ -150,9 +157,6 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         break;
       case InternalResourceType.product:
       case InternalResourceType.productLookup:
-        // Nota: QR codes do tipo productLookup normalmente disparam a consulta
-        // automática no ScannerNotifier antes de exibir o card de produto encontrado.
-        // O tratamento aqui é preservado como fallback defensivo caso chegue como ScannerQrInternal.
         await Navigator.of(context).pushNamed(
           AppRouter.productDetail,
           arguments: resource.id,
@@ -174,13 +178,16 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = RewitSemanticColors.of(context);
 
+    // Superfície base da câmera permanece escura independentemente do tema para
+    // enquadrar o vídeo ao vivo e garantir contraste das miras sobre a lente.
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: const Text('Escanear Código'),
-        backgroundColor: Colors.black.withAlpha(200),
-        foregroundColor: Colors.white,
+        backgroundColor: semantic.mediaScrim,
+        foregroundColor: semantic.onMediaScrim,
         actions: [
           IconButton(
             icon: Icon(_isTorchOn ? Icons.flash_on : Icons.flash_off),
@@ -214,11 +221,15 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                   controller: _cameraController,
                   onDetect: _onBarcodeDetected,
                   errorBuilder: (context, error) {
-                    if (error.errorCode == MobileScannerErrorCode.permissionDenied) {
+                    if (error.errorCode ==
+                        MobileScannerErrorCode.permissionDenied) {
                       if (_notifier.state is! ScannerPermissionDenied) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted && _notifier.state is! ScannerPermissionDenied) {
-                            _notifier.onPermissionDenied(permanentlyDenied: false);
+                          if (mounted &&
+                              _notifier.state is! ScannerPermissionDenied) {
+                            _notifier.onPermissionDenied(
+                              permanentlyDenied: false,
+                            );
                           }
                         });
                       }
@@ -233,26 +244,26 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                         child: Text(
                           'Erro na câmera: ${error.errorDetails?.message ?? error.errorCode.name}',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white),
+                          style: TextStyle(color: semantic.onMediaScrim),
                         ),
                       ),
                     );
                   },
                 )
               else
-                const Center(
+                Center(
                   child: Text(
                     'Câmera não inicializada.',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: semantic.onMediaScrim),
                   ),
                 ),
 
-              // 2. Mira de mira e orientações
+              // 2. Mira de captura e orientações sobre o feed de câmera
               if (state is ScannerScanning || state is ScannerInitial)
                 const ScannerOverlay(),
 
               // 3. Modais/Cards de Feedback ancorados na parte inferior
-              _buildBottomFeedbackCard(context, state, theme),
+              _buildBottomFeedbackCard(context, state, theme, semantic),
             ],
           );
         },
@@ -260,34 +271,55 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
     );
   }
 
+  BoxDecoration _feedbackCardDecoration(
+    ColorScheme scheme,
+    RewitSemanticColors semantic,
+  ) {
+    return BoxDecoration(
+      color: semantic.elevatedFocalSurface,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: scheme.outlineVariant),
+      boxShadow: [
+        BoxShadow(
+          color: scheme.shadow.withAlpha(80),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    );
+  }
+
   Widget _buildBottomFeedbackCard(
     BuildContext context,
     ScannerState state,
     ThemeData theme,
+    RewitSemanticColors semantic,
   ) {
+    final scheme = theme.colorScheme;
+
     if (state is ScannerProcessing) {
       return Align(
         alignment: Alignment.bottomCenter,
         child: Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
-          ),
-          child: const Row(
+          decoration: _feedbackCardDecoration(scheme, semantic),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
+              const SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2.5),
               ),
-              SizedBox(width: 16),
+              const SizedBox(width: 16),
               Text(
                 'Consultando catálogo...',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: scheme.onSurface,
+                ),
               ),
             ],
           ),
@@ -302,24 +334,24 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         child: Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12)],
-          ),
+          decoration: _feedbackCardDecoration(scheme, semantic),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
                 children: [
-                  Icon(Icons.check_circle, color: Colors.green.shade600, size: 24),
+                  Icon(
+                    Icons.check_circle,
+                    color: semantic.success.accent,
+                    size: 24,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'Produto encontrado',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: Colors.green.shade800,
+                      color: semantic.success.accent,
                     ),
                   ),
                 ],
@@ -332,12 +364,14 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                 ),
               ),
               if (product.brand.isNotEmpty &&
-                  !product.name.toLowerCase().contains(product.brand.toLowerCase())) ...[
+                  !product.name
+                      .toLowerCase()
+                      .contains(product.brand.toLowerCase())) ...[
                 const SizedBox(height: 4),
                 Text(
                   'Marca: ${product.brand}',
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withAlpha(180),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -346,7 +380,7 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                 Text(
                   'Categoria: ${product.category}',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withAlpha(150),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -381,24 +415,24 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         child: Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12)],
-          ),
+          decoration: _feedbackCardDecoration(scheme, semantic),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
                 children: [
-                  Icon(Icons.search_off_outlined, color: Colors.orange.shade700, size: 24),
+                  Icon(
+                    Icons.search_off_outlined,
+                    color: semantic.warning.accent,
+                    size: 24,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'Produto não encontrado',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: Colors.orange.shade900,
+                      color: semantic.warning.accent,
                     ),
                   ),
                 ],
@@ -407,7 +441,7 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
               Text(
                 'O código foi lido corretamente, mas este produto ainda não está no catálogo do Rewit.',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurface.withAlpha(200),
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 16),
@@ -444,24 +478,24 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         child: Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12)],
-          ),
+          decoration: _feedbackCardDecoration(scheme, semantic),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, color: theme.colorScheme.error, size: 24),
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: scheme.error,
+                    size: 24,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'Formato não suportado',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.error,
+                      color: scheme.error,
                     ),
                   ),
                 ],
@@ -488,18 +522,18 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         child: Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12)],
-          ),
+          decoration: _feedbackCardDecoration(scheme, semantic),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
                 children: [
-                  Icon(Icons.qr_code_2_outlined, color: theme.colorScheme.primary, size: 24),
+                  Icon(
+                    Icons.qr_code_2_outlined,
+                    color: scheme.primary,
+                    size: 24,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'QR Code detectado',
@@ -513,7 +547,7 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
               Text(
                 'Conteúdo não reconhecido pelo Rewit.',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurface.withAlpha(200),
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 16),
@@ -559,18 +593,14 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         child: Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12)],
-          ),
+          decoration: _feedbackCardDecoration(scheme, semantic),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
                 children: [
-                  Icon(Icons.link, color: theme.colorScheme.primary, size: 24),
+                  Icon(Icons.link, color: scheme.primary, size: 24),
                   const SizedBox(width: 8),
                   Text(
                     'Recurso Rewit Reconhecido',
@@ -615,25 +645,23 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         child: Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12)],
-          ),
+          decoration: _feedbackCardDecoration(scheme, semantic),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
                 children: [
-                  Icon(Icons.error_outline, color: theme.colorScheme.error, size: 24),
+                  Icon(Icons.error_outline, color: scheme.error, size: 24),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      state.isRateLimit ? 'Limite de Consultas' : 'Falha na Consulta',
+                      state.isRateLimit
+                          ? 'Limite de Consultas'
+                          : 'Falha na Consulta',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.error,
+                        color: scheme.error,
                       ),
                     ),
                   ),
@@ -648,7 +676,9 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                 const SizedBox(height: 4),
                 Text(
                   'Tente novamente em ${state.retryAfterSeconds} segundos.',
-                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
               const SizedBox(height: 16),
@@ -680,22 +710,25 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
     BuildContext context,
     ScannerPermissionDenied state,
   ) {
+    final semantic = RewitSemanticColors.of(context);
+    final foregroundMuted = semantic.onMediaScrim.withAlpha(200);
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.no_photography_outlined,
               size: 64,
-              color: Colors.white70,
+              color: foregroundMuted,
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Acesso à câmera necessário',
               style: TextStyle(
-                color: Colors.white,
+                color: semantic.onMediaScrim,
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
@@ -706,7 +739,7 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
               state.permanentlyDenied
                   ? 'A permissão de acesso à câmera foi negada permanentemente. Para escanear códigos, habilite a câmera nas configurações do dispositivo.'
                   : 'Para escanear códigos de barras e QR Codes de produtos, o Rewit precisa de permissão de acesso à câmera.',
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
+              style: TextStyle(color: foregroundMuted, fontSize: 14),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -722,9 +755,9 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
             ],
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text(
+              child: Text(
                 'Voltar',
-                style: TextStyle(color: Colors.white70),
+                style: TextStyle(color: semantic.onMediaScrim),
               ),
             ),
           ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import '../../domain/entities/business_entities.dart';
 import '../../domain/repositories/business_repository.dart';
@@ -124,15 +125,18 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
       );
 
       if (mounted) {
+        final semantic = RewitSemanticColors.of(context);
+        final messenger = ScaffoldMessenger.of(context);
         widget.onClaimSubmitted?.call();
         Navigator.of(context).pop(true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+        messenger.showSnackBar(
+          SnackBar(
             content: Text(
               'Solicitação enviada com sucesso! Ela foi registrada como pendente e será avaliada pela moderação.',
+              style: TextStyle(color: semantic.success.onContainer),
             ),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 4),
+            backgroundColor: semantic.success.container,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -140,11 +144,14 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
       if (mounted) {
         setState(() {
           if (e.errorCode == 'PLACE_ALREADY_CLAIMED') {
-            _errorMessage = 'Este local já foi reivindicado e está vinculado a outra empresa.';
+            _errorMessage =
+                'Este local já foi reivindicado e está vinculado a outra empresa.';
           } else if (e.errorCode == 'PLACE_CLAIM_ALREADY_PENDING') {
-            _errorMessage = 'Já existe uma solicitação de reivindicação em análise para este local.';
+            _errorMessage =
+                'Já existe uma solicitação de reivindicação em análise para este local.';
           } else if (e.errorCode == 'BUSINESS_ACCOUNT_REJECTED') {
-            _errorMessage = 'Esta conta comercial está rejeitada e não pode reivindicar locais.';
+            _errorMessage =
+                'Esta conta comercial está rejeitada e não pode reivindicar locais.';
           } else {
             _errorMessage = e.detail;
           }
@@ -154,7 +161,8 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
     } catch (_) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Falha ao enviar solicitação de reivindicação. Tente novamente.';
+          _errorMessage =
+              'Falha ao enviar solicitação de reivindicação. Tente novamente.';
           _isSubmitting = false;
         });
       }
@@ -164,6 +172,7 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final textLength = _evidenceController.text.trim().length;
     final isEvidenceValid = textLength >= 20 && textLength <= 1000;
 
@@ -201,16 +210,16 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                             final cleanState = widget.state?.trim() ?? '';
                             final locationSuffix =
                                 cleanCity.isNotEmpty && cleanState.isNotEmpty
-                                ? ' ($cleanCity/$cleanState)'
-                                : cleanCity.isNotEmpty
-                                ? ' ($cleanCity)'
-                                : cleanState.isNotEmpty
-                                ? ' ($cleanState)'
-                                : '';
+                                    ? ' ($cleanCity/$cleanState)'
+                                    : cleanCity.isNotEmpty
+                                        ? ' ($cleanCity)'
+                                        : cleanState.isNotEmpty
+                                            ? ' ($cleanState)'
+                                            : '';
                             return Text(
                               '${widget.placeName}$locationSuffix',
                               style: TextStyle(
-                                color: theme.colorScheme.onSurface.withAlpha(160),
+                                color: scheme.onSurfaceVariant,
                                 fontSize: 13,
                               ),
                             );
@@ -221,7 +230,8 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
-                    onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(),
+                    onPressed:
+                        _isSubmitting ? null : () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
@@ -231,18 +241,25 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.red.withAlpha(25),
+                    color: scheme.errorContainer,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.withAlpha(100)),
+                    border: Border.all(color: scheme.error.withAlpha(90)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                      Icon(
+                        Icons.error_outline,
+                        color: scheme.error,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: const TextStyle(color: Colors.red, fontSize: 13),
+                          style: TextStyle(
+                            color: scheme.onErrorContainer,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ],
@@ -260,13 +277,17 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
+                    color: scheme.surfaceContainerHighest.withAlpha(110),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+                    border: Border.all(color: scheme.outlineVariant),
                   ),
                   child: Column(
                     children: [
-                      Icon(Icons.storefront_outlined, size: 40, color: theme.colorScheme.primary),
+                      Icon(
+                        Icons.storefront_outlined,
+                        size: 40,
+                        color: scheme.primary,
+                      ),
                       const SizedBox(height: 8),
                       const Text(
                         'Você ainda não possui contas comerciais.',
@@ -277,7 +298,7 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                         'Para reivindicar este local, primeiro cadastre os dados da sua empresa.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: theme.colorScheme.onSurface.withAlpha(160),
+                          color: scheme.onSurfaceVariant,
                           fontSize: 13,
                         ),
                       ),
@@ -286,7 +307,8 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                         key: const Key('go_to_business_accounts_button'),
                         onPressed: () {
                           Navigator.of(context).pop();
-                          Navigator.of(context).pushNamed(AppRouter.businessAccounts);
+                          Navigator.of(context)
+                              .pushNamed(AppRouter.businessAccounts);
                         },
                         icon: const Icon(Icons.add_business),
                         label: const Text('Cadastrar Empresa'),
@@ -298,7 +320,9 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                 // Seletor de Conta Comercial
                 Text(
                   'Selecione a Empresa Solicitante:',
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
@@ -306,7 +330,10 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                   initialValue: _selectedAccountId,
                   decoration: const InputDecoration(
                     border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
                   ),
                   items: _accounts.map((account) {
                     return DropdownMenuItem<String>(
@@ -330,13 +357,15 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                 // Campo de Evidências
                 Text(
                   'Evidências de Representação (20 a 1000 caracteres):',
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Descreva alvarás, comprovantes de endereço, inscrição municipal ou dados societários que comprovem que você representa este estabelecimento.',
                   style: TextStyle(
-                    color: theme.colorScheme.onSurface.withAlpha(150),
+                    color: scheme.onSurfaceVariant,
                     fontSize: 12,
                   ),
                 ),
@@ -347,11 +376,14 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
                   maxLines: 4,
                   maxLength: 1000,
                   decoration: InputDecoration(
-                    hintText: 'Explique detalhadamente seu vínculo com o estabelecimento...',
+                    hintText:
+                        'Explique detalhadamente seu vínculo com o estabelecimento...',
                     border: const OutlineInputBorder(),
                     counterText: '$textLength / 1000 (mínimo 20)',
                     counterStyle: TextStyle(
-                      color: textLength > 0 && !isEvidenceValid ? Colors.red : null,
+                      color: textLength > 0 && !isEvidenceValid
+                          ? scheme.error
+                          : null,
                     ),
                   ),
                   validator: (value) {
@@ -369,7 +401,9 @@ class _ClaimPlaceBottomSheetState extends State<ClaimPlaceBottomSheet> {
 
                 ElevatedButton(
                   key: const Key('submit_claim_button'),
-                  onPressed: (_isSubmitting || !isEvidenceValid || _selectedAccountId == null)
+                  onPressed: (_isSubmitting ||
+                          !isEvidenceValid ||
+                          _selectedAccountId == null)
                       ? null
                       : _submitClaim,
                   style: ElevatedButton.styleFrom(

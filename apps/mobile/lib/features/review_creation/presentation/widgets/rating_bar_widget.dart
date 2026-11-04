@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 
 /// Componente interativo de seleção de nota entre 1.0 e 5.0.
 class RatingBarWidget extends StatelessWidget {
@@ -15,7 +16,8 @@ class RatingBarWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final semantic = RewitSemanticColors.of(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -28,6 +30,15 @@ class RatingBarWidget extends StatelessWidget {
                 final starValue = index + 1;
                 final isFilled = rating >= starValue;
                 final isHalf = rating >= starValue - 0.5 && rating < starValue;
+
+                final Color starColor;
+                if (!enabled) {
+                  starColor = scheme.outline;
+                } else if (isFilled || isHalf) {
+                  starColor = semantic.starFilled;
+                } else {
+                  starColor = semantic.starEmpty;
+                }
 
                 return InkWell(
                   onTap: enabled
@@ -42,12 +53,15 @@ class RatingBarWidget extends StatelessWidget {
                       : null,
                   borderRadius: BorderRadius.circular(20),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4.0,
+                      vertical: 4.0,
+                    ),
                     child: Icon(
                       isFilled
                           ? Icons.star
                           : (isHalf ? Icons.star_half : Icons.star_border),
-                      color: enabled ? Colors.amber[700] : Colors.grey,
+                      color: starColor,
                       size: 28,
                     ),
                   ),
@@ -58,7 +72,7 @@ class RatingBarWidget extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withAlpha(25),
+                color: scheme.secondaryContainer,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -66,7 +80,7 @@ class RatingBarWidget extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 15,
-                  color: theme.colorScheme.primary,
+                  color: scheme.onSecondaryContainer,
                 ),
               ),
             ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import '../../domain/entities/in_app_notification.dart';
 
 /// Card para renderização de um item de notificação in-app.
@@ -42,16 +43,16 @@ class NotificationItemCard extends StatelessWidget {
     }
   }
 
-  Color _getIconColor(ColorScheme colorScheme) {
+  RewitSemanticTone _getTone(RewitSemanticColors semantic) {
     switch (notification.type) {
       case NotificationType.newFollower:
-        return Colors.blue.shade700;
+        return semantic.info;
       case NotificationType.reviewHelpful:
-        return Colors.amber.shade800;
+        return semantic.ratingBadge;
       case NotificationType.newDiscussion:
-        return Colors.teal.shade700;
+        return semantic.verified;
       case NotificationType.discussionReply:
-        return Colors.purple.shade700;
+        return semantic.placeTarget;
     }
   }
 
@@ -85,6 +86,8 @@ class NotificationItemCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
+    final tone = _getTone(semantic);
     final isUnread = !notification.isRead;
 
     return InkWell(
@@ -92,12 +95,10 @@ class NotificationItemCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: isUnread
-              ? colorScheme.primary.withAlpha(14)
-              : Colors.transparent,
+          color: isUnread ? colorScheme.surfaceContainerLow : null,
           border: Border(
             bottom: BorderSide(
-              color: theme.dividerColor.withAlpha(50),
+              color: colorScheme.outlineVariant,
               width: 0.8,
             ),
           ),
@@ -108,11 +109,11 @@ class NotificationItemCard extends StatelessWidget {
             // Ícone temático da notificação
             CircleAvatar(
               radius: 20,
-              backgroundColor: _getIconColor(colorScheme).withAlpha(30),
+              backgroundColor: tone.container,
               child: Icon(
                 _getIcon(),
                 size: 20,
-                color: _getIconColor(colorScheme),
+                color: tone.accent,
               ),
             ),
             const SizedBox(width: 12),
@@ -128,14 +129,15 @@ class NotificationItemCard extends StatelessWidget {
                         child: Text(
                           _getTitle(),
                           style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: isUnread ? FontWeight.bold : FontWeight.w600,
+                            fontWeight:
+                                isUnread ? FontWeight.bold : FontWeight.w600,
                           ),
                         ),
                       ),
                       Text(
                         _formatDate(notification.createdAt),
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurface.withAlpha(140),
+                          color: colorScheme.onSurfaceVariant,
                           fontSize: 11,
                         ),
                       ),
@@ -147,7 +149,7 @@ class NotificationItemCard extends StatelessWidget {
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: isUnread
                           ? colorScheme.onSurface
-                          : colorScheme.onSurface.withAlpha(180),
+                          : colorScheme.onSurfaceVariant,
                       fontSize: 13,
                     ),
                   ),

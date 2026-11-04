@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
 
 /// Widget para renderização acessível de um item individual de discussão (raiz ou resposta).
@@ -29,6 +30,8 @@ class DiscussionItemWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
 
     // 1. Caso REMOVED: Omitir conteúdo e autor, renderizar placeholder acessível
     if (item.isRemoved) {
@@ -39,19 +42,23 @@ class DiscussionItemWidget extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: 4),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.grey.shade100,
+            color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: Colors.grey.shade300),
+            border: Border.all(color: scheme.outlineVariant),
           ),
           child: Row(
             children: [
-              Icon(Icons.remove_circle_outline, size: 16, color: Colors.grey.shade600),
+              Icon(
+                Icons.remove_circle_outline,
+                size: 16,
+                color: scheme.onSurfaceVariant,
+              ),
               const SizedBox(width: 8),
               Text(
                 'Comentário removido',
                 style: TextStyle(
                   fontStyle: FontStyle.italic,
-                  color: Colors.grey.shade700,
+                  color: scheme.onSurfaceVariant,
                   fontSize: 13,
                 ),
               ),
@@ -63,12 +70,15 @@ class DiscussionItemWidget extends StatelessWidget {
 
     final author = item.author;
     final authorId = author?.id;
-    final displayName = author?.displayName ?? (item.isFromOwner ? 'Autor da Avaliação' : 'Usuário');
+    final displayName = author?.displayName ??
+        (item.isFromOwner ? 'Autor da Avaliação' : 'Usuário');
     final handle = author?.handle;
     final canNavigateToAuthor = author != null &&
         authorId != null &&
         authorId.isNotEmpty &&
         displayName != 'Usuário excluído';
+
+    final cardBackground = theme.cardTheme.color ?? scheme.surfaceContainerLow;
 
     return Semantics(
       label: item.isPendingReview
@@ -82,17 +92,17 @@ class DiscussionItemWidget extends StatelessWidget {
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: item.isPendingReview
-              ? Colors.amber.shade50.withAlpha(120)
+              ? semantic.warning.container.withAlpha(150)
               : isHighlighted
-                  ? theme.colorScheme.primaryContainer.withAlpha(90)
-                  : theme.colorScheme.surface,
+                  ? scheme.secondaryContainer
+                  : cardBackground,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: item.isPendingReview
-                ? Colors.amber.shade300
+                ? semantic.warning.border
                 : isHighlighted
-                    ? theme.colorScheme.primary.withAlpha(160)
-                    : theme.colorScheme.outlineVariant.withAlpha(60),
+                    ? scheme.primary
+                    : scheme.outlineVariant,
             width: isHighlighted ? 1.5 : 1.0,
           ),
         ),
@@ -105,23 +115,32 @@ class DiscussionItemWidget extends StatelessWidget {
                 label: 'Aviso: Seu comentário está em análise pela moderação.',
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
-                    color: Colors.amber.shade100,
+                    color: semantic.warning.container,
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.amber.shade400),
+                    border: Border.all(color: semantic.warning.border),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.hourglass_empty, size: 14, color: Colors.amber.shade900),
+                      Icon(
+                        Icons.hourglass_empty,
+                        size: 14,
+                        color: semantic.warning.accent,
+                      ),
                       const SizedBox(width: 6),
-                      Text(
-                        'Em análise pela moderação (visível apenas para você)',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.amber.shade900,
+                      Flexible(
+                        child: Text(
+                          'Em análise pela moderação (visível apenas para você)',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: semantic.warning.onContainer,
+                          ),
                         ),
                       ),
                     ],
@@ -132,7 +151,9 @@ class DiscussionItemWidget extends StatelessWidget {
 
             // Cabeçalho do comentário
             InkWell(
-              onTap: canNavigateToAuthor ? () => onAuthorTap?.call(authorId) : null,
+              onTap: canNavigateToAuthor
+                  ? () => onAuthorTap?.call(authorId)
+                  : null,
               borderRadius: BorderRadius.circular(4),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -140,14 +161,18 @@ class DiscussionItemWidget extends StatelessWidget {
                   CircleAvatar(
                     radius: isRoot ? 14 : 11,
                     backgroundColor: item.isFromOwner
-                        ? theme.colorScheme.primary.withAlpha(30)
-                        : Colors.grey.shade200,
+                        ? scheme.primaryContainer
+                        : scheme.surfaceContainerHighest,
                     child: Text(
-                      displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
+                      displayName.isNotEmpty
+                          ? displayName[0].toUpperCase()
+                          : 'U',
                       style: TextStyle(
                         fontSize: isRoot ? 12 : 10,
                         fontWeight: FontWeight.bold,
-                        color: item.isFromOwner ? theme.colorScheme.primary : Colors.grey.shade800,
+                        color: item.isFromOwner
+                            ? scheme.onPrimaryContainer
+                            : scheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -168,16 +193,19 @@ class DiscussionItemWidget extends StatelessWidget {
                           Text(
                             '@$handle',
                             style: TextStyle(
-                              color: theme.colorScheme.onSurface.withAlpha(150),
+                              color: scheme.onSurfaceVariant,
                               fontSize: 11,
                             ),
                           ),
                         ],
                         if (item.isFromOwner) ...[
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.primary.withAlpha(20),
+                              color: scheme.secondaryContainer,
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -185,7 +213,7 @@ class DiscussionItemWidget extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
-                                color: theme.colorScheme.primary,
+                                color: scheme.onSecondaryContainer,
                               ),
                             ),
                           ),
@@ -196,7 +224,7 @@ class DiscussionItemWidget extends StatelessWidget {
                   Text(
                     _formatDate(item.createdAt),
                     style: TextStyle(
-                      color: theme.colorScheme.onSurface.withAlpha(120),
+                      color: scheme.onSurfaceVariant,
                       fontSize: 10,
                     ),
                   ),
@@ -214,7 +242,7 @@ class DiscussionItemWidget extends StatelessWidget {
                   style: TextStyle(
                     fontSize: isRoot ? 14 : 13,
                     height: 1.35,
-                    color: theme.colorScheme.onSurface,
+                    color: scheme.onSurface,
                   ),
                 ),
               ),
@@ -234,18 +262,21 @@ class DiscussionItemWidget extends StatelessWidget {
                       onTap: onReply,
                       borderRadius: BorderRadius.circular(4),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.reply, size: 14, color: theme.colorScheme.primary),
+                            Icon(Icons.reply, size: 14, color: scheme.primary),
                             const SizedBox(width: 4),
                             Text(
                               'Responder',
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
-                                color: theme.colorScheme.primary,
+                                color: scheme.primary,
                               ),
                             ),
                           ],
@@ -261,17 +292,24 @@ class DiscussionItemWidget extends StatelessWidget {
                       onTap: onDelete,
                       borderRadius: BorderRadius.circular(4),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.delete_outline, size: 14, color: Colors.red.shade700),
+                            Icon(
+                              Icons.delete_outline,
+                              size: 14,
+                              color: scheme.error,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               'Excluir',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.red.shade700,
+                                color: scheme.error,
                               ),
                             ),
                           ],
@@ -287,17 +325,24 @@ class DiscussionItemWidget extends StatelessWidget {
                       onTap: onReport,
                       borderRadius: BorderRadius.circular(4),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.flag_outlined, size: 13, color: Colors.grey.shade600),
+                            Icon(
+                              Icons.flag_outlined,
+                              size: 13,
+                              color: scheme.onSurfaceVariant,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               'Denunciar',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.grey.shade600,
+                                color: scheme.onSurfaceVariant,
                               ),
                             ),
                           ],

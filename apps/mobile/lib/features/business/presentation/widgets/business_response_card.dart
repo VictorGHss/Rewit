@@ -23,26 +23,30 @@ class BusinessResponseCard extends StatelessWidget {
   Future<void> _handleConfirmDelete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Excluir resposta oficial'),
-        content: const Text(
-          'Deseja realmente remover esta resposta oficial da empresa? Esta ação não pode ser desfeita.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
+      builder: (ctx) {
+        final dialogScheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: const Text('Excluir resposta oficial'),
+          content: const Text(
+            'Deseja realmente remover esta resposta oficial da empresa? Esta ação não pode ser desfeita.',
           ),
-          FilledButton(
-            key: const Key('confirm_delete_business_response_button'),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar'),
             ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Excluir'),
-          ),
-        ],
-      ),
+            FilledButton(
+              key: const Key('confirm_delete_business_response_button'),
+              style: FilledButton.styleFrom(
+                backgroundColor: dialogScheme.error,
+                foregroundColor: dialogScheme.onError,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirmed == true) {
@@ -53,20 +57,22 @@ class BusinessResponseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final badgeLabel =
         'Resposta oficial · ${response.corporateName} · ${response.placeName}';
 
     return Semantics(
-      label: 'Resposta oficial da empresa ${response.corporateName} referente a ${response.placeName}: ${response.content}',
+      label:
+          'Resposta oficial da empresa ${response.corporateName} referente a ${response.placeName}: ${response.content}',
       container: true,
       child: Card(
         margin: const EdgeInsets.symmetric(vertical: 6.0),
         elevation: 0,
-        color: theme.colorScheme.primaryContainer.withAlpha(40),
+        color: scheme.secondaryContainer.withAlpha(110),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
           side: BorderSide(
-            color: theme.colorScheme.primary.withAlpha(120),
+            color: scheme.primary.withAlpha(110),
             width: 1.2,
           ),
         ),
@@ -81,14 +87,13 @@ class BusinessResponseCard extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withAlpha(30),
+                        color: scheme.primaryContainer,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: theme.colorScheme.primary.withAlpha(100),
-                          width: 1,
-                        ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -96,7 +101,7 @@ class BusinessResponseCard extends StatelessWidget {
                           Icon(
                             Icons.verified,
                             size: 14,
-                            color: theme.colorScheme.primary,
+                            color: scheme.primary,
                           ),
                           const SizedBox(width: 5),
                           Flexible(
@@ -106,7 +111,7 @@ class BusinessResponseCard extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
-                                color: theme.colorScheme.primary,
+                                color: scheme.onPrimaryContainer,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -125,7 +130,7 @@ class BusinessResponseCard extends StatelessWidget {
                 key: const Key('business_response_content'),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   height: 1.4,
-                  color: theme.colorScheme.onSurface,
+                  color: scheme.onSurface,
                 ),
               ),
               const SizedBox(height: 10),
@@ -138,7 +143,7 @@ class BusinessResponseCard extends StatelessWidget {
                     _formatDate(response.createdAt),
                     style: TextStyle(
                       fontSize: 11,
-                      color: theme.colorScheme.onSurface.withAlpha(130),
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                   if (canDelete) ...[
@@ -150,18 +155,23 @@ class BusinessResponseCard extends StatelessWidget {
                       ),
                     ] else ...[
                       InkWell(
-                        key: ValueKey('delete_business_response_${response.id}'),
+                        key: ValueKey(
+                          'delete_business_response_${response.id}',
+                        ),
                         onTap: () => _handleConfirmDelete(context),
                         borderRadius: BorderRadius.circular(4),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
                                 Icons.delete_outline,
                                 size: 14,
-                                color: Colors.red.shade700,
+                                color: scheme.error,
                               ),
                               const SizedBox(width: 4),
                               Text(
@@ -169,7 +179,7 @@ class BusinessResponseCard extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.red.shade700,
+                                  color: scheme.error,
                                 ),
                               ),
                             ],

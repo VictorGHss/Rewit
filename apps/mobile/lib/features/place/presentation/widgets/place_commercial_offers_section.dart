@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../app/theme/rewit_semantic_colors.dart';
 import '../../domain/entities/place_commercial_entities.dart';
 import '../state/place_commercial_state.dart';
 
@@ -228,7 +229,8 @@ class PlaceCommercialOffersSection extends StatelessWidget {
   }
 
   Widget _buildOfferCard(BuildContext context, PlaceProductOffer offer, ThemeData theme) {
-    final isAvailable = offer.isAvailable;
+    final semantic = RewitSemanticColors.of(context);
+    final availabilityTone = offer.isAvailable ? semantic.success : semantic.warning;
 
     return Card(
       elevation: 0,
@@ -293,14 +295,10 @@ class PlaceCommercialOffersSection extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isAvailable
-                                ? Colors.green.withAlpha(30)
-                                : Colors.orange.withAlpha(30),
+                            color: availabilityTone.container,
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: isAvailable
-                                  ? Colors.green.withAlpha(100)
-                                  : Colors.orange.withAlpha(100),
+                              color: availabilityTone.border,
                             ),
                           ),
                           child: Text(
@@ -308,7 +306,7 @@ class PlaceCommercialOffersSection extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: isAvailable ? Colors.green.shade800 : Colors.orange.shade900,
+                              color: availabilityTone.onContainer,
                             ),
                           ),
                         ),

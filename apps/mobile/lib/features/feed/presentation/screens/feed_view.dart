@@ -28,7 +28,8 @@ class FeedView extends StatefulWidget {
   State<FeedView> createState() => _FeedViewState();
 }
 
-class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin {
+class _FeedViewState extends State<FeedView>
+    with AutomaticKeepAliveClientMixin {
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -81,6 +82,9 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return ListenableBuilder(
       listenable: widget.feedNotifier,
       builder: (context, _) {
@@ -118,21 +122,21 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
                         Icon(
                           Icons.feed_outlined,
                           size: 64,
-                          color: Theme.of(context).colorScheme.primary.withAlpha(120),
+                          color: scheme.primary,
                         ),
                         const SizedBox(height: 16),
                         Text(
                           'Nenhuma avaliação no feed',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           'Quando as pessoas e estabelecimentos que você acompanha publicarem avaliações, elas aparecerão aqui.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface.withAlpha(160),
+                            color: scheme.onSurfaceVariant,
                             fontSize: 14,
                           ),
                         ),
@@ -173,7 +177,8 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
                     onTap: () => widget.onReviewTap?.call(review),
                     onAuthorTap: widget.onAuthorTap,
                     onTargetTap: widget.onTargetTap,
-                    isHelpfulLoading: widget.feedNotifier.isTogglingHelpful(review.id),
+                    isHelpfulLoading:
+                        widget.feedNotifier.isTogglingHelpful(review.id),
                     onHelpfulTap: () => _handleToggleHelpful(review.id),
                   );
                 }
@@ -194,12 +199,13 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
                                   Text(
                                     state.loadMoreError!,
                                     style: TextStyle(
-                                      color: Theme.of(context).colorScheme.error,
+                                      color: scheme.error,
                                       fontSize: 12,
                                     ),
                                   ),
                                   TextButton.icon(
-                                    onPressed: () => widget.feedNotifier.retry(),
+                                    onPressed: () =>
+                                        widget.feedNotifier.retry(),
                                     icon: const Icon(Icons.refresh, size: 16),
                                     label: const Text('Tentar novamente'),
                                   ),

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/update_profile_input.dart';
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
+import 'package:rewit_mobile/shared/widgets/error_banner.dart';
 
 /// Tela dedicada para edição do perfil do usuário autenticado (C5.8).
 /// Consome PATCH /api/v1/me/profile no backend sem aceitar userId arbitrário.
@@ -43,8 +46,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ? (widget.authNotifier.state as Authenticated).user
         : null;
 
-    final initialHandle = widget.initialProfile?.handle ?? authUser?.handle ?? '';
-    final initialDisplayName = widget.initialProfile?.displayName ?? authUser?.displayName ?? '';
+    final initialHandle =
+        widget.initialProfile?.handle ?? authUser?.handle ?? '';
+    final initialDisplayName =
+        widget.initialProfile?.displayName ?? authUser?.displayName ?? '';
     final initialBio = widget.initialProfile?.bio ?? '';
     final initialAnonymous = widget.initialProfile?.isAnonymousDefault ??
         authUser?.isAnonymousDefault ??
@@ -83,8 +88,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     final handle = _cleanHandle(_handleController.text);
     final displayName = _displayNameController.text.trim();
-    final bioText = _bioController.text.trim();
-    final bio = bioText;
+    final bio = _bioController.text.trim();
 
     final input = UpdateProfileInput(
       handle: handle,
@@ -104,10 +108,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           isAnonymousDefault: updatedProfile.isAnonymousDefault,
         );
 
+        final successTone = RewitSemanticColors.of(context).success;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Perfil atualizado com sucesso!'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text(
+              'Perfil atualizado com sucesso!',
+              style: TextStyle(color: successTone.onContainer),
+            ),
+            backgroundColor: successTone.container,
           ),
         );
 
@@ -128,7 +136,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           } else if (e.statusCode == 401) {
             _errorMessage = 'Sessão expirada. Faça login novamente.';
           } else if (e.statusCode == 429) {
-            _errorMessage = 'Muitas tentativas. Aguarde um momento antes de tentar novamente.';
+            _errorMessage =
+                'Muitas tentativas. Aguarde um momento antes de tentar novamente.';
           } else {
             _errorMessage = e.detail.isNotEmpty
                 ? e.detail
@@ -157,7 +166,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -188,29 +197,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             children: [
               // Banner de Erro em caso de falha no salvamento
               if (_errorMessage != null) ...[
-                Card(
-                  color: theme.colorScheme.errorContainer,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Row(
-                      children: [
-                        Icon(Icons.error_outline, color: theme.colorScheme.error),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _errorMessage!,
-                            style: TextStyle(
-                              color: theme.colorScheme.onErrorContainer,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                ErrorBanner(
+                  margin: const EdgeInsets.only(bottom: RewitSpacing.lg),
+                  message: _errorMessage!,
                 ),
-                const SizedBox(height: 16),
               ],
 
               // 1. Campo Handle
@@ -223,7 +213,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   hintText: 'seu_handle',
                   prefixText: '@',
                   border: OutlineInputBorder(),
-                  helperText: 'De 3 a 30 caracteres alfanuméricos ou sublinhado (_)',
+                  helperText:
+                      'De 3 a 30 caracteres alfanuméricos ou sublinhado (_)',
                 ),
                 validator: (val) {
                   if (val == null || val.trim().isEmpty) {
@@ -282,7 +273,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 maxLength: 500,
                 decoration: const InputDecoration(
                   labelText: 'Biografia',
-                  hintText: 'Conte um pouco sobre suas preferências gastronômicas...',
+                  hintText:
+                      'Conte um pouco sobre suas preferências gastronômicas...',
                   border: OutlineInputBorder(),
                   alignLabelWithHint: true,
                 ),
@@ -298,11 +290,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
               // 4. Switch Avaliações Anônimas por Padrão
               Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(100)),
-                ),
                 child: SwitchListTile(
                   key: const Key('edit_profile_anonymous_switch'),
                   title: const Text(
@@ -331,12 +318,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 key: const Key('edit_profile_submit_button'),
                 onPressed: _isSaving ? null : _saveProfile,
                 icon: _isSaving
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Colors.white,
+                          color: scheme.primary,
                         ),
                       )
                     : const Icon(Icons.check),
