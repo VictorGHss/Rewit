@@ -3,6 +3,34 @@
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/), e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.4.0] - 2026-11-04
+
+### Adicionado
+- **Design System Next-Gen V1 Mobile (`apps/mobile`)**:
+  - **Fundações de Temas e Paletas Material 3**:
+    - Suporte a três modos de exibição: Sistema (`ThemeMode.system` como padrão de fábrica), Claro (`ThemeMode.light` com fundo lavanda `#F6F4FB` e primária roxa `#6D28D9`) e Escuro (`ThemeMode.dark` com fundo preto predominante `#09090D`, superfícies em grafite `#17151D` / `#211B2B`, ações roxas `#8055D9` e detalhes lavanda `#B69AFF`).
+    - Aplicação estrita das diretrizes visuais: proibição de cards brancos e de grandes superfícies roxas no modo escuro, com roxo restrito a elementos interativos e lavanda a detalhes.
+  - **Tokens de Espaçamento e Borda (`RewitTokens`)**:
+    - Constantes geométricas em `RewitSpacing` (de `xxs = 2.0` a `xxxl = 32.0`) e paddings semânticos estruturados (`screenPadding`, `cardPadding`, `bannerPadding`).
+    - Raios de curvatura canônicos em `RewitRadius` (de `xs = 4.0` a `sheet = 20.0` e `pill = 999.0`) e bordas pré-computadas (`borderMd`, `borderLg`, `sheetTop`).
+  - **Cores Semânticas Contextuais via ThemeExtension (`RewitSemanticColors`)**:
+    - Extensão nativa imutável estruturada em blocos funcionais `RewitSemanticTone` (`container`, `onContainer`, `border`, `accent`) para estados contextuais (`success`, `warning`, `danger`, `info`), selo de presença verificada (`verified`), avaliações e estrelas (`ratingBadge`, `starFilled`, `starEmpty`), categorias multi-alvo (`placeTarget`, `productTarget`, `serviceTarget`) e superfícies focais (`elevatedFocalSurface`, `anonymousAvatarBackground`, `mediaScrim`).
+    - Acesso simplificado via `RewitSemanticColors.of(context)` com fallback defensivo por brilho para execução isolada em testes.
+  - **Persistência de Preferência e Gerenciamento Reativo (`ThemeController`)**:
+    - Controle de ciclo de vida com `ChangeNotifier` e injeção desacoplada na árvore via `ThemeControllerScope` (`InheritedNotifier`).
+    - Persistência segura no dispositivo via `FlutterSecureStorage` sob a chave `rewit_app_theme_mode` (`SecureThemePreferenceStorage`), completamente isolada de `TokenStorage.clearTokens()` (a aparência do app é preservada após logout ou troca de conta).
+    - Mecanismo resiliente de fallback em memória (`InMemoryThemePreferenceStorage`) contra indisponibilidade de I/O de secure storage.
+    - Seletor acessível de aparência na tela de configurações (`AccountSettingsScreen`) com opções para Sistema, Claro e Escuro.
+  - **Migração e Homogeneização Visual de Componentes e Telas**:
+    - Eliminação completa de cores e espaçamentos hardcoded em telas de Feed V2, Detalhes de Avaliação, Check-in, Scanner, Rankings, Perfil e Configurações de Conta.
+    - Adaptação estruturada de modais, diálogos, bottom sheets, inputs e banners de status.
+  - **Acessibilidade e Testes Automatizados**:
+    - Conformidade matemática com critérios WCAG AA: contraste `>= 4.5:1` para texto regular e `>= 3:1` para divisores e componentes interativos.
+    - Suíte de testes expandida para **1.172 testes automatizados** aprovados (`flutter test`), com 0 falhas, 0 erros e 0 alertas no `flutter analyze`.
+    - **Registro de Homologação Pendente**: Aprovado em todos os testes unitários e de integração de widgets; a inspeção visual interativa em hardware físico real (dispositivos móveis Android e iOS) permanece pendente de validação operacional pela equipe.
+
+---
+
 ## [0.3.0] - 2026-10-14
 
 ### Adicionado

@@ -45,7 +45,7 @@ O **Rewit** transcende os catálogos estáticos de avaliação baseados em simpl
 ```
 /
 ├── apps/
-│   ├── mobile/                # Aplicação cliente Flutter (Android & iOS)
+│   ├── mobile/                # Aplicação cliente Flutter (Android & iOS) com Design System Next-Gen V1
 │   └── admin/                 # Painel administrativo web (React / TypeScript / Vite)
 │
 ├── backend/                   # API REST Central (Java 25 LTS / Spring Boot 4.1.x)
@@ -135,6 +135,9 @@ cd apps/mobile
 flutter pub get
 flutter run
 ```
+- **Análise Estática**: `flutter analyze`
+- **Execução da Suíte Completa de Testes**: `flutter test`
+- **Testes do Design System e Widgets**: `flutter test test/shared/widgets/design_system_widgets_test.dart`
 
 ---
 
@@ -228,6 +231,128 @@ flutter run
   - **Backend REST API**: Publicação, consulta e exclusão de respostas oficiais de estabelecimentos comerciais a avaliações (`/api/v1/reviews/{reviewId}/business-responses`) e discussões raiz (`/api/v1/discussions/{discussionId}/business-responses`), com unicidade de resposta ativa por par (empresa, alvo), rate limiting distribuído com Redis (`BUSINESS_RESPONSE_CREATION`), fila administrativa de respostas removidas (`/api/v1/admin/business-responses/removed`) e moderação/restauração formal auditada com justificativa obrigatória (15 a 1.000 caracteres);
   - **Cliente Mobile (Flutter)**: Renderização destacada de respostas oficiais com selo de verificação da empresa proprietária em avaliações e discussões, além de fluxo de resposta para proprietários verificados;
   - **Painel Administrativo Web (React + TypeScript + Vite)**: Nova área "Respostas Oficiais Removidas" com fila de triagem paginada, filtros avançados (`BUSINESS` / `MODERATION`), visualização contextual de datas (`moderatedAt`), status de restaurabilidade (`restorable`) e modal de restauração com tratamento de conflitos e recarga reativa.
+
+- **Design System Next-Gen V1 Mobile (Flutter)**:
+  - **Arquitetura e Fundações**:
+    - Centralização de temas em `apps/mobile/lib/app/theme/app_theme.dart` (`AppTheme.lightTheme` e `AppTheme.darkTheme`), plenamente integrado ao Material 3 (`ColorScheme`, tipografia unificada, `AppBarTheme`, `CardTheme`, `BottomSheetThemeData`, `DialogTheme`, `InputDecorationTheme`, `ElevatedButtonThemeData`, `OutlinedButtonThemeData`, `TextButtonThemeData` e `NavigationBarThemeData`);
+    - Escala geométrica padronizada de espaçamentos em `apps/mobile/lib/app/theme/rewit_tokens.dart` (`RewitSpacing`: `xxs = 2.0`, `xs = 4.0`, `sm = 8.0`, `md = 12.0`, `lg = 16.0`, `xl = 20.0`, `xxl = 24.0`, `xxxl = 32.0`, além dos preenchimentos semânticos estruturados `screenPadding`, `cardPadding` e `bannerPadding`);
+    - Padronização de raios de curvatura e bordas pré-calculadas em `RewitRadius` (`xs = 4.0`, `sm = 6.0`, `md = 8.0`, `lg = 12.0`, `xl = 16.0`, `sheet = 20.0`, `pill = 999.0`, `borderXs`, `borderSm`, `borderMd`, `borderLg`, `borderXl`, `borderPill` e `sheetTop`);
+    - Extensão semântica oficial em `apps/mobile/lib/app/theme/rewit_semantic_colors.dart` (`RewitSemanticColors extends ThemeExtension<RewitSemanticColors>`), estruturada em blocos funcionais imutáveis `RewitSemanticTone` (`container`, `onContainer`, `border`, `accent`) para estados contextuais (`success`, `warning`, `danger`, `info`), selo de presença verificada (`verified`), avaliações e estrelas (`ratingBadge`, `starFilled`, `starEmpty`), categorias multi-alvo (`placeTarget`, `productTarget`, `serviceTarget`) e superfícies focais (`elevatedFocalSurface`, `anonymousAvatarBackground`, `anonymousAvatarForeground`, `mediaScrim`, `onMediaScrim`). Acesso via `RewitSemanticColors.of(context)`;
+    - Gerenciamento reativo de aparência em `apps/mobile/lib/app/theme/theme_controller.dart` (`ThemeController` baseado em `ChangeNotifier`, com contrato `ThemePreferenceStorage` e escopo `ThemeControllerScope` via `InheritedNotifier`).
+  - **Temas Disponíveis e Cores Canônicas**:
+    - **Sistema (`ThemeMode.system`)**: Padrão inicial de fábrica. Acompanha instantaneamente o brilho configurado no sistema operacional do dispositivo;
+    - **Claro (`ThemeMode.light`)**: Lavanda suave e roxo focal:
+      - Fundo da aplicação (`scaffoldBackgroundColor`): `#F6F4FB`;
+      - Superfície padrão de cards (`surfaceContainerLow`): `#F1EEFA`;
+      - Superfície elevada focal moderada (`elevatedFocalSurface` / `surfaceContainerLowest`): `#FFFFFF` (utilizado com moderação exclusivamente em modais, bottom sheets, inputs e miras do scanner);
+      - Cor primária de ação e foco: `#6D28D9`;
+      - Cor secundária: `#7C3AED`;
+      - Texto principal (`onSurface`): `#181520` (grafite profundo);
+      - Texto secundário (`onSurfaceVariant`): `#534C63` (grafite médio);
+      - Bordas e divisores: `#D5CDE8` / `#79718A`;
+    - **Escuro (`ThemeMode.dark`)**: Predominância de preto e grafite com toques de lavanda:
+      - Fundo predominante da tela (`scaffoldBackgroundColor`): `#09090D`;
+      - Superfície principal de cards (`surface` / `cardTheme`): `#17151D`;
+      - Superfície elevada focal (`elevatedFocalSurface` / `surfaceContainerHigh`): `#211B2B`;
+      - Ações primárias (botões e controles ativos): `#8055D9`;
+      - Destaque textual primário de alta legibilidade: `#9D78F2`;
+      - Detalhes secundários em lavanda (`secondary`): `#B69AFF`;
+      - Texto principal suave (`onSurface`): `#F2EFFA`;
+      - Texto secundário (`onSurfaceVariant`): `#B5AFC4`;
+      - Bordas e divisores sutis: `#2E283D` / `#8A829C`;
+    - **Diretrizes Inegociáveis do Modo Escuro**: Proibição terminante de cards brancos no tema escuro; nenhuma grande superfície pintada em roxo saturado em bloco (o roxo é reservado estritamente para ações primárias, botões, indicadores de foco e estados ativos, e o lavanda para detalhes e ícones secundários); legibilidade priorizada e distinção semântica estrita preservada para estados de sucesso, alerta, erro e avaliação.
+  - **Persistência Local e Ciclo de Vida Desacoplado**:
+    - Persistência exclusiva no dispositivo via `FlutterSecureStorage` sob a chave `rewit_app_theme_mode` (`SecureThemePreferenceStorage`);
+    - Desacoplamento total da sessão de usuário: chamadas a `TokenStorage.clearTokens()` decorrentes de logout ou expiração de credenciais não resetam a preferência visual do dispositivo;
+    - Fallback resiliente em memória (`InMemoryThemePreferenceStorage`) ativado automaticamente em caso de falha de I/O na chave de armazenamento seguro;
+    - Carregamento assíncrono antes do bootstrap do app (`await themeController.load()` em `main.dart`);
+    - Painel acessível de configuração na tela de configurações (`AccountSettingsScreen`), com semântica de rádio, ícones dedicados e feedback visual imediato.
+  - **Guia Prático de Desenvolvimento (Consumo de Tokens e Componentes)**:
+    - O desenvolvimento de novas telas e widgets deve consumir os tokens exclusivamente via contexto do Flutter, prevenindo cores literais hardcoded:
+      ```dart
+      import 'package:flutter/material.dart';
+      import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
+      import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+
+      class ExemploCardReview extends StatelessWidget {
+        const ExemploCardReview({super.key});
+
+        @override
+        Widget build(BuildContext context) {
+          final theme = Theme.of(context);
+          final scheme = theme.colorScheme;
+          final semantics = RewitSemanticColors.of(context);
+
+          return Card(
+            margin: RewitSpacing.screenPadding,
+            shape: const RoundedRectangleBorder(borderRadius: RewitRadius.borderLg),
+            child: Padding(
+              padding: RewitSpacing.cardPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      // Selo semântico de verificação presencial
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: RewitSpacing.sm,
+                          vertical: RewitSpacing.xs,
+                        ),
+                        decoration: BoxDecoration(
+                          color: semantics.verified.container,
+                          borderRadius: RewitRadius.borderPill,
+                          border: Border.all(color: semantics.verified.border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.verified, size: 14, color: semantics.verified.accent),
+                            const SizedBox(width: RewitSpacing.xs),
+                            Text(
+                              'Presença Verificada',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: semantics.verified.onContainer,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: RewitSpacing.md),
+                  Text(
+                    'Excelente atendimento no local',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: RewitSpacing.xs),
+                  Text(
+                    'Relato da experiência em conformidade com o Design System.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      }
+      ```
+    - **Boas Práticas de Implementação**:
+      - Nunca utilizar `Colors.white`, `Colors.black` ou hexadecimais literais soltos no corpo de widgets. Para superfícies dinâmicas elevadas (modais, cards focais ou inputs), utilize `semantics.elevatedFocalSurface` ou `scheme.surfaceContainerHigh`;
+      - Para espaçamentos e alinhamentos, utilize os múltiplos canônicos de `RewitSpacing` (`RewitSpacing.xs`, `RewitSpacing.sm`, `RewitSpacing.md`, `RewitSpacing.lg`, etc.);
+      - Para cantos arredondados, utilize as constantes pré-calculadas de `RewitRadius` (`RewitRadius.borderMd`, `RewitRadius.borderLg`, `RewitRadius.borderPill`, `RewitRadius.sheetTop`);
+      - Assegure contraste mínimo WCAG AA em ambos os temas testando a legibilidade de textos e ícones contra seus respectivos containers.
+  - **Acessibilidade e Garantia de Qualidade**:
+    - Verificação estrita de contraste WCAG AA: relação `>= 4.5:1` para tipografia de leitura regular e `>= 3:1` para divisores estruturais, bordas e ícones gráficos;
+    - Bateria de testes automatizados: **1.172 testes aprovados** (`All tests passed!`), 0 falhas, 0 erros e 0 alertas no `flutter analyze`;
+    - **Status de Homologação**: A suíte de testes automatizados e regressões estruturais de widget foi 100% validada no ambiente de CI/CD. A inspeção visual interativa em hardware físico real (dispositivos Android e iOS) permanece como pendência formal para validação prática pela equipe/mantenedor.
 
 ### 7.2 Funcionalidades Planejadas (Fases Futuras)
 
