@@ -82,11 +82,22 @@ class FeedNotifier extends ChangeNotifier {
     // Evita requisições redundantes se já estiver em carregamento inicial
     if (channel.state is FeedLoading) return;
 
-    await _executeLoadInitial(channel, size: size);
+    final isFirstLoad = channel.state is FeedInitial;
+    await _executeLoadInitial(
+      channel,
+      size: size,
+      clearRemovedReviewIds: isFirstLoad,
+    );
   }
 
-  Future<void> _executeLoadInitial(_FeedChannel channel, {required int size}) async {
-    channel.removedReviewIds.clear();
+  Future<void> _executeLoadInitial(
+    _FeedChannel channel, {
+    required int size,
+    bool clearRemovedReviewIds = false,
+  }) async {
+    if (clearRemovedReviewIds) {
+      channel.removedReviewIds.clear();
+    }
     channel.needsPaginationReset = false;
     final requestId = ++channel.currentRequestId;
     final session = _session;
@@ -149,7 +160,7 @@ class FeedNotifier extends ChangeNotifier {
     final channel = _channels[targetType]!;
     // Incrementa requestId para invalidar imediatamente qualquer loadMore pendente
     channel.currentRequestId++;
-    await _executeLoadInitial(channel, size: size);
+    await _executeLoadInitial(channel, size: size, clearRemovedReviewIds: true);
   }
 
   /// Carrega a próxima página (infinite scroll / paginação) com deduplicação por ID.
@@ -284,25 +295,28 @@ class FeedNotifier extends ChangeNotifier {
 
     final wasHelpful = targetReview.isHelpfulByMe;
     final nextHelpful = !wasHelpful;
-    final nextCount = math.max(0, targetReview.helpfulCount + (nextHelpful ? 1 : -1));
 
-    final optimisticReview = targetReview.copyWith(
-      isHelpfulByMe: nextHelpful,
-      helpfulCount: nextCount,
-    );
-
-    // Guarda snapshots anteriores para rollback em caso de erro
-    final previousSnapshots = <FeedType, List<FeedReview>>{};
+    // Registra os estados de voto originais por canal para restaurar apenas eles em caso de erro,
+    // preservando novas avaliações anexadas via loadMore concorrente e edições em outros campos.
+    final previousVoteStates = <FeedType, ({bool isHelpfulByMe, int helpfulCount})>{};
 
     for (final entry in _channels.entries) {
       final state = entry.value.state;
       if (state is FeedSuccess) {
-        final containsReview = state.reviews.any((r) => r.id == reviewId);
-        if (containsReview) {
-          previousSnapshots[entry.key] = state.reviews;
-          final updatedReviews = state.reviews.map((r) {
-            return r.id == reviewId ? optimisticReview : r;
-          }).toList();
+        final index = state.reviews.indexWhere((r) => r.id == reviewId);
+        if (index != -1) {
+          final current = state.reviews[index];
+          previousVoteStates[entry.key] = (
+            isHelpfulByMe: current.isHelpfulByMe,
+            helpfulCount: current.helpfulCount,
+          );
+          final nextCount = math.max(0, current.helpfulCount + (nextHelpful ? 1 : -1));
+          final optimisticReview = current.copyWith(
+            isHelpfulByMe: nextHelpful,
+            helpfulCount: nextCount,
+          );
+          final updatedReviews = List<FeedReview>.from(state.reviews);
+          updatedReviews[index] = optimisticReview;
           entry.value.state = state.copyWith(reviews: updatedReviews);
         }
       }
@@ -346,14 +360,23 @@ class FeedNotifier extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      // Reversão em caso de falha de rede/API em todos os feeds afetados
+      // Reversão precisa em caso de falha de rede/API: restaura apenas o estado de voto da avaliação alvo,
+      // preservando novos itens anexados por loadMore concorrente e edições em outras avaliações.
       if (session == _session) {
-        for (final entry in previousSnapshots.entries) {
+        for (final entry in previousVoteStates.entries) {
           final channel = _channels[entry.key]!;
           if (channel.state is FeedSuccess) {
-            channel.state = (channel.state as FeedSuccess).copyWith(
-              reviews: entry.value,
-            );
+            final liveState = channel.state as FeedSuccess;
+            final restoredReviews = liveState.reviews.map((r) {
+              if (r.id == reviewId) {
+                return r.copyWith(
+                  isHelpfulByMe: entry.value.isHelpfulByMe,
+                  helpfulCount: entry.value.helpfulCount,
+                );
+              }
+              return r;
+            }).toList();
+            channel.state = liveState.copyWith(reviews: restoredReviews);
           }
         }
         notifyListeners();
@@ -407,8 +430,9 @@ class FeedNotifier extends ChangeNotifier {
 
           if (filtered.isEmpty) {
             if (state.hasMore) {
-              // Recarrega canal específico caso tenha mais páginas para evitar estado vazio prematuro
-              _executeLoadInitial(channel, size: 10);
+              // Recarrega canal específico caso tenha mais páginas para evitar estado vazio prematuro,
+              // preservando os IDs removidos para não ressuscitar itens excluídos.
+              _executeLoadInitial(channel, size: 10, clearRemovedReviewIds: false);
             } else {
               channel.state = const FeedEmpty();
             }
