@@ -1,5 +1,14 @@
 import '../../domain/entities/feed_entities.dart';
 
+/// Tipos de feeds sociais disponíveis no Rewit (Home V2).
+enum FeedType {
+  /// Feed V2 ranqueado com diversidade e baseado em interesses (/api/v2/feed).
+  forYou,
+
+  /// Feed V1 timeline social clássica dos usuários seguidos (/api/v1/feed).
+  following,
+}
+
 /// Hierarquia tipada de estados da timeline do Feed V2.
 abstract class FeedState {
   const FeedState();

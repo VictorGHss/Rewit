@@ -5,46 +5,119 @@ import '../../domain/entities/feed_entities.dart';
 import '../../domain/repositories/feed_repository.dart';
 import 'feed_state.dart';
 
-/// Gerenciador reativo de estado do Feed V2 (ChangeNotifier).
+/// Canal de estado isolado para uma fonte específica de feed (forYou ou following).
+class _FeedChannel {
+  final FeedType type;
+  FeedState state = const FeedInitial();
+  int currentRequestId = 0;
+  final Set<String> removedReviewIds = {};
+  bool needsPaginationReset = false;
+
+  _FeedChannel(this.type);
+
+  void reset() {
+    currentRequestId++;
+    removedReviewIds.clear();
+    needsPaginationReset = false;
+    state = const FeedInitial();
+  }
+}
+
+/// Gerenciador reativo de estado dos feeds sociais (Home V2 - ChangeNotifier).
+///
+/// Suporta dois canais de feed independentes:
+/// - [FeedType.forYou]: Feed V2 ranqueado com diversidade (/api/v2/feed).
+/// - [FeedType.following]: Feed V1 dos usuários seguidos (/api/v1/feed).
+///
+/// Mantém estado, paginação, refresh, reset e erros isolados por canal,
+/// enquanto centraliza a sincronização de mutações de avaliações (voto útil,
+/// edição e remoção) entre todas as instâncias existentes em ambos os feeds.
 class FeedNotifier extends ChangeNotifier {
   final FeedRepository _feedRepository;
-  FeedState _state = const FeedInitial();
-
-  int _currentRequestId = 0;
+  FeedType _activeFeedType;
   int _session = 0;
   final Set<String> _pendingHelpfulReviewIds = {};
-  final Set<String> _removedReviewIds = {};
-  bool _needsPaginationReset = false;
 
-  FeedNotifier({required FeedRepository feedRepository})
-      : _feedRepository = feedRepository;
+  final Map<FeedType, _FeedChannel> _channels = {
+    FeedType.forYou: _FeedChannel(FeedType.forYou),
+    FeedType.following: _FeedChannel(FeedType.following),
+  };
 
-  FeedState get state => _state;
+  FeedNotifier({
+    required FeedRepository feedRepository,
+    FeedType initialType = FeedType.forYou,
+  })  : _feedRepository = feedRepository,
+        _activeFeedType = initialType;
+
+  /// Tipo de feed atualmente ativo na interface (padrão [FeedType.forYou]).
+  FeedType get activeFeedType => _activeFeedType;
+
+  /// Altera o feed ativo e notifica os ouvintes somente se o tipo mudou.
+  void setActiveFeedType(FeedType type) {
+    if (_activeFeedType != type) {
+      _activeFeedType = type;
+      notifyListeners();
+    }
+  }
+
+  /// Estado do feed atualmente ativo (compatibilidade retroativa com consumidores existentes).
+  FeedState get state => stateOf(_activeFeedType);
+
+  /// Retorna o [FeedState] de um canal específico.
+  FeedState stateOf(FeedType type) => _channels[type]!.state;
+
+  /// Alias de conveniência para [stateOf].
+  FeedState getState(FeedType type) => stateOf(type);
 
   /// Verifica se há uma alternância de voto útil em andamento para a avaliação.
   bool isTogglingHelpful(String reviewId) => _pendingHelpfulReviewIds.contains(reviewId);
 
-  /// Carrega a primeira página do feed (página 0).
-  Future<void> loadInitial({int size = 10}) async {
-    _removedReviewIds.clear();
-    _needsPaginationReset = false;
-    final requestId = ++_currentRequestId;
-    _state = const FeedLoading();
+  /// Carrega a primeira página do feed (página 0) para o tipo especificado (ou feed ativo).
+  ///
+  /// Ignora chamadas concorrentes duplicadas caso o canal já esteja em carregamento ([FeedLoading]).
+  Future<void> loadInitial({FeedType? type, int size = 10}) async {
+    final targetType = type ?? _activeFeedType;
+    final channel = _channels[targetType]!;
+
+    // Evita requisições redundantes se já estiver em carregamento inicial
+    if (channel.state is FeedLoading) return;
+
+    await _executeLoadInitial(channel, size: size);
+  }
+
+  Future<void> _executeLoadInitial(_FeedChannel channel, {required int size}) async {
+    channel.removedReviewIds.clear();
+    channel.needsPaginationReset = false;
+    final requestId = ++channel.currentRequestId;
+    final session = _session;
+
+    channel.state = const FeedLoading();
     notifyListeners();
 
     try {
-      final feedPage = await _feedRepository.getFeed(page: 0, size: size);
-
-      if (requestId != _currentRequestId) {
-        return; // Resposta obsoleta descartada
+      final FeedPage feedPage;
+      switch (channel.type) {
+        case FeedType.forYou:
+          feedPage = await _feedRepository.getFeed(page: 0, size: size);
+          break;
+        case FeedType.following:
+          feedPage = await _feedRepository.getFollowingFeed(page: 0, size: size);
+          break;
       }
 
-      final activeReviews = feedPage.items.where((r) => !_removedReviewIds.contains(r.id)).toList();
+      // Resposta obsoleta descartada (cancelamento por refresh/reset/nova requisição)
+      if (requestId != channel.currentRequestId || session != _session) {
+        return;
+      }
+
+      final activeReviews = feedPage.items
+          .where((r) => !channel.removedReviewIds.contains(r.id))
+          .toList();
 
       if (activeReviews.isEmpty && !feedPage.hasMore) {
-        _state = const FeedEmpty();
+        channel.state = const FeedEmpty();
       } else {
-        _state = FeedSuccess(
+        channel.state = FeedSuccess(
           reviews: activeReviews,
           currentPage: feedPage.page,
           totalPages: feedPage.totalPages,
@@ -53,75 +126,77 @@ class FeedNotifier extends ChangeNotifier {
       }
       notifyListeners();
     } on ApiException catch (e) {
-      if (requestId == _currentRequestId) {
-        _state = FeedError(message: e.detail, code: e.errorCode);
+      if (requestId == channel.currentRequestId && session == _session) {
+        channel.state = FeedError(message: e.detail, code: e.errorCode);
         notifyListeners();
       }
     } on NetworkException catch (e) {
-      if (requestId == _currentRequestId) {
-        _state = FeedError(message: e.message);
+      if (requestId == channel.currentRequestId && session == _session) {
+        channel.state = FeedError(message: e.message);
         notifyListeners();
       }
     } catch (_) {
-      if (requestId == _currentRequestId) {
-        _state = const FeedError(message: 'Não foi possível carregar o feed.');
+      if (requestId == channel.currentRequestId && session == _session) {
+        channel.state = const FeedError(message: 'Não foi possível carregar o feed.');
         notifyListeners();
       }
     }
   }
 
-  /// Descarta o feed da sessão encerrada (logout, sessão expirada ou troca de conta) e volta a [FeedInitial].
-  ///
-  /// O Feed V2 é do usuário autenticado (ordem pelos interesses dele, `isHelpfulByMe` dos votos dele): a mesma
-  /// instância atende todas as sessões do app, então nada do feed passa de uma conta para outra. Respostas ainda em
-  /// curso da sessão anterior são ignoradas; a próxima exibição do feed carrega do início.
-  void reset() {
-    _currentRequestId++;
-    _session++;
-    _pendingHelpfulReviewIds.clear();
-    _removedReviewIds.clear();
-    _needsPaginationReset = false;
-    _state = const FeedInitial();
-    notifyListeners();
-  }
-
-  /// Recarrega o feed desde o início (Pull-to-refresh).
-  Future<void> refresh({int size = 10}) async {
-    await loadInitial(size: size);
+  /// Recarrega o feed desde o início (Pull-to-refresh) de forma independente.
+  Future<void> refresh({FeedType? type, int size = 10}) async {
+    final targetType = type ?? _activeFeedType;
+    final channel = _channels[targetType]!;
+    // Incrementa requestId para invalidar imediatamente qualquer loadMore pendente
+    channel.currentRequestId++;
+    await _executeLoadInitial(channel, size: size);
   }
 
   /// Carrega a próxima página (infinite scroll / paginação) com deduplicação por ID.
-  Future<void> loadMore({int size = 10}) async {
-    final currentState = _state;
+  Future<void> loadMore({FeedType? type, int size = 10}) async {
+    final targetType = type ?? _activeFeedType;
+    final channel = _channels[targetType]!;
+    final currentState = channel.state;
+
     if (currentState is! FeedSuccess) return;
     if (!currentState.hasMore || currentState.isLoadingMore) return;
     if (currentState.loadMoreError != null) return;
 
-    final requestId = _currentRequestId;
-    _state = currentState.copyWith(isLoadingMore: true, clearLoadMoreError: true);
+    final requestId = channel.currentRequestId;
+    final session = _session;
+
+    channel.state = currentState.copyWith(isLoadingMore: true, clearLoadMoreError: true);
     notifyListeners();
 
     try {
-      final nextPage = _needsPaginationReset ? 0 : currentState.currentPage + 1;
-      _needsPaginationReset = false;
+      final nextPage = channel.needsPaginationReset ? 0 : currentState.currentPage + 1;
+      channel.needsPaginationReset = false;
 
-      final feedPage = await _feedRepository.getFeed(page: nextPage, size: size);
+      final FeedPage feedPage;
+      switch (channel.type) {
+        case FeedType.forYou:
+          feedPage = await _feedRepository.getFeed(page: nextPage, size: size);
+          break;
+        case FeedType.following:
+          feedPage = await _feedRepository.getFollowingFeed(page: nextPage, size: size);
+          break;
+      }
 
-      if (requestId != _currentRequestId) {
+      if (requestId != channel.currentRequestId || session != _session) {
         return; // Resposta obsoleta descartada se refresh foi acionado
       }
 
-      if (_state is! FeedSuccess) return;
-      final liveState = _state as FeedSuccess;
+      if (channel.state is! FeedSuccess) return;
+      final liveState = channel.state as FeedSuccess;
 
       // Deduplicação estrita de itens pelo identificador da review e exclusão de itens removidos
       final existingIds = liveState.reviews.map((r) => r.id).toSet();
       final newItems = feedPage.items
-          .where((r) => !existingIds.contains(r.id) && !_removedReviewIds.contains(r.id))
+          .where((r) => !existingIds.contains(r.id) && !channel.removedReviewIds.contains(r.id))
           .toList();
       final combined = [...liveState.reviews, ...newItems];
 
-      _state = liveState.copyWith(
+      channel.state = liveState.copyWith(
         reviews: combined,
         currentPage: feedPage.page,
         totalPages: feedPage.totalPages,
@@ -131,24 +206,24 @@ class FeedNotifier extends ChangeNotifier {
       );
       notifyListeners();
     } on ApiException catch (e) {
-      if (requestId == _currentRequestId && _state is FeedSuccess) {
-        _state = (_state as FeedSuccess).copyWith(
+      if (requestId == channel.currentRequestId && session == _session && channel.state is FeedSuccess) {
+        channel.state = (channel.state as FeedSuccess).copyWith(
           isLoadingMore: false,
           loadMoreError: e.detail,
         );
         notifyListeners();
       }
     } on NetworkException catch (e) {
-      if (requestId == _currentRequestId && _state is FeedSuccess) {
-        _state = (_state as FeedSuccess).copyWith(
+      if (requestId == channel.currentRequestId && session == _session && channel.state is FeedSuccess) {
+        channel.state = (channel.state as FeedSuccess).copyWith(
           isLoadingMore: false,
           loadMoreError: e.message,
         );
         notifyListeners();
       }
     } catch (_) {
-      if (requestId == _currentRequestId && _state is FeedSuccess) {
-        _state = (_state as FeedSuccess).copyWith(
+      if (requestId == channel.currentRequestId && session == _session && channel.state is FeedSuccess) {
+        channel.state = (channel.state as FeedSuccess).copyWith(
           isLoadingMore: false,
           loadMoreError: 'Erro ao carregar mais avaliações.',
         );
@@ -157,42 +232,84 @@ class FeedNotifier extends ChangeNotifier {
     }
   }
 
-  /// Repete o carregamento que falhou.
-  Future<void> retry() async {
-    final currentState = _state;
+  /// Repete o carregamento que falhou no canal especificado (ou feed ativo).
+  Future<void> retry({FeedType? type}) async {
+    final targetType = type ?? _activeFeedType;
+    final channel = _channels[targetType]!;
+    final currentState = channel.state;
+
     if (currentState is FeedSuccess && currentState.loadMoreError != null) {
-      _state = currentState.copyWith(clearLoadMoreError: true);
-      await loadMore();
+      channel.state = currentState.copyWith(clearLoadMoreError: true);
+      await loadMore(type: targetType);
     } else {
-      await loadInitial();
+      await loadInitial(type: targetType);
     }
   }
 
-  /// Alterna o voto útil (helpful) de uma avaliação de forma otimista com reversão em caso de erro.
+  /// Descarta o estado de um feed específico ou de ambos (quando [type] for nulo, ex.: logout).
+  void reset({FeedType? type}) {
+    if (type != null) {
+      _channels[type]!.reset();
+    } else {
+      _session++;
+      for (final channel in _channels.values) {
+        channel.reset();
+      }
+      _pendingHelpfulReviewIds.clear();
+    }
+    notifyListeners();
+  }
+
+  /// Alterna o voto útil (helpful) de uma avaliação de forma otimista com reversão em caso de erro,
+  /// sincronizando o estado em todos os feeds em que a avaliação estiver presente.
   Future<void> toggleHelpful(String reviewId) async {
-    final currentState = _state;
-    if (currentState is! FeedSuccess) return;
     if (_pendingHelpfulReviewIds.contains(reviewId)) return;
 
-    final index = currentState.reviews.indexWhere((r) => r.id == reviewId);
-    if (index == -1) return;
+    // Localiza a avaliação em qualquer canal em FeedSuccess
+    FeedReview? targetReview;
+    for (final channel in _channels.values) {
+      final state = channel.state;
+      if (state is FeedSuccess) {
+        for (final r in state.reviews) {
+          if (r.id == reviewId) {
+            targetReview = r;
+            break;
+          }
+        }
+        if (targetReview != null) break;
+      }
+    }
 
-    final currentReview = currentState.reviews[index];
-    final wasHelpful = currentReview.isHelpfulByMe;
+    if (targetReview == null) return;
+
+    final wasHelpful = targetReview.isHelpfulByMe;
     final nextHelpful = !wasHelpful;
-    final nextCount = math.max(0, currentReview.helpfulCount + (nextHelpful ? 1 : -1));
+    final nextCount = math.max(0, targetReview.helpfulCount + (nextHelpful ? 1 : -1));
 
-    // Atualização otimista imediata
-    final optimisticReview = currentReview.copyWith(
+    final optimisticReview = targetReview.copyWith(
       isHelpfulByMe: nextHelpful,
       helpfulCount: nextCount,
     );
-    final updatedList = List<FeedReview>.from(currentState.reviews);
-    updatedList[index] = optimisticReview;
+
+    // Guarda snapshots anteriores para rollback em caso de erro
+    final previousSnapshots = <FeedType, List<FeedReview>>{};
+
+    for (final entry in _channels.entries) {
+      final state = entry.value.state;
+      if (state is FeedSuccess) {
+        final containsReview = state.reviews.any((r) => r.id == reviewId);
+        if (containsReview) {
+          previousSnapshots[entry.key] = state.reviews;
+          final updatedReviews = state.reviews.map((r) {
+            return r.id == reviewId ? optimisticReview : r;
+          }).toList();
+          entry.value.state = state.copyWith(reviews: updatedReviews);
+        }
+      }
+    }
 
     final session = _session;
     _pendingHelpfulReviewIds.add(reviewId);
-    _state = currentState.copyWith(reviews: updatedList);
     notifyListeners();
 
     try {
@@ -204,36 +321,45 @@ class FeedNotifier extends ChangeNotifier {
       // Voto de uma sessão já encerrada não altera o feed da sessão atual
       if (session != _session) return;
 
-      // Reconcilia com a resposta canônica do backend
-      final latestState = _state;
-      if (latestState is FeedSuccess) {
-        final latestIndex = latestState.reviews.indexWhere((r) => r.id == reviewId);
-        if (latestIndex != -1) {
-          final reconciled = latestState.reviews[latestIndex].copyWith(
-            isHelpfulByMe: result.helpful,
-            helpfulCount: math.max(0, result.helpfulCount),
-          );
-          final reconciledList = List<FeedReview>.from(latestState.reviews);
-          reconciledList[latestIndex] = reconciled;
-          _state = latestState.copyWith(reviews: reconciledList);
-          notifyListeners();
+      // Reconcilia com a resposta canônica do backend em todos os feeds
+      bool anyUpdated = false;
+      for (final channel in _channels.values) {
+        final state = channel.state;
+        if (state is FeedSuccess) {
+          final containsReview = state.reviews.any((r) => r.id == reviewId);
+          if (containsReview) {
+            final reconciledReviews = state.reviews.map((r) {
+              if (r.id == reviewId) {
+                return r.copyWith(
+                  isHelpfulByMe: result.helpful,
+                  helpfulCount: math.max(0, result.helpfulCount),
+                );
+              }
+              return r;
+            }).toList();
+            channel.state = state.copyWith(reviews: reconciledReviews);
+            anyUpdated = true;
+          }
         }
       }
+      if (anyUpdated) {
+        notifyListeners();
+      }
     } catch (e) {
-      // Reversão em caso de falha de rede/API
-      final latestState = _state;
-      if (session == _session && latestState is FeedSuccess) {
-        final rollbackIndex = latestState.reviews.indexWhere((r) => r.id == reviewId);
-        if (rollbackIndex != -1) {
-          final rollbackList = List<FeedReview>.from(latestState.reviews);
-          rollbackList[rollbackIndex] = currentReview;
-          _state = latestState.copyWith(reviews: rollbackList);
-          notifyListeners();
+      // Reversão em caso de falha de rede/API em todos os feeds afetados
+      if (session == _session) {
+        for (final entry in previousSnapshots.entries) {
+          final channel = _channels[entry.key]!;
+          if (channel.state is FeedSuccess) {
+            channel.state = (channel.state as FeedSuccess).copyWith(
+              reviews: entry.value,
+            );
+          }
         }
+        notifyListeners();
       }
       rethrow;
     } finally {
-      // Depois de reset, a marca pendente pode ser de um voto da sessão atual na mesma avaliação
       if (session == _session) {
         _pendingHelpfulReviewIds.remove(reviewId);
         notifyListeners();
@@ -241,42 +367,60 @@ class FeedNotifier extends ChangeNotifier {
     }
   }
 
-  /// Atualiza os dados de uma avaliação localmente sem recarregar o feed.
+  /// Atualiza os dados de uma avaliação localmente sem recarregar os feeds,
+  /// sincronizando in-place em todos os canais em que a avaliação estiver presente.
   void updateReview(FeedReview updatedReview) {
-    final currentState = _state;
-    if (currentState is! FeedSuccess) return;
+    bool anyUpdated = false;
 
-    final index = currentState.reviews.indexWhere((r) => r.id == updatedReview.id);
-    if (index == -1) return;
+    for (final channel in _channels.values) {
+      final state = channel.state;
+      if (state is FeedSuccess) {
+        final contains = state.reviews.any((r) => r.id == updatedReview.id);
+        if (contains) {
+          final updatedList = state.reviews.map((r) {
+            return r.id == updatedReview.id ? updatedReview : r;
+          }).toList();
+          channel.state = state.copyWith(reviews: updatedList);
+          anyUpdated = true;
+        }
+      }
+    }
 
-    final updatedList = List<FeedReview>.from(currentState.reviews);
-    updatedList[index] = updatedReview;
-    _state = currentState.copyWith(reviews: updatedList);
-    notifyListeners();
+    if (anyUpdated) {
+      notifyListeners();
+    }
   }
 
-  /// Remove uma avaliação localmente sem recarregar o feed inteiro.
+  /// Remove uma avaliação localmente sem recarregar o feed inteiro,
+  /// sincronizando a exclusão em todos os canais em que a avaliação estiver presente.
   void removeReview(String reviewId) {
-    _removedReviewIds.add(reviewId);
+    bool anyChanged = false;
 
-    final currentState = _state;
-    if (currentState is! FeedSuccess) return;
+    for (final channel in _channels.values) {
+      channel.removedReviewIds.add(reviewId);
+      final state = channel.state;
+      if (state is FeedSuccess) {
+        final filtered = state.reviews.where((r) => r.id != reviewId).toList();
+        if (filtered.length != state.reviews.length) {
+          channel.needsPaginationReset = true;
+          anyChanged = true;
 
-    final updatedList = currentState.reviews.where((r) => r.id != reviewId).toList();
-    if (updatedList.length == currentState.reviews.length) return;
-
-    _needsPaginationReset = true;
-
-    if (updatedList.isEmpty) {
-      if (currentState.hasMore) {
-        // Existem páginas adicionais no servidor: recarrega para não exibir estado vazio prematuro
-        loadInitial();
-        return;
+          if (filtered.isEmpty) {
+            if (state.hasMore) {
+              // Recarrega canal específico caso tenha mais páginas para evitar estado vazio prematuro
+              _executeLoadInitial(channel, size: 10);
+            } else {
+              channel.state = const FeedEmpty();
+            }
+          } else {
+            channel.state = state.copyWith(reviews: filtered);
+          }
+        }
       }
-      _state = const FeedEmpty();
-    } else {
-      _state = currentState.copyWith(reviews: updatedList);
     }
-    notifyListeners();
+
+    if (anyChanged) {
+      notifyListeners();
+    }
   }
 }
