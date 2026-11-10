@@ -23,6 +23,25 @@ import 'package:rewit_mobile/features/scanner/domain/entities/scanner_state.dart
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:rewit_mobile/features/scanner/presentation/state/scanner_notifier.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
+import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
+
+class _FakeSearchRepository implements SearchRepository {
+  @override
+  Future<SearchPage> search({
+    required String query,
+    int page = 0,
+    int size = 20,
+  }) async {
+    return const SearchPage(
+      items: [],
+      pageNumber: 0,
+      pageSize: 20,
+      totalElements: 0,
+      totalPages: 0,
+      isLast: true,
+    );
+  }
+}
 
 class _FakeProductRepository implements ProductRepository {
   @override
@@ -972,5 +991,210 @@ void main() {
       expect(didPop, isTrue);
       expect(selectedItem, isNull);
     });
+  });
+
+  group('Integração AppRouter: ReviewCreateScreen <-> ScannerScreen e Explorar', () {
+    late _FakePlaceRepository fakePlaceRepository;
+
+    setUp(() {
+      fakePlaceRepository = _FakePlaceRepository();
+    });
+
+    testWidgets(
+      'AppRouter.reviewCreate abre Scanner em selectionMode com PlaceRepository injetado e retorna SearchResultItem',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final repo = _StubAuthRepo();
+        final authNotifier = AuthNotifier(authRepository: repo);
+        addTearDown(authNotifier.dispose);
+        await authNotifier.checkAuthStatus();
+
+        fakePlaceRepository.placeToReturn = const PlaceDetail(
+          id: 'place-router-uuid-1',
+          name: 'Cafeteria Central Router',
+          slug: 'cafeteria-central-router',
+          category: 'CAFETERIA',
+          addressText: 'Av. Paulista, 1000',
+          validationRadiusMeters: 100,
+          origin: 'MANUAL',
+          isVerified: true,
+          status: 'ACTIVE',
+        );
+
+        void Function(BarcodeCapture)? activeCapture;
+
+        final router = AppRouter(
+          authNotifier: authNotifier,
+          searchRepository: _FakeSearchRepository(),
+          productRepository: fakeRepository,
+          placeRepository: fakePlaceRepository,
+          scannerCameraBuilder: (context, onDetect) {
+            activeCapture = onDetect;
+            return const SizedBox.expand(key: Key('router_mock_camera'));
+          },
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            initialRoute: AppRouter.reviewCreate,
+            onGenerateRoute: router.onGenerateRoute,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final targetScannerBtn = find.byKey(const Key('target_scanner_button_0'));
+        expect(targetScannerBtn, findsOneWidget);
+
+        await tester.tap(targetScannerBtn);
+        await tester.pumpAndSettle();
+
+        final scannerScreenFinder = find.byType(ScannerScreen);
+        expect(scannerScreenFinder, findsOneWidget);
+
+        final scannerWidget = tester.widget<ScannerScreen>(scannerScreenFinder);
+        expect(scannerWidget.selectionMode, isTrue);
+        expect(scannerWidget.placeRepository, same(fakePlaceRepository));
+        expect(scannerWidget.productRepository, same(fakeRepository));
+        expect(activeCapture, isNotNull);
+
+        // Simula leitura de QR Code de local físico via PlaceRepository injetado
+        activeCapture!(
+          const BarcodeCapture(
+            barcodes: [
+              Barcode(
+                rawValue: 'rewit://places/place-router-uuid-1',
+                format: BarcodeFormat.qrCode,
+              ),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Local encontrado'), findsOneWidget);
+        expect(find.text('Cafeteria Central Router'), findsOneWidget);
+        expect(find.text('Selecionar local'), findsOneWidget);
+
+        await tester.tap(find.text('Selecionar local'));
+        await tester.pumpAndSettle();
+
+        // Verifica retorno à ReviewCreateScreen com o alvo selecionado
+        expect(find.byType(ScannerScreen), findsNothing);
+        expect(find.text('Cafeteria Central Router'), findsOneWidget);
+        expect(
+          find.text('Estabelecimento vinculado: Cafeteria Central Router'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'cancelar Scanner aberto a partir de AppRouter.reviewCreate retorna null sem alterar o alvo',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final repo = _StubAuthRepo();
+        final authNotifier = AuthNotifier(authRepository: repo);
+        addTearDown(authNotifier.dispose);
+        await authNotifier.checkAuthStatus();
+
+        final router = AppRouter(
+          authNotifier: authNotifier,
+          searchRepository: _FakeSearchRepository(),
+          productRepository: fakeRepository,
+          placeRepository: fakePlaceRepository,
+          scannerCameraBuilder: (context, onDetect) {
+            return const SizedBox.expand(key: Key('router_mock_camera'));
+          },
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            initialRoute: AppRouter.reviewCreate,
+            onGenerateRoute: router.onGenerateRoute,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ScannerScreen), findsOneWidget);
+
+        // Cancela voltando sem selecionar nada
+        final NavigatorState navigator = tester.state(find.byType(Navigator));
+        navigator.pop();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ScannerScreen), findsNothing);
+        expect(find.byKey(const Key('target_scanner_button_0')), findsOneWidget);
+        expect(find.text('O que você quer avaliar? *'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'abrir Scanner pelo Explorar via AppRouter opera em modo normal (selectionMode == false)',
+      (tester) async {
+        final repo = _StubAuthRepo();
+        final authNotifier = AuthNotifier(authRepository: repo);
+        addTearDown(authNotifier.dispose);
+        await authNotifier.checkAuthStatus();
+
+        void Function(BarcodeCapture)? activeCapture;
+
+        final router = AppRouter(
+          authNotifier: authNotifier,
+          productRepository: fakeRepository,
+          placeRepository: fakePlaceRepository,
+          scannerCameraBuilder: (context, onDetect) {
+            activeCapture = onDetect;
+            return const SizedBox.expand(key: Key('explore_router_camera'));
+          },
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            initialRoute: AppRouter.root,
+            onGenerateRoute: router.onGenerateRoute,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Explorar'));
+        await tester.pumpAndSettle();
+
+        final scannerButton = find.byKey(const Key('search_scanner_button'));
+        expect(scannerButton, findsOneWidget);
+
+        await tester.tap(scannerButton);
+        await tester.pumpAndSettle();
+
+        final scannerScreenFinder = find.byType(ScannerScreen);
+        expect(scannerScreenFinder, findsOneWidget);
+
+        final scannerWidget = tester.widget<ScannerScreen>(scannerScreenFinder);
+        expect(scannerWidget.selectionMode, isFalse);
+        expect(activeCapture, isNotNull);
+
+        activeCapture!(
+          const BarcodeCapture(
+            barcodes: [
+              Barcode(rawValue: '7894900011517', format: BarcodeFormat.ean13),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Produto encontrado'), findsOneWidget);
+        expect(find.text('Ver produto'), findsOneWidget);
+        expect(find.text('Selecionar produto'), findsNothing);
+      },
+    );
   });
 }

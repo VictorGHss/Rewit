@@ -52,10 +52,35 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
+import 'package:rewit_mobile/features/scanner/presentation/state/scanner_notifier.dart';
+import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
+
+/// Argumentos tipados opcionais para a rota [AppRouter.scanner].
+class ScannerRouteArgs {
+  final bool selectionMode;
+  final ProductRepository? productRepository;
+  final PlaceRepository? placeRepository;
+  final ScannerNotifier? notifier;
+  final Widget Function(
+    BuildContext context,
+    void Function(BarcodeCapture) onDetect,
+  )? cameraBuilder;
+  final bool autoStartCamera;
+
+  const ScannerRouteArgs({
+    this.selectionMode = false,
+    this.productRepository,
+    this.placeRepository,
+    this.notifier,
+    this.cameraBuilder,
+    this.autoStartCamera = true,
+  });
+}
 
 /// Definição de rotas nomeadas e gerador centralizado de navegação.
 class AppRouter {
@@ -123,6 +148,12 @@ class AppRouter {
   /// Seletor da fotografia do cadastro manual; nulo usa a câmera/galeria do dispositivo.
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
 
+  /// Construtor opcional da visão de câmera do Scanner (usado para testes de integração de rotas).
+  final Widget Function(
+    BuildContext context,
+    void Function(BarcodeCapture) onDetect,
+  )? scannerCameraBuilder;
+
   const AppRouter({
     required this.authNotifier,
     this.feedNotifier,
@@ -148,6 +179,7 @@ class AppRouter {
     this.checkInRepository,
     this.rankingRepository,
     this.themeController,
+    this.scannerCameraBuilder,
   });
 
   String? _currentUserId() {
@@ -385,12 +417,17 @@ class AppRouter {
         String? initialTargetType;
         String? initialCategory;
         File? initialPhoto;
+        Future<SearchResultItem?> Function()? customOnScanTarget;
         if (args is Map<String, dynamic>) {
           initialTargetId = args['targetId'] as String?;
           initialTargetName = args['targetName'] as String?;
           initialTargetType = args['targetType'] as String?;
           initialCategory = args['category'] as String?;
           initialPhoto = args['initialPhoto'] as File?;
+          final rawOnScan = args['onScanTarget'];
+          if (rawOnScan is Future<SearchResultItem?> Function()) {
+            customOnScanTarget = rawOnScan;
+          }
         }
 
         return MaterialPageRoute(
@@ -417,6 +454,19 @@ class AppRouter {
                 authNotifier: authNotifier,
                 pendingRegistrationStore: pendingRegistrationStore,
                 onPickManualPlacePhoto: onPickManualPlacePhoto,
+                onScanTarget: customOnScanTarget ??
+                    () async {
+                      final result = await Navigator.of(context).pushNamed(
+                        AppRouter.scanner,
+                        arguments: ScannerRouteArgs(
+                          selectionMode: true,
+                          productRepository: productRepository,
+                          placeRepository: placeRepository,
+                          cameraBuilder: scannerCameraBuilder,
+                        ),
+                      );
+                      return result is SearchResultItem ? result : null;
+                    },
                 onReviewCreated: (createdReview) {
                   feedNotifier?.refresh();
                   Navigator.of(context).pushReplacementNamed(
@@ -536,9 +586,17 @@ class AppRouter {
         );
 
       case scanner:
-        return MaterialPageRoute(
+        final args = settings.arguments;
+        final routeArgs = args is ScannerRouteArgs ? args : null;
+        return MaterialPageRoute<SearchResultItem?>(
           builder: (context) => ScannerScreen(
-            productRepository: productRepository,
+            productRepository:
+                routeArgs?.productRepository ?? productRepository,
+            placeRepository: routeArgs?.placeRepository ?? placeRepository,
+            selectionMode: routeArgs?.selectionMode ?? false,
+            notifier: routeArgs?.notifier,
+            cameraBuilder: routeArgs?.cameraBuilder ?? scannerCameraBuilder,
+            autoStartCamera: routeArgs?.autoStartCamera ?? true,
           ),
           settings: settings,
         );
