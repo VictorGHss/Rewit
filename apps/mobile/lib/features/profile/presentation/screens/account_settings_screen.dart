@@ -35,6 +35,7 @@ class AccountSettingsScreen extends StatefulWidget {
 
 class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   bool _isDeactivating = false;
+  bool _isLoggingOut = false;
   String? _errorMessage;
   int? _retryAfterSeconds;
   ThemeController? _localThemeController;
@@ -49,6 +50,50 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   void dispose() {
     _localThemeController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _confirmAndLogout() async {
+    if (_isLoggingOut || _isDeactivating) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Encerrar Sessão'),
+        content: const Text('Deseja realmente sair da sua conta?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('Sair'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _isLoggingOut = true;
+      });
+      try {
+        await widget.authNotifier.logout();
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoggingOut = false;
+          });
+        }
+      }
+    }
   }
 
   Future<void> _confirmAndDeactivate() async {
@@ -448,6 +493,37 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                       ],
                     ),
                     const SizedBox(height: RewitSpacing.md),
+                    // Botão explícito para encerrar sessão (logout)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        key: const Key('logout_account_button'),
+                        onPressed: (_isLoggingOut || _isDeactivating)
+                            ? null
+                            : _confirmAndLogout,
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: RewitRadius.borderMd,
+                          ),
+                        ),
+                        icon: _isLoggingOut
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.logout, size: 20),
+                        label: Text(
+                          _isLoggingOut ? 'Saindo...' : 'Sair da Conta',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: RewitSpacing.lg),
+
                     Text(
                       'Desativação de Conta',
                       style: theme.textTheme.titleSmall?.copyWith(

@@ -14,7 +14,7 @@ import '../../domain/repositories/check_in_repository.dart';
 
 /// Check-in rápido: uma avaliação mínima (só as estrelas) de um local próximo, publicada com a localização do
 /// momento. Não existe check-in avulso: o backend decide, ao receber a avaliação, se a presença foi verificada, e
-/// esta tela só mostra o que ele respondeu. O fluxo completo continua na aba Avaliar.
+/// esta tela só mostra o que ele respondeu. O fluxo completo continua em Nova Avaliação (botão +).
 class CheckInScreen extends StatefulWidget {
   final ReviewCreationRepository? reviewCreationRepository;
   final LocationService? locationService;
@@ -26,6 +26,9 @@ class CheckInScreen extends StatefulWidget {
   /// Chamado com a avaliação publicada (ex.: recarregar o feed).
   final ValueChanged<FeedReview>? onReviewCreated;
 
+  /// Quando `true`, renderiza apenas o conteúdo interno sem `Scaffold` nem `AppBar` próprios.
+  final bool embedded;
+
   const CheckInScreen({
     super.key,
     required this.reviewCreationRepository,
@@ -33,6 +36,7 @@ class CheckInScreen extends StatefulWidget {
     required this.checkInRepository,
     this.onOpenHistory,
     this.onReviewCreated,
+    this.embedded = false,
   });
 
   @override
@@ -164,6 +168,29 @@ class _CheckInScreenState extends State<CheckInScreen> {
   @override
   Widget build(BuildContext context) {
     final notifier = _notifier;
+    final body = notifier == null
+        ? const Center(child: Text('Check-in indisponível nesta versão do app.'))
+        : ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+            children: [
+              if (widget.embedded && widget.onOpenHistory != null)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    key: const Key('checkin_history_button'),
+                    onPressed: widget.onOpenHistory,
+                    icon: const Icon(Icons.history, size: 18),
+                    label: const Text('Meus check-ins'),
+                  ),
+                ),
+              ..._buildContent(context, notifier),
+            ],
+          );
+
+    if (widget.embedded) {
+      return body;
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Check-in'),
@@ -177,12 +204,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
             ),
         ],
       ),
-      body: notifier == null
-          ? const Center(child: Text('Check-in indisponível nesta versão do app.'))
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: _buildContent(context, notifier),
-            ),
+      body: body,
     );
   }
 
@@ -247,7 +269,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
   static String _locationErrorMessage(ReviewCreateNotifier notifier) {
     return switch (notifier.locationFailureReason) {
       LocationFailureReason.permissionDenied =>
-        'Sem permissão de localização não é possível fazer check-in. Você ainda pode avaliar pela aba Avaliar.',
+        'Sem permissão de localização não é possível fazer check-in. Você ainda pode publicar uma avaliação completa pelo botão + (Nova Avaliação).',
       LocationFailureReason.permissionDeniedForever =>
         'A permissão de localização foi negada. Libere-a nas configurações do aparelho para fazer check-in.',
       LocationFailureReason.serviceDisabled => 'A localização do aparelho está desligada.',
@@ -299,7 +321,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
           key: Key('checkin_nearby_empty'),
           padding: EdgeInsets.symmetric(vertical: 24),
           child: Text(
-            'Nenhum local cadastrado no Rewit por perto. Você pode cadastrar o local pela aba Avaliar.',
+            'Nenhum local cadastrado no Rewit por perto. Você pode cadastrar o local em Explorar ou pelo botão + (Nova Avaliação).',
             textAlign: TextAlign.center,
           ),
         )

@@ -887,7 +887,7 @@ void main() {
 
   // -------------------------------------------------------------------------------------------------------------
   group('Integração com o app', () {
-    testWidgets('Home mostra a entrada Rankings da Região sem mudar as cinco abas', (tester) async {
+    testWidgets('Home V2 exibe Rankings como destino na barra inferior e preserva navegação entre abas', (tester) async {
       _tallScreen(tester);
       final auth = await _signedIn();
       final repository = _FakeRankingRepository(auth: auth);
@@ -903,15 +903,16 @@ void main() {
           .widgetList<NavigationDestination>(find.byType(NavigationDestination))
           .map((d) => d.label)
           .toList();
-      expect(labels, ['Início', 'Buscar', 'Avaliar', 'Check-in', 'Perfil']);
+      expect(labels, ['Início', 'Explorar', 'Rankings', 'Check-in', 'Coleção']);
+      expect(find.byKey(const Key('home_rankings_entry')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('home_rankings_entry')));
+      await tester.tap(find.text('Rankings'));
       await tester.pumpAndSettle();
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 2);
       expect(find.byType(RankingsScreen), findsOneWidget);
+      expect(find.byKey(const Key('rankings_state_required')), findsOneWidget);
 
-      Navigator.of(tester.element(find.byType(RankingsScreen))).pop();
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Perfil'));
+      await tester.tap(find.text('Coleção'));
       await tester.pumpAndSettle();
       expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 4);
     });
@@ -936,7 +937,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('home_rankings_entry')));
+      await tester.tap(find.text('Rankings'));
       await tester.pumpAndSettle();
       await _chooseState(tester, 'PR');
       expect(find.text('Topo de ana (você)'), findsOneWidget);
@@ -951,7 +952,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(HomeScreen), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('home_rankings_entry')));
+      await tester.tap(find.text('Rankings'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('rankings_state_required')), findsOneWidget, reason: 'filtros e dados recomeçam');
       expect(find.textContaining('Topo de ana'), findsNothing);

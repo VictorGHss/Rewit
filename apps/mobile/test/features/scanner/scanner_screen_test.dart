@@ -518,7 +518,7 @@ void main() {
     expect(find.text('Tente novamente em 60 segundos.'), findsOneWidget);
   });
 
-  testWidgets('HomeScreen possui botão de scanner na AppBar e navega para /scanner', (tester) async {
+  testWidgets('Explorar na HomeScreen possui botão de scanner e navega para /scanner', (tester) async {
     final repo = _StubAuthRepo();
     final authNotifier = AuthNotifier(authRepository: repo);
     await authNotifier.checkAuthStatus();
@@ -537,8 +537,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Localiza o botão do scanner na AppBar
-    final scannerButton = find.byTooltip('Escanear Código');
+    // Na Home V2, o scanner fica acessível na busca da aba Explorar
+    await tester.tap(find.text('Explorar'));
+    await tester.pumpAndSettle();
+
+    final scannerButton = find.byKey(const Key('search_scanner_button'));
     expect(scannerButton, findsOneWidget);
 
     // Clica no botão e valida navegação

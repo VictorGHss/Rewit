@@ -23,12 +23,16 @@ class RankingsScreen extends StatefulWidget {
   /// Injeção para testes; sem ele, a tela cria e descarta o próprio notifier.
   final RankingsNotifier? notifier;
 
+  /// Quando `true`, renderiza apenas o conteúdo interno sem `Scaffold` nem `AppBar` próprios.
+  final bool embedded;
+
   const RankingsScreen({
     super.key,
     required this.repository,
     required this.authNotifier,
     this.interestRepository,
     this.notifier,
+    this.embedded = false,
   });
 
   @override
@@ -52,9 +56,16 @@ class _RankingsScreenState extends State<RankingsScreen> {
   @override
   void initState() {
     super.initState();
+    _initNotifier();
+    widget.authNotifier.addListener(_onAuthChanged);
+    _loadCategories();
+  }
+
+  void _initNotifier() {
     _sessionUserId = _authenticatedUserId();
     if (widget.notifier != null) {
       _notifier = widget.notifier;
+      _ownsNotifier = false;
     } else if (widget.repository != null && _sessionUserId != null) {
       _notifier = RankingsNotifier(
         repository: widget.repository!,
@@ -62,9 +73,29 @@ class _RankingsScreenState extends State<RankingsScreen> {
         currentUserId: _authenticatedUserId,
       );
       _ownsNotifier = true;
+    } else {
+      _notifier = null;
+      _ownsNotifier = false;
     }
-    widget.authNotifier.addListener(_onAuthChanged);
-    _loadCategories();
+  }
+
+  @override
+  void didUpdateWidget(covariant RankingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.authNotifier != widget.authNotifier) {
+      oldWidget.authNotifier.removeListener(_onAuthChanged);
+      widget.authNotifier.addListener(_onAuthChanged);
+    }
+    if (oldWidget.repository != widget.repository ||
+        oldWidget.notifier != widget.notifier ||
+        _authenticatedUserId() != _sessionUserId) {
+      if (_ownsNotifier) {
+        _notifier?.dispose();
+      }
+      _cityController.clear();
+      _initNotifier();
+      _loadCategories();
+    }
   }
 
   @override
@@ -75,14 +106,33 @@ class _RankingsScreenState extends State<RankingsScreen> {
     super.dispose();
   }
 
-  /// Logout, expiração ou outra conta: descarta os dados desta sessão e sai da tela.
+  /// Logout, expiração ou outra conta: descarta os dados desta sessão e atualiza ou fecha a tela.
   void _onAuthChanged() {
     final state = widget.authNotifier.state;
     if (state is Authenticating) return;
-    if (_authenticatedUserId() == _sessionUserId) return;
+    final newUserId = _authenticatedUserId();
+    if (newUserId == _sessionUserId) return;
     _notifier?.invalidate();
-    // A sessão expirada já volta à raiz (RewitApp): só fecha esta tela se ela ainda for a rota atual
-    if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) Navigator.of(context).pop();
+    if (!widget.embedded) {
+      // A sessão expirada já volta à raiz (RewitApp): só fecha esta tela se ela ainda for a rota atual e puder dar pop
+      if (mounted &&
+          (ModalRoute.of(context)?.isCurrent ?? false) &&
+          Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      if (_ownsNotifier) {
+        _notifier?.dispose();
+      }
+      _cityController.clear();
+      _initNotifier();
+    });
+    if (newUserId != null) {
+      _loadCategories();
+    }
   }
 
   Future<void> _loadCategories() async {
@@ -117,26 +167,32 @@ class _RankingsScreenState extends State<RankingsScreen> {
   @override
   Widget build(BuildContext context) {
     final notifier = _notifier;
+    final body = notifier == null
+        ? const Center(child: Text('Rankings indisponíveis nesta versão do app.'))
+        : AnimatedBuilder(
+            animation: notifier,
+            builder: (context, _) => ListView(
+              key: const Key('rankings_list'),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+              children: [
+                ..._buildHeader(context),
+                const SizedBox(height: 12),
+                _buildMetricSelector(notifier),
+                const SizedBox(height: 12),
+                ..._buildFilters(context, notifier),
+                const SizedBox(height: 16),
+                ..._buildResults(context, notifier),
+              ],
+            ),
+          );
+
+    if (widget.embedded) {
+      return body;
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('Rankings da Região')),
-      body: notifier == null
-          ? const Center(child: Text('Rankings indisponíveis nesta versão do app.'))
-          : AnimatedBuilder(
-              animation: notifier,
-              builder: (context, _) => ListView(
-                key: const Key('rankings_list'),
-                padding: const EdgeInsets.all(16),
-                children: [
-                  ..._buildHeader(context),
-                  const SizedBox(height: 12),
-                  _buildMetricSelector(notifier),
-                  const SizedBox(height: 12),
-                  ..._buildFilters(context, notifier),
-                  const SizedBox(height: 16),
-                  ..._buildResults(context, notifier),
-                ],
-              ),
-            ),
+      body: body,
     );
   }
 

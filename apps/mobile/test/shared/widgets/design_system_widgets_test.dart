@@ -11,6 +11,7 @@ import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart
 import 'package:rewit_mobile/features/check_ins/domain/entities/check_in_entities.dart';
 import 'package:rewit_mobile/features/check_ins/domain/repositories/check_in_repository.dart';
 import 'package:rewit_mobile/features/check_ins/presentation/screens/check_in_screen.dart';
+import 'package:rewit_mobile/features/collection/presentation/screens/collection_screen.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
@@ -576,6 +577,16 @@ void main() {
           ),
           theme: theme,
         );
+      });
+
+      testWidgets('CollectionScreen no tema $themeLabel', (tester) async {
+        await _verifyScreenInTheme(
+          tester: tester,
+          screenName: 'CollectionScreen',
+          screen: const CollectionScreen(),
+          theme: theme,
+        );
+        expect(find.byKey(const Key('collection_empty_state')), findsOneWidget);
       });
 
       testWidgets('UserProfileScreen no tema $themeLabel', (tester) async {

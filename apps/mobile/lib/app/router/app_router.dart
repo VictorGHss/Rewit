@@ -23,6 +23,7 @@ import 'package:rewit_mobile/features/discussions/domain/repositories/discussion
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_state.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:rewit_mobile/features/interests/domain/repositories/interest_repository.dart';
 import 'package:rewit_mobile/features/interests/presentation/screens/edit_interests_screen.dart';
@@ -154,6 +155,31 @@ class AppRouter {
     return state is Authenticated ? state.user.id : null;
   }
 
+  /// Constrói a [HomeScreen] com todas as dependências injetadas e escopo por sessão.
+  Widget _buildHomeScreen(Authenticated? session) {
+    return HomeScreen(
+      key: ValueKey('home-${session?.user.id ?? 'anon'}'),
+      authNotifier: authNotifier,
+      feedNotifier: feedNotifier,
+      reviewCreationRepository: reviewCreationRepository,
+      mediaRepository: reviewMediaRepository,
+      mediaPickerService: mediaPickerService,
+      locationService: locationService,
+      searchRepository: searchRepository,
+      placeRepository: placeRepository,
+      productRepository: productRepository,
+      placeDiscoveryRepository: placeDiscoveryRepository,
+      userProfileRepository: userProfileRepository,
+      notificationRepository: notificationRepository,
+      notificationsNotifier: notificationsNotifier,
+      pendingRegistrationStore: pendingRegistrationStore,
+      onPickManualPlacePhoto: onPickManualPlacePhoto,
+      checkInRepository: checkInRepository,
+      rankingRepository: rankingRepository,
+      interestRepository: interestRepository,
+    );
+  }
+
   /// App da sessão autenticada; com [interestRepository], passa antes pelo questionário inicial de interesses. O
   /// portão tem uma chave por usuário: outra conta começa do zero, sem herdar estado nem respostas.
   Widget _authenticatedHome(BuildContext context, Authenticated session, WidgetBuilder home) {
@@ -186,24 +212,7 @@ class AppRouter {
                 return _authenticatedHome(
                   context,
                   state,
-                  (context) => HomeScreen(
-                    authNotifier: authNotifier,
-                    feedNotifier: feedNotifier,
-                    reviewCreationRepository: reviewCreationRepository,
-                    mediaRepository: reviewMediaRepository,
-                    mediaPickerService: mediaPickerService,
-                    locationService: locationService,
-                    searchRepository: searchRepository,
-                    placeRepository: placeRepository,
-                    productRepository: productRepository,
-                    placeDiscoveryRepository: placeDiscoveryRepository,
-                    userProfileRepository: userProfileRepository,
-                    notificationRepository: notificationRepository,
-                    notificationsNotifier: notificationsNotifier,
-                    pendingRegistrationStore: pendingRegistrationStore,
-                    onPickManualPlacePhoto: onPickManualPlacePhoto,
-                    checkInRepository: checkInRepository,
-                  ),
+                  (_) => _buildHomeScreen(state),
                 );
               }
               return LoginScreen(authNotifier: authNotifier);
@@ -219,26 +228,17 @@ class AppRouter {
         );
 
       case home:
-        Widget buildHome(BuildContext context) => HomeScreen(
-              authNotifier: authNotifier,
-              feedNotifier: feedNotifier,
-              reviewCreationRepository: reviewCreationRepository,
-              mediaRepository: reviewMediaRepository,
-              mediaPickerService: mediaPickerService,
-              locationService: locationService,
-              searchRepository: searchRepository,
-              placeRepository: placeRepository,
-              productRepository: productRepository,
-              placeDiscoveryRepository: placeDiscoveryRepository,
-              userProfileRepository: userProfileRepository,
-              notificationRepository: notificationRepository,
-              notificationsNotifier: notificationsNotifier,
-              checkInRepository: checkInRepository,
-            );
         return MaterialPageRoute(
           builder: (context) {
             final state = authNotifier.state;
-            return state is Authenticated ? _authenticatedHome(context, state, buildHome) : buildHome(context);
+            if (state is Authenticated) {
+              return _authenticatedHome(
+                context,
+                state,
+                (_) => _buildHomeScreen(state),
+              );
+            }
+            return _buildHomeScreen(null);
           },
           settings: settings,
         );
@@ -394,28 +394,36 @@ class AppRouter {
         }
 
         return MaterialPageRoute(
-          builder: (context) => ReviewCreateScreen(
-            repository: reviewCreationRepository,
-            mediaRepository: reviewMediaRepository,
-            mediaPickerService: mediaPickerService,
-            locationService: locationService,
-            searchRepository: searchRepository,
-            placeRepository: placeRepository,
-            productRepository: productRepository,
-            placeDiscoveryRepository: placeDiscoveryRepository,
-            initialTargetId: initialTargetId,
-            initialTargetName: initialTargetName,
-            initialTargetType: initialTargetType,
-            initialCategory: initialCategory,
-            initialPhoto: initialPhoto,
-            authNotifier: authNotifier,
-            pendingRegistrationStore: pendingRegistrationStore,
-            onPickManualPlacePhoto: onPickManualPlacePhoto,
-            onReviewCreated: (createdReview) {
-              feedNotifier?.refresh();
-              Navigator.of(context).pushReplacementNamed(
-                AppRouter.reviewDetail,
-                arguments: createdReview,
+          builder: (context) => ListenableBuilder(
+            listenable: authNotifier,
+            builder: (context, _) {
+              if (authNotifier.state is Unauthenticated) {
+                return LoginScreen(authNotifier: authNotifier);
+              }
+              return ReviewCreateScreen(
+                repository: reviewCreationRepository,
+                mediaRepository: reviewMediaRepository,
+                mediaPickerService: mediaPickerService,
+                locationService: locationService,
+                searchRepository: searchRepository,
+                placeRepository: placeRepository,
+                productRepository: productRepository,
+                placeDiscoveryRepository: placeDiscoveryRepository,
+                initialTargetId: initialTargetId,
+                initialTargetName: initialTargetName,
+                initialTargetType: initialTargetType,
+                initialCategory: initialCategory,
+                initialPhoto: initialPhoto,
+                authNotifier: authNotifier,
+                pendingRegistrationStore: pendingRegistrationStore,
+                onPickManualPlacePhoto: onPickManualPlacePhoto,
+                onReviewCreated: (createdReview) {
+                  feedNotifier?.refresh();
+                  Navigator.of(context).pushReplacementNamed(
+                    AppRouter.reviewDetail,
+                    arguments: createdReview,
+                  );
+                },
               );
             },
           ),
@@ -510,7 +518,9 @@ class AppRouter {
               // O Feed V2 é ordenado pelos interesses: a volta ao app já mostra o feed com a seleção nova. Se a
               // sessão terminou enquanto gravava, o feed já foi descartado e não é recarregado para outra sessão
               onSaved: () {
-                if (_currentUserId() == userId) feedNotifier?.refresh();
+                if (_currentUserId() == userId) {
+                  feedNotifier?.refresh(type: FeedType.forYou);
+                }
               },
             );
           },

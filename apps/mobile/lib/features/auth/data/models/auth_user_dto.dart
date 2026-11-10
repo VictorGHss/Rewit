@@ -8,6 +8,9 @@ class AuthUserDto {
   final bool isAnonymousDefault;
   final int reputationScore;
 
+  /// URL pública da foto de perfil; nula quando o usuário não tem foto (a interface usa a inicial do nome).
+  final String? avatarUrl;
+
   const AuthUserDto({
     required this.id,
     required this.email,
@@ -16,6 +19,7 @@ class AuthUserDto {
     this.isVerified = false,
     this.isAnonymousDefault = false,
     this.reputationScore = 0,
+    this.avatarUrl,
   });
 
   factory AuthUserDto.fromJson(Map<String, dynamic> json) {
@@ -27,6 +31,7 @@ class AuthUserDto {
       isVerified: json['isVerified'] as bool? ?? false,
       isAnonymousDefault: json['isAnonymousDefault'] as bool? ?? false,
       reputationScore: (json['reputationScore'] as num?)?.toInt() ?? 0,
+      avatarUrl: normalizeAvatarUrl(json['avatarUrl'] as String?),
     );
   }
 
@@ -39,6 +44,7 @@ class AuthUserDto {
       'isVerified': isVerified,
       'isAnonymousDefault': isAnonymousDefault,
       'reputationScore': reputationScore,
+      if (avatarUrl != null) 'avatarUrl': avatarUrl,
     };
   }
 
@@ -50,6 +56,8 @@ class AuthUserDto {
     bool? isVerified,
     bool? isAnonymousDefault,
     int? reputationScore,
+    String? avatarUrl,
+    bool clearAvatarUrl = false,
   }) {
     return AuthUserDto(
       id: id ?? this.id,
@@ -59,7 +67,14 @@ class AuthUserDto {
       isVerified: isVerified ?? this.isVerified,
       isAnonymousDefault: isAnonymousDefault ?? this.isAnonymousDefault,
       reputationScore: reputationScore ?? this.reputationScore,
+      avatarUrl: clearAvatarUrl ? null : (avatarUrl ?? this.avatarUrl),
     );
+  }
+
+  /// URL de avatar utilizável: texto vazio ou só com espaços conta como ausência de foto.
+  static String? normalizeAvatarUrl(String? value) {
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 
   @override

@@ -51,6 +51,9 @@ class SearchScreen extends StatefulWidget {
   /// Store das operações pendentes; o app real injeta o persistente (ver `main.dart`).
   final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
+  /// Quando `true`, renderiza apenas o conteúdo interno sem `Scaffold` nem `AppBar` próprios.
+  final bool embedded;
+
   const SearchScreen({
     super.key,
     this.searchRepository,
@@ -62,6 +65,7 @@ class SearchScreen extends StatefulWidget {
     this.authNotifier,
     this.currentUserId,
     this.pendingRegistrationStore,
+    this.embedded = false,
   });
 
   @override
@@ -302,184 +306,206 @@ class _SearchScreenState extends State<SearchScreen>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
+    final content = Column(
+      children: [
+        // 1. Campo de Busca com debounce, botão de limpar e atalho para o Scanner QR/EAN/ISBN
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: _notifier,
+                  builder: (context, _) {
+                    final state = _notifier.state;
+                    final isLoading = state is SearchLoading;
+
+                    return TextFormField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Buscar estabelecimentos ou produtos...',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        suffixIcon: isLoading
+                            ? const Padding(
+                                padding: EdgeInsets.all(12.0),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              )
+                            : _searchController.text.isNotEmpty
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear, size: 20),
+                                    tooltip: 'Limpar busca',
+                                    onPressed: _clearSearch,
+                                  )
+                                : null,
+                        border: const OutlineInputBorder(
+                          borderRadius: RewitRadius.borderLg,
+                        ),
+                        isDense: true,
+                      ),
+                      onChanged: (val) => _notifier.onQueryChanged(val),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                key: const Key('search_scanner_button'),
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: 'Escanear Código',
+                onPressed: () {
+                  Navigator.of(context).pushNamed(AppRouter.scanner);
+                },
+              ),
+            ],
+          ),
+        ),
+
+        // 2. Chips de Filtro (Todos / Locais / Produtos)
+        ListenableBuilder(
+          listenable: _notifier,
+          builder: (context, _) {
+            final activeFilter = _notifier.state.filter;
+
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  _buildFilterChip(
+                    theme: theme,
+                    label: SearchFilter.all.displayName,
+                    selected: activeFilter == SearchFilter.all,
+                    onSelected: () => _notifier.setFilter(SearchFilter.all),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildFilterChip(
+                    theme: theme,
+                    label: SearchFilter.places.displayName,
+                    selected: activeFilter == SearchFilter.places,
+                    icon: Icons.storefront_rounded,
+                    onSelected: () =>
+                        _notifier.setFilter(SearchFilter.places),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildFilterChip(
+                    theme: theme,
+                    label: SearchFilter.products.displayName,
+                    selected: activeFilter == SearchFilter.products,
+                    icon: Icons.inventory_2_outlined,
+                    onSelected: () =>
+                        _notifier.setFilter(SearchFilter.products),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+
+        const Divider(height: 1),
+
+        if (_pendingRegistration != null) ...[
+          Container(
+            key: const Key('search_pending_registration_banner'),
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: scheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.pending_actions,
+                  color: scheme.onSecondaryContainer,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Foto pendente: ${_pendingRegistration!.place.name}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: scheme.onSecondaryContainer,
+                        ),
+                      ),
+                      Text(
+                        _pendingRegistration!.photoUnavailable
+                            ? 'A fotografia não está mais disponível neste dispositivo. Retome selecionando uma nova foto para o mesmo local.'
+                            : 'O local foi criado. Toque para concluir o envio da fotografia.',
+                        key: _pendingRegistration!.photoUnavailable
+                            ? const Key(
+                                'search_pending_photo_unavailable_text',
+                              )
+                            : const Key('search_pending_photo_pending_text'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSecondaryContainer,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  key: const Key('search_resume_pending_place_button'),
+                  onPressed: _resumePendingRegistration,
+                  child: const Text('Retomar'),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        // 3. Conteúdo Dinâmico por Estado
+        Expanded(
+          child: ListenableBuilder(
+            listenable: _notifier,
+            builder: (context, _) {
+              final state = _notifier.state;
+
+              if (state is SearchInitial) {
+                return _buildInitialState(theme);
+              }
+
+              if (state is SearchLoading) {
+                return _buildLoadingState(theme);
+              }
+
+              if (state is SearchEmpty) {
+                return _buildEmptyState(theme, state.query);
+              }
+
+              if (state is SearchError) {
+                return _buildErrorState(theme, state);
+              }
+
+              if (state is SearchResults) {
+                return _buildResultsState(theme, state);
+              }
+
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      ],
+    );
+
+    if (widget.embedded) {
+      return content;
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Buscar no Catálogo'),
       ),
-      body: Column(
-        children: [
-          // 1. Campo de Busca com debounce e botão de limpar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: ListenableBuilder(
-              listenable: _notifier,
-              builder: (context, _) {
-                final state = _notifier.state;
-                final isLoading = state is SearchLoading;
-
-                return TextFormField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Buscar estabelecimentos ou produtos...',
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    suffixIcon: isLoading
-                        ? const Padding(
-                            padding: EdgeInsets.all(12.0),
-                            child: SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        : _searchController.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, size: 20),
-                                tooltip: 'Limpar busca',
-                                onPressed: _clearSearch,
-                              )
-                            : null,
-                    border: const OutlineInputBorder(
-                      borderRadius: RewitRadius.borderLg,
-                    ),
-                    isDense: true,
-                  ),
-                  onChanged: (val) => _notifier.onQueryChanged(val),
-                );
-              },
-            ),
-          ),
-
-          // 2. Chips de Filtro (Todos / Locais / Produtos)
-          ListenableBuilder(
-            listenable: _notifier,
-            builder: (context, _) {
-              final activeFilter = _notifier.state.filter;
-
-              return SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: Row(
-                  children: [
-                    _buildFilterChip(
-                      theme: theme,
-                      label: SearchFilter.all.displayName,
-                      selected: activeFilter == SearchFilter.all,
-                      onSelected: () => _notifier.setFilter(SearchFilter.all),
-                    ),
-                    const SizedBox(width: 8),
-                    _buildFilterChip(
-                      theme: theme,
-                      label: SearchFilter.places.displayName,
-                      selected: activeFilter == SearchFilter.places,
-                      icon: Icons.storefront_rounded,
-                      onSelected: () =>
-                          _notifier.setFilter(SearchFilter.places),
-                    ),
-                    const SizedBox(width: 8),
-                    _buildFilterChip(
-                      theme: theme,
-                      label: SearchFilter.products.displayName,
-                      selected: activeFilter == SearchFilter.products,
-                      icon: Icons.inventory_2_outlined,
-                      onSelected: () =>
-                          _notifier.setFilter(SearchFilter.products),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-
-          const Divider(height: 1),
-
-          if (_pendingRegistration != null) ...[
-            Container(
-              key: const Key('search_pending_registration_banner'),
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: scheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: scheme.outlineVariant),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.pending_actions,
-                    color: scheme.onSecondaryContainer,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Foto pendente: ${_pendingRegistration!.place.name}',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: scheme.onSecondaryContainer,
-                          ),
-                        ),
-                        Text(
-                          _pendingRegistration!.photoUnavailable
-                              ? 'A fotografia não está mais disponível neste dispositivo. Retome selecionando uma nova foto para o mesmo local.'
-                              : 'O local foi criado. Toque para concluir o envio da fotografia.',
-                          key: _pendingRegistration!.photoUnavailable
-                              ? const Key(
-                                  'search_pending_photo_unavailable_text',
-                                )
-                              : const Key('search_pending_photo_pending_text'),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSecondaryContainer,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  TextButton(
-                    key: const Key('search_resume_pending_place_button'),
-                    onPressed: _resumePendingRegistration,
-                    child: const Text('Retomar'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          // 3. Conteúdo Dinâmico por Estado
-          Expanded(
-            child: ListenableBuilder(
-              listenable: _notifier,
-              builder: (context, _) {
-                final state = _notifier.state;
-
-                if (state is SearchInitial) {
-                  return _buildInitialState(theme);
-                }
-
-                if (state is SearchLoading) {
-                  return _buildLoadingState(theme);
-                }
-
-                if (state is SearchEmpty) {
-                  return _buildEmptyState(theme, state.query);
-                }
-
-                if (state is SearchError) {
-                  return _buildErrorState(theme, state);
-                }
-
-                if (state is SearchResults) {
-                  return _buildResultsState(theme, state);
-                }
-
-                return const SizedBox.shrink();
-              },
-            ),
-          ),
-        ],
-      ),
+      body: content,
     );
   }
 
@@ -689,7 +715,7 @@ class _SearchScreenState extends State<SearchScreen>
 
     return ListView.builder(
       controller: _scrollController,
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 96),
       itemCount: filtered.length + (hasMoreFooter ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == filtered.length) {

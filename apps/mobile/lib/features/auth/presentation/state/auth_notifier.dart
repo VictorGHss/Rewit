@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/session_refresher.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
+import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
 import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
@@ -489,10 +490,15 @@ class AuthNotifier extends ChangeNotifier {
   }
 
   /// Atualiza os dados de perfil do usuário autenticado após edição bem-sucedida.
+  ///
+  /// [clearAvatarUrl] remove a foto da sessão (o perfil não tem mais avatar); sem ele, um [avatarUrl] nulo mantém
+  /// a foto atual.
   void updateCurrentUser({
     String? handle,
     String? displayName,
     bool? isAnonymousDefault,
+    String? avatarUrl,
+    bool clearAvatarUrl = false,
   }) {
     if (_state is Authenticated) {
       final current = _state as Authenticated;
@@ -501,6 +507,8 @@ class AuthNotifier extends ChangeNotifier {
           handle: handle,
           displayName: displayName,
           isAnonymousDefault: isAnonymousDefault,
+          avatarUrl: AuthUserDto.normalizeAvatarUrl(avatarUrl),
+          clearAvatarUrl: clearAvatarUrl,
         ),
         tokens: current.tokens,
       );

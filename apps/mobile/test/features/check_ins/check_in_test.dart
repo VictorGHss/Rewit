@@ -354,7 +354,7 @@ void main() {
           .widgetList<NavigationDestination>(find.byType(NavigationDestination))
           .map((d) => d.label)
           .toList();
-      expect(labels, ['Início', 'Buscar', 'Avaliar', 'Check-in', 'Perfil']);
+      expect(labels, ['Início', 'Explorar', 'Rankings', 'Check-in', 'Coleção']);
 
       await tester.tap(find.byKey(const Key('home_check_in_tab')));
       await tester.pumpAndSettle();

@@ -36,6 +36,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   bool _isLoading = true;
   bool _isActionLoading = false;
   bool _isNotFound = false;
+  bool _avatarLoadFailed = false;
   String? _errorMessage;
 
   @override
@@ -87,6 +88,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             id: state.user.id,
             handle: state.user.handle,
             displayName: state.user.displayName,
+            avatarUrl: state.user.avatarUrl,
             stats: const UserStats(),
           );
           _isLoading = false;
@@ -104,6 +106,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       final profile =
           await widget.userProfileRepository!.getUserProfile(targetId);
       if (mounted) {
+        if (_isMyProfile) {
+          widget.authNotifier.updateCurrentUser(
+            handle: profile.handle,
+            displayName: profile.displayName,
+            isAnonymousDefault: profile.isAnonymousDefault,
+            avatarUrl: profile.avatarUrl,
+            clearAvatarUrl: profile.avatarUrl == null ||
+                profile.avatarUrl!.trim().isEmpty,
+          );
+        }
         setState(() {
           _profile = profile;
           _isLoading = false;
@@ -398,11 +410,25 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               CircleAvatar(
                 radius: 36,
                 backgroundColor: scheme.secondaryContainer,
-                backgroundImage:
-                    profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty
-                        ? NetworkImage(profile.avatarUrl!)
-                        : null,
-                child: profile.avatarUrl == null || profile.avatarUrl!.isEmpty
+                backgroundImage: profile.avatarUrl != null &&
+                        profile.avatarUrl!.isNotEmpty &&
+                        !_avatarLoadFailed
+                    ? NetworkImage(profile.avatarUrl!)
+                    : null,
+                onBackgroundImageError: profile.avatarUrl != null &&
+                        profile.avatarUrl!.isNotEmpty &&
+                        !_avatarLoadFailed
+                    ? (_, __) {
+                        if (mounted && !_avatarLoadFailed) {
+                          setState(() {
+                            _avatarLoadFailed = true;
+                          });
+                        }
+                      }
+                    : null,
+                child: profile.avatarUrl == null ||
+                        profile.avatarUrl!.isEmpty ||
+                        _avatarLoadFailed
                     ? Text(
                         profile.displayName.isNotEmpty
                             ? profile.displayName[0].toUpperCase()

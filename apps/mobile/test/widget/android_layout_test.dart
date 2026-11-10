@@ -115,14 +115,14 @@ void main() {
       expect(find.text('Rewit'), findsOneWidget);
     });
 
-    testWidgets('tocar no cartão do usuário abre a aba Perfil e voltar retorna ao Início', (tester) async {
+    testWidgets('alternar para outra aba da barra inferior e voltar no Android retorna ao Início sem fechar o app', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('home_user_header_card')));
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Coleção')));
       await tester.pumpAndSettle();
-      // Perfil é a quinta aba: Início, Buscar, Avaliar, Check-in, Perfil
+      // Coleção é a quinta aba: Início, Explorar, Rankings, Check-in, Coleção
       expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 4);
       expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 4);
 
@@ -133,57 +133,66 @@ void main() {
       expect(find.byType(HomeScreen), findsOneWidget);
     });
 
-    testWidgets('AppBar não tem atalho redundante de perfil; scanner à esquerda e menu à direita', (tester) async {
+    testWidgets('AppBar V2 tem avatar à esquerda, título Rewit centralizado e ícones de mensagens e notificações à direita', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
       final appBar = find.byType(AppBar);
-      expect(find.descendant(of: appBar, matching: find.byTooltip('Meu perfil')), findsNothing);
-      expect(find.descendant(of: appBar, matching: find.byIcon(Icons.account_circle_outlined)), findsNothing);
-      expect(find.byKey(const Key('home_open_profile_button')), findsNothing);
+      final avatar = find.descendant(of: appBar, matching: find.byKey(const Key('home_avatar_button')));
+      expect(avatar, findsOneWidget);
+      expect(tester.getCenter(avatar).dx, lessThan(360 / 2));
 
-      final scanner = find.descendant(of: appBar, matching: find.byTooltip('Escanear Código'));
-      expect(scanner, findsOneWidget);
-      expect(tester.getCenter(scanner).dx, lessThan(360 / 2));
-      final more = find.descendant(of: appBar, matching: find.byTooltip('Mais opções'));
-      expect(more, findsOneWidget);
-      expect(tester.getCenter(more).dx, greaterThan(360 / 2));
+      // Antigos controles removidos da AppBar da Home
+      expect(find.byKey(const Key('home_scanner_button')), findsNothing);
+      expect(find.byKey(const Key('home_more_options_button')), findsNothing);
+      expect(find.byKey(const Key('home_user_header_card')), findsNothing);
+
+      final messages = find.descendant(of: appBar, matching: find.byKey(const Key('home_messages_button')));
+      expect(messages, findsOneWidget);
+      expect(tester.getCenter(messages).dx, greaterThan(360 / 2));
+
+      final notifications = find.descendant(of: appBar, matching: find.byKey(const Key('home_notifications_button')));
+      expect(notifications, findsOneWidget);
+      expect(tester.getCenter(notifications).dx, greaterThan(360 / 2));
     });
 
-    testWidgets('a aba Perfil da navegação inferior abre o próprio perfil', (tester) async {
+    testWidgets('tocar no avatar do AppBar abre a rota de perfil', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Perfil')));
+      await tester.tap(find.byKey(const Key('home_avatar_button')));
       await tester.pumpAndSettle();
-      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 4);
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 4);
+      expect(find.text('rota ${AppRouter.profile}'), findsOneWidget);
     });
 
-    testWidgets('scanner do AppBar continua abrindo a rota do scanner', (tester) async {
+    testWidgets('scanner na aba Explorar abre a rota do scanner', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('home_scanner_button')));
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Explorar')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('search_scanner_button')));
       await tester.pumpAndSettle();
       expect(find.text('rota ${AppRouter.scanner}'), findsOneWidget);
     });
 
-    testWidgets('menu "Mais opções" leva às configurações da conta', (tester) async {
+    testWidgets('ícone de mensagens exibe aviso honesto de recurso não implementado sem navegar para tela falsa', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Mais opções'));
-      await tester.pumpAndSettle();
-      expect(find.text('Sair da Conta'), findsOneWidget);
-      await tester.tap(find.text('Configurações da Conta'));
+      await tester.tap(find.byKey(const Key('home_messages_button')));
       await tester.pumpAndSettle();
 
-      expect(find.text('rota ${AppRouter.accountSettings}'), findsOneWidget);
+      expect(
+        find.text('O Chat de mensagens ainda não foi implementado nesta versão do Rewit.'),
+        findsOneWidget,
+      );
+      expect(find.byType(HomeScreen), findsOneWidget);
     });
   });
 

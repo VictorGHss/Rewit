@@ -263,25 +263,36 @@ void main() {
   Future<void> login(WidgetTester tester, _AppRun app, AuthUserDto user) async {
     await app.auth.login(user.email, 'senha');
     await tester.pumpAndSettle();
-    expect(find.text('Avaliar'), findsOneWidget, reason: 'Home autenticada de ${user.id}');
+    final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
+    if (nav.canPop()) {
+      nav.popUntil((route) => route.isFirst);
+      await tester.pumpAndSettle();
+    }
+    expect(find.byKey(const Key('home_fab_button')), findsOneWidget, reason: 'Home autenticada de ${user.id}');
   }
 
   Future<void> logoutThroughUi(WidgetTester tester) async {
-    // O layout pode agrupar o logout num menu de opções (S1/S3-B); o caminho continua sendo a UI real
-    final moreOptions = find.byKey(const Key('home_more_options_button'));
-    if (moreOptions.evaluate().isNotEmpty) {
-      await tester.tap(moreOptions);
+    // Se uma tela empilhada (ex.: Criar Avaliação) estiver aberta sobre a Home, retorna à Home para acessar o Perfil
+    if (find.byKey(const Key('home_avatar_button')).evaluate().isEmpty) {
+      tester.state<NavigatorState>(find.byType(Navigator).first).popUntil((route) => route.isFirst);
       await tester.pumpAndSettle();
     }
-    await tester.tap(find.byIcon(Icons.logout));
+    await tester.tap(find.byKey(const Key('home_avatar_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('logout_account_button')));
+    await tester.tap(find.byKey(const Key('logout_account_button')));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ElevatedButton, 'Sair'));
     await tester.pumpAndSettle();
-    expect(find.text('Avaliar'), findsNothing, reason: 'Home desmontada após logout');
+    expect(find.byKey(const Key('home_fab_button')), findsNothing, reason: 'Home desmontada após logout');
   }
 
   Future<void> openReviewTab(WidgetTester tester) async {
-    await tester.tap(find.text('Avaliar'));
+    await tester.tap(find.byKey(const Key('home_fab_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('home_quick_action_review_create')));
     await tester.pumpAndSettle();
   }
 

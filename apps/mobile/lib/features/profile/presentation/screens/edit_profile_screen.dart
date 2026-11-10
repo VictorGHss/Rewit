@@ -106,6 +106,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           handle: updatedProfile.handle,
           displayName: updatedProfile.displayName,
           isAnonymousDefault: updatedProfile.isAnonymousDefault,
+          avatarUrl: updatedProfile.avatarUrl,
+          clearAvatarUrl: updatedProfile.avatarUrl == null ||
+              updatedProfile.avatarUrl!.trim().isEmpty,
         );
 
         final successTone = RewitSemanticColors.of(context).success;

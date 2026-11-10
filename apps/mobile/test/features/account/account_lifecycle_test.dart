@@ -767,7 +767,7 @@ void main() {
   });
 
   group('Navigation & AppRouter - Configurações de Conta', () {
-    testWidgets('abrir configurações da conta pelo ícone no AppBar da HomeScreen', (tester) async {
+    testWidgets('abrir configurações da conta pelo avatar no AppBar da HomeScreen -> Perfil -> ícone de configurações', (tester) async {
       final repo = TestMockAuthRepo();
       final notifier = AuthNotifier(authRepository: repo);
       await notifier.checkAuthStatus();
@@ -781,10 +781,11 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Configurações ficam no menu "Mais opções" do AppBar (título centralizado com dois controles por lado)
-      await tester.tap(find.byTooltip('Mais opções'));
+      // Na Home V2, o perfil é aberto pelo avatar à esquerda do AppBar
+      await tester.tap(find.byKey(const Key('home_avatar_button')));
       await tester.pumpAndSettle();
 
+      expect(find.text('Perfil de Usuário'), findsOneWidget);
       final settingsIcon = find.byIcon(Icons.settings_outlined);
       expect(settingsIcon, findsOneWidget);
 
@@ -793,10 +794,11 @@ void main() {
 
       // Navegou para AccountSettingsScreen
       expect(find.text('Configurações da Conta'), findsOneWidget);
+      expect(find.text('Sair da Conta'), findsOneWidget);
       expect(find.text('Desativar minha conta'), findsOneWidget);
     });
 
-    testWidgets('abrir configurações da conta pelo botão na ProfilePlaceholderScreen', (tester) async {
+    testWidgets('abrir configurações da conta pelo botão na UserProfileScreen', (tester) async {
       final repo = TestMockAuthRepo();
       final notifier = AuthNotifier(authRepository: repo);
       await notifier.checkAuthStatus();
@@ -810,8 +812,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Seleciona aba Perfil
-      await tester.tap(find.text('Perfil'));
+      // Abre o Perfil pelo avatar da Home V2
+      await tester.tap(find.byKey(const Key('home_avatar_button')));
       await tester.pumpAndSettle();
 
       expect(find.text('Perfil de Usuário'), findsOneWidget);

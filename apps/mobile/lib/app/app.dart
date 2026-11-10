@@ -67,14 +67,15 @@ class _RewitAppState extends State<RewitApp> {
     final state = widget.router.authNotifier.state;
     // Authenticating (ex.: troca de senha recusada) não encerra a sessão: só Authenticated e Unauthenticated contam
     if (state is Authenticated || state is Unauthenticated) {
+      final prevUserId = _sessionUserId;
       final userId = _resolvedUserId(state);
       if (userId != _sessionUserId) {
         _sessionUserId = userId;
         widget.router.feedNotifier?.reset();
       }
-    }
-    if (state is Unauthenticated && state.errorCode == 'SESSION_EXPIRED') {
-      _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      if (prevUserId != null && userId == null) {
+        _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      }
     }
   }
 
