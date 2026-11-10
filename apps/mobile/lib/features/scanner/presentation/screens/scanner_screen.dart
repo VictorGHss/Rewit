@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
+import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import '../../domain/entities/scanned_code.dart';
 import '../../domain/entities/scanner_state.dart';
 import '../state/scanner_notifier.dart';
@@ -11,6 +15,8 @@ import '../widgets/scanner_overlay.dart';
 /// Tela principal do Scanner MVP de Barcode e QR Code (C5.6).
 class ScannerScreen extends StatefulWidget {
   final ProductRepository? productRepository;
+  final PlaceRepository? placeRepository;
+  final bool selectionMode;
   final ScannerNotifier? notifier;
   final Widget Function(
     BuildContext context,
@@ -21,6 +27,8 @@ class ScannerScreen extends StatefulWidget {
   const ScannerScreen({
     super.key,
     this.productRepository,
+    this.placeRepository,
+    this.selectionMode = false,
     this.notifier,
     this.cameraBuilder,
     this.autoStartCamera = true,
@@ -38,6 +46,8 @@ class _ScannerScreenState extends State<ScannerScreen>
   MobileScannerController? _cameraController;
   bool _isTorchOn = false;
 
+  bool get _isSelectionMode => widget.selectionMode || _notifier.selectionMode;
+
   @override
   void initState() {
     super.initState();
@@ -47,7 +57,11 @@ class _ScannerScreenState extends State<ScannerScreen>
       _notifier = widget.notifier!;
       _ownsNotifier = false;
     } else {
-      _notifier = ScannerNotifier(productRepository: widget.productRepository);
+      _notifier = ScannerNotifier(
+        productRepository: widget.productRepository,
+        placeRepository: widget.placeRepository,
+        selectionMode: widget.selectionMode,
+      );
       _ownsNotifier = true;
     }
 
@@ -125,7 +139,37 @@ class _ScannerScreenState extends State<ScannerScreen>
     _notifier.onCodeDetected(rawValue, format: barcode.format);
   }
 
+  void _selectProduct(ProductDetail product) {
+    _cameraController?.stop();
+    Navigator.of(context).pop(
+      SearchResultItem(
+        id: product.id,
+        name: product.name,
+        category: product.category.trim().isEmpty ? null : product.category,
+        targetType: TargetType.product,
+        rawTargetType: 'PRODUCT',
+        status: product.status,
+      ),
+    );
+  }
+
+  void _selectPlace(PlaceDetail place) {
+    _cameraController?.stop();
+    Navigator.of(context).pop(
+      SearchResultItem(
+        id: place.id,
+        name: place.name,
+        slug: place.slug.trim().isEmpty ? null : place.slug,
+        category: place.category.trim().isEmpty ? null : place.category,
+        targetType: TargetType.place,
+        rawTargetType: 'PLACE',
+        status: place.status,
+      ),
+    );
+  }
+
   Future<void> _navigateToProductDetail(String productId) async {
+    if (_isSelectionMode) return;
     _cameraController?.stop();
     await Navigator.of(context).pushNamed(
       AppRouter.productDetail,
@@ -138,6 +182,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   Future<void> _navigateToSearch() async {
+    if (_isSelectionMode) return;
     _cameraController?.stop();
     await Navigator.of(context).pushNamed(AppRouter.search);
     if (mounted) {
@@ -147,6 +192,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   Future<void> _navigateToInternalResource(InternalResource resource) async {
+    if (_isSelectionMode) return;
     _cameraController?.stop();
     switch (resource.type) {
       case InternalResourceType.place:
@@ -289,6 +335,26 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
+  Widget _buildFeedbackCard(
+    ColorScheme scheme,
+    RewitSemanticColors semantic,
+    List<Widget> children,
+  ) {
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
+        decoration: _feedbackCardDecoration(scheme, semantic),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
+      ),
+    );
+  }
+
   Widget _buildBottomFeedbackCard(
     BuildContext context,
     ScannerState state,
@@ -329,147 +395,270 @@ class _ScannerScreenState extends State<ScannerScreen>
 
     if (state is ScannerFound) {
       final product = state.product;
-      return Align(
-        alignment: Alignment.bottomCenter,
-        child: Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.all(20),
-          decoration: _feedbackCardDecoration(scheme, semantic),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.check_circle,
-                    color: semantic.success.accent,
-                    size: 24,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Produto encontrado',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: semantic.success.accent,
-                    ),
-                  ),
-                ],
+      return _buildFeedbackCard(scheme, semantic, [
+        Row(
+          children: [
+            Icon(
+              Icons.check_circle,
+              color: semantic.success.accent,
+              size: 24,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Produto encontrado',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: semantic.success.accent,
               ),
-              const SizedBox(height: 12),
-              Text(
-                product.displayName,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (product.brand.isNotEmpty &&
-                  !product.name
-                      .toLowerCase()
-                      .contains(product.brand.toLowerCase())) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Marca: ${product.brand}',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-              if (product.category.isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(
-                  'Categoria: ${product.category}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => _notifier.resumeScanning(),
-                      child: const Text('Escanear novamente'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _navigateToProductDetail(product.id),
-                      icon: const Icon(Icons.shopping_bag_outlined, size: 18),
-                      label: const Text('Ver produto'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          product.displayName,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
           ),
         ),
-      );
+        if (product.brand.isNotEmpty &&
+            !product.name
+                .toLowerCase()
+                .contains(product.brand.toLowerCase())) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Marca: ${product.brand}',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        if (product.category.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            'Categoria: ${product.category}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => _notifier.resumeScanning(),
+                child: const Text('Escanear novamente'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isSelectionMode
+                    ? () => _selectProduct(product)
+                    : () => _navigateToProductDetail(product.id),
+                icon: Icon(
+                  _isSelectionMode
+                      ? Icons.check
+                      : Icons.shopping_bag_outlined,
+                  size: 18,
+                ),
+                label: Text(
+                  _isSelectionMode ? 'Selecionar produto' : 'Ver produto',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ]);
+    }
+
+    if (state is ScannerPlaceFound) {
+      final place = state.place;
+      return _buildFeedbackCard(scheme, semantic, [
+        Row(
+          children: [
+            Icon(
+              Icons.place_outlined,
+              color: semantic.success.accent,
+              size: 24,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Local encontrado',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: semantic.success.accent,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          place.name,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        if (place.category.trim().isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Categoria: ${place.category}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        if (place.addressText.trim().isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            place.addressText,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => _notifier.resumeScanning(),
+                child: const Text('Escanear novamente'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _selectPlace(place),
+                icon: const Icon(Icons.check, size: 18),
+                label: const Text('Selecionar local'),
+              ),
+            ),
+          ],
+        ),
+      ]);
+    }
+
+    if (state is ScannerInvalidSelectionTarget) {
+      return _buildFeedbackCard(scheme, semantic, [
+        Row(
+          children: [
+            Icon(
+              Icons.block_outlined,
+              color: semantic.warning.accent,
+              size: 24,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Alvo não selecionável',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: semantic.warning.accent,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          state.message,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => _notifier.resumeScanning(),
+                child: const Text('Escanear novamente'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Voltar'),
+            ),
+          ],
+        ),
+      ]);
     }
 
     if (state is ScannerNotFound) {
-      return Align(
-        alignment: Alignment.bottomCenter,
-        child: Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.all(20),
-          decoration: _feedbackCardDecoration(scheme, semantic),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.search_off_outlined,
-                    color: semantic.warning.accent,
-                    size: 24,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Produto não encontrado',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: semantic.warning.accent,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'O código foi lido corretamente, mas este produto ainda não está no catálogo do Rewit.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
+      final notFoundTitle = state.isPlace
+          ? 'Local não encontrado'
+          : 'Produto não encontrado';
+      final notFoundDescription = state.isPlace
+          ? 'Não encontramos este local cadastrado no catálogo do Rewit.'
+          : _isSelectionMode
+              ? 'O código foi lido corretamente, mas este produto não foi encontrado no catálogo do Rewit.'
+              : 'O código foi lido corretamente, mas este produto ainda não está no catálogo do Rewit.';
+
+      return _buildFeedbackCard(scheme, semantic, [
+        Row(
+          children: [
+            Icon(
+              Icons.search_off_outlined,
+              color: semantic.warning.accent,
+              size: 24,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                notFoundTitle,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: semantic.warning.accent,
                 ),
               ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: _navigateToSearch,
-                icon: const Icon(Icons.search, size: 18),
-                label: const Text('Buscar pelo nome'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          notFoundDescription,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (_isSelectionMode) ...[
+          ElevatedButton.icon(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.arrow_back, size: 18),
+            label: const Text('Voltar para busca'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: () => _notifier.resumeScanning(),
+            child: const Text('Escanear novamente'),
+          ),
+        ] else ...[
+          ElevatedButton.icon(
+            onPressed: _navigateToSearch,
+            icon: const Icon(Icons.search, size: 18),
+            label: const Text('Buscar pelo nome'),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _notifier.resumeScanning(),
+                  child: const Text('Escanear novamente'),
+                ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => _notifier.resumeScanning(),
-                      child: const Text('Escanear novamente'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Voltar'),
-                  ),
-                ],
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Voltar'),
               ),
             ],
           ),
-        ),
-      );
+        ],
+      ]);
     }
 
     if (state is ScannerUnsupported) {
@@ -588,55 +777,84 @@ class _ScannerScreenState extends State<ScannerScreen>
           break;
       }
 
-      return Align(
-        alignment: Alignment.bottomCenter,
-        child: Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.all(20),
-          decoration: _feedbackCardDecoration(scheme, semantic),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+      if (_isSelectionMode) {
+        return _buildFeedbackCard(scheme, semantic, [
+          Row(
             children: [
-              Row(
-                children: [
-                  Icon(Icons.link, color: scheme.primary, size: 24),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Recurso Rewit Reconhecido',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+              Icon(Icons.block_outlined, color: semantic.warning.accent, size: 24),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Alvo não selecionável',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: semantic.warning.accent,
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '$typeLabel identificado: ${res.id}',
-                style: theme.textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => _notifier.resumeScanning(),
-                      child: const Text('Escanear novamente'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => _navigateToInternalResource(res),
-                      child: const Text('Abrir recurso'),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          Text(
+            'Este QR Code ($typeLabel) não pôde ser selecionado diretamente como alvo.',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _notifier.resumeScanning(),
+                  child: const Text('Escanear novamente'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Voltar'),
+              ),
+            ],
+          ),
+        ]);
+      }
+
+      return _buildFeedbackCard(scheme, semantic, [
+        Row(
+          children: [
+            Icon(Icons.link, color: scheme.primary, size: 24),
+            const SizedBox(width: 8),
+            Text(
+              'Recurso Rewit Reconhecido',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
         ),
-      );
+        const SizedBox(height: 8),
+        Text(
+          '$typeLabel identificado: ${res.id}',
+          style: theme.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => _notifier.resumeScanning(),
+                child: const Text('Escanear novamente'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: () => _navigateToInternalResource(res),
+                child: const Text('Abrir recurso'),
+              ),
+            ),
+          ],
+        ),
+      ]);
     }
 
     if (state is ScannerError) {

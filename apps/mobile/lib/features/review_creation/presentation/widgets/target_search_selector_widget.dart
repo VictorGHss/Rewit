@@ -44,6 +44,7 @@ class TargetSearchSelectorWidget extends StatefulWidget {
   final ValueChanged<String>? onManualTargetIdEntered;
   final ValueChanged<File>? onManualPlacePhotoSelected;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+  final Future<SearchResultItem?> Function()? onScanTarget;
   final String? currentUserId;
   final AuthNotifier? authNotifier;
 
@@ -64,6 +65,7 @@ class TargetSearchSelectorWidget extends StatefulWidget {
     this.onManualTargetIdEntered,
     this.onManualPlacePhotoSelected,
     this.onPickManualPlacePhoto,
+    this.onScanTarget,
     this.currentUserId,
     this.authNotifier,
     this.pendingRegistrationStore,
@@ -88,6 +90,7 @@ class _TargetSearchSelectorWidgetState
   bool _showManualInput = false;
   TargetKindFilter _kindFilter = TargetKindFilter.all;
   bool _isOpeningProductRegistration = false;
+  bool _isOpeningScanner = false;
 
   /// Resultados do tipo escolhido; a busca é a mesma, só a exibição muda.
   List<SearchResultItem>? get _visibleResults {
@@ -357,6 +360,40 @@ class _TargetSearchSelectorWidgetState
     }
   }
 
+  void _showDuplicateTargetSnackBar(String targetName) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'O alvo "$targetName" já foi adicionado a esta avaliação.',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _openTargetScanner() async {
+    if (!widget.enabled || widget.onScanTarget == null || _isOpeningScanner) {
+      return;
+    }
+    _isOpeningScanner = true;
+    try {
+      final currentUid = _getCurrentUserId();
+      final item = await widget.onScanTarget!();
+      if (!mounted || item == null) return;
+      // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado.
+      if (_getCurrentUserId() != currentUid) return;
+
+      if (widget.isTargetSelectedElsewhere?.call(item.id) ?? false) {
+        _showDuplicateTargetSnackBar(item.name);
+        return;
+      }
+
+      widget.onTargetSelected(item);
+    } finally {
+      _isOpeningScanner = false;
+    }
+  }
+
   /// Local adotado da fonte externa: entra no cache da consulta e vira o alvo, salvo se já estiver em outro alvo.
   void _onExternalPlaceAdopted(SearchResultItem adopted) {
     if (widget.isTargetSelectedElsewhere?.call(adopted.id) ?? false) {
@@ -596,34 +633,50 @@ class _TargetSearchSelectorWidgetState
           ),
         ],
 
-        // Campo de entrada da busca
-        TextFormField(
-          controller: _searchController,
-          enabled: widget.enabled,
-          decoration: InputDecoration(
-            labelText: 'O que você quer avaliar? *',
-            hintText: 'Digite o nome do estabelecimento ou produto...',
-            prefixIcon: const Icon(Icons.search_rounded, size: 22),
-            suffixIcon: _isLoading
-                ? const Padding(
-                    padding: EdgeInsets.all(12.0),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        tooltip: 'Limpar busca',
-                        onPressed: widget.enabled ? _clearSearch : null,
-                      )
-                    : null,
-            isDense: true,
-            border: const OutlineInputBorder(),
-          ),
-          onChanged: _onSearchQueryChanged,
+        // Campo de entrada da busca e ação opcional de scanner (QR, EAN, ISBN)
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _searchController,
+                enabled: widget.enabled,
+                decoration: InputDecoration(
+                  labelText: 'O que você quer avaliar? *',
+                  hintText: 'Digite o nome do estabelecimento ou produto...',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 22),
+                  suffixIcon: _isLoading
+                      ? const Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              tooltip: 'Limpar busca',
+                              onPressed: widget.enabled ? _clearSearch : null,
+                            )
+                          : null,
+                  isDense: true,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: _onSearchQueryChanged,
+              ),
+            ),
+            if (widget.onScanTarget != null) ...[
+              const SizedBox(width: 8),
+              IconButton.outlined(
+                key: Key('target_scanner_button_${widget.targetIndex}'),
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: 'Escanear QR, EAN ou ISBN',
+                onPressed: widget.enabled ? _openTargetScanner : null,
+              ),
+            ],
+          ],
         ),
         const SizedBox(height: 8),
 
@@ -1049,16 +1102,7 @@ class _TargetSearchSelectorWidgetState
               child: const Text('Selecionar', style: TextStyle(fontSize: 12)),
             ),
       onTap: isAlreadySelected
-          ? () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'O alvo "${item.name}" já foi adicionado a esta avaliação.',
-                  ),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            }
+          ? () => _showDuplicateTargetSnackBar(item.name)
           : () {
               widget.onTargetSelected(item);
             },

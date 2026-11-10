@@ -10,8 +10,10 @@ import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.d
 import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
@@ -20,6 +22,7 @@ import 'package:rewit_mobile/features/product/domain/repositories/product_reposi
 import 'package:rewit_mobile/features/scanner/domain/entities/scanner_state.dart';
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:rewit_mobile/features/scanner/presentation/state/scanner_notifier.dart';
+import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 
 class _FakeProductRepository implements ProductRepository {
   @override
@@ -27,6 +30,8 @@ class _FakeProductRepository implements ProductRepository {
 
   ProductDetail? productToReturn;
   Exception? exceptionToThrow;
+  ProductDetail? productByIdToReturn;
+  Exception? productByIdException;
 
   @override
   Future<ProductDetail> getProductByIdentifier({
@@ -48,7 +53,19 @@ class _FakeProductRepository implements ProductRepository {
   }
 
   @override
-  Future<ProductDetail> getProductById(String id) async => throw UnimplementedError();
+  Future<ProductDetail> getProductById(String id) async {
+    if (productByIdException != null) {
+      throw productByIdException!;
+    }
+    return productByIdToReturn ??
+        ProductDetail(
+          id: id,
+          name: 'Mouse Sem Fio Pro',
+          brand: 'LogiTest',
+          category: 'PERIFÉRICOS',
+          status: 'ACTIVE',
+        );
+  }
 
   @override
   Future<List<ProductIdentifier>> getProductIdentifiers(String id) async => throw UnimplementedError();
@@ -72,6 +89,76 @@ class _FakeProductRepository implements ProductRepository {
 
   @override
   Future<Uint8List> getProductImageBytes(String imageUrl) async => Uint8List.fromList([]);
+}
+
+class _FakePlaceRepository implements PlaceRepository {
+  PlaceDetail? placeToReturn;
+  Exception? exceptionToThrow;
+
+  @override
+  Future<PlaceDetail> getPlaceById(String id) async {
+    if (exceptionToThrow != null) {
+      throw exceptionToThrow!;
+    }
+    return placeToReturn ??
+        PlaceDetail(
+          id: id,
+          name: 'Padaria Boa Vista',
+          slug: 'padaria-boa-vista',
+          category: 'PADARIA',
+          addressText: 'Rua Augusta, 400',
+          validationRadiusMeters: 100,
+          origin: 'MANUAL',
+          isVerified: true,
+          status: 'ACTIVE',
+        );
+  }
+
+  @override
+  Future<PlaceDetail> createPlace(CreatePlaceInput input) async => throw UnimplementedError();
+
+  @override
+  Future<void> deletePlaceMedia({required String placeId, required String mediaId}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<PlaceMediaItem>> getPlaceMedia(String placeId) async => throw UnimplementedError();
+
+  @override
+  Future<TargetReviewsPage> getTargetReviews(
+    String targetId, {
+    int page = 0,
+    int size = 10,
+    String sort = 'newest',
+    bool verifiedOnly = false,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<TargetStats> getTargetStats(String id) async => throw UnimplementedError();
+
+  @override
+  Future<PlaceMediaItem> setPrimaryPlaceMedia({required String placeId, required String mediaId}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlaceMediaItem> uploadPlaceMedia({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? mimeType,
+    String? idempotencyKey,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? idempotencyKey,
+  }) async =>
+      throw UnimplementedError();
 }
 
 class _StubAuthRepo implements AuthRepository {
@@ -568,5 +655,322 @@ void main() {
     expect(pageRoute.settings.name, equals(AppRouter.scanner));
 
     authNotifier.dispose();
+  });
+
+  group('ScannerScreen - Modo Seleção (selectionMode)', () {
+    late _FakePlaceRepository fakePlaceRepository;
+
+    setUp(() {
+      fakePlaceRepository = _FakePlaceRepository();
+    });
+
+    Future<void> pumpSelectionFlow(
+      WidgetTester tester, {
+      required void Function(SearchResultItem? result, bool popped) onPopped,
+      void Function(void Function(BarcodeCapture) onDetect)? onCameraReady,
+      ScannerNotifier? customNotifier,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          routes: {
+            '/': (context) => Scaffold(
+                  body: Center(
+                    child: ElevatedButton(
+                      key: const Key('btn_open_scanner'),
+                      onPressed: () async {
+                        final res = await Navigator.of(context).push<SearchResultItem?>(
+                          MaterialPageRoute<SearchResultItem?>(
+                            builder: (_) => ScannerScreen(
+                              productRepository: fakeRepository,
+                              placeRepository: fakePlaceRepository,
+                              selectionMode: true,
+                              notifier: customNotifier,
+                              cameraBuilder: (ctx, onDetect) {
+                                onCameraReady?.call(onDetect);
+                                return const SizedBox.expand(
+                                  key: Key('selection_mock_camera'),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                        onPopped(res, true);
+                      },
+                      child: const Text('Abrir Scanner'),
+                    ),
+                  ),
+                ),
+            AppRouter.search: (context) => const Scaffold(
+                  body: Center(child: Text('Tela de Busca')),
+                ),
+            AppRouter.productDetail: (context) => const Scaffold(
+                  body: Center(child: Text('Detalhe Produto')),
+                ),
+            AppRouter.placeDetail: (context) => const Scaffold(
+                  body: Center(child: Text('Detalhe Local')),
+                ),
+          },
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('btn_open_scanner')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('barcode de produto exibe Selecionar produto e retorna SearchResultItem', (tester) async {
+      SearchResultItem? selectedItem;
+      var didPop = false;
+      late void Function(BarcodeCapture) capture;
+
+      await pumpSelectionFlow(
+        tester,
+        onCameraReady: (onDetect) => capture = onDetect,
+        onPopped: (res, popped) {
+          selectedItem = res;
+          didPop = popped;
+        },
+      );
+
+      capture(
+        const BarcodeCapture(
+          barcodes: [
+            Barcode(rawValue: '7891234567890', format: BarcodeFormat.ean13),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Produto encontrado'), findsOneWidget);
+      expect(find.text('Selecionar produto'), findsOneWidget);
+      expect(find.text('Ver produto'), findsNothing);
+
+      await tester.tap(find.text('Selecionar produto'));
+      await tester.pumpAndSettle();
+
+      expect(didPop, isTrue);
+      expect(selectedItem, isNotNull);
+      expect(selectedItem!.id, equals('prod-uuid-123'));
+      expect(selectedItem!.name, equals('Café Arábica Especial'));
+      expect(selectedItem!.category, equals('BEBIDAS'));
+      expect(selectedItem!.targetType, equals(TargetType.product));
+      expect(selectedItem!.rawTargetType, equals('PRODUCT'));
+      expect(selectedItem!.status, equals('ACTIVE'));
+      expect(find.text('Detalhe Produto'), findsNothing);
+    });
+
+    testWidgets('QR de lugar exibe Local encontrado e retorna SearchResultItem de Place', (tester) async {
+      SearchResultItem? selectedItem;
+      var didPop = false;
+      late void Function(BarcodeCapture) capture;
+
+      await pumpSelectionFlow(
+        tester,
+        onCameraReady: (onDetect) => capture = onDetect,
+        onPopped: (res, popped) {
+          selectedItem = res;
+          didPop = popped;
+        },
+      );
+
+      capture(
+        const BarcodeCapture(
+          barcodes: [
+            Barcode(rawValue: 'rewit://places/place-456', format: BarcodeFormat.qrCode),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Local encontrado'), findsOneWidget);
+      expect(find.text('Padaria Boa Vista'), findsOneWidget);
+      expect(find.text('Selecionar local'), findsOneWidget);
+
+      await tester.tap(find.text('Selecionar local'));
+      await tester.pumpAndSettle();
+
+      expect(didPop, isTrue);
+      expect(selectedItem, isNotNull);
+      expect(selectedItem!.id, equals('place-456'));
+      expect(selectedItem!.name, equals('Padaria Boa Vista'));
+      expect(selectedItem!.slug, equals('padaria-boa-vista'));
+      expect(selectedItem!.targetType, equals(TargetType.place));
+      expect(selectedItem!.rawTargetType, equals('PLACE'));
+    });
+
+    testWidgets('QR de avaliação em modo seleção exibe explicação e botão Escanear novamente', (tester) async {
+      late void Function(BarcodeCapture) capture;
+      final notifier = ScannerNotifier(
+        productRepository: fakeRepository,
+        placeRepository: fakePlaceRepository,
+        selectionMode: true,
+      );
+      addTearDown(notifier.dispose);
+
+      await pumpSelectionFlow(
+        tester,
+        customNotifier: notifier,
+        onCameraReady: (onDetect) => capture = onDetect,
+        onPopped: (_, __) {},
+      );
+
+      capture(
+        const BarcodeCapture(
+          barcodes: [
+            Barcode(rawValue: 'rewit://reviews/rev-999', format: BarcodeFormat.qrCode),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Alvo não selecionável'), findsOneWidget);
+      expect(find.textContaining('avaliações não podem ser selecionados como alvo'), findsOneWidget);
+      expect(find.text('Escanear novamente'), findsOneWidget);
+      expect(find.text('Selecionar produto'), findsNothing);
+      expect(find.text('Selecionar local'), findsNothing);
+
+      await tester.tap(find.text('Escanear novamente'));
+      await tester.pumpAndSettle();
+
+      expect(notifier.state, isA<ScannerScanning>());
+    });
+
+    testWidgets('código não encontrado em modo seleção oferece Voltar para busca e Escanear novamente sem empilhar SearchScreen', (tester) async {
+      fakeRepository.exceptionToThrow = const ApiException(
+        ProblemDetail(
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail: 'Not Found',
+          code: 'PRODUCT_NOT_FOUND',
+        ),
+      );
+
+      SearchResultItem? selectedItem;
+      var didPop = false;
+      late void Function(BarcodeCapture) capture;
+
+      await pumpSelectionFlow(
+        tester,
+        onCameraReady: (onDetect) => capture = onDetect,
+        onPopped: (res, popped) {
+          selectedItem = res;
+          didPop = popped;
+        },
+      );
+
+      capture(
+        const BarcodeCapture(
+          barcodes: [
+            Barcode(rawValue: '7890000000000', format: BarcodeFormat.ean13),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Produto não encontrado'), findsOneWidget);
+      expect(find.text('Voltar para busca'), findsOneWidget);
+      expect(find.text('Escanear novamente'), findsOneWidget);
+      expect(find.text('Buscar pelo nome'), findsNothing);
+
+      await tester.tap(find.text('Voltar para busca'));
+      await tester.pumpAndSettle();
+
+      expect(didPop, isTrue);
+      expect(selectedItem, isNull);
+      expect(find.text('Tela de Busca'), findsNothing);
+    });
+
+    testWidgets('QR de produto por ID exibe nome real (nunca ID) e permite selecionar produto', (tester) async {
+      fakeRepository.productByIdToReturn = const ProductDetail(
+        id: 'prod-qr-uuid-88',
+        name: 'Teclado Mecânico Compacto',
+        brand: 'KeyPro',
+        category: 'PERIFÉRICOS',
+        status: 'ACTIVE',
+      );
+
+      SearchResultItem? selectedItem;
+      var didPop = false;
+      late void Function(BarcodeCapture) capture;
+
+      await pumpSelectionFlow(
+        tester,
+        onCameraReady: (onDetect) => capture = onDetect,
+        onPopped: (res, popped) {
+          selectedItem = res;
+          didPop = popped;
+        },
+      );
+
+      capture(
+        const BarcodeCapture(
+          barcodes: [
+            Barcode(rawValue: 'rewit://products/prod-qr-uuid-88', format: BarcodeFormat.qrCode),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Produto encontrado'), findsOneWidget);
+      expect(find.text('KeyPro Teclado Mecânico Compacto'), findsOneWidget);
+      expect(find.text('prod-qr-uuid-88'), findsNothing);
+      expect(find.text('Selecionar produto'), findsOneWidget);
+
+      await tester.tap(find.text('Selecionar produto'));
+      await tester.pumpAndSettle();
+
+      expect(didPop, isTrue);
+      expect(selectedItem, isNotNull);
+      expect(selectedItem!.id, equals('prod-qr-uuid-88'));
+      expect(selectedItem!.name, equals('Teclado Mecânico Compacto'));
+      expect(selectedItem!.category, equals('PERIFÉRICOS'));
+      expect(selectedItem!.targetType, equals(TargetType.product));
+      expect(selectedItem!.rawTargetType, equals('PRODUCT'));
+    });
+
+    testWidgets('QR de lugar inexistente em modo seleção exibe Local não encontrado e Voltar para busca', (tester) async {
+      fakePlaceRepository.exceptionToThrow = const ApiException(
+        ProblemDetail(
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail: 'Local não encontrado',
+          code: 'PLACE_NOT_FOUND',
+        ),
+      );
+
+      SearchResultItem? selectedItem;
+      var didPop = false;
+      late void Function(BarcodeCapture) capture;
+
+      await pumpSelectionFlow(
+        tester,
+        onCameraReady: (onDetect) => capture = onDetect,
+        onPopped: (res, popped) {
+          selectedItem = res;
+          didPop = popped;
+        },
+      );
+
+      capture(
+        const BarcodeCapture(
+          barcodes: [
+            Barcode(rawValue: 'rewit://places/place-404', format: BarcodeFormat.qrCode),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Local não encontrado'), findsOneWidget);
+      expect(find.text('Voltar para busca'), findsOneWidget);
+      expect(find.text('Escanear novamente'), findsOneWidget);
+      expect(find.text('Buscar pelo nome'), findsNothing);
+
+      await tester.tap(find.text('Voltar para busca'));
+      await tester.pumpAndSettle();
+
+      expect(didPop, isTrue);
+      expect(selectedItem, isNull);
+    });
   });
 }

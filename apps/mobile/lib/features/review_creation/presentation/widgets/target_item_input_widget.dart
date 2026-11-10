@@ -40,6 +40,7 @@ class TargetItemInputWidget extends StatefulWidget {
   final bool Function(String targetId)? isTargetSelectedElsewhere;
   final ValueChanged<File>? onManualPlacePhotoSelected;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+  final Future<SearchResultItem?> Function()? onScanTarget;
 
   final String? currentUserId;
   final AuthNotifier? authNotifier;
@@ -65,6 +66,7 @@ class TargetItemInputWidget extends StatefulWidget {
     this.isTargetSelectedElsewhere,
     this.onManualPlacePhotoSelected,
     this.onPickManualPlacePhoto,
+    this.onScanTarget,
     this.currentUserId,
     this.authNotifier,
     this.pendingRegistrationStore,
@@ -185,6 +187,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                 onManualTargetIdEntered: widget.onTargetIdChanged,
                 onManualPlacePhotoSelected: widget.onManualPlacePhotoSelected,
                 onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
+                onScanTarget: widget.onScanTarget,
                 currentUserId: widget.currentUserId,
                 authNotifier: widget.authNotifier,
                 pendingRegistrationStore: widget.pendingRegistrationStore,

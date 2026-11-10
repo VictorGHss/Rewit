@@ -11,6 +11,7 @@ import 'package:rewit_mobile/features/product/domain/repositories/product_reposi
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
+import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/entities/review_privacy_rules.dart';
@@ -42,6 +43,7 @@ class ReviewCreateScreen extends StatefulWidget {
   final String? initialCategory;
   final File? initialPhoto;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+  final Future<SearchResultItem?> Function()? onScanTarget;
 
   final AuthNotifier? authNotifier;
   final String? currentUserId;
@@ -65,6 +67,7 @@ class ReviewCreateScreen extends StatefulWidget {
     this.initialCategory,
     this.initialPhoto,
     this.onPickManualPlacePhoto,
+    this.onScanTarget,
     this.authNotifier,
     this.currentUserId,
     this.pendingRegistrationStore,
@@ -403,6 +406,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                       _notifier.removeTarget(index);
                     },
                     onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
+                    onScanTarget: widget.onScanTarget,
                     authNotifier: widget.authNotifier,
                     currentUserId: widget.currentUserId,
                     pendingRegistrationStore: widget.pendingRegistrationStore,

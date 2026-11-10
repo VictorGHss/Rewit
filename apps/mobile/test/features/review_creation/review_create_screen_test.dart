@@ -246,6 +246,7 @@ void main() {
     String? initialCategory,
     File? initialPhoto,
     Future<File?> Function(ImageSource source)? onPickManualPlacePhoto,
+    Future<SearchResultItem?> Function()? onScanTarget,
   }) {
     return MaterialApp(
       theme: AppTheme.lightTheme,
@@ -263,6 +264,7 @@ void main() {
         initialCategory: initialCategory,
         initialPhoto: initialPhoto,
         onPickManualPlacePhoto: onPickManualPlacePhoto,
+        onScanTarget: onScanTarget,
       ),
     );
   }
@@ -1381,6 +1383,120 @@ void main() {
           expect(find.text('Estabelecimento vinculado: Pastel da Dona Ana'), findsOneWidget);
         },
       );
+    });
+
+    group('Scanner target selection forwarding (onScanTarget)', () {
+      testWidgets('oculta botão de scanner quando onScanTarget não é fornecido e encaminha seleção preservando local de contexto', (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final searchRepo = MockSearchRepository();
+
+        // 1. Sem onScanTarget: botão não deve existir
+        await tester.pumpWidget(
+          buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+          ),
+        );
+        expect(find.byKey(const Key('target_scanner_button_0')), findsNothing);
+
+        // 2. Com onScanTarget: primeiro seleciona um Local (atualiza local de contexto)
+        const scannedPlace = SearchResultItem(
+          id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          name: 'Livraria Central',
+          category: 'LIVRARIA',
+          targetType: TargetType.place,
+          rawTargetType: 'PLACE',
+          status: 'ACTIVE',
+        );
+        const scannedProduct = SearchResultItem(
+          id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          name: 'Dom Casmurro',
+          category: 'LIVROS',
+          targetType: TargetType.product,
+          rawTargetType: 'PRODUCT',
+          status: 'ACTIVE',
+        );
+
+        var scanCount = 0;
+        await tester.pumpWidget(
+          buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+            onScanTarget: () async {
+              scanCount++;
+              if (scanCount == 1) return scannedPlace;
+              return scannedProduct;
+            },
+          ),
+        );
+
+        final scannerBtn0 = find.byKey(const Key('target_scanner_button_0'));
+        expect(scannerBtn0, findsOneWidget);
+
+        await tester.tap(scannerBtn0);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Livraria Central'), findsOneWidget);
+        expect(find.text('Estabelecimento vinculado: Livraria Central'), findsOneWidget);
+
+        // Adiciona segundo alvo e seleciona um produto pelo scanner: local de contexto deve continuar Livraria Central
+        await tester.tap(find.text('Adicionar Outro Alvo / Item'));
+        await tester.pumpAndSettle();
+
+        final scannerBtn1 = find.byKey(const Key('target_scanner_button_1'));
+        expect(scannerBtn1, findsOneWidget);
+
+        await tester.tap(scannerBtn1);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Dom Casmurro'), findsOneWidget);
+        expect(find.text('Estabelecimento vinculado: Livraria Central'), findsOneWidget);
+      });
+
+      testWidgets('bloqueia seleção duplicada via scanner entre múltiplos alvos no ReviewCreateScreen', (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final searchRepo = MockSearchRepository();
+        const duplicateProduct = SearchResultItem(
+          id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+          name: 'Espresso Duplo',
+          category: 'BEBIDAS',
+          targetType: TargetType.product,
+          rawTargetType: 'PRODUCT',
+          status: 'ACTIVE',
+        );
+
+        await tester.pumpWidget(
+          buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+            onScanTarget: () async => duplicateProduct,
+          ),
+        );
+
+        await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+        await tester.pumpAndSettle();
+        expect(find.text('Espresso Duplo'), findsOneWidget);
+
+        await tester.tap(find.text('Adicionar Outro Alvo / Item'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('target_scanner_button_1')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('O alvo "Espresso Duplo" já foi adicionado a esta avaliação.'),
+          findsOneWidget,
+        );
+        expect(find.text('Espresso Duplo'), findsOneWidget);
+      });
     });
   });
 }

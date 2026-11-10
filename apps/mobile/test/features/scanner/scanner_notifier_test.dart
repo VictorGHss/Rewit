@@ -2,8 +2,10 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
+import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
@@ -19,9 +21,16 @@ class _FakeProductRepository implements ProductRepository {
 
   ProductDetail? productToReturn;
   Exception? exceptionToThrow;
+  Future<ProductDetail> Function(String type, String value)? onGetProductByIdentifier;
   int lookupCallCount = 0;
   String? lastLookupType;
   String? lastLookupValue;
+  final List<String> lookupCalls = [];
+
+  ProductDetail? productByIdToReturn;
+  Exception? productByIdException;
+  int getProductByIdCallCount = 0;
+  String? lastProductId;
 
   @override
   Future<ProductDetail> getProductByIdentifier({
@@ -31,6 +40,10 @@ class _FakeProductRepository implements ProductRepository {
     lookupCallCount++;
     lastLookupType = type;
     lastLookupValue = value;
+    lookupCalls.add('$type:$value');
+    if (onGetProductByIdentifier != null) {
+      return onGetProductByIdentifier!(type, value);
+    }
     if (exceptionToThrow != null) {
       throw exceptionToThrow!;
     }
@@ -46,7 +59,21 @@ class _FakeProductRepository implements ProductRepository {
   }
 
   @override
-  Future<ProductDetail> getProductById(String id) async => throw UnimplementedError();
+  Future<ProductDetail> getProductById(String id) async {
+    getProductByIdCallCount++;
+    lastProductId = id;
+    if (productByIdException != null) {
+      throw productByIdException!;
+    }
+    return productByIdToReturn ??
+        ProductDetail(
+          id: id,
+          name: 'Notebook Pro 14',
+          brand: 'TechCo',
+          category: 'ELETRÔNICOS',
+          status: 'ACTIVE',
+        );
+  }
 
   @override
   Future<List<ProductIdentifier>> getProductIdentifiers(String id) async => throw UnimplementedError();
@@ -70,6 +97,80 @@ class _FakeProductRepository implements ProductRepository {
 
   @override
   Future<Uint8List> getProductImageBytes(String imageUrl) async => Uint8List.fromList([]);
+}
+
+class _FakePlaceRepository implements PlaceRepository {
+  PlaceDetail? placeToReturn;
+  Exception? exceptionToThrow;
+  int getPlaceByIdCallCount = 0;
+  String? lastPlaceId;
+
+  @override
+  Future<PlaceDetail> getPlaceById(String id) async {
+    getPlaceByIdCallCount++;
+    lastPlaceId = id;
+    if (exceptionToThrow != null) {
+      throw exceptionToThrow!;
+    }
+    return placeToReturn ??
+        PlaceDetail(
+          id: id,
+          name: 'Café Central',
+          slug: 'cafe-central',
+          category: 'CAFETERIA',
+          addressText: 'Rua das Flores, 123',
+          validationRadiusMeters: 100,
+          origin: 'MANUAL',
+          isVerified: true,
+          status: 'ACTIVE',
+        );
+  }
+
+  @override
+  Future<PlaceDetail> createPlace(CreatePlaceInput input) async => throw UnimplementedError();
+
+  @override
+  Future<void> deletePlaceMedia({required String placeId, required String mediaId}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<PlaceMediaItem>> getPlaceMedia(String placeId) async => throw UnimplementedError();
+
+  @override
+  Future<TargetReviewsPage> getTargetReviews(
+    String targetId, {
+    int page = 0,
+    int size = 10,
+    String sort = 'newest',
+    bool verifiedOnly = false,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<TargetStats> getTargetStats(String id) async => throw UnimplementedError();
+
+  @override
+  Future<PlaceMediaItem> setPrimaryPlaceMedia({required String placeId, required String mediaId}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<PlaceMediaItem> uploadPlaceMedia({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? mimeType,
+    String? idempotencyKey,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> uploadPlacePhoto({
+    required String placeId,
+    required Uint8List fileBytes,
+    required String filename,
+    String? idempotencyKey,
+  }) async =>
+      throw UnimplementedError();
 }
 
 void main() {
@@ -352,6 +453,246 @@ void main() {
       expect(fakeRepository.lastLookupType, equals('EAN'));
       expect(fakeRepository.lastLookupValue, equals('7891234567890'));
       expect(notifier.state, isA<ScannerFound>());
+    });
+
+    test('modo normal preserva QR codes internos de produto e review em ScannerQrInternal sem consultar repos', () async {
+      await notifier.onCodeDetected('rewit://products/prod-normal-1', format: BarcodeFormat.qrCode);
+      expect(notifier.state, isA<ScannerQrInternal>());
+      expect(fakeRepository.getProductByIdCallCount, equals(0));
+
+      notifier.resumeScanning();
+      await notifier.onCodeDetected('rewit://reviews/rev-normal-1', format: BarcodeFormat.qrCode);
+      expect(notifier.state, isA<ScannerQrInternal>());
+    });
+  });
+
+  group('ScannerNotifier - Modo Seleção e Fallback ISBN-13', () {
+    late _FakePlaceRepository fakePlaceRepository;
+    late ScannerNotifier selectionNotifier;
+
+    setUp(() {
+      fakePlaceRepository = _FakePlaceRepository();
+      selectionNotifier = ScannerNotifier(
+        productRepository: fakeRepository,
+        placeRepository: fakePlaceRepository,
+        selectionMode: true,
+      );
+    });
+
+    tearDown(() {
+      selectionNotifier.dispose();
+    });
+
+    test('EAN, UPC e GTIN permanecem selecionáveis em selectionMode', () async {
+      await selectionNotifier.onCodeDetected('012345678905', format: BarcodeFormat.upcA);
+      expect(selectionNotifier.state, isA<ScannerFound>());
+      expect(fakeRepository.lastLookupType, equals('UPC'));
+
+      selectionNotifier.resumeScanning();
+      await selectionNotifier.onCodeDetected('07891234567890', format: BarcodeFormat.itf14);
+      expect(selectionNotifier.state, isA<ScannerFound>());
+      expect(fakeRepository.lastLookupType, equals('GTIN'));
+    });
+
+    test('executa fallback para ISBN após EAN 404 em código 978 de 13 dígitos', () async {
+      fakeRepository.onGetProductByIdentifier = (type, value) async {
+        if (type == 'EAN') {
+          throw const ApiException(
+            ProblemDetail(
+              type: 'about:blank',
+              title: 'Not Found',
+              status: 404,
+              detail: 'Not found',
+              code: 'PRODUCT_NOT_FOUND',
+            ),
+          );
+        }
+        return const ProductDetail(
+          id: 'book-978',
+          name: 'Código Limpo',
+          brand: 'Alta Books',
+          category: 'LIVROS',
+          status: 'ACTIVE',
+        );
+      };
+
+      await selectionNotifier.onCodeDetected('9788576082675', format: BarcodeFormat.ean13);
+
+      expect(fakeRepository.lookupCalls, equals(['EAN:9788576082675', 'ISBN:9788576082675']));
+      expect(selectionNotifier.state, isA<ScannerFound>());
+      expect((selectionNotifier.state as ScannerFound).product.name, equals('Código Limpo'));
+    });
+
+    test('executa fallback para ISBN após EAN 404 em código 979 de 13 dígitos', () async {
+      fakeRepository.onGetProductByIdentifier = (type, value) async {
+        if (type == 'EAN') {
+          throw const ApiException(
+            ProblemDetail(
+              type: 'about:blank',
+              title: 'Not Found',
+              status: 404,
+              detail: 'Not found',
+              code: 'PRODUCT_NOT_FOUND',
+            ),
+          );
+        }
+        return const ProductDetail(
+          id: 'book-979',
+          name: 'Arquitetura Limpa',
+          brand: 'Editora Exemplo',
+          category: 'LIVROS',
+          status: 'ACTIVE',
+        );
+      };
+
+      await selectionNotifier.onCodeDetected('9791090636071', format: BarcodeFormat.ean13);
+
+      expect(fakeRepository.lookupCalls, equals(['EAN:9791090636071', 'ISBN:9791090636071']));
+      expect(selectionNotifier.state, isA<ScannerFound>());
+    });
+
+    test('não executa fallback ISBN após erro de rede ou timeout', () async {
+      fakeRepository.onGetProductByIdentifier = (_, __) async {
+        throw const NetworkException('Tempo esgotado.');
+      };
+
+      await selectionNotifier.onCodeDetected('9788576082675', format: BarcodeFormat.ean13);
+
+      expect(fakeRepository.lookupCalls, equals(['EAN:9788576082675']));
+      expect(selectionNotifier.state, isA<ScannerError>());
+    });
+
+    test('não executa fallback ISBN após erro HTTP 500/503 do servidor', () async {
+      fakeRepository.onGetProductByIdentifier = (_, __) async {
+        throw const ApiException(
+          ProblemDetail(
+            type: 'about:blank',
+            title: 'Service Unavailable',
+            status: 503,
+            detail: 'Indisponível',
+            code: 'SERVICE_UNAVAILABLE',
+          ),
+        );
+      };
+
+      await selectionNotifier.onCodeDetected('9788576082675', format: BarcodeFormat.ean13);
+
+      expect(fakeRepository.lookupCalls, equals(['EAN:9788576082675']));
+      expect(selectionNotifier.state, isA<ScannerError>());
+    });
+
+    test('não executa fallback ISBN para EAN comum que não começa com 978 ou 979', () async {
+      fakeRepository.onGetProductByIdentifier = (_, __) async {
+        throw const ApiException(
+          ProblemDetail(
+            type: 'about:blank',
+            title: 'Not Found',
+            status: 404,
+            detail: 'Not found',
+            code: 'PRODUCT_NOT_FOUND',
+          ),
+        );
+      };
+
+      await selectionNotifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+
+      expect(fakeRepository.lookupCalls, equals(['EAN:7891234567890']));
+      expect(selectionNotifier.state, isA<ScannerNotFound>());
+    });
+
+    test('QR de produto por ID consulta getProductById e obtém metadados reais', () async {
+      fakeRepository.productByIdToReturn = const ProductDetail(
+        id: 'prod-abc-123',
+        name: 'Fone Bluetooth XYZ',
+        brand: 'AudioMax',
+        category: 'ÁUDIO',
+        status: 'ACTIVE',
+      );
+
+      await selectionNotifier.onCodeDetected('rewit://products/prod-abc-123', format: BarcodeFormat.qrCode);
+
+      expect(fakeRepository.getProductByIdCallCount, equals(1));
+      expect(fakeRepository.lastProductId, equals('prod-abc-123'));
+      expect(selectionNotifier.state, isA<ScannerFound>());
+      final state = selectionNotifier.state as ScannerFound;
+      expect(state.product.name, equals('Fone Bluetooth XYZ'));
+      expect(state.product.category, equals('ÁUDIO'));
+      expect(state.product.status, equals('ACTIVE'));
+    });
+
+    test('QR de produto por ID rejeita resposta sem nome real sem usar ID como substituto', () async {
+      fakeRepository.productByIdToReturn = const ProductDetail(
+        id: 'prod-sem-nome',
+        name: '   ',
+        brand: 'Marca',
+        category: 'OUTROS',
+        status: 'ACTIVE',
+      );
+
+      await selectionNotifier.onCodeDetected('rewit://products/prod-sem-nome', format: BarcodeFormat.qrCode);
+
+      expect(selectionNotifier.state, isA<ScannerError>());
+    });
+
+    test('QR de lugar por ID consulta getPlaceById e emite ScannerPlaceFound', () async {
+      fakePlaceRepository.placeToReturn = const PlaceDetail(
+        id: 'place-uuid-9',
+        name: 'Livraria Cultura',
+        slug: 'livraria-cultura',
+        category: 'LIVRARIA',
+        addressText: 'Av. Paulista, 2073',
+        validationRadiusMeters: 100,
+        origin: 'MANUAL',
+        isVerified: true,
+        status: 'ACTIVE',
+      );
+
+      await selectionNotifier.onCodeDetected('rewit://places/place-uuid-9', format: BarcodeFormat.qrCode);
+
+      expect(fakePlaceRepository.getPlaceByIdCallCount, equals(1));
+      expect(fakePlaceRepository.lastPlaceId, equals('place-uuid-9'));
+      expect(selectionNotifier.state, isA<ScannerPlaceFound>());
+      final state = selectionNotifier.state as ScannerPlaceFound;
+      expect(state.place.name, equals('Livraria Cultura'));
+      expect(state.place.category, equals('LIVRARIA'));
+    });
+
+    test('QR de avaliação em selectionMode é recusado com ScannerInvalidSelectionTarget', () async {
+      await selectionNotifier.onCodeDetected('rewit://reviews/rev-uuid-77', format: BarcodeFormat.qrCode);
+
+      expect(selectionNotifier.state, isA<ScannerInvalidSelectionTarget>());
+      final state = selectionNotifier.state as ScannerInvalidSelectionTarget;
+      expect(state.resource.type, equals(InternalResourceType.review));
+      expect(state.message, contains('avaliações'));
+    });
+
+    test('produto e lugar inexistentes por ID transicionam para ScannerNotFound', () async {
+      fakeRepository.productByIdException = const ApiException(
+        ProblemDetail(
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail: 'Produto não encontrado.',
+          code: 'PRODUCT_NOT_FOUND',
+        ),
+      );
+      await selectionNotifier.onCodeDetected('rewit://products/inexistente', format: BarcodeFormat.qrCode);
+      expect(selectionNotifier.state, isA<ScannerNotFound>());
+      expect((selectionNotifier.state as ScannerNotFound).isPlace, isFalse);
+
+      selectionNotifier.resumeScanning();
+      fakePlaceRepository.exceptionToThrow = const ApiException(
+        ProblemDetail(
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail: 'Local não encontrado.',
+          code: 'PLACE_NOT_FOUND',
+        ),
+      );
+      await selectionNotifier.onCodeDetected('rewit://places/inexistente', format: BarcodeFormat.qrCode);
+      expect(selectionNotifier.state, isA<ScannerNotFound>());
+      expect((selectionNotifier.state as ScannerNotFound).isPlace, isTrue);
     });
   });
 }

@@ -67,9 +67,13 @@ void main() {
 
   Widget buildSubject({
     required FakeSearchRepository repository,
+    int targetIndex = 0,
+    bool enabled = true,
     ValueChanged<SearchResultItem>? onTargetSelected,
     bool Function(String targetId)? isTargetSelectedElsewhere,
     ValueChanged<String>? onManualTargetIdEntered,
+    Future<SearchResultItem?> Function()? onScanTarget,
+    String? currentUserId,
   }) {
     return MaterialApp(
       theme: AppTheme.lightTheme,
@@ -78,10 +82,13 @@ void main() {
           padding: const EdgeInsets.all(16.0),
           child: TargetSearchSelectorWidget(
             searchRepository: repository,
-            targetIndex: 0,
+            targetIndex: targetIndex,
+            enabled: enabled,
             onTargetSelected: onTargetSelected ?? (_) {},
             isTargetSelectedElsewhere: isTargetSelectedElsewhere,
             onManualTargetIdEntered: onManualTargetIdEntered,
+            onScanTarget: onScanTarget,
+            currentUserId: currentUserId,
           ),
         ),
       ),
@@ -351,6 +358,164 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('O que você quer avaliar? *'), findsOneWidget);
+    });
+  });
+
+  group('TargetSearchSelectorWidget - Integração com Scanner (onScanTarget)', () {
+    late FakeSearchRepository repository;
+
+    setUp(() {
+      repository = FakeSearchRepository();
+    });
+
+    testWidgets('botão de scanner fica visível apenas quando onScanTarget é fornecido', (tester) async {
+      await tester.pumpWidget(buildSubject(repository: repository));
+      expect(find.byKey(const Key('target_scanner_button_0')), findsNothing);
+      expect(find.byIcon(Icons.qr_code_scanner), findsNothing);
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => null,
+        ),
+      );
+
+      final scannerBtn = find.byKey(const Key('target_scanner_button_0'));
+      expect(scannerBtn, findsOneWidget);
+      expect(find.byTooltip('Escanear QR, EAN ou ISBN'), findsOneWidget);
+    });
+
+    testWidgets('botão de scanner respeita enabled: false e não dispara callback', (tester) async {
+      var callbackCalls = 0;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          enabled: false,
+          onScanTarget: () async {
+            callbackCalls++;
+            return productItem;
+          },
+        ),
+      );
+
+      final buttonFinder = find.byKey(const Key('target_scanner_button_0'));
+      expect(buttonFinder, findsOneWidget);
+      final iconButton = tester.widget<IconButton>(buttonFinder);
+      expect(iconButton.onPressed, isNull);
+
+      await tester.tap(buttonFinder);
+      await tester.pump();
+
+      expect(callbackCalls, equals(0));
+    });
+
+    testWidgets('seleciona produto e lugar retornados pelo scanner', (tester) async {
+      SearchResultItem? selectedProduct;
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          targetIndex: 0,
+          onScanTarget: () async => productItem,
+          onTargetSelected: (item) => selectedProduct = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+      expect(selectedProduct?.id, equals(productItem.id));
+      expect(selectedProduct?.targetType, equals(TargetType.product));
+
+      SearchResultItem? selectedPlace;
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          targetIndex: 1,
+          onScanTarget: () async => placeItem,
+          onTargetSelected: (item) => selectedPlace = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_1')));
+      await tester.pumpAndSettle();
+      expect(selectedPlace?.id, equals(placeItem.id));
+      expect(selectedPlace?.targetType, equals(TargetType.place));
+    });
+
+    testWidgets('bloqueia alvo duplicado retornado pelo scanner e exibe feedback equivalente', (tester) async {
+      SearchResultItem? selectedItem;
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => productItem,
+          isTargetSelectedElsewhere: (id) => id == productItem.id,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+
+      expect(selectedItem, isNull);
+      expect(
+        find.text('O alvo "${productItem.name}" já foi adicionado a esta avaliação.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('descarta retorno do scanner quando widget é desmontado durante await', (tester) async {
+      final completer = Completer<SearchResultItem?>();
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () => completer.future,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+
+      // Desmonta o seletor antes do retorno do scanner
+      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox.shrink())));
+      completer.complete(productItem);
+      await tester.pumpAndSettle();
+
+      expect(selectedItem, isNull);
+    });
+
+    testWidgets('descarta retorno do scanner quando usuário atual muda durante await (MB-1a)', (tester) async {
+      final completer = Completer<SearchResultItem?>();
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          currentUserId: 'user-1',
+          onScanTarget: () => completer.future,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+
+      // Troca o usuário autenticado enquanto a tela de scanner está aberta
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          currentUserId: 'user-2',
+          onScanTarget: () => completer.future,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      completer.complete(placeItem);
+      await tester.pumpAndSettle();
+
+      expect(selectedItem, isNull);
     });
   });
 }
