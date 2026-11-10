@@ -1050,4 +1050,175 @@ void main() {
       expect(notifier.state, isA<ScannerError>());
     });
   });
+
+  group('ScannerNotifier - Polish L-C (Concorrência e Cancelamento ISBN 2º Await)', () {
+    late _FakePlaceRepository fakePlaceRepository;
+    late ScannerNotifier selectionNotifier;
+
+    setUp(() {
+      fakePlaceRepository = _FakePlaceRepository();
+      selectionNotifier = ScannerNotifier(
+        productRepository: fakeRepository,
+        placeRepository: fakePlaceRepository,
+        selectionMode: true,
+      );
+    });
+
+    tearDown(() {
+      selectionNotifier.dispose();
+    });
+
+    test('L-C: chamadas concorrentes sem resumeScanning ignoram segunda leitura enquanto _isProcessing == true', () async {
+      final completer1 = Completer<ProductDetail>();
+      fakeRepository.onGetProductByIdentifier = (type, value) {
+        if (type == 'EAN' && value == '7891234567890') {
+          return completer1.future;
+        }
+        throw StateError('Chamada concorrente indevida: $type:$value');
+      };
+
+      final firstFuture = selectionNotifier.onCodeDetected(
+        '7891234567890',
+        format: BarcodeFormat.ean13,
+      );
+      expect(selectionNotifier.isProcessing, isTrue);
+      expect(selectionNotifier.state, isA<ScannerProcessing>());
+
+      // Segunda leitura disparada imediatamente sem resumeScanning enquanto a 1ª aguarda resposta
+      await selectionNotifier.onCodeDetected(
+        '012345678905',
+        format: BarcodeFormat.upcA,
+      );
+
+      expect(fakeRepository.lookupCalls, equals(['EAN:7891234567890']));
+      expect(selectionNotifier.isProcessing, isTrue);
+      expect(selectionNotifier.state, isA<ScannerProcessing>());
+      expect(
+        (selectionNotifier.state as ScannerProcessing).scannedCode.normalizedValue,
+        equals('7891234567890'),
+      );
+
+      completer1.complete(
+        const ProductDetail(
+          id: 'prod-first',
+          name: 'Primeiro Produto',
+          brand: 'Marca A',
+          category: 'CAT',
+          status: 'ACTIVE',
+        ),
+      );
+      await firstFuture;
+
+      expect(selectionNotifier.isProcessing, isFalse);
+      expect(selectionNotifier.state, isA<ScannerFound>());
+      expect((selectionNotifier.state as ScannerFound).product.id, equals('prod-first'));
+    });
+
+    test('L-C: cancelamento via resumeScanning durante o 2º await (ISBN fallback) impede aplicar resultado cancelado', () async {
+      final isbnStarted = Completer<void>();
+      final isbnCompleter = Completer<ProductDetail>();
+
+      fakeRepository.onGetProductByIdentifier = (type, value) async {
+        if (type == 'EAN') {
+          throw const ApiException(
+            ProblemDetail(
+              type: 'about:blank',
+              title: 'Not Found',
+              status: 404,
+              detail: 'Not Found',
+              code: 'PRODUCT_NOT_FOUND',
+            ),
+          );
+        }
+        if (type == 'ISBN') {
+          isbnStarted.complete();
+          return isbnCompleter.future;
+        }
+        throw StateError('Chamada inesperada: $type:$value');
+      };
+
+      final detectionFuture = selectionNotifier.onCodeDetected(
+        '9788576082675',
+        format: BarcodeFormat.ean13,
+      );
+
+      // Aguarda deterministicamente o início da requisição secundária ISBN
+      await isbnStarted.future;
+      expect(
+        fakeRepository.lookupCalls,
+        equals(['EAN:9788576082675', 'ISBN:9788576082675']),
+      );
+      expect(selectionNotifier.isProcessing, isTrue);
+
+      // Usuário cancela/retoma escaneamento com o fallback ISBN suspenso em voo
+      selectionNotifier.resumeScanning();
+      expect(selectionNotifier.state, isA<ScannerScanning>());
+      expect(selectionNotifier.isProcessing, isFalse);
+
+      isbnCompleter.complete(
+        const ProductDetail(
+          id: 'book-late',
+          name: 'Livro Cancelado',
+          brand: 'Editora',
+          category: 'LIVROS',
+          status: 'ACTIVE',
+        ),
+      );
+      await detectionFuture;
+
+      expect(selectionNotifier.state, isA<ScannerScanning>());
+      expect(selectionNotifier.isProcessing, isFalse);
+    });
+
+    test('L-C: dispose durante o 2º await (ISBN fallback) impede notificação e mutação quando ISBN responde depois', () async {
+      final customRepo = _FakeProductRepository();
+      final customNotifier = ScannerNotifier(
+        productRepository: customRepo,
+        selectionMode: true,
+      );
+      final isbnStarted = Completer<void>();
+      final isbnCompleter = Completer<ProductDetail>();
+
+      customRepo.onGetProductByIdentifier = (type, value) async {
+        if (type == 'EAN') {
+          throw const ApiException(
+            ProblemDetail(
+              type: 'about:blank',
+              title: 'Not Found',
+              status: 404,
+              detail: 'Not Found',
+              code: 'PRODUCT_NOT_FOUND',
+            ),
+          );
+        }
+        isbnStarted.complete();
+        return isbnCompleter.future;
+      };
+
+      var listenerCalls = 0;
+      customNotifier.addListener(() => listenerCalls++);
+
+      final detectionFuture = customNotifier.onCodeDetected(
+        '9791090636071',
+        format: BarcodeFormat.ean13,
+      );
+      await isbnStarted.future;
+      final callsBeforeDispose = listenerCalls;
+
+      customNotifier.dispose();
+      isbnCompleter.complete(
+        const ProductDetail(
+          id: 'book-disposed',
+          name: 'Livro Após Dispose',
+          brand: 'Editora',
+          category: 'LIVROS',
+          status: 'ACTIVE',
+        ),
+      );
+      await expectLater(detectionFuture, completes);
+
+      expect(customNotifier.isDisposed, isTrue);
+      expect(listenerCalls, equals(callsBeforeDispose));
+    });
+  });
 }

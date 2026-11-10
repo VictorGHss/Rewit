@@ -82,8 +82,9 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isClosing) return;
       if (_notifier.state is ScannerInitial) {
-        _notifier.startScanning();
+        _startScanning();
       }
     });
   }
@@ -105,15 +106,18 @@ class _ScannerScreenState extends State<ScannerScreen>
         state == AppLifecycleState.paused) {
       _cameraController?.stop();
     } else if (state == AppLifecycleState.resumed &&
+        mounted &&
+        !_isClosing &&
         _notifier.state is ScannerScanning) {
       _cameraController?.start();
     }
   }
 
   Future<void> _toggleTorch() async {
-    if (_cameraController == null) return;
+    if (_cameraController == null || !mounted || _isClosing) return;
     try {
       await _cameraController!.toggleTorch();
+      if (!mounted || _isClosing) return;
       setState(() {
         _isTorchOn = !_isTorchOn;
       });
@@ -123,7 +127,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   Future<void> _switchCamera() async {
-    if (_cameraController == null) return;
+    if (_cameraController == null || !mounted || _isClosing) return;
     try {
       await _cameraController!.switchCamera();
     } catch (_) {
@@ -131,7 +135,18 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
+  void _startScanning() {
+    if (!mounted || _isClosing) return;
+    _notifier.startScanning();
+  }
+
+  void _resumeScanning() {
+    if (!mounted || _isClosing) return;
+    _notifier.resumeScanning();
+  }
+
   void _onBarcodeDetected(BarcodeCapture capture) {
+    if (!mounted || _isClosing) return;
     if (capture.barcodes.isEmpty) return;
     final barcode = capture.barcodes.first;
     final rawValue = barcode.rawValue;
@@ -216,8 +231,8 @@ class _ScannerScreenState extends State<ScannerScreen>
       AppRouter.productDetail,
       arguments: productId,
     );
-    if (mounted) {
-      _notifier.resumeScanning();
+    if (mounted && !_isClosing) {
+      _resumeScanning();
       _cameraController?.start();
     }
   }
@@ -226,8 +241,8 @@ class _ScannerScreenState extends State<ScannerScreen>
     if (_isSelectionMode || _isClosing) return;
     _cameraController?.stop();
     await Navigator.of(context).pushNamed(AppRouter.search);
-    if (mounted) {
-      _notifier.resumeScanning();
+    if (mounted && !_isClosing) {
+      _resumeScanning();
       _cameraController?.start();
     }
   }
@@ -256,8 +271,8 @@ class _ScannerScreenState extends State<ScannerScreen>
         );
         break;
     }
-    if (mounted) {
-      _notifier.resumeScanning();
+    if (mounted && !_isClosing) {
+      _resumeScanning();
       _cameraController?.start();
     }
   }
@@ -505,7 +520,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           children: [
             Expanded(
               child: OutlinedButton(
-                onPressed: () => _notifier.resumeScanning(),
+                onPressed: _resumeScanning,
                 child: const Text('Escanear novamente'),
               ),
             ),
@@ -581,7 +596,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           children: [
             Expanded(
               child: OutlinedButton(
-                onPressed: () => _notifier.resumeScanning(),
+                onPressed: _resumeScanning,
                 child: const Text('Escanear novamente'),
               ),
             ),
@@ -631,7 +646,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           children: [
             Expanded(
               child: OutlinedButton(
-                onPressed: () => _notifier.resumeScanning(),
+                onPressed: _resumeScanning,
                 child: const Text('Escanear novamente'),
               ),
             ),
@@ -691,7 +706,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           ),
           const SizedBox(height: 8),
           OutlinedButton(
-            onPressed: () => _notifier.resumeScanning(),
+            onPressed: _resumeScanning,
             child: const Text('Escanear novamente'),
           ),
         ] else ...[
@@ -705,7 +720,7 @@ class _ScannerScreenState extends State<ScannerScreen>
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => _notifier.resumeScanning(),
+                  onPressed: _resumeScanning,
                   child: const Text('Escanear novamente'),
                 ),
               ),
@@ -755,7 +770,7 @@ class _ScannerScreenState extends State<ScannerScreen>
               ),
               const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: () => _notifier.resumeScanning(),
+                onPressed: _resumeScanning,
                 child: const Text('Escanear novamente'),
               ),
             ],
@@ -803,7 +818,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => _notifier.resumeScanning(),
+                      onPressed: _resumeScanning,
                       child: const Text('Escanear novamente'),
                     ),
                   ),
@@ -863,7 +878,7 @@ class _ScannerScreenState extends State<ScannerScreen>
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => _notifier.resumeScanning(),
+                  onPressed: _resumeScanning,
                   child: const Text('Escanear novamente'),
                 ),
               ),
@@ -900,7 +915,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           children: [
             Expanded(
               child: OutlinedButton(
-                onPressed: () => _notifier.resumeScanning(),
+                onPressed: _resumeScanning,
                 child: const Text('Escanear novamente'),
               ),
             ),
@@ -963,7 +978,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => _notifier.resumeScanning(),
+                      onPressed: _resumeScanning,
                       child: const Text('Escanear novamente'),
                     ),
                   ),
@@ -1023,7 +1038,8 @@ class _ScannerScreenState extends State<ScannerScreen>
             if (!state.permanentlyDenied) ...[
               ElevatedButton(
                 onPressed: () {
-                  _notifier.startScanning();
+                  if (!mounted || _isClosing) return;
+                  _startScanning();
                   _cameraController?.start();
                 },
                 child: const Text('Tentar novamente'),

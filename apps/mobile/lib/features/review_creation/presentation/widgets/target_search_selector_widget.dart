@@ -382,15 +382,31 @@ class _TargetSearchSelectorWidgetState
       if (!mounted || !widget.enabled || item == null) return;
       // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado.
       if (_getCurrentUserId() != currentUid) return;
-      // Garante que apenas alvos íntegros sejam propagados para o formulário.
-      if (item.id.trim().isEmpty || item.name.trim().isEmpty) return;
 
-      if (widget.isTargetSelectedElsewhere?.call(item.id) ?? false) {
-        _showDuplicateTargetSnackBar(item.name);
+      final normalizedId = item.id.trim();
+      final normalizedName = item.name.trim();
+      // Garante que apenas alvos íntegros sejam propagados para o formulário.
+      if (normalizedId.isEmpty || normalizedName.isEmpty) return;
+
+      final normalizedItem =
+          (normalizedId == item.id && normalizedName == item.name)
+              ? item
+              : SearchResultItem(
+                  id: normalizedId,
+                  name: normalizedName,
+                  slug: item.slug,
+                  category: item.category,
+                  targetType: item.targetType,
+                  rawTargetType: item.rawTargetType,
+                  status: item.status,
+                );
+
+      if (widget.isTargetSelectedElsewhere?.call(normalizedItem.id) ?? false) {
+        _showDuplicateTargetSnackBar(normalizedItem.name);
         return;
       }
 
-      widget.onTargetSelected(item);
+      widget.onTargetSelected(normalizedItem);
     } finally {
       _isOpeningScanner = false;
     }

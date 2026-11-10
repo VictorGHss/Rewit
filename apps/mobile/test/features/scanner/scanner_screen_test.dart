@@ -198,6 +198,36 @@ class _ForcedStateScannerNotifier extends ScannerNotifier {
   void startScanning() {}
 }
 
+class _RecordingScannerNotifier extends ScannerNotifier {
+  int onCodeDetectedCalls = 0;
+  int resumeScanningCalls = 0;
+  int startScanningCalls = 0;
+
+  _RecordingScannerNotifier({
+    super.productRepository,
+    super.placeRepository,
+    super.selectionMode = false,
+  });
+
+  @override
+  Future<void> onCodeDetected(String rawValue, {BarcodeFormat? format}) {
+    onCodeDetectedCalls++;
+    return super.onCodeDetected(rawValue, format: format);
+  }
+
+  @override
+  void resumeScanning() {
+    resumeScanningCalls++;
+    super.resumeScanning();
+  }
+
+  @override
+  void startScanning() {
+    startScanningCalls++;
+    super.startScanning();
+  }
+}
+
 class _StubAuthRepo implements AuthRepository {
   @override
   Future<Authenticated> register({
@@ -1655,6 +1685,276 @@ void main() {
         expect(typedResult, isNotNull);
         expect(typedResult!.id, equals('prod-uuid-123'));
         expect(typedResult!.targetType, equals(TargetType.product));
+      },
+    );
+  });
+
+  group('ScannerScreen - Polish L-A e L-C (Fechamento com Animação e Eventos Tardios)', () {
+    late _FakePlaceRepository fakePlaceRepository;
+
+    setUp(() {
+      fakePlaceRepository = _FakePlaceRepository();
+    });
+
+    testWidgets(
+      'L-A: leitura tardia da câmera e Escanear novamente durante animação de fechamento são ignorados',
+      (tester) async {
+        final spyNotifier = _RecordingScannerNotifier(
+          productRepository: fakeRepository,
+          placeRepository: fakePlaceRepository,
+          selectionMode: true,
+        );
+        addTearDown(spyNotifier.dispose);
+
+        void Function(BarcodeCapture)? activeCapture;
+        final returnedItems = <SearchResultItem?>[];
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (baseContext) => Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Tela Base Raiz'),
+                      ElevatedButton(
+                        key: const Key('btn_open_inter_la'),
+                        onPressed: () {
+                          Navigator.of(baseContext).push<void>(
+                            MaterialPageRoute<void>(
+                              builder: (interContext) => Scaffold(
+                                body: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text('Tela Intermediária L-A'),
+                                      ElevatedButton(
+                                        key: const Key('btn_open_scanner_la'),
+                                        onPressed: () async {
+                                          final res = await Navigator.of(interContext)
+                                              .push<SearchResultItem?>(
+                                            MaterialPageRoute<SearchResultItem?>(
+                                              builder: (_) => ScannerScreen(
+                                                notifier: spyNotifier,
+                                                selectionMode: true,
+                                                cameraBuilder: (_, onDetect) {
+                                                  activeCapture = onDetect;
+                                                  return const SizedBox.expand(
+                                                    key: Key('la_mock_camera'),
+                                                  );
+                                                },
+                                              ),
+                                            ),
+                                          );
+                                          returnedItems.add(res);
+                                        },
+                                        child: const Text('Abrir Scanner L-A'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        child: const Text('Ir Inter L-A'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byKey(const Key('btn_open_inter_la')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('btn_open_scanner_la')));
+        await tester.pumpAndSettle();
+
+        activeCapture!(
+          const BarcodeCapture(
+            barcodes: [
+              Barcode(rawValue: '7891234567890', format: BarcodeFormat.ean13),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(spyNotifier.onCodeDetectedCalls, equals(1));
+        expect(spyNotifier.resumeScanningCalls, equals(0));
+
+        final resumeFinder = find.widgetWithText(OutlinedButton, 'Escanear novamente');
+        final resumeOnPressed = tester.widget<OutlinedButton>(resumeFinder).onPressed!;
+
+        // Inicia o fechamento selecionando o produto e avança apenas parte da animação
+        await tester.tap(find.text('Selecionar produto'));
+        await tester.pump(const Duration(milliseconds: 50));
+
+        // Dispara leitura tardia da câmera e tentativa de retomada com _isClosing == true
+        activeCapture!(
+          const BarcodeCapture(
+            barcodes: [
+              Barcode(rawValue: '012345678905', format: BarcodeFormat.upcA),
+            ],
+          ),
+        );
+        resumeOnPressed();
+        await tester.pumpAndSettle();
+
+        expect(spyNotifier.onCodeDetectedCalls, equals(1));
+        expect(spyNotifier.resumeScanningCalls, equals(0));
+        expect(find.text('Tela Intermediária L-A'), findsOneWidget);
+        expect(find.text('Tela Base Raiz'), findsNothing);
+        expect(returnedItems.length, equals(1));
+        expect(returnedItems.single?.id, equals('prod-uuid-123'));
+      },
+    );
+
+    testWidgets(
+      'L-C: duplo acionamento com intervalo na animação em CloseButton (fullscreenDialog), Selecionar produto e PopScope back preserva tela subjacente',
+      (tester) async {
+        void Function(BarcodeCapture)? activeCapture;
+        final returnedItems = <SearchResultItem?>[];
+        BuildContext? scannerContext;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (baseContext) => Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Tela Base Raiz L-C'),
+                      ElevatedButton(
+                        key: const Key('btn_open_inter_lc'),
+                        onPressed: () {
+                          Navigator.of(baseContext).push<void>(
+                            MaterialPageRoute<void>(
+                              builder: (interContext) => Scaffold(
+                                body: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text('Tela Intermediária L-C'),
+                                      ElevatedButton(
+                                        key: const Key('btn_open_fullscreen_scanner'),
+                                        onPressed: () async {
+                                          final res = await Navigator.of(interContext)
+                                              .push<SearchResultItem?>(
+                                            MaterialPageRoute<SearchResultItem?>(
+                                              fullscreenDialog: true,
+                                              builder: (_) => ScannerScreen(
+                                                productRepository: fakeRepository,
+                                                placeRepository: fakePlaceRepository,
+                                                selectionMode: true,
+                                                cameraBuilder: (ctx, onDetect) {
+                                                  scannerContext = ctx;
+                                                  activeCapture = onDetect;
+                                                  return const SizedBox.expand(
+                                                    key: Key('lc_camera'),
+                                                  );
+                                                },
+                                              ),
+                                            ),
+                                          );
+                                          returnedItems.add(res);
+                                        },
+                                        child: const Text('Abrir Scanner Fullscreen'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        child: const Text('Ir Inter L-C'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byKey(const Key('btn_open_inter_lc')));
+        await tester.pumpAndSettle();
+
+        // 1) CloseButton em fullscreenDialog com segundo disparo durante animação (pump 50ms)
+        await tester.tap(find.byKey(const Key('btn_open_fullscreen_scanner')));
+        await tester.pumpAndSettle();
+
+        final closeFinder = find.byType(CloseButton);
+        expect(closeFinder, findsOneWidget);
+        expect(find.byType(BackButton), findsNothing);
+        final closeOnPressed = tester.widget<CloseButton>(closeFinder).onPressed!;
+
+        await tester.tap(closeFinder);
+        await tester.pump(const Duration(milliseconds: 50));
+        closeOnPressed();
+        await tester.pumpAndSettle();
+
+        expect(find.text('Tela Intermediária L-C'), findsOneWidget);
+        expect(find.text('Tela Base Raiz L-C'), findsNothing);
+        expect(returnedItems.length, equals(1));
+        expect(returnedItems.last, isNull);
+
+        // 2) Selecionar produto com segundo disparo durante animação (pump 50ms)
+        await tester.tap(find.byKey(const Key('btn_open_fullscreen_scanner')));
+        await tester.pumpAndSettle();
+
+        activeCapture!(
+          const BarcodeCapture(
+            barcodes: [
+              Barcode(rawValue: '7891234567890', format: BarcodeFormat.ean13),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final selectProdFinder = find.widgetWithText(ElevatedButton, 'Selecionar produto');
+        final selectOnPressed = tester.widget<ElevatedButton>(selectProdFinder).onPressed!;
+        await tester.tap(selectProdFinder);
+        await tester.pump(const Duration(milliseconds: 50));
+        selectOnPressed();
+        await tester.pumpAndSettle();
+
+        expect(find.text('Tela Intermediária L-C'), findsOneWidget);
+        expect(find.text('Tela Base Raiz L-C'), findsNothing);
+        expect(returnedItems.length, equals(2));
+        expect(returnedItems.last?.id, equals('prod-uuid-123'));
+
+        // 3) Back via PopScope (maybePop) seguido de acionamentos durante animação de saída
+        await tester.tap(find.byKey(const Key('btn_open_fullscreen_scanner')));
+        await tester.pumpAndSettle();
+
+        activeCapture!(
+          const BarcodeCapture(
+            barcodes: [
+              Barcode(rawValue: 'rewit://places/place-789', format: BarcodeFormat.qrCode),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final selectPlaceFinder = find.widgetWithText(ElevatedButton, 'Selecionar local');
+        final selectPlaceOnPressed = tester.widget<ElevatedButton>(selectPlaceFinder).onPressed!;
+        final closeAfterPopOnPressed = tester.widget<CloseButton>(find.byType(CloseButton)).onPressed!;
+
+        await Navigator.of(scannerContext!).maybePop();
+        await tester.pump(const Duration(milliseconds: 50));
+        selectPlaceOnPressed();
+        closeAfterPopOnPressed();
+        await tester.pumpAndSettle();
+
+        expect(find.text('Tela Intermediária L-C'), findsOneWidget);
+        expect(find.text('Tela Base Raiz L-C'), findsNothing);
+        expect(returnedItems.length, equals(3));
+        expect(returnedItems.last, isNull);
       },
     );
   });

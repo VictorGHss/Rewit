@@ -787,5 +787,79 @@ void main() {
 
       expect(selectedItem, isNull);
     });
+
+    testWidgets('L-B: normaliza id e nome com espaços nas bordas preservando case e demais campos', (tester) async {
+      String? checkedDuplicateId;
+      SearchResultItem? selectedItem;
+
+      const untrimmedItem = SearchResultItem(
+        id: '  Prod-MixedCase-UUID-42  ',
+        name: '  Café Torrado Especial  ',
+        slug: 'cafe-torrado-especial',
+        category: 'BEBIDAS',
+        targetType: TargetType.product,
+        rawTargetType: 'PRODUCT',
+        status: 'ACTIVE',
+      );
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => untrimmedItem,
+          isTargetSelectedElsewhere: (id) {
+            checkedDuplicateId = id;
+            return false;
+          },
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+
+      expect(checkedDuplicateId, equals('Prod-MixedCase-UUID-42'));
+      expect(selectedItem, isNotNull);
+      expect(selectedItem!.id, equals('Prod-MixedCase-UUID-42'));
+      expect(selectedItem!.name, equals('Café Torrado Especial'));
+      expect(selectedItem!.slug, equals('cafe-torrado-especial'));
+      expect(selectedItem!.category, equals('BEBIDAS'));
+      expect(selectedItem!.targetType, equals(TargetType.product));
+      expect(selectedItem!.rawTargetType, equals('PRODUCT'));
+      expect(selectedItem!.status, equals('ACTIVE'));
+    });
+
+    testWidgets('L-B: checagem de duplicidade usa ID já normalizado quando callback retorna espaços nas bordas', (tester) async {
+      final duplicateCheckArgs = <String>[];
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => SearchResultItem(
+            id: '  ${productItem.id}  ',
+            name: '  ${productItem.name}  ',
+            category: productItem.category,
+            targetType: TargetType.product,
+            rawTargetType: 'PRODUCT',
+            status: 'ACTIVE',
+          ),
+          isTargetSelectedElsewhere: (id) {
+            duplicateCheckArgs.add(id);
+            return id == productItem.id;
+          },
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+
+      expect(duplicateCheckArgs, equals([productItem.id]));
+      expect(selectedItem, isNull);
+      expect(
+        find.text('O alvo "${productItem.name}" já foi adicionado a esta avaliação.'),
+        findsOneWidget,
+      );
+    });
   });
 }
