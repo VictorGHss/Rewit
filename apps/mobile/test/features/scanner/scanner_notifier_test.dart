@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -693,6 +694,360 @@ void main() {
       await selectionNotifier.onCodeDetected('rewit://places/inexistente', format: BarcodeFormat.qrCode);
       expect(selectionNotifier.state, isA<ScannerNotFound>());
       expect((selectionNotifier.state as ScannerNotFound).isPlace, isTrue);
+    });
+  });
+
+  group('ScannerNotifier - Hardening: Concorrência, Cancelamento ISBN e Dados Inválidos', () {
+    late _FakePlaceRepository fakePlaceRepository;
+    late ScannerNotifier selectionNotifier;
+
+    setUp(() {
+      fakePlaceRepository = _FakePlaceRepository();
+      selectionNotifier = ScannerNotifier(
+        productRepository: fakeRepository,
+        placeRepository: fakePlaceRepository,
+        selectionMode: true,
+      );
+    });
+
+    tearDown(() {
+      selectionNotifier.dispose();
+    });
+
+    test('L-1: resumeScanning durante EAN 978 suspenso cancela fallback ISBN quando 404 retorna depois', () async {
+      final eanCompleter = Completer<ProductDetail>();
+      fakeRepository.onGetProductByIdentifier = (type, value) {
+        if (type == 'EAN') return eanCompleter.future;
+        return Future.value(
+          const ProductDetail(
+            id: 'book-978',
+            name: 'Não deveria buscar',
+            brand: 'Editora',
+            category: 'LIVROS',
+            status: 'ACTIVE',
+          ),
+        );
+      };
+
+      final detectionFuture = selectionNotifier.onCodeDetected(
+        '9788576082675',
+        format: BarcodeFormat.ean13,
+      );
+      expect(selectionNotifier.isProcessing, isTrue);
+      expect(selectionNotifier.state, isA<ScannerProcessing>());
+
+      // Usuário cancela/retoma escaneamento antes da resposta 404 do lookup EAN.
+      selectionNotifier.resumeScanning();
+      expect(selectionNotifier.state, isA<ScannerScanning>());
+      expect(selectionNotifier.isProcessing, isFalse);
+
+      // Resposta tardia 404 do lookup EAN não pode iniciar o fallback ISBN.
+      eanCompleter.completeError(
+        const ApiException(
+          ProblemDetail(
+            type: 'about:blank',
+            title: 'Not Found',
+            status: 404,
+            detail: 'Not Found',
+            code: 'PRODUCT_NOT_FOUND',
+          ),
+        ),
+      );
+      await detectionFuture;
+
+      expect(fakeRepository.lookupCalls, equals(['EAN:9788576082675']));
+      expect(selectionNotifier.state, isA<ScannerScanning>());
+      expect(selectionNotifier.isProcessing, isFalse);
+    });
+
+    test('L-1: dispose durante EAN 979 suspenso impede fallback ISBN após 404 tardio e nao notifica listeners', () async {
+      final customRepo = _FakeProductRepository();
+      final customNotifier = ScannerNotifier(
+        productRepository: customRepo,
+        selectionMode: true,
+      );
+      final eanCompleter = Completer<ProductDetail>();
+      customRepo.onGetProductByIdentifier = (type, value) => eanCompleter.future;
+
+      var listenerNotifications = 0;
+      customNotifier.addListener(() => listenerNotifications++);
+
+      final detectionFuture = customNotifier.onCodeDetected(
+        '9791090636071',
+        format: BarcodeFormat.ean13,
+      );
+      final notificationsBeforeDispose = listenerNotifications;
+
+      customNotifier.dispose();
+      eanCompleter.completeError(
+        const ApiException(
+          ProblemDetail(
+            type: 'about:blank',
+            title: 'Not Found',
+            status: 404,
+            detail: 'Not Found',
+            code: 'PRODUCT_NOT_FOUND',
+          ),
+        ),
+      );
+      await expectLater(detectionFuture, completes);
+
+      expect(customRepo.lookupCalls, equals(['EAN:9791090636071']));
+      expect(listenerNotifications, equals(notificationsBeforeDispose));
+    });
+
+    test('L-1 + M-1: nova leitura apos resumeScanning invalida fallback ISBN e isProcessing da consulta antiga', () async {
+      final completer1 = Completer<ProductDetail>();
+      final completer2 = Completer<ProductDetail>();
+
+      fakeRepository.onGetProductByIdentifier = (type, value) {
+        if (value == '9788576082675' && type == 'EAN') return completer1.future;
+        if (value == '7891234567890' && type == 'EAN') return completer2.future;
+        throw StateError('Chamada inesperada: $type:$value');
+      };
+
+      final f1 = selectionNotifier.onCodeDetected('9788576082675', format: BarcodeFormat.ean13);
+      selectionNotifier.resumeScanning();
+
+      final f2 = selectionNotifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+      expect(selectionNotifier.isProcessing, isTrue);
+      expect(selectionNotifier.state, isA<ScannerProcessing>());
+
+      // Primeira consulta (antiga) retorna 404 enquanto a segunda ainda está em trânsito:
+      // não dispara ISBN e NÃO pode limpar _isProcessing da segunda leitura.
+      completer1.completeError(
+        const ApiException(
+          ProblemDetail(
+            type: 'about:blank',
+            title: 'Not Found',
+            status: 404,
+            detail: 'Not Found',
+            code: 'PRODUCT_NOT_FOUND',
+          ),
+        ),
+      );
+      await f1;
+
+      expect(fakeRepository.lookupCalls, equals(['EAN:9788576082675', 'EAN:7891234567890']));
+      expect(selectionNotifier.isProcessing, isTrue);
+      expect(selectionNotifier.state, isA<ScannerProcessing>());
+
+      completer2.complete(
+        const ProductDetail(
+          id: 'prod-2',
+          name: 'Produto Novo Válido',
+          brand: 'Marca B',
+          category: 'OUTROS',
+          status: 'ACTIVE',
+        ),
+      );
+      await f2;
+
+      expect(selectionNotifier.isProcessing, isFalse);
+      expect(selectionNotifier.state, isA<ScannerFound>());
+      expect((selectionNotifier.state as ScannerFound).product.id, equals('prod-2'));
+    });
+
+    test('M-1: resposta antiga concluída após conclusão da segunda leitura não sobrescreve estado atual', () async {
+      final completerOld = Completer<ProductDetail>();
+      final completerNew = Completer<ProductDetail>();
+
+      fakeRepository.onGetProductByIdentifier = (type, value) {
+        if (value == '7890000000011') return completerOld.future;
+        if (value == '7890000000022') return completerNew.future;
+        throw StateError('Chamada inesperada: $type:$value');
+      };
+
+      // 1. Consulta EAN antiga suspensa
+      final oldFuture = selectionNotifier.onCodeDetected('7890000000011', format: BarcodeFormat.ean13);
+      expect(selectionNotifier.isProcessing, isTrue);
+
+      // 2. resumeScanning durante a consulta
+      selectionNotifier.resumeScanning();
+      expect(selectionNotifier.isProcessing, isFalse);
+
+      // 3. Nova leitura iniciada
+      final newFuture = selectionNotifier.onCodeDetected('7890000000022', format: BarcodeFormat.ean13);
+      expect(selectionNotifier.isProcessing, isTrue);
+      expect(selectionNotifier.state, isA<ScannerProcessing>());
+
+      // 4. Segunda consulta concluída primeiro
+      completerNew.complete(
+        const ProductDetail(
+          id: 'prod-atual',
+          name: 'Café Atual',
+          brand: 'Marca Atual',
+          category: 'BEBIDAS',
+          status: 'ACTIVE',
+        ),
+      );
+      await newFuture;
+
+      expect(selectionNotifier.state, isA<ScannerFound>());
+      expect((selectionNotifier.state as ScannerFound).product.id, equals('prod-atual'));
+      expect(selectionNotifier.isProcessing, isFalse);
+
+      // 5. Primeira consulta concluída posteriormente
+      completerOld.complete(
+        const ProductDetail(
+          id: 'prod-antigo',
+          name: 'Produto Obsoleto',
+          brand: 'Marca Antiga',
+          category: 'OUTROS',
+          status: 'ACTIVE',
+        ),
+      );
+      await oldFuture;
+
+      // 6 & 7. Resposta antiga não altera estado atual nem corrompe isProcessing
+      expect(selectionNotifier.state, isA<ScannerFound>());
+      expect((selectionNotifier.state as ScannerFound).product.id, equals('prod-atual'));
+      expect(selectionNotifier.isProcessing, isFalse);
+    });
+
+    test('M-1: dispose durante consulta bem-sucedida em trânsito com Completer nao dispara listeners', () async {
+      final customRepo = _FakeProductRepository();
+      final customNotifier = ScannerNotifier(productRepository: customRepo);
+      final completer = Completer<ProductDetail>();
+      customRepo.onGetProductByIdentifier = (_, __) => completer.future;
+
+      var listenerCalls = 0;
+      customNotifier.addListener(() => listenerCalls++);
+
+      final future = customNotifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+      final countBeforeDispose = listenerCalls;
+
+      customNotifier.dispose();
+      completer.complete(
+        const ProductDetail(
+          id: 'prod-late',
+          name: 'Produto Tardio',
+          brand: 'Marca',
+          category: 'CAT',
+          status: 'ACTIVE',
+        ),
+      );
+      await expectLater(future, completes);
+
+      expect(customNotifier.isDisposed, isTrue);
+      expect(listenerCalls, equals(countBeforeDispose));
+    });
+
+    test('M-1: QR de lugar com placeRepository nulo em selectionMode retorna ScannerError', () async {
+      final noPlaceRepoNotifier = ScannerNotifier(
+        productRepository: fakeRepository,
+        placeRepository: null,
+        selectionMode: true,
+      );
+      addTearDown(noPlaceRepoNotifier.dispose);
+
+      await noPlaceRepoNotifier.onCodeDetected('rewit://places/place-1', format: BarcodeFormat.qrCode);
+
+      expect(noPlaceRepoNotifier.isProcessing, isFalse);
+      expect(noPlaceRepoNotifier.state, isA<ScannerError>());
+      expect(
+        (noPlaceRepoNotifier.state as ScannerError).message,
+        contains('locais não configurado'),
+      );
+    });
+
+    test('M-1: QR de produto com productRepository nulo em selectionMode retorna ScannerError', () async {
+      final noProductRepoNotifier = ScannerNotifier(
+        productRepository: null,
+        placeRepository: fakePlaceRepository,
+        selectionMode: true,
+      );
+      addTearDown(noProductRepoNotifier.dispose);
+
+      await noProductRepoNotifier.onCodeDetected('rewit://products/prod-1', format: BarcodeFormat.qrCode);
+
+      expect(noProductRepoNotifier.isProcessing, isFalse);
+      expect(noProductRepoNotifier.state, isA<ScannerError>());
+      expect(
+        (noProductRepoNotifier.state as ScannerError).message,
+        contains('produtos não configurado'),
+      );
+    });
+
+    test('L-3 + M-1: PlaceDetail com nome vazio ou id vazio é rejeitado com ScannerError', () async {
+      fakePlaceRepository.placeToReturn = const PlaceDetail(
+        id: 'place-ok',
+        name: '   ',
+        slug: 'sem-nome',
+        category: 'PADARIA',
+        addressText: 'Rua A',
+        validationRadiusMeters: 100,
+        origin: 'MANUAL',
+        isVerified: true,
+        status: 'ACTIVE',
+      );
+      await selectionNotifier.onCodeDetected('rewit://places/place-ok', format: BarcodeFormat.qrCode);
+      expect(selectionNotifier.state, isA<ScannerError>());
+      expect((selectionNotifier.state as ScannerError).message, contains('sem nome válido'));
+
+      selectionNotifier.resumeScanning();
+      fakePlaceRepository.placeToReturn = const PlaceDetail(
+        id: '   ',
+        name: 'Padaria com Nome Válido',
+        slug: 'padaria',
+        category: 'PADARIA',
+        addressText: 'Rua A',
+        validationRadiusMeters: 100,
+        origin: 'MANUAL',
+        isVerified: true,
+        status: 'ACTIVE',
+      );
+      await selectionNotifier.onCodeDetected('rewit://places/place-ok', format: BarcodeFormat.qrCode);
+      expect(selectionNotifier.state, isA<ScannerError>());
+      expect((selectionNotifier.state as ScannerError).message, contains('sem identificador válido'));
+    });
+
+    test('L-3 + M-1: ProductDetail com nome vazio ou id vazio é rejeitado tanto em barcode quanto em getProductById', () async {
+      fakeRepository.productToReturn = const ProductDetail(
+        id: 'prod-1',
+        name: '   ',
+        brand: 'Marca',
+        category: 'CAT',
+        status: 'ACTIVE',
+      );
+      await selectionNotifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+      expect(selectionNotifier.state, isA<ScannerError>());
+      expect((selectionNotifier.state as ScannerError).message, contains('sem nome válido'));
+
+      selectionNotifier.resumeScanning();
+      fakeRepository.productToReturn = const ProductDetail(
+        id: '   ',
+        name: 'Produto com Nome',
+        brand: 'Marca',
+        category: 'CAT',
+        status: 'ACTIVE',
+      );
+      await selectionNotifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+      expect(selectionNotifier.state, isA<ScannerError>());
+      expect((selectionNotifier.state as ScannerError).message, contains('sem identificador válido'));
+
+      // Também valida quando retornado no modo normal via barcode
+      notifier.resumeScanning();
+      fakeRepository.productToReturn = const ProductDetail(
+        id: '  ',
+        name: 'Produto Inválido Modo Normal',
+        brand: 'Marca',
+        category: 'CAT',
+        status: 'ACTIVE',
+      );
+      await notifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+      expect(notifier.state, isA<ScannerError>());
+
+      notifier.resumeScanning();
+      fakeRepository.productToReturn = const ProductDetail(
+        id: 'prod-valid-id',
+        name: '  ',
+        brand: 'Marca',
+        category: 'CAT',
+        status: 'ACTIVE',
+      );
+      await notifier.onCodeDetected('7891234567890', format: BarcodeFormat.ean13);
+      expect(notifier.state, isA<ScannerError>());
     });
   });
 }

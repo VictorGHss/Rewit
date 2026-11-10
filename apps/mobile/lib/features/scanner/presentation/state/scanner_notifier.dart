@@ -207,7 +207,7 @@ class ScannerNotifier extends ChangeNotifier {
     await _executeLookup(
       code: code,
       genericErrorMessage: 'Ocorreu um erro inesperado ao consultar o produto.',
-      runLookup: () async {
+      runLookup: (isActive) async {
         try {
           final product = await _productRepository.getProductByIdentifier(
             type: normalizedType,
@@ -217,6 +217,7 @@ class ScannerNotifier extends ChangeNotifier {
         } on ApiException catch (e) {
           if (e.statusCode == 404 &&
               _shouldFallbackToIsbn(normalizedType, trimmedValue)) {
+            if (!isActive()) rethrow;
             final isbnProduct = await _productRepository.getProductByIdentifier(
               type: 'ISBN',
               value: trimmedValue,
@@ -235,6 +236,16 @@ class ScannerNotifier extends ChangeNotifier {
   }) async {
     if (_isDisposed) return;
 
+    final trimmedId = productId.trim();
+    if (trimmedId.isEmpty) {
+      _isProcessing = false;
+      _state = const ScannerError(
+        message: 'Identificador de produto inválido para consulta.',
+      );
+      _safeNotifyListeners();
+      return;
+    }
+
     if (_productRepository == null) {
       _isProcessing = false;
       _state = const ScannerError(
@@ -247,9 +258,9 @@ class ScannerNotifier extends ChangeNotifier {
     await _executeLookup(
       code: code,
       genericErrorMessage: 'Ocorreu um erro inesperado ao consultar o produto.',
-      runLookup: () async {
-        final product = await _productRepository.getProductById(productId);
-        return _buildProductFoundState(product, code, requireValidName: true);
+      runLookup: (_) async {
+        final product = await _productRepository.getProductById(trimmedId);
+        return _buildProductFoundState(product, code);
       },
     );
   }
@@ -259,6 +270,16 @@ class ScannerNotifier extends ChangeNotifier {
     required String placeId,
   }) async {
     if (_isDisposed) return;
+
+    final trimmedId = placeId.trim();
+    if (trimmedId.isEmpty) {
+      _isProcessing = false;
+      _state = const ScannerError(
+        message: 'Identificador de local inválido para consulta.',
+      );
+      _safeNotifyListeners();
+      return;
+    }
 
     if (_placeRepository == null) {
       _isProcessing = false;
@@ -273,8 +294,8 @@ class ScannerNotifier extends ChangeNotifier {
       code: code,
       isPlace: true,
       genericErrorMessage: 'Ocorreu um erro inesperado ao consultar o local.',
-      runLookup: () async {
-        final place = await _placeRepository.getPlaceById(placeId);
+      runLookup: (_) async {
+        final place = await _placeRepository.getPlaceById(trimmedId);
         return _buildPlaceFoundState(place, code);
       },
     );
@@ -289,10 +310,14 @@ class ScannerNotifier extends ChangeNotifier {
 
   ScannerState _buildProductFoundState(
     ProductDetail product,
-    ScannedCode code, {
-    bool requireValidName = false,
-  }) {
-    if ((requireValidName || _selectionMode) && product.name.trim().isEmpty) {
+    ScannedCode code,
+  ) {
+    if (product.id.trim().isEmpty) {
+      return const ScannerError(
+        message: 'Produto retornado sem identificador válido no catálogo.',
+      );
+    }
+    if (product.name.trim().isEmpty) {
       return const ScannerError(
         message: 'Produto retornado sem nome válido no catálogo.',
       );
@@ -301,6 +326,11 @@ class ScannerNotifier extends ChangeNotifier {
   }
 
   ScannerState _buildPlaceFoundState(PlaceDetail place, ScannedCode code) {
+    if (place.id.trim().isEmpty) {
+      return const ScannerError(
+        message: 'Local retornado sem identificador válido no catálogo.',
+      );
+    }
     if (place.name.trim().isEmpty) {
       return const ScannerError(
         message: 'Local retornado sem nome válido no catálogo.',
@@ -312,28 +342,30 @@ class ScannerNotifier extends ChangeNotifier {
   Future<void> _executeLookup({
     required ScannedCode code,
     required String genericErrorMessage,
-    required Future<ScannerState> Function() runLookup,
+    required Future<ScannerState> Function(bool Function() isActive) runLookup,
     bool isPlace = false,
   }) async {
     final seq = ++_lookupSequence;
+    bool isActive() => !_isDisposed && seq == _lookupSequence;
+
     _state = ScannerProcessing(scannedCode: code);
     _safeNotifyListeners();
 
     try {
-      final nextState = await runLookup();
-      if (_isDisposed || seq != _lookupSequence) return;
+      final nextState = await runLookup(isActive);
+      if (!isActive()) return;
       _state = nextState;
     } on ApiException catch (e) {
-      if (_isDisposed || seq != _lookupSequence) return;
+      if (!isActive()) return;
       _state = _mapApiExceptionToState(e, code: code, isPlace: isPlace);
     } on NetworkException catch (e) {
-      if (_isDisposed || seq != _lookupSequence) return;
+      if (!isActive()) return;
       _state = ScannerError(message: e.message);
     } catch (_) {
-      if (_isDisposed || seq != _lookupSequence) return;
+      if (!isActive()) return;
       _state = ScannerError(message: genericErrorMessage);
     } finally {
-      if (!_isDisposed && seq == _lookupSequence) {
+      if (isActive()) {
         _isProcessing = false;
         _safeNotifyListeners();
       }

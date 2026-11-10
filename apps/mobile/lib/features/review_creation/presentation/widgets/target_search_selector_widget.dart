@@ -379,9 +379,11 @@ class _TargetSearchSelectorWidgetState
     try {
       final currentUid = _getCurrentUserId();
       final item = await widget.onScanTarget!();
-      if (!mounted || item == null) return;
+      if (!mounted || !widget.enabled || item == null) return;
       // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado.
       if (_getCurrentUserId() != currentUid) return;
+      // Garante que apenas alvos íntegros sejam propagados para o formulário.
+      if (item.id.trim().isEmpty || item.name.trim().isEmpty) return;
 
       if (widget.isTargetSelectedElsewhere?.call(item.id) ?? false) {
         _showDuplicateTargetSnackBar(item.name);

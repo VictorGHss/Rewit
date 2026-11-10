@@ -45,6 +45,7 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   MobileScannerController? _cameraController;
   bool _isTorchOn = false;
+  bool _isClosing = false;
 
   bool get _isSelectionMode => widget.selectionMode || _notifier.selectionMode;
 
@@ -139,13 +140,44 @@ class _ScannerScreenState extends State<ScannerScreen>
     _notifier.onCodeDetected(rawValue, format: barcode.format);
   }
 
-  void _selectProduct(ProductDetail product) {
+  void _closeRoute([SearchResultItem? result]) {
+    if (!mounted || _isClosing) return;
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    final navigator = Navigator.of(context);
+    if (!navigator.canPop()) return;
+    _isClosing = true;
     _cameraController?.stop();
-    Navigator.of(context).pop(
+    navigator.pop(result);
+  }
+
+  void _showInvalidSelectionSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  void _selectProduct(ProductDetail product) {
+    final id = product.id.trim();
+    final name = product.name.trim();
+    if (id.isEmpty || name.isEmpty) {
+      _showInvalidSelectionSnackBar(
+        'Produto com dados inválidos para seleção.',
+      );
+      return;
+    }
+    final category = product.category.trim();
+    _closeRoute(
       SearchResultItem(
-        id: product.id,
-        name: product.name,
-        category: product.category.trim().isEmpty ? null : product.category,
+        id: id,
+        name: name,
+        category: category.isEmpty ? null : category,
         targetType: TargetType.product,
         rawTargetType: 'PRODUCT',
         status: product.status,
@@ -154,13 +186,22 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   void _selectPlace(PlaceDetail place) {
-    _cameraController?.stop();
-    Navigator.of(context).pop(
+    final id = place.id.trim();
+    final name = place.name.trim();
+    if (id.isEmpty || name.isEmpty) {
+      _showInvalidSelectionSnackBar(
+        'Local com dados inválidos para seleção.',
+      );
+      return;
+    }
+    final slug = place.slug.trim();
+    final category = place.category.trim();
+    _closeRoute(
       SearchResultItem(
-        id: place.id,
-        name: place.name,
-        slug: place.slug.trim().isEmpty ? null : place.slug,
-        category: place.category.trim().isEmpty ? null : place.category,
+        id: id,
+        name: name,
+        slug: slug.isEmpty ? null : slug,
+        category: category.isEmpty ? null : category,
         targetType: TargetType.place,
         rawTargetType: 'PLACE',
         status: place.status,
@@ -169,7 +210,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   Future<void> _navigateToProductDetail(String productId) async {
-    if (_isSelectionMode) return;
+    if (_isSelectionMode || _isClosing) return;
     _cameraController?.stop();
     await Navigator.of(context).pushNamed(
       AppRouter.productDetail,
@@ -182,7 +223,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   Future<void> _navigateToSearch() async {
-    if (_isSelectionMode) return;
+    if (_isSelectionMode || _isClosing) return;
     _cameraController?.stop();
     await Navigator.of(context).pushNamed(AppRouter.search);
     if (mounted) {
@@ -192,7 +233,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   Future<void> _navigateToInternalResource(InternalResource resource) async {
-    if (_isSelectionMode) return;
+    if (_isSelectionMode || _isClosing) return;
     _cameraController?.stop();
     switch (resource.type) {
       case InternalResourceType.place:
@@ -225,94 +266,112 @@ class _ScannerScreenState extends State<ScannerScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final semantic = RewitSemanticColors.of(context);
+    final route = ModalRoute.of(context);
+    final canDismiss = route?.impliesAppBarDismissal ?? false;
+    final isFullscreenDialog =
+        route is PageRoute<dynamic> && route.fullscreenDialog;
 
     // Superfície base da câmera permanece escura independentemente do tema para
     // enquadrar o vídeo ao vivo e garantir contraste das miras sobre a lente.
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: const Text('Escanear Código'),
-        backgroundColor: semantic.mediaScrim,
-        foregroundColor: semantic.onMediaScrim,
-        actions: [
-          IconButton(
-            icon: Icon(_isTorchOn ? Icons.flash_on : Icons.flash_off),
-            tooltip: _isTorchOn ? 'Desativar flash' : 'Ativar flash',
-            onPressed: _toggleTorch,
-          ),
-          IconButton(
-            icon: const Icon(Icons.flip_camera_ios),
-            tooltip: 'Alternar câmera',
-            onPressed: _switchCamera,
-          ),
-        ],
-      ),
-      body: ListenableBuilder(
-        listenable: _notifier,
-        builder: (context, _) {
-          final state = _notifier.state;
+    return PopScope<Object?>(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          _isClosing = true;
+          _cameraController?.stop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          title: const Text('Escanear Código'),
+          backgroundColor: semantic.mediaScrim,
+          foregroundColor: semantic.onMediaScrim,
+          automaticallyImplyLeading: false,
+          leading: canDismiss
+              ? (isFullscreenDialog
+                  ? CloseButton(onPressed: () => _closeRoute())
+                  : BackButton(onPressed: () => _closeRoute()))
+              : null,
+          actions: [
+            IconButton(
+              icon: Icon(_isTorchOn ? Icons.flash_on : Icons.flash_off),
+              tooltip: _isTorchOn ? 'Desativar flash' : 'Ativar flash',
+              onPressed: _toggleTorch,
+            ),
+            IconButton(
+              icon: const Icon(Icons.flip_camera_ios),
+              tooltip: 'Alternar câmera',
+              onPressed: _switchCamera,
+            ),
+          ],
+        ),
+        body: ListenableBuilder(
+          listenable: _notifier,
+          builder: (context, _) {
+            final state = _notifier.state;
 
-          if (state is ScannerPermissionDenied) {
-            return _buildPermissionDeniedView(context, state);
-          }
+            if (state is ScannerPermissionDenied) {
+              return _buildPermissionDeniedView(context, state);
+            }
 
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              // 1. Câmera
-              if (widget.cameraBuilder != null)
-                widget.cameraBuilder!(context, _onBarcodeDetected)
-              else if (_cameraController != null)
-                MobileScanner(
-                  controller: _cameraController,
-                  onDetect: _onBarcodeDetected,
-                  errorBuilder: (context, error) {
-                    if (error.errorCode ==
-                        MobileScannerErrorCode.permissionDenied) {
-                      if (_notifier.state is! ScannerPermissionDenied) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted &&
-                              _notifier.state is! ScannerPermissionDenied) {
-                            _notifier.onPermissionDenied(
-                              permanentlyDenied: false,
-                            );
-                          }
-                        });
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                // 1. Câmera
+                if (widget.cameraBuilder != null)
+                  widget.cameraBuilder!(context, _onBarcodeDetected)
+                else if (_cameraController != null)
+                  MobileScanner(
+                    controller: _cameraController,
+                    onDetect: _onBarcodeDetected,
+                    errorBuilder: (context, error) {
+                      if (error.errorCode ==
+                          MobileScannerErrorCode.permissionDenied) {
+                        if (_notifier.state is! ScannerPermissionDenied) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted &&
+                                _notifier.state is! ScannerPermissionDenied) {
+                              _notifier.onPermissionDenied(
+                                permanentlyDenied: false,
+                              );
+                            }
+                          });
+                        }
+                        return _buildPermissionDeniedView(
+                          context,
+                          const ScannerPermissionDenied(permanentlyDenied: false),
+                        );
                       }
-                      return _buildPermissionDeniedView(
-                        context,
-                        const ScannerPermissionDenied(permanentlyDenied: false),
-                      );
-                    }
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Text(
-                          'Erro na câmera: ${error.errorDetails?.message ?? error.errorCode.name}',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: semantic.onMediaScrim),
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Text(
+                            'Erro na câmera: ${error.errorDetails?.message ?? error.errorCode.name}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: semantic.onMediaScrim),
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                )
-              else
-                Center(
-                  child: Text(
-                    'Câmera não inicializada.',
-                    style: TextStyle(color: semantic.onMediaScrim),
+                      );
+                    },
+                  )
+                else
+                  Center(
+                    child: Text(
+                      'Câmera não inicializada.',
+                      style: TextStyle(color: semantic.onMediaScrim),
+                    ),
                   ),
-                ),
 
-              // 2. Mira de captura e orientações sobre o feed de câmera
-              if (state is ScannerScanning || state is ScannerInitial)
-                const ScannerOverlay(),
+                // 2. Mira de captura e orientações sobre o feed de câmera
+                if (state is ScannerScanning || state is ScannerInitial)
+                  const ScannerOverlay(),
 
-              // 3. Modais/Cards de Feedback ancorados na parte inferior
-              _buildBottomFeedbackCard(context, state, theme, semantic),
-            ],
-          );
-        },
+                // 3. Modais/Cards de Feedback ancorados na parte inferior
+                _buildBottomFeedbackCard(context, state, theme, semantic),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -578,7 +637,7 @@ class _ScannerScreenState extends State<ScannerScreen>
             ),
             const SizedBox(width: 8),
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => _closeRoute(),
               child: const Text('Voltar'),
             ),
           ],
@@ -626,7 +685,7 @@ class _ScannerScreenState extends State<ScannerScreen>
         const SizedBox(height: 16),
         if (_isSelectionMode) ...[
           ElevatedButton.icon(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => _closeRoute(),
             icon: const Icon(Icons.arrow_back, size: 18),
             label: const Text('Voltar para busca'),
           ),
@@ -652,7 +711,7 @@ class _ScannerScreenState extends State<ScannerScreen>
               ),
               const SizedBox(width: 8),
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => _closeRoute(),
                 child: const Text('Voltar'),
               ),
             ],
@@ -750,7 +809,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                   ),
                   const SizedBox(width: 12),
                   TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () => _closeRoute(),
                     child: const Text('Voltar'),
                   ),
                 ],
@@ -810,7 +869,7 @@ class _ScannerScreenState extends State<ScannerScreen>
               ),
               const SizedBox(width: 8),
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => _closeRoute(),
                 child: const Text('Voltar'),
               ),
             ],
@@ -910,7 +969,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                   ),
                   const SizedBox(width: 12),
                   TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () => _closeRoute(),
                     child: const Text('Voltar'),
                   ),
                 ],
@@ -972,7 +1031,7 @@ class _ScannerScreenState extends State<ScannerScreen>
               const SizedBox(height: 12),
             ],
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => _closeRoute(),
               child: Text(
                 'Voltar',
                 style: TextStyle(color: semantic.onMediaScrim),

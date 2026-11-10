@@ -193,7 +193,8 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                 pendingRegistrationStore: widget.pendingRegistrationStore,
               ),
             ] else ...[
-              // Fallback para inserção direta de UUID quando searchRepository não for injetado
+              // Fallback legado para inserção direta de UUID quando searchRepository não for injetado
+              // (caminho usado apenas em testes unitários isolados; em produção AppRouter injeta SearchRepository).
               TextFormField(
                 controller: _targetIdController,
                 enabled: widget.enabled,

@@ -19,6 +19,7 @@ import 'package:rewit_mobile/features/product/domain/entities/product_detail.dar
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
+import 'package:rewit_mobile/features/scanner/domain/entities/scanned_code.dart';
 import 'package:rewit_mobile/features/scanner/domain/entities/scanner_state.dart';
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:rewit_mobile/features/scanner/presentation/state/scanner_notifier.dart';
@@ -178,6 +179,23 @@ class _FakePlaceRepository implements PlaceRepository {
     String? idempotencyKey,
   }) async =>
       throw UnimplementedError();
+}
+
+class _ForcedStateScannerNotifier extends ScannerNotifier {
+  ScannerState _forcedState;
+
+  _ForcedStateScannerNotifier(this._forcedState) : super(selectionMode: true);
+
+  @override
+  ScannerState get state => _forcedState;
+
+  void setForcedState(ScannerState nextState) {
+    _forcedState = nextState;
+    notifyListeners();
+  }
+
+  @override
+  void startScanning() {}
 }
 
 class _StubAuthRepo implements AuthRepository {
@@ -991,6 +1009,365 @@ void main() {
       expect(didPop, isTrue);
       expect(selectedItem, isNull);
     });
+
+    testWidgets('L-3: duplo acionamento rapido ao selecionar produto ou local nao fecha a tela subjacente', (tester) async {
+      void Function(BarcodeCapture)? activeCapture;
+      var returnedItems = <SearchResultItem?>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (baseContext) => Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Tela Base Raiz'),
+                    ElevatedButton(
+                      key: const Key('btn_go_intermediate'),
+                      onPressed: () {
+                        Navigator.of(baseContext).push<void>(
+                          MaterialPageRoute<void>(
+                            builder: (interContext) => Scaffold(
+                              body: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Text('Tela Intermediária Avaliação'),
+                                    ElevatedButton(
+                                      key: const Key('btn_open_scanner_l3'),
+                                      onPressed: () async {
+                                        final res = await Navigator.of(interContext)
+                                            .push<SearchResultItem?>(
+                                          MaterialPageRoute<SearchResultItem?>(
+                                            builder: (_) => ScannerScreen(
+                                              productRepository: fakeRepository,
+                                              placeRepository: fakePlaceRepository,
+                                              selectionMode: true,
+                                              cameraBuilder: (_, onDetect) {
+                                                activeCapture = onDetect;
+                                                return const SizedBox.expand(
+                                                  key: Key('l3_camera'),
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        );
+                                        returnedItems.add(res);
+                                      },
+                                      child: const Text('Abrir Scanner L3'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                      child: const Text('Ir para Intermediária'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('btn_go_intermediate')));
+      await tester.pumpAndSettle();
+      expect(find.text('Tela Intermediária Avaliação'), findsOneWidget);
+
+      // 1) Produto: duplo acionamento de "Selecionar produto"
+      await tester.tap(find.byKey(const Key('btn_open_scanner_l3')));
+      await tester.pumpAndSettle();
+      activeCapture!(
+        const BarcodeCapture(
+          barcodes: [Barcode(rawValue: '7891234567890', format: BarcodeFormat.ean13)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final selectProdFinder = find.widgetWithText(ElevatedButton, 'Selecionar produto');
+      expect(selectProdFinder, findsOneWidget);
+      final selectProdOnPressed = tester.widget<ElevatedButton>(selectProdFinder).onPressed!;
+      selectProdOnPressed();
+      selectProdOnPressed(); // segundo disparo rápido durante fechamento
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tela Intermediária Avaliação'), findsOneWidget);
+      expect(find.text('Tela Base Raiz'), findsNothing);
+      expect(returnedItems.length, equals(1));
+      expect(returnedItems.last?.id, equals('prod-uuid-123'));
+
+      // 2) Local: duplo acionamento de "Selecionar local"
+      await tester.tap(find.byKey(const Key('btn_open_scanner_l3')));
+      await tester.pumpAndSettle();
+      activeCapture!(
+        const BarcodeCapture(
+          barcodes: [Barcode(rawValue: 'rewit://places/place-789', format: BarcodeFormat.qrCode)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final selectPlaceFinder = find.widgetWithText(ElevatedButton, 'Selecionar local');
+      expect(selectPlaceFinder, findsOneWidget);
+      final selectPlaceOnPressed = tester.widget<ElevatedButton>(selectPlaceFinder).onPressed!;
+      selectPlaceOnPressed();
+      selectPlaceOnPressed();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tela Intermediária Avaliação'), findsOneWidget);
+      expect(find.text('Tela Base Raiz'), findsNothing);
+      expect(returnedItems.length, equals(2));
+      expect(returnedItems.last?.id, equals('place-789'));
+    });
+
+    testWidgets('L-3: duplo acionamento rapido em Voltar para busca, Voltar apos erro e BackButton nao fecha tela subjacente', (tester) async {
+      void Function(BarcodeCapture)? activeCapture;
+      var returnedItems = <SearchResultItem?>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (baseContext) => Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Tela Base Raiz'),
+                    ElevatedButton(
+                      key: const Key('btn_go_intermediate'),
+                      onPressed: () {
+                        Navigator.of(baseContext).push<void>(
+                          MaterialPageRoute<void>(
+                            builder: (interContext) => Scaffold(
+                              body: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Text('Tela Intermediária Avaliação'),
+                                    ElevatedButton(
+                                      key: const Key('btn_open_scanner_l3'),
+                                      onPressed: () async {
+                                        final res = await Navigator.of(interContext)
+                                            .push<SearchResultItem?>(
+                                          MaterialPageRoute<SearchResultItem?>(
+                                            builder: (_) => ScannerScreen(
+                                              productRepository: fakeRepository,
+                                              placeRepository: fakePlaceRepository,
+                                              selectionMode: true,
+                                              cameraBuilder: (_, onDetect) {
+                                                activeCapture = onDetect;
+                                                return const SizedBox.expand();
+                                              },
+                                            ),
+                                          ),
+                                        );
+                                        returnedItems.add(res);
+                                      },
+                                      child: const Text('Abrir Scanner L3'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                      child: const Text('Ir para Intermediária'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('btn_go_intermediate')));
+      await tester.pumpAndSettle();
+
+      // 1) Voltar para busca (404 em selectionMode)
+      fakeRepository.exceptionToThrow = const ApiException(
+        ProblemDetail(
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail: 'Not Found',
+          code: 'PRODUCT_NOT_FOUND',
+        ),
+      );
+      await tester.tap(find.byKey(const Key('btn_open_scanner_l3')));
+      await tester.pumpAndSettle();
+      activeCapture!(
+        const BarcodeCapture(
+          barcodes: [Barcode(rawValue: '7890000000000', format: BarcodeFormat.ean13)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final backToSearchFinder = find.widgetWithText(ElevatedButton, 'Voltar para busca');
+      final backToSearchOnPressed = tester.widget<ElevatedButton>(backToSearchFinder).onPressed!;
+      backToSearchOnPressed();
+      backToSearchOnPressed();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tela Intermediária Avaliação'), findsOneWidget);
+      expect(find.text('Tela Base Raiz'), findsNothing);
+      expect(returnedItems.single, isNull);
+
+      // 2) Voltar após erro (500)
+      fakeRepository.exceptionToThrow = const NetworkException('Sem conexão');
+      await tester.tap(find.byKey(const Key('btn_open_scanner_l3')));
+      await tester.pumpAndSettle();
+      activeCapture!(
+        const BarcodeCapture(
+          barcodes: [Barcode(rawValue: '7891234567890', format: BarcodeFormat.ean13)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final errorBackFinder = find.widgetWithText(TextButton, 'Voltar');
+      final errorBackOnPressed = tester.widget<TextButton>(errorBackFinder).onPressed!;
+      errorBackOnPressed();
+      errorBackOnPressed();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tela Intermediária Avaliação'), findsOneWidget);
+      expect(find.text('Tela Base Raiz'), findsNothing);
+      expect(returnedItems.length, equals(2));
+      expect(returnedItems.last, isNull);
+
+      // 3) Cancelamento via BackButton da AppBar (duplo disparo)
+      await tester.tap(find.byKey(const Key('btn_open_scanner_l3')));
+      await tester.pumpAndSettle();
+      final appBarBackFinder = find.byType(BackButton);
+      expect(appBarBackFinder, findsOneWidget);
+      final appBarBackOnPressed = tester.widget<BackButton>(appBarBackFinder).onPressed!;
+      appBarBackOnPressed();
+      appBarBackOnPressed();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tela Intermediária Avaliação'), findsOneWidget);
+      expect(find.text('Tela Base Raiz'), findsNothing);
+      expect(returnedItems.length, equals(3));
+      expect(returnedItems.last, isNull);
+    });
+
+    testWidgets('L-3: ScannerScreen recusa criar SearchResultItem inválido se produto ou local vier com id ou nome vazio', (tester) async {
+      fakeRepository.productToReturn = const ProductDetail(
+        id: '   ',
+        name: 'Produto Sem ID',
+        brand: 'Marca',
+        category: 'CAT',
+        status: 'ACTIVE',
+      );
+
+      var popped = false;
+      SearchResultItem? selectedItem;
+      late void Function(BarcodeCapture) capture;
+
+      await pumpSelectionFlow(
+        tester,
+        onCameraReady: (onDetect) => capture = onDetect,
+        onPopped: (res, didPop) {
+          selectedItem = res;
+          popped = didPop;
+        },
+      );
+
+      capture(
+        const BarcodeCapture(
+          barcodes: [Barcode(rawValue: '7891234567890', format: BarcodeFormat.ean13)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Notifier rejeita antes mesmo de oferecer botão de seleção
+      expect(find.text('Falha na Consulta'), findsOneWidget);
+      expect(find.text('Selecionar produto'), findsNothing);
+      expect(popped, isFalse);
+      expect(selectedItem, isNull);
+    });
+
+    testWidgets('L-3: protecao defensiva em _selectProduct e _selectPlace impede pop com SearchResultItem invalido mesmo com notifier externo', (tester) async {
+      final forcedNotifier = _ForcedStateScannerNotifier(
+        const ScannerFound(
+          product: ProductDetail(
+            id: '   ',
+            name: 'Produto Inválido',
+            brand: 'Marca',
+            category: 'CAT',
+            status: 'ACTIVE',
+          ),
+          scannedCode: ScannedCode(
+            rawValue: '7891234567890',
+            format: BarcodeFormat.ean13,
+            category: ScannedCodeCategory.barcode,
+            barcodeType: 'EAN',
+            normalizedValue: '7891234567890',
+          ),
+        ),
+      );
+      addTearDown(forcedNotifier.dispose);
+
+      var popped = false;
+      SearchResultItem? result;
+      await pumpSelectionFlow(
+        tester,
+        customNotifier: forcedNotifier,
+        onPopped: (res, didPop) {
+          result = res;
+          popped = didPop;
+        },
+      );
+
+      expect(find.text('Selecionar produto'), findsOneWidget);
+      await tester.tap(find.text('Selecionar produto'));
+      await tester.pump();
+
+      expect(popped, isFalse);
+      expect(find.text('Produto com dados inválidos para seleção.'), findsOneWidget);
+      expect(find.byType(ScannerScreen), findsOneWidget);
+
+      // Valida também _selectPlace com PlaceDetail sem nome válido no mesmo fluxo
+      forcedNotifier.setForcedState(
+        const ScannerPlaceFound(
+          place: PlaceDetail(
+            id: 'place-123',
+            name: '   ',
+            slug: 'slug',
+            category: 'PADARIA',
+            addressText: 'Rua A',
+            validationRadiusMeters: 100,
+            origin: 'MANUAL',
+            isVerified: true,
+            status: 'ACTIVE',
+          ),
+          scannedCode: ScannedCode(
+            rawValue: 'rewit://places/place-123',
+            format: BarcodeFormat.qrCode,
+            category: ScannedCodeCategory.qrInternal,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Selecionar local'), findsOneWidget);
+      await tester.tap(find.text('Selecionar local'));
+      await tester.pumpAndSettle();
+
+      expect(popped, isFalse);
+      expect(find.text('Local com dados inválidos para seleção.'), findsOneWidget);
+      expect(find.byType(ScannerScreen), findsOneWidget);
+
+      // Cancelamento manual segue fechando normalmente com null
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(popped, isTrue);
+      expect(result, isNull);
+    });
   });
 
   group('Integração AppRouter: ReviewCreateScreen <-> ScannerScreen e Explorar', () {
@@ -1194,6 +1571,90 @@ void main() {
         expect(find.text('Produto encontrado'), findsOneWidget);
         expect(find.text('Ver produto'), findsOneWidget);
         expect(find.text('Selecionar produto'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'H-1: pushNamed<SearchResultItem?> na rota AppRouter.scanner nao lanca TypeError ao selecionar ou cancelar',
+      (tester) async {
+        final repo = _StubAuthRepo();
+        final authNotifier = AuthNotifier(authRepository: repo);
+        addTearDown(authNotifier.dispose);
+        await authNotifier.checkAuthStatus();
+
+        void Function(BarcodeCapture)? activeCapture;
+        SearchResultItem? typedResult;
+        var calls = 0;
+
+        final router = AppRouter(
+          authNotifier: authNotifier,
+          productRepository: fakeRepository,
+          placeRepository: fakePlaceRepository,
+          scannerCameraBuilder: (context, onDetect) {
+            activeCapture = onDetect;
+            return const SizedBox.expand(key: Key('h1_typed_camera'));
+          },
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            onGenerateRoute: router.onGenerateRoute,
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    key: const Key('btn_push_typed_scanner'),
+                    onPressed: () async {
+                      calls++;
+                      typedResult = await Navigator.of(context)
+                          .pushNamed<SearchResultItem?>(
+                        AppRouter.scanner,
+                        arguments: ScannerRouteArgs(
+                          selectionMode: true,
+                          productRepository: fakeRepository,
+                          placeRepository: fakePlaceRepository,
+                        ),
+                      );
+                    },
+                    child: const Text('Abrir Tipado'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // 1. Cancelamento tipado retorna null sem TypeError
+        await tester.tap(find.byKey(const Key('btn_push_typed_scanner')));
+        await tester.pumpAndSettle();
+        expect(find.byType(ScannerScreen), findsOneWidget);
+
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+        expect(calls, equals(1));
+        expect(typedResult, isNull);
+
+        // 2. Seleção tipada retorna SearchResultItem sem TypeError
+        await tester.tap(find.byKey(const Key('btn_push_typed_scanner')));
+        await tester.pumpAndSettle();
+
+        activeCapture!(
+          const BarcodeCapture(
+            barcodes: [
+              Barcode(rawValue: '7891234567890', format: BarcodeFormat.ean13),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Selecionar produto'));
+        await tester.pumpAndSettle();
+
+        expect(calls, equals(2));
+        expect(typedResult, isNotNull);
+        expect(typedResult!.id, equals('prod-uuid-123'));
+        expect(typedResult!.targetType, equals(TargetType.product));
       },
     );
   });
