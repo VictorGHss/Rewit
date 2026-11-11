@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
@@ -7,8 +9,10 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
+import '../../data/services/android_camera_permission_service.dart';
 import '../../domain/entities/scanned_code.dart';
 import '../../domain/entities/scanner_state.dart';
+import '../../domain/services/camera_permission_service.dart';
 import '../state/scanner_notifier.dart';
 import '../widgets/scanner_overlay.dart';
 
@@ -23,6 +27,7 @@ class ScannerScreen extends StatefulWidget {
     void Function(BarcodeCapture) onDetect,
   )? cameraBuilder;
   final bool autoStartCamera;
+  final CameraPermissionService? cameraPermissionService;
 
   const ScannerScreen({
     super.key,
@@ -32,6 +37,7 @@ class ScannerScreen extends StatefulWidget {
     this.notifier,
     this.cameraBuilder,
     this.autoStartCamera = true,
+    this.cameraPermissionService,
   });
 
   @override
@@ -42,17 +48,55 @@ class _ScannerScreenState extends State<ScannerScreen>
     with WidgetsBindingObserver {
   late final ScannerNotifier _notifier;
   bool _ownsNotifier = false;
+  late final CameraPermissionService _cameraPermissionService;
 
   MobileScannerController? _cameraController;
   bool _isTorchOn = false;
   bool _isClosing = false;
+  bool _isPermissionFlowInProgress = false;
+  bool _cameraStoppedByLifecycle = false;
+  CameraPermissionStatus _lastKnownPermissionStatus =
+      CameraPermissionStatus.unknown;
 
   bool get _isSelectionMode => widget.selectionMode || _notifier.selectionMode;
+
+  MobileScannerController _createCameraController() {
+    return MobileScannerController(
+      autoStart: widget.autoStartCamera,
+      detectionSpeed: DetectionSpeed.normal,
+      facing: CameraFacing.back,
+      formats: const [
+        BarcodeFormat.ean13,
+        BarcodeFormat.ean8,
+        BarcodeFormat.upcA,
+        BarcodeFormat.itf14,
+        BarcodeFormat.qrCode,
+      ],
+    );
+  }
+
+  void _ensureCleanCameraController() {
+    final current = _cameraController;
+    if (widget.cameraBuilder != null || current == null) return;
+    if (current.value.error == null) return;
+
+    // Substitui o controller caso tenha falhado anteriormente (ex.: erro de permissão),
+    // evitando que o erro obsoleto dispare errorBuilder ao remontar MobileScanner.
+    _cameraController = _createCameraController();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(current.dispose());
+    });
+    if (mounted) {
+      setState(() {});
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _cameraPermissionService =
+        widget.cameraPermissionService ?? const AndroidCameraPermissionService();
 
     if (widget.notifier != null) {
       _notifier = widget.notifier!;
@@ -67,25 +111,11 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
 
     if (widget.cameraBuilder == null) {
-      _cameraController = MobileScannerController(
-        autoStart: widget.autoStartCamera,
-        detectionSpeed: DetectionSpeed.normal,
-        facing: CameraFacing.back,
-        formats: const [
-          BarcodeFormat.ean13,
-          BarcodeFormat.ean8,
-          BarcodeFormat.upcA,
-          BarcodeFormat.itf14,
-          BarcodeFormat.qrCode,
-        ],
-      );
+      _cameraController = _createCameraController();
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _isClosing) return;
-      if (_notifier.state is ScannerInitial) {
-        _startScanning();
-      }
+      unawaited(_initializePermissionsAndCamera());
     });
   }
 
@@ -101,15 +131,222 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_cameraController == null) return;
+    if (!mounted || _isClosing) return;
+
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
+      if (_cameraController != null && _notifier.state is ScannerScanning) {
+        _cameraStoppedByLifecycle = true;
+      }
       _cameraController?.stop();
-    } else if (state == AppLifecycleState.resumed &&
-        mounted &&
-        !_isClosing &&
-        _notifier.state is ScannerScanning) {
-      _cameraController?.start();
+    } else if (state == AppLifecycleState.resumed) {
+      if (_isPermissionFlowInProgress) return;
+      if (_notifier.state is ScannerPermissionDenied) {
+        unawaited(_recheckPermissionOnResume());
+      } else if (_notifier.state is ScannerScanning &&
+          _cameraStoppedByLifecycle) {
+        _cameraStoppedByLifecycle = false;
+        unawaited(_recheckPermissionAndResumeCamera());
+      }
+    }
+  }
+
+  Future<void> _initializePermissionsAndCamera() async {
+    if (!mounted || _isClosing) return;
+    if (_notifier.state is! ScannerInitial) return;
+
+    if (widget.cameraPermissionService == null &&
+        (widget.cameraBuilder != null || !widget.autoStartCamera)) {
+      _startScanning();
+      return;
+    }
+
+    _isPermissionFlowInProgress = true;
+    try {
+      var status = await _cameraPermissionService.checkPermissionStatus();
+      if (!mounted || _isClosing || _notifier.state is! ScannerInitial) return;
+
+      if (status == CameraPermissionStatus.denied) {
+        status = await _cameraPermissionService.requestPermission();
+        if (!mounted || _isClosing || _notifier.state is! ScannerInitial) {
+          return;
+        }
+      }
+
+      _applyPermissionResolution(status);
+    } finally {
+      _isPermissionFlowInProgress = false;
+    }
+  }
+
+  Future<void> _onRetryPermissionPressed() async {
+    if (!mounted || _isClosing || _isPermissionFlowInProgress) return;
+
+    _isPermissionFlowInProgress = true;
+    try {
+      var status = await _cameraPermissionService.checkPermissionStatus();
+      if (!mounted || _isClosing) return;
+
+      if (status == CameraPermissionStatus.denied) {
+        status = await _cameraPermissionService.requestPermission();
+        if (!mounted || _isClosing) return;
+      }
+
+      _applyPermissionResolution(status);
+    } finally {
+      _isPermissionFlowInProgress = false;
+    }
+  }
+
+  Future<void> _onOpenAppSettingsPressed() async {
+    if (!mounted || _isClosing) return;
+
+    final opened = await _cameraPermissionService.openAppSettings();
+    if (!mounted || _isClosing) return;
+
+    if (!opened) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Não foi possível abrir as configurações do dispositivo.',
+            ),
+            duration: Duration(seconds: 3),
+          ),
+        );
+    }
+  }
+
+  Future<void> _recheckPermissionOnResume() async {
+    if (!mounted || _isClosing || _isPermissionFlowInProgress) return;
+
+    _isPermissionFlowInProgress = true;
+    try {
+      final status = await _cameraPermissionService.checkPermissionStatus();
+      if (!mounted || _isClosing) return;
+      if (_notifier.state is! ScannerPermissionDenied) return;
+
+      _lastKnownPermissionStatus = status;
+
+      if (status == CameraPermissionStatus.granted) {
+        _cameraStoppedByLifecycle = false;
+        _ensureCleanCameraController();
+        _startScanning();
+      } else if (status == CameraPermissionStatus.denied ||
+          status == CameraPermissionStatus.permanentlyDenied) {
+        _setPermissionDeniedState(
+          permanentlyDenied: status == CameraPermissionStatus.permanentlyDenied,
+        );
+      }
+    } finally {
+      _isPermissionFlowInProgress = false;
+    }
+  }
+
+  Future<void> _recheckPermissionAndResumeCamera() async {
+    if (!mounted || _isClosing || _isPermissionFlowInProgress) return;
+
+    final status = await _cameraPermissionService.checkPermissionStatus();
+    if (!mounted || _isClosing) return;
+    if (_notifier.state is! ScannerScanning) return;
+
+    _lastKnownPermissionStatus = status;
+    if (status == CameraPermissionStatus.denied ||
+        status == CameraPermissionStatus.permanentlyDenied) {
+      _setPermissionDeniedState(
+        permanentlyDenied: status == CameraPermissionStatus.permanentlyDenied,
+      );
+      return;
+    }
+
+    await _safeStartCamera();
+  }
+
+  Future<void> _handlePermissionDeniedFromScannerError() async {
+    if (!mounted || _isClosing) return;
+
+    if (_notifier.state is! ScannerPermissionDenied) {
+      _setPermissionDeniedState(
+        permanentlyDenied: _lastKnownPermissionStatus ==
+            CameraPermissionStatus.permanentlyDenied,
+      );
+    }
+
+    if (widget.cameraPermissionService == null && !widget.autoStartCamera) {
+      return;
+    }
+
+    final status = await _cameraPermissionService.checkPermissionStatus(
+      afterRequest: true,
+    );
+    if (!mounted || _isClosing) return;
+
+    _lastKnownPermissionStatus = status;
+
+    if (status == CameraPermissionStatus.granted) {
+      _ensureCleanCameraController();
+      _startScanning();
+      return;
+    }
+
+    if (status == CameraPermissionStatus.permanentlyDenied ||
+        status == CameraPermissionStatus.denied) {
+      _setPermissionDeniedState(
+        permanentlyDenied: status == CameraPermissionStatus.permanentlyDenied,
+      );
+    }
+  }
+
+  void _applyPermissionResolution(CameraPermissionStatus status) {
+    if (!mounted || _isClosing) return;
+    _lastKnownPermissionStatus = status;
+
+    switch (status) {
+      case CameraPermissionStatus.granted:
+      case CameraPermissionStatus.unknown:
+        _cameraStoppedByLifecycle = false;
+        _ensureCleanCameraController();
+        _startScanning();
+      case CameraPermissionStatus.denied:
+        _setPermissionDeniedState(permanentlyDenied: false);
+      case CameraPermissionStatus.permanentlyDenied:
+        _setPermissionDeniedState(permanentlyDenied: true);
+    }
+  }
+
+  void _setPermissionDeniedState({required bool permanentlyDenied}) {
+    if (!mounted || _isClosing) return;
+    final current = _notifier.state;
+    if (current is ScannerPermissionDenied &&
+        current.permanentlyDenied == permanentlyDenied) {
+      return;
+    }
+    _cameraStoppedByLifecycle = false;
+    _cameraController?.stop();
+    _notifier.onPermissionDenied(permanentlyDenied: permanentlyDenied);
+  }
+
+  Future<void> _safeStartCamera() async {
+    final controller = _cameraController;
+    if (controller == null ||
+        !mounted ||
+        _isClosing ||
+        !widget.autoStartCamera) {
+      return;
+    }
+    if (controller.value.isRunning || controller.value.isStarting) {
+      return;
+    }
+    try {
+      await controller.start();
+    } on MobileScannerException catch (error) {
+      if (!mounted || _isClosing) return;
+      if (error.errorCode == MobileScannerErrorCode.permissionDenied) {
+        await _handlePermissionDeniedFromScannerError();
+      }
+    } catch (_) {
+      // Ignora falhas transitórias de ciclo de vida já tratadas na UI.
     }
   }
 
@@ -233,7 +470,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
     if (mounted && !_isClosing) {
       _resumeScanning();
-      _cameraController?.start();
+      unawaited(_safeStartCamera());
     }
   }
 
@@ -243,7 +480,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     await Navigator.of(context).pushNamed(AppRouter.search);
     if (mounted && !_isClosing) {
       _resumeScanning();
-      _cameraController?.start();
+      unawaited(_safeStartCamera());
     }
   }
 
@@ -273,7 +510,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
     if (mounted && !_isClosing) {
       _resumeScanning();
-      _cameraController?.start();
+      unawaited(_safeStartCamera());
     }
   }
 
@@ -335,6 +572,8 @@ class _ScannerScreenState extends State<ScannerScreen>
                 // 1. Câmera
                 if (widget.cameraBuilder != null)
                   widget.cameraBuilder!(context, _onBarcodeDetected)
+                else if (state is ScannerInitial && widget.autoStartCamera)
+                  const ColoredBox(color: Colors.black)
                 else if (_cameraController != null)
                   MobileScanner(
                     controller: _cameraController,
@@ -345,16 +584,20 @@ class _ScannerScreenState extends State<ScannerScreen>
                         if (_notifier.state is! ScannerPermissionDenied) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted &&
+                                !_isClosing &&
                                 _notifier.state is! ScannerPermissionDenied) {
-                              _notifier.onPermissionDenied(
-                                permanentlyDenied: false,
+                              unawaited(
+                                _handlePermissionDeniedFromScannerError(),
                               );
                             }
                           });
                         }
                         return _buildPermissionDeniedView(
                           context,
-                          const ScannerPermissionDenied(permanentlyDenied: false),
+                          ScannerPermissionDenied(
+                            permanentlyDenied: _lastKnownPermissionStatus ==
+                                CameraPermissionStatus.permanentlyDenied,
+                          ),
                         );
                       }
                       return Center(
@@ -1035,12 +1278,18 @@ class _ScannerScreenState extends State<ScannerScreen>
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
-            if (!state.permanentlyDenied) ...[
+            if (state.permanentlyDenied) ...[
               ElevatedButton(
                 onPressed: () {
-                  if (!mounted || _isClosing) return;
-                  _startScanning();
-                  _cameraController?.start();
+                  unawaited(_onOpenAppSettingsPressed());
+                },
+                child: const Text('Abrir configurações'),
+              ),
+              const SizedBox(height: 12),
+            ] else ...[
+              ElevatedButton(
+                onPressed: () {
+                  unawaited(_onRetryPermissionPressed());
                 },
                 child: const Text('Tentar novamente'),
               ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,6 +22,7 @@ import 'package:rewit_mobile/features/product/domain/entities/products_in_place_
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/scanner/domain/entities/scanned_code.dart';
 import 'package:rewit_mobile/features/scanner/domain/entities/scanner_state.dart';
+import 'package:rewit_mobile/features/scanner/domain/services/camera_permission_service.dart';
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:rewit_mobile/features/scanner/presentation/state/scanner_notifier.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
@@ -1958,4 +1960,560 @@ void main() {
       },
     );
   });
+
+  group('ScannerScreen - UX de Permissão de Câmera e Ciclo de Vida', () {
+    late MobileScannerPlatform originalPlatform;
+    late _SpyMobileScannerPlatform spyPlatform;
+
+    setUp(() {
+      originalPlatform = MobileScannerPlatform.instance;
+      MobileScannerController.resetPlatformSessionOwner();
+      spyPlatform = _SpyMobileScannerPlatform();
+      MobileScannerPlatform.instance = spyPlatform;
+    });
+
+    tearDown(() async {
+      await spyPlatform.disposeStreams();
+      MobileScannerController.resetPlatformSessionOwner();
+      MobileScannerPlatform.instance = originalPlatform;
+    });
+
+    testWidgets(
+      'concessão inicial de permissão inicia a câmera uma única vez e permite escaneamento',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.denied,
+          requestResponses: [CameraPermissionStatus.granted],
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(fakePermission.checkCalls, equals(1));
+        expect(fakePermission.requestCalls, equals(1));
+        expect(spyPlatform.startCalls, equals(1));
+        expect(find.byType(MobileScanner), findsOneWidget);
+        expect(find.text('Acesso à câmera necessário'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'primeira negação exibe negação temporária com Tentar novamente e concede na segunda tentativa',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.denied,
+          requestResponses: [
+            CameraPermissionStatus.denied,
+            CameraPermissionStatus.granted,
+          ],
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Acesso à câmera necessário'), findsOneWidget);
+        expect(find.text('Tentar novamente'), findsOneWidget);
+        expect(find.text('Abrir configurações'), findsNothing);
+        expect(find.text('Voltar'), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(0));
+
+        await tester.tap(find.text('Tentar novamente'));
+        await tester.pumpAndSettle();
+
+        expect(fakePermission.requestCalls, equals(2));
+        expect(spyPlatform.startCalls, equals(1));
+        expect(find.byType(MobileScanner), findsOneWidget);
+        expect(find.text('Tentar novamente'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'negação repetida evolui para negação permanente com Abrir configurações e sem Tentar novamente',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.denied,
+          requestResponses: [
+            CameraPermissionStatus.denied,
+            CameraPermissionStatus.permanentlyDenied,
+          ],
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Tentar novamente'), findsOneWidget);
+        expect(find.text('Abrir configurações'), findsNothing);
+
+        fakePermission.nextCheckStatus = CameraPermissionStatus.denied;
+        await tester.tap(find.text('Tentar novamente'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Acesso à câmera necessário'), findsOneWidget);
+        expect(
+          find.text(
+            'A permissão de acesso à câmera foi negada permanentemente. Para escanear códigos, habilite a câmera nas configurações do dispositivo.',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Abrir configurações'), findsOneWidget);
+        expect(find.text('Tentar novamente'), findsNothing);
+        expect(find.text('Voltar'), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(0));
+      },
+    );
+
+    testWidgets(
+      'abertura com permissão já negada permanentemente entra direto na tela de configurações sem chamar start()',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.permanentlyDenied,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Abrir configurações'), findsOneWidget);
+        expect(find.text('Tentar novamente'), findsNothing);
+        expect(fakePermission.requestCalls, equals(0));
+        expect(spyPlatform.startCalls, equals(0));
+      },
+    );
+
+    testWidgets(
+      'botão Abrir configurações aciona abertura nativa e exibe feedback discreto se falhar',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.permanentlyDenied,
+          openSettingsResult: true,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Abrir configurações'));
+        await tester.pumpAndSettle();
+        expect(fakePermission.openSettingsCalls, equals(1));
+
+        fakePermission.openSettingsResult = false;
+        await tester.tap(find.text('Abrir configurações'));
+        await tester.pumpAndSettle();
+        expect(fakePermission.openSettingsCalls, equals(2));
+        expect(
+          find.text('Não foi possível abrir as configurações do dispositivo.'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'retornar das Configurações sem conceder mantém negação permanente e não inicia a câmera',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.permanentlyDenied,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Abrir configurações'));
+        await tester.pumpAndSettle();
+
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Abrir configurações'), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(0));
+      },
+    );
+
+    testWidgets(
+      'retornar das Configurações com permissão concedida limpa negação e inicia câmera uma única vez',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.permanentlyDenied,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Abrir configurações'), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(0));
+
+        await tester.tap(find.text('Abrir configurações'));
+        await tester.pumpAndSettle();
+
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+
+        // Usuário habilitou a câmera nas Configurações do Android antes de voltar
+        fakePermission.nextCheckStatus = CameraPermissionStatus.granted;
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Abrir configurações'), findsNothing);
+        expect(find.byType(MobileScanner), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(1));
+
+        // Em modo normal, leitura após retorno continua funcionando normalmente
+        spyPlatform.emitBarcode('7891234567890', format: BarcodeFormat.ean13);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Produto encontrado'), findsOneWidget);
+        expect(find.text('Fazenda Terra Roxa Café Arábica Especial'), findsOneWidget);
+        expect(find.text('Ver produto'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'recuperação via errorBuilder seguida de retorno com concessão não reutiliza erro obsoleto nem duplica start()',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.granted,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(spyPlatform.startCalls, equals(1));
+
+        // Simula falha tardia de permissão no próprio MobileScanner (ex.: revogação)
+        final scannerElement = tester.element(find.byType(MobileScanner));
+        final scannerWidget = tester.widget<MobileScanner>(find.byType(MobileScanner));
+        scannerWidget.controller!.value = scannerWidget.controller!.value.copyWith(
+          error: const MobileScannerException(
+            errorCode: MobileScannerErrorCode.permissionDenied,
+          ),
+        );
+        fakePermission.nextCheckStatus = CameraPermissionStatus.permanentlyDenied;
+        scannerWidget.errorBuilder!(
+          scannerElement,
+          const MobileScannerException(
+            errorCode: MobileScannerErrorCode.permissionDenied,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Abrir configurações'), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(1));
+
+        // Retorna com permissão concedida
+        fakePermission.nextCheckStatus = CameraPermissionStatus.granted;
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MobileScanner), findsOneWidget);
+        expect(find.text('Abrir configurações'), findsNothing);
+        // Exatamente +1 start após recuperação (total = 2, nunca 3)
+        expect(spyPlatform.startCalls, equals(2));
+      },
+    );
+
+    testWidgets(
+      'fechamento da rota durante solicitação assíncrona de permissão ignora resposta tardia com segurança',
+      (tester) async {
+        final pendingRequest = Completer<CameraPermissionStatus>();
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.denied,
+          pendingRequest: pendingRequest,
+        );
+        final notifier = ScannerNotifier(productRepository: fakeRepository);
+        final poppedValues = <SearchResultItem?>[];
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    key: const Key('btn_push_scanner_perm'),
+                    onPressed: () async {
+                      final res = await Navigator.of(context).push<SearchResultItem?>(
+                        MaterialPageRoute<SearchResultItem?>(
+                          builder: (_) => ScannerScreen(
+                            notifier: notifier,
+                            selectionMode: true,
+                            cameraPermissionService: fakePermission,
+                          ),
+                        ),
+                      );
+                      poppedValues.add(res);
+                    },
+                    child: const Text('Abrir Scanner'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byKey(const Key('btn_push_scanner_perm')));
+        await tester.pumpAndSettle();
+
+        expect(fakePermission.requestCalls, equals(1));
+
+        // Fecha a rota enquanto a caixa de permissão ainda está pendente
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+
+        expect(poppedValues, equals([null]));
+        expect(notifier.state, isA<ScannerInitial>());
+
+        // Resposta tardia chega após fechamento da tela
+        pendingRequest.complete(CameraPermissionStatus.granted);
+        await tester.pumpAndSettle();
+
+        expect(notifier.state, isA<ScannerInitial>());
+        expect(spyPlatform.startCalls, equals(0));
+        expect(find.text('Abrir Scanner'), findsOneWidget);
+
+        notifier.dispose();
+      },
+    );
+
+    testWidgets(
+      'Selection Mode com negação permanente permite Voltar com null e funciona ao retornar com concessão',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.permanentlyDenied,
+        );
+        final results = <SearchResultItem?>[];
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    key: const Key('btn_open_selection_perm'),
+                    onPressed: () async {
+                      final res = await Navigator.of(context).push<SearchResultItem?>(
+                        MaterialPageRoute<SearchResultItem?>(
+                          builder: (_) => ScannerScreen(
+                            productRepository: fakeRepository,
+                            placeRepository: _FakePlaceRepository(),
+                            selectionMode: true,
+                            cameraPermissionService: fakePermission,
+                          ),
+                        ),
+                      );
+                      results.add(res);
+                    },
+                    child: const Text('Escanear para avaliar'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        // 1) Negação permanente + Voltar -> retorna null preservando rota anterior
+        await tester.tap(find.byKey(const Key('btn_open_selection_perm')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Abrir configurações'), findsOneWidget);
+        await tester.tap(find.text('Voltar'));
+        await tester.pumpAndSettle();
+
+        expect(results, equals([null]));
+        expect(find.text('Escanear para avaliar'), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(0));
+
+        // 2) Reabre em Selection Mode, vai às Configurações e retorna com concessão
+        await tester.tap(find.byKey(const Key('btn_open_selection_perm')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Abrir configurações'));
+        await tester.pumpAndSettle();
+
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+        fakePermission.nextCheckStatus = CameraPermissionStatus.granted;
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MobileScanner), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(1));
+
+        spyPlatform.emitBarcode('7891234567890', format: BarcodeFormat.ean13);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Selecionar produto'), findsOneWidget);
+        await tester.tap(find.text('Selecionar produto'));
+        await tester.pumpAndSettle();
+
+        expect(results.length, equals(2));
+        expect(results.last, isNotNull);
+        expect(results.last!.id, equals('prod-uuid-123'));
+        expect(results.last!.targetType, equals(TargetType.product));
+      },
+    );
+  });
+}
+
+class _FakeCameraPermissionService implements CameraPermissionService {
+  CameraPermissionStatus nextCheckStatus;
+  final List<CameraPermissionStatus> _requestResponses;
+  final Completer<CameraPermissionStatus>? pendingRequest;
+  bool openSettingsResult;
+
+  int checkCalls = 0;
+  int requestCalls = 0;
+  int openSettingsCalls = 0;
+
+  _FakeCameraPermissionService({
+    required CameraPermissionStatus initialCheckStatus,
+    List<CameraPermissionStatus> requestResponses = const [],
+    this.pendingRequest,
+    this.openSettingsResult = true,
+  })  : nextCheckStatus = initialCheckStatus,
+        _requestResponses = List<CameraPermissionStatus>.from(requestResponses);
+
+  @override
+  Future<CameraPermissionStatus> checkPermissionStatus({
+    bool afterRequest = false,
+  }) async {
+    checkCalls++;
+    return nextCheckStatus;
+  }
+
+  @override
+  Future<CameraPermissionStatus> requestPermission() async {
+    requestCalls++;
+    if (pendingRequest != null) {
+      return pendingRequest!.future;
+    }
+    if (_requestResponses.isNotEmpty) {
+      final result = _requestResponses.removeAt(0);
+      nextCheckStatus = result;
+      return result;
+    }
+    return nextCheckStatus;
+  }
+
+  @override
+  Future<bool> openAppSettings() async {
+    openSettingsCalls++;
+    return openSettingsResult;
+  }
+}
+
+class _SpyMobileScannerPlatform extends MobileScannerPlatform {
+  final StreamController<BarcodeCapture?> _barcodesController =
+      StreamController<BarcodeCapture?>.broadcast();
+  final StreamController<TorchState> _torchController =
+      StreamController<TorchState>.broadcast();
+  final StreamController<double> _zoomController =
+      StreamController<double>.broadcast();
+
+  int startCalls = 0;
+  int stopCalls = 0;
+
+  void emitBarcode(String rawValue, {BarcodeFormat format = BarcodeFormat.ean13}) {
+    if (_barcodesController.isClosed) return;
+    _barcodesController.add(
+      BarcodeCapture(
+        barcodes: [Barcode(rawValue: rawValue, format: format)],
+      ),
+    );
+  }
+
+  Future<void> disposeStreams() async {
+    await _barcodesController.close();
+    await _torchController.close();
+    await _zoomController.close();
+  }
+
+  @override
+  Stream<BarcodeCapture?> get barcodesStream => _barcodesController.stream;
+
+  @override
+  Stream<TorchState> get torchStateStream => _torchController.stream;
+
+  @override
+  Stream<double> get zoomScaleStateStream => _zoomController.stream;
+
+  @override
+  Widget buildCameraView() => const ColoredBox(color: Colors.black);
+
+  @override
+  Future<MobileScannerViewAttributes> start(StartOptions startOptions) async {
+    startCalls++;
+    return const MobileScannerViewAttributes(
+      cameraDirection: CameraFacing.back,
+      currentTorchMode: TorchState.off,
+      size: Size(1080, 1920),
+      numberOfCameras: 2,
+    );
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCalls++;
+  }
+
+  @override
+  Future<void> pause() async {}
+
+  @override
+  Future<void> dispose() async {}
 }
