@@ -188,6 +188,7 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
     try {
       final result = await service.getCurrentLocation(
         timeout: const Duration(seconds: 5),
+        purpose: LocationPurpose.discovery,
       );
       // Opção trocada ou nova leitura disparada durante a leitura: a posição é descartada
       if (!mounted || locSeq != _locationSequence || _mode != ExternalRegionMode.nearby) return;
@@ -566,6 +567,13 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
                   onPressed: () => widget.locationService?.openAppSettings(),
                   icon: const Icon(Icons.settings_outlined, size: 16),
                   label: const Text('Abrir configurações', style: TextStyle(fontSize: 12)),
+                ),
+              if (issue.reason == LocationFailureReason.serviceDisabled)
+                TextButton.icon(
+                  key: const Key('external_location_device_settings_button'),
+                  onPressed: () => widget.locationService?.openLocationSettings(),
+                  icon: const Icon(Icons.location_on_outlined, size: 16),
+                  label: const Text('Ativar localização', style: TextStyle(fontSize: 12)),
                 ),
             ],
           ),

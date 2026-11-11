@@ -74,6 +74,26 @@ class CheckInResult {
 
   bool get isVerified => status == CheckInResultStatus.verified;
 
+  /// Mensagem explicativa em português para quando o backend não verifica a presença.
+  String get notVerifiedReasonMessage {
+    if (status != CheckInResultStatus.notVerified) {
+      return 'Sua avaliação foi publicada, mas a presença no local não foi verificada.';
+    }
+    return switch (reason) {
+      'ACCURACY_TOO_LOW' =>
+        'A precisão do GPS estava baixa demais para confirmar sua presença. Tente de novo em um lugar aberto.',
+      'ACCURACY_UNAVAILABLE' =>
+        'O aparelho não informou a precisão da localização, então a presença não pôde ser confirmada.',
+      'OUTSIDE_RADIUS' =>
+        'Sua localização estava fora da área do local, então a presença não foi confirmada.',
+      'RECENT_CHECK_IN' =>
+        'Você já tem um check-in verificado recente neste local; este não conta como um novo.',
+      'PLACE_WITHOUT_COORDINATES' =>
+        'Este local não tem localização cadastrada, então a presença não pôde ser verificada.',
+      _ => 'Sua avaliação foi publicada, mas a presença no local não foi verificada.',
+    };
+  }
+
   static CheckInResult? fromJson(Object? json) {
     if (json is! Map<String, dynamic>) return null;
     final status = switch (json['status']) {

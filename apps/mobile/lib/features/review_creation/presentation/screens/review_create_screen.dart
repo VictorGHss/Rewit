@@ -13,6 +13,7 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
+import '../../domain/entities/device_location.dart';
 import '../../domain/entities/review_creation_input.dart';
 import '../../domain/entities/review_privacy_rules.dart';
 import '../../domain/repositories/review_creation_repository.dart';
@@ -131,28 +132,61 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
       final semantic = RewitSemanticColors.of(context);
 
       if (state.hasMediaFailures) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Avaliação criada com sucesso! Porém ${state.failedMediaCount} anexo(s) falharam no upload.',
-              style: TextStyle(color: semantic.warning.onContainer),
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Avaliação criada com sucesso! Porém ${state.failedMediaCount} anexo(s) falharam no upload.',
+                style: TextStyle(color: semantic.warning.onContainer),
+              ),
+              backgroundColor: semantic.warning.container,
+              duration: const Duration(seconds: 5),
             ),
-            backgroundColor: semantic.warning.container,
-            duration: const Duration(seconds: 5),
-          ),
-        );
+          );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              state.uploadedMediaCount > 0
-                  ? 'Avaliação publicada com ${state.uploadedMediaCount} foto(s) anexada(s)!'
-                  : 'Avaliação publicada com sucesso!',
-              style: TextStyle(color: semantic.success.onContainer),
+        final checkIn = createdReview.checkIn;
+        final String message;
+        final Color backgroundColor;
+        final Color foregroundColor;
+
+        if (checkIn?.status == CheckInResultStatus.verified) {
+          message = state.uploadedMediaCount > 0
+              ? 'Avaliação publicada com ${state.uploadedMediaCount} foto(s) e check-in verificado!'
+              : 'Avaliação publicada com check-in verificado!';
+          backgroundColor = semantic.verified.container;
+          foregroundColor = semantic.verified.onContainer;
+        } else if (checkIn?.status == CheckInResultStatus.notVerified) {
+          message = state.uploadedMediaCount > 0
+              ? 'Avaliação publicada com ${state.uploadedMediaCount} foto(s), mas check-in não verificado: ${checkIn!.notVerifiedReasonMessage}'
+              : 'Avaliação publicada, mas check-in não verificado: ${checkIn!.notVerifiedReasonMessage}';
+          backgroundColor = semantic.warning.container;
+          foregroundColor = semantic.warning.onContainer;
+        } else if (checkIn?.status == CheckInResultStatus.notRequested) {
+          message = state.uploadedMediaCount > 0
+              ? 'Avaliação publicada com ${state.uploadedMediaCount} foto(s) (check-in não solicitado).'
+              : 'Avaliação publicada (check-in não solicitado).';
+          backgroundColor = semantic.success.container;
+          foregroundColor = semantic.success.onContainer;
+        } else {
+          message = state.uploadedMediaCount > 0
+              ? 'Avaliação publicada com ${state.uploadedMediaCount} foto(s) anexada(s)!'
+              : 'Avaliação publicada com sucesso!';
+          backgroundColor = semantic.success.container;
+          foregroundColor = semantic.success.onContainer;
+        }
+
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                message,
+                style: TextStyle(color: foregroundColor),
+              ),
+              backgroundColor: backgroundColor,
             ),
-            backgroundColor: semantic.success.container,
-          ),
-        );
+          );
       }
 
       // Limpa os controladores e reinicia o estado do formulário para evitar reutilização no IndexedStack
@@ -730,75 +764,124 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
             ] else if (status == LocationCaptureStatus.captured &&
                 hasLocation) ...[
               if (_notifier.hasContextPlace)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: semantic.verified.container,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: semantic.verified.border),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.check_circle,
-                            color: semantic.verified.accent,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Presença capturada',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: semantic.verified.onContainer,
-                            ),
-                          ),
-                          const Spacer(),
-                          if (_notifier.locationAccuracyMeters != null)
-                            Text(
-                              'Precisão aproximada: ${_notifier.locationAccuracyMeters!.round()} m',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: semantic.verified.onContainer,
-                              ),
-                            ),
-                        ],
+                Builder(
+                  builder: (context) {
+                    final isApprox = _notifier.isApproximateLocation;
+                    final tone = isApprox ? semantic.warning : semantic.verified;
+                    final limitMeters =
+                        DeviceLocation.approximateAccuracyThresholdMeters.round();
+                    return Container(
+                      key: Key(
+                        isApprox
+                            ? 'review_location_approximate_card'
+                            : 'review_location_verified_card',
                       ),
-                      if (_notifier.isApproximateLocation) ...[
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: semantic.warning.container,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: semantic.warning.border),
-                          ),
-                          child: Row(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: tone.container,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: tone.border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
                             children: [
                               Icon(
-                                Icons.info_outline,
-                                size: 16,
-                                color: semantic.warning.accent,
+                                isApprox
+                                    ? Icons.warning_amber_rounded
+                                    : Icons.check_circle,
+                                color: tone.accent,
+                                size: 20,
                               ),
                               const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Localização aproximada concedida. A precisão pode não ser suficiente para validar presença no local.',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: semantic.warning.onContainer,
-                                  ),
+                              Text(
+                                'Presença capturada',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: tone.onContainer,
                                 ),
                               ),
+                              const Spacer(),
+                              if (_notifier.locationAccuracyMeters != null)
+                                Text(
+                                  'Precisão aproximada: ${_notifier.locationAccuracyMeters!.round()} m',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: tone.onContainer,
+                                  ),
+                                ),
                             ],
                           ),
-                        ),
-                      ],
-                    ],
-                  ),
+                          if (isApprox) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              key: const Key('review_approximate_warning'),
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: scheme.surface.withAlpha(180),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: semantic.warning.border),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline,
+                                        size: 16,
+                                        color: semantic.warning.accent,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Localização aproximada concedida. A precisão pode não ser suficiente para validar presença no local.',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: semantic.warning.onContainer,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _notifier.isPermissionApproximate
+                                        ? 'A permissão está definida apenas como aproximada no aparelho. O check-in exige localização exata (até $limitMeters m), mas sua avaliação pode ser publicada normalmente.'
+                                        : 'O check-in exige precisão de até $limitMeters m e não há garantia de verificação com esta leitura. Você pode tentar capturar novamente ou publicar sua avaliação normalmente.',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: semantic.warning.onContainer,
+                                    ),
+                                  ),
+                                  if (_notifier.isPermissionApproximate) ...[
+                                    const SizedBox(height: 4),
+                                    TextButton.icon(
+                                      key: const Key(
+                                          'approximate_open_settings_button'),
+                                      onPressed: isSubmitting
+                                          ? null
+                                          : () => _notifier.openAppSettings(),
+                                      icon: const Icon(Icons.settings_outlined,
+                                          size: 16),
+                                      label: const Text(
+                                        'Abrir configurações',
+                                        style: TextStyle(fontSize: 12),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
                 )
               else
                 Container(
@@ -850,9 +933,11 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                       onPressed:
                           isSubmitting ? null : () => _notifier.captureLocation(),
                       icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text(
-                        'Atualizar localização',
-                        style: TextStyle(fontSize: 12),
+                      label: Text(
+                        _notifier.isApproximateLocation
+                            ? 'Tentar novamente'
+                            : 'Atualizar localização',
+                        style: const TextStyle(fontSize: 12),
                       ),
                     ),
                   ),
@@ -905,37 +990,48 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    Row(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.start,
                       children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            key: const Key('retry_location_button'),
-                            onPressed: isSubmitting
-                                ? null
-                                : () => _notifier.captureLocation(),
-                            child: const Text(
-                              'Tentar novamente',
-                              style: TextStyle(fontSize: 12),
-                            ),
+                        OutlinedButton(
+                          key: const Key('retry_location_button'),
+                          onPressed: isSubmitting
+                              ? null
+                              : () => _notifier.captureLocation(),
+                          child: const Text(
+                            'Tentar novamente',
+                            style: TextStyle(fontSize: 12),
                           ),
                         ),
                         if (_notifier.locationFailureReason ==
-                            LocationFailureReason.permissionDeniedForever) ...[
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: OutlinedButton(
-                              key: const Key('open_settings_button'),
-                              onPressed: isSubmitting
-                                  ? null
-                                  : () => _notifier.openAppSettings(),
-                              child: const Text(
-                                'Abrir configurações',
-                                style: TextStyle(fontSize: 12),
-                              ),
+                            LocationFailureReason.permissionDeniedForever)
+                          OutlinedButton.icon(
+                            key: const Key('open_settings_button'),
+                            onPressed: isSubmitting
+                                ? null
+                                : () => _notifier.openAppSettings(),
+                            icon: const Icon(Icons.settings_outlined, size: 16),
+                            label: const Text(
+                              'Abrir configurações',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          )
+                        else if (_notifier.locationFailureReason ==
+                            LocationFailureReason.serviceDisabled)
+                          OutlinedButton.icon(
+                            key: const Key('open_location_settings_button'),
+                            onPressed: isSubmitting
+                                ? null
+                                : () => _notifier.openLocationSettings(),
+                            icon:
+                                const Icon(Icons.location_on_outlined, size: 16),
+                            label: const Text(
+                              'Ativar localização',
+                              style: TextStyle(fontSize: 12),
                             ),
                           ),
-                        ],
-                        const SizedBox(width: 8),
                         TextButton(
                           onPressed: isSubmitting
                               ? null

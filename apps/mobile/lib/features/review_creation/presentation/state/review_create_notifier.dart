@@ -68,6 +68,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
   double? _userLatitude;
   double? _userLongitude;
   double? _locationAccuracyMeters;
+  bool _isPermissionApproximate = false;
   LocationCaptureStatus _locationStatus = LocationCaptureStatus.idle;
   String? _locationErrorMessage;
   LocationFailureReason? _locationFailureReason;
@@ -139,8 +140,9 @@ class ReviewCreateNotifier extends ChangeNotifier {
       _userLongitude != null;
   bool get hasValidCheckin => hasContextPlace && hasLocation;
   bool get isRequestingLocation => _locationStatus == LocationCaptureStatus.requesting;
+  bool get isPermissionApproximate => _isPermissionApproximate;
   bool get isApproximateLocation =>
-      DeviceLocation.isAccuracyApproximate(_locationAccuracyMeters);
+      _isPermissionApproximate || DeviceLocation.isAccuracyApproximate(_locationAccuracyMeters);
 
   /// Adiciona um novo alvo para avaliação multi-alvo (Step 11.0).
   void addTarget({
@@ -316,8 +318,8 @@ class ReviewCreateNotifier extends ChangeNotifier {
     _safeNotifyListeners();
   }
 
-  /// Captura a localização atual sob demanda (chamada única) com proteção contra concorrência e descarte de dados após falha ou submissão (C5.10).
-  Future<bool> captureLocation({Duration timeout = const Duration(seconds: 10)}) async {
+  /// Captura a localização atual sob demanda para verificação de presença (sem usar cache antigo) (C5.10).
+  Future<bool> captureLocation({Duration? timeout}) async {
     if (_isDisposed || isSubmitting || _locationStatus == LocationCaptureStatus.requesting) {
       return false;
     }
@@ -330,6 +332,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
     _userLatitude = null;
     _userLongitude = null;
     _locationAccuracyMeters = null;
+    _isPermissionApproximate = false;
     _safeNotifyListeners();
 
     if (locationService == null) {
@@ -341,7 +344,10 @@ class ReviewCreateNotifier extends ChangeNotifier {
     }
 
     try {
-      final result = await locationService!.getCurrentLocation(timeout: timeout);
+      final result = await locationService!.getCurrentLocation(
+        timeout: timeout,
+        purpose: LocationPurpose.presenceVerification,
+      );
 
       if (_isDisposed || seq != _locationCaptureSequence || isSubmitting || _state is ReviewCreateSuccess) {
         return false;
@@ -352,6 +358,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
           _userLatitude = location.latitude;
           _userLongitude = location.longitude;
           _locationAccuracyMeters = location.accuracyMeters;
+          _isPermissionApproximate = location.isPermissionApproximate;
           _locationStatus = LocationCaptureStatus.captured;
           _locationErrorMessage = null;
           _locationFailureReason = null;
@@ -362,6 +369,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
           _userLatitude = null;
           _userLongitude = null;
           _locationAccuracyMeters = null;
+          _isPermissionApproximate = false;
           _locationStatus = LocationCaptureStatus.error;
           _locationFailureReason = reason;
           _locationErrorMessage = message;
@@ -375,6 +383,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
       _userLatitude = null;
       _userLongitude = null;
       _locationAccuracyMeters = null;
+      _isPermissionApproximate = false;
       _locationStatus = LocationCaptureStatus.error;
       _locationFailureReason = LocationFailureReason.error;
       _locationErrorMessage = 'Não foi possível obter sua localização agora.';
@@ -389,11 +398,14 @@ class ReviewCreateNotifier extends ChangeNotifier {
     double? latitude,
     double? longitude,
     double? accuracyMeters,
+    bool isPermissionApproximate = false,
   }) {
     if (_isDisposed || isSubmitting) return;
     _userLatitude = latitude;
     _userLongitude = longitude;
     _locationAccuracyMeters = accuracyMeters;
+    _isPermissionApproximate =
+        (latitude != null && longitude != null) ? isPermissionApproximate : false;
     _locationStatus = (latitude != null && longitude != null)
         ? LocationCaptureStatus.captured
         : LocationCaptureStatus.idle;
@@ -405,19 +417,27 @@ class ReviewCreateNotifier extends ChangeNotifier {
   /// Remove coordenadas de presença e descarta os dados da memória da criação.
   void clearCoordinates() {
     if (_isDisposed || isSubmitting) return;
+    _locationCaptureSequence++;
     _userLatitude = null;
     _userLongitude = null;
     _locationAccuracyMeters = null;
+    _isPermissionApproximate = false;
     _locationStatus = LocationCaptureStatus.idle;
     _locationErrorMessage = null;
     _locationFailureReason = null;
     _safeNotifyListeners();
   }
 
-  /// Abre as configurações do sistema para ajuste manual de permissões se necessário.
+  /// Abre as configurações do aplicativo para ajuste manual de permissões se necessário.
   Future<bool> openAppSettings() async {
     if (_isDisposed || locationService == null) return false;
     return locationService!.openAppSettings();
+  }
+
+  /// Abre as configurações de localização do aparelho para ativar o GPS / serviço.
+  Future<bool> openLocationSettings() async {
+    if (_isDisposed || locationService == null) return false;
+    return locationService!.openLocationSettings();
   }
 
   /// Seleciona mídias da galeria até o limite restante de 5 anexos.
@@ -650,6 +670,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
       _userLatitude = null;
       _userLongitude = null;
       _locationAccuracyMeters = null;
+      _isPermissionApproximate = false;
       _locationStatus = LocationCaptureStatus.idle;
 
       if (_selectedMedia.isEmpty || mediaRepository == null) {
@@ -791,6 +812,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
   /// Limpa o estado e redefine os campos do formulário para o padrão.
   void reset() {
     if (_isDisposed) return;
+    _locationCaptureSequence++;
     _state = const ReviewCreateInitial();
     _targets.clear();
     _targets.add(
@@ -809,6 +831,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
     _userLatitude = null;
     _userLongitude = null;
     _locationAccuracyMeters = null;
+    _isPermissionApproximate = false;
     _locationStatus = LocationCaptureStatus.idle;
     _locationErrorMessage = null;
     _locationFailureReason = null;

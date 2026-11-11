@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
+import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_notifier.dart';
@@ -239,8 +241,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
           margin: const EdgeInsets.only(bottom: 12),
           message: _locationErrorMessage(notifier),
         ),
-        if (notifier.locationFailureReason == LocationFailureReason.permissionDeniedForever ||
-            notifier.locationFailureReason == LocationFailureReason.serviceDisabled)
+        if (notifier.locationFailureReason == LocationFailureReason.permissionDeniedForever)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: OutlinedButton.icon(
@@ -248,6 +249,16 @@ class _CheckInScreenState extends State<CheckInScreen> {
               onPressed: notifier.openAppSettings,
               icon: const Icon(Icons.settings_outlined),
               label: const Text('Abrir configurações'),
+            ),
+          )
+        else if (notifier.locationFailureReason == LocationFailureReason.serviceDisabled)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: OutlinedButton.icon(
+              key: const Key('checkin_open_location_settings'),
+              onPressed: notifier.openLocationSettings,
+              icon: const Icon(Icons.location_on_outlined),
+              label: const Text('Ativar localização'),
             ),
           ),
       ],
@@ -272,7 +283,8 @@ class _CheckInScreenState extends State<CheckInScreen> {
         'Sem permissão de localização não é possível fazer check-in. Você ainda pode publicar uma avaliação completa pelo botão + (Nova Avaliação).',
       LocationFailureReason.permissionDeniedForever =>
         'A permissão de localização foi negada. Libere-a nas configurações do aparelho para fazer check-in.',
-      LocationFailureReason.serviceDisabled => 'A localização do aparelho está desligada.',
+      LocationFailureReason.serviceDisabled =>
+        'A localização do aparelho está desligada. Ative-a nas configurações do dispositivo para fazer check-in.',
       LocationFailureReason.timeout => 'Não foi possível obter sua localização a tempo.',
       _ => notifier.locationErrorMessage ?? 'Não foi possível obter sua localização agora.',
     };
@@ -294,13 +306,11 @@ class _CheckInScreenState extends State<CheckInScreen> {
         ],
       ),
       if (notifier.isApproximateLocation)
-        const Padding(
-          padding: EdgeInsets.only(top: 4, bottom: 8),
-          child: Text(
-            'Sua localização está aproximada. Você pode publicar, mas o Rewit pode não conseguir confirmar a '
-            'presença no local.',
-            key: Key('checkin_approximate_hint'),
-          ),
+        _buildApproximateWarning(
+          context,
+          notifier,
+          bannerKey: const Key('checkin_approximate_hint'),
+          showActions: true,
         ),
       const SizedBox(height: 8),
       if (_loadingNearby)
@@ -398,6 +408,15 @@ class _CheckInScreenState extends State<CheckInScreen> {
         const SizedBox(height: 8),
         ErrorBanner(key: const Key('checkin_submit_error'), message: state.message),
       ],
+      if (notifier.isApproximateLocation) ...[
+        const SizedBox(height: 8),
+        _buildApproximateWarning(
+          context,
+          notifier,
+          bannerKey: const Key('checkin_form_approximate_hint'),
+          showActions: false,
+        ),
+      ],
       const SizedBox(height: 12),
       FilledButton(
         key: const Key('checkin_publish_button'),
@@ -407,6 +426,73 @@ class _CheckInScreenState extends State<CheckInScreen> {
             : Text(state is ReviewCreateError ? 'Tentar novamente' : 'Publicar check-in'),
       ),
     ];
+  }
+
+  Widget _buildApproximateWarning(
+    BuildContext context,
+    ReviewCreateNotifier notifier, {
+    required Key bannerKey,
+    required bool showActions,
+  }) {
+    final semantic = RewitSemanticColors.of(context);
+    final accuracyMeters = notifier.locationAccuracyMeters?.round();
+    final limitMeters = DeviceLocation.approximateAccuracyThresholdMeters.round();
+    final message = notifier.isPermissionApproximate
+        ? 'Você concedeu apenas localização aproximada${accuracyMeters != null ? ' ($accuracyMeters m)' : ''}. '
+            'Sua avaliação pode ser publicada normalmente, mas o check-in não será verificado até liberar a localização exata (até $limitMeters m).'
+        : 'Sua localização está com precisão aproximada${accuracyMeters != null ? ' ($accuracyMeters m, limite de $limitMeters m)' : ''}. '
+            'Você pode publicar a avaliação normalmente, mas não há garantia de check-in verificado.';
+
+    return Container(
+      key: bannerKey,
+      margin: const EdgeInsets.only(top: 4, bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: semantic.warning.container,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: semantic.warning.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 20, color: semantic.warning.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: TextStyle(fontSize: 13, color: semantic.warning.onContainer),
+                ),
+              ),
+            ],
+          ),
+          if (showActions) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                TextButton.icon(
+                  key: const Key('checkin_approximate_retry'),
+                  onPressed: notifier.isRequestingLocation || _loadingNearby ? null : _locate,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Tentar novamente'),
+                ),
+                if (notifier.isPermissionApproximate)
+                  TextButton.icon(
+                    key: const Key('checkin_approximate_open_settings'),
+                    onPressed: notifier.openAppSettings,
+                    icon: const Icon(Icons.settings_outlined, size: 16),
+                    label: const Text('Abrir configurações'),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -423,12 +509,25 @@ class _ResultCard extends StatelessWidget {
     final theme = Theme.of(context);
     final checkIn = review.checkIn;
     final verified = checkIn?.isVerified ?? false;
-    final title = verified ? 'Presença verificada' : 'Avaliação publicada sem check-in verificado';
+    final notRequested = checkIn?.status == CheckInResultStatus.notRequested;
+    final title = verified
+        ? 'Presença verificada'
+        : notRequested
+            ? 'Avaliação publicada (check-in não solicitado)'
+            : 'Avaliação publicada sem check-in verificado';
     final message = verified
         ? 'O Rewit confirmou que você estava no local. Sua avaliação foi publicada com o selo de presença.'
-        : _reasonMessage(checkIn);
+        : notRequested
+            ? 'Sua avaliação foi publicada sem envio de localização para verificação de presença.'
+            : (checkIn?.notVerifiedReasonMessage ??
+                'Sua avaliação foi publicada, mas a presença no local não foi verificada.');
+    final cardKey = verified
+        ? const Key('checkin_result_verified')
+        : notRequested
+            ? const Key('checkin_result_not_requested')
+            : const Key('checkin_result_not_verified');
     return Card(
-      key: Key(verified ? 'checkin_result_verified' : 'checkin_result_not_verified'),
+      key: cardKey,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
@@ -459,22 +558,5 @@ class _ResultCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  static String _reasonMessage(CheckInResult? checkIn) {
-    if (checkIn == null || checkIn.status != CheckInResultStatus.notVerified) {
-      return 'Sua avaliação foi publicada, mas a presença no local não foi verificada.';
-    }
-    return switch (checkIn.reason) {
-      'ACCURACY_TOO_LOW' =>
-        'A precisão do GPS estava baixa demais para confirmar sua presença. Tente de novo em um lugar aberto.',
-      'ACCURACY_UNAVAILABLE' =>
-        'O aparelho não informou a precisão da localização, então a presença não pôde ser confirmada.',
-      'OUTSIDE_RADIUS' => 'Sua localização estava fora da área do local, então a presença não foi confirmada.',
-      'RECENT_CHECK_IN' => 'Você já tem um check-in verificado recente neste local; este não conta como um novo.',
-      'PLACE_WITHOUT_COORDINATES' =>
-        'Este local não tem localização cadastrada, então a presença não pôde ser verificada.',
-      _ => 'Sua avaliação foi publicada, mas a presença no local não foi verificada.',
-    };
   }
 }

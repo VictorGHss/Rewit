@@ -42,6 +42,8 @@ class _FakeLocationService implements LocationService {
   LocationResult result;
   int requests = 0;
   int settingsOpened = 0;
+  int locationSettingsOpened = 0;
+  LocationPurpose? lastPurpose;
 
   _FakeLocationService(this.result);
 
@@ -49,14 +51,24 @@ class _FakeLocationService implements LocationService {
       : result = LocationSuccess(DeviceLocation(latitude: -25.4384, longitude: -49.2849, accuracyMeters: accuracy));
 
   @override
-  Future<LocationResult> getCurrentLocation({Duration timeout = const Duration(seconds: 10)}) async {
+  Future<LocationResult> getCurrentLocation({
+    Duration? timeout,
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
     requests++;
+    lastPurpose = purpose;
     return result;
   }
 
   @override
   Future<bool> openAppSettings() async {
     settingsOpened++;
+    return true;
+  }
+
+  @override
+  Future<bool> openLocationSettings() async {
+    locationSettingsOpened++;
     return true;
   }
 }
@@ -542,6 +554,88 @@ void main() {
       expect(reviews.inputs, hasLength(2));
       expect(find.byKey(const Key('checkin_result_not_verified')), findsOneWidget);
       expect(find.textContaining('check-in verificado recente'), findsOneWidget);
+    });
+
+    testWidgets('serviceDisabled abre configurações de localização do sistema e retorno permite tentar de novo',
+        (tester) async {
+      final location = _FakeLocationService(const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'A localização do aparelho está desligada.',
+      ));
+      await _pumpCheckIn(
+        tester,
+        location: location,
+        checkIns: _FakeCheckInRepository(),
+        reviews: _FakeReviewCreationRepository(),
+      );
+
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      expect(location.lastPurpose, LocationPurpose.presenceVerification);
+      expect(find.byKey(const Key('checkin_open_location_settings')), findsOneWidget);
+      expect(find.byKey(const Key('checkin_open_settings')), findsNothing);
+
+      await _tap(tester, find.byKey(const Key('checkin_open_location_settings')));
+      expect(location.locationSettingsOpened, 1);
+      expect(location.settingsOpened, 0);
+
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.4384, longitude: -49.2849, accuracyMeters: 10),
+      );
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      expect(find.text('Café Central'), findsOneWidget);
+    });
+
+    testWidgets('permissão aproximada informa limite, oferece configurações e ainda permite publicar', (tester) async {
+      final location = _FakeLocationService(const LocationSuccess(
+        DeviceLocation(
+          latitude: -25.4384,
+          longitude: -49.2849,
+          accuracyMeters: 350,
+          isPermissionApproximate: true,
+        ),
+      ));
+      final reviews = _FakeReviewCreationRepository()
+        ..result = const CheckInResult(status: CheckInResultStatus.notVerified, reason: 'ACCURACY_TOO_LOW');
+
+      await _pumpCheckIn(
+        tester,
+        location: location,
+        checkIns: _FakeCheckInRepository(),
+        reviews: reviews,
+      );
+
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      expect(find.byKey(const Key('checkin_approximate_hint')), findsOneWidget);
+      expect(find.byKey(const Key('checkin_approximate_open_settings')), findsOneWidget);
+
+      await _tap(tester, find.byKey(const Key('checkin_approximate_open_settings')));
+      expect(location.settingsOpened, 1);
+
+      await _tap(tester, find.byKey(const Key('checkin_place_$_cafeId')));
+      expect(find.byKey(const Key('checkin_form_approximate_hint')), findsOneWidget);
+
+      await _tap(tester, find.byIcon(Icons.star_border).at(3));
+      await _tap(tester, find.byKey(const Key('checkin_publish_button')));
+
+      expect(reviews.inputs.single.locationAccuracyMeters, 350);
+      expect(find.byKey(const Key('checkin_result_not_verified')), findsOneWidget);
+      expect(find.textContaining('precisão do GPS estava baixa demais'), findsOneWidget);
+    });
+
+    testWidgets('distingue resultado NOT_REQUESTED após publicação', (tester) async {
+      final reviews = _FakeReviewCreationRepository()
+        ..result = const CheckInResult(status: CheckInResultStatus.notRequested);
+      await _pumpCheckIn(
+        tester,
+        location: _FakeLocationService.at(),
+        checkIns: _FakeCheckInRepository(),
+        reviews: reviews,
+      );
+      await _reachForm(tester);
+      await _tap(tester, find.byKey(const Key('checkin_publish_button')));
+
+      expect(find.byKey(const Key('checkin_result_not_requested')), findsOneWidget);
+      expect(find.text('Avaliação publicada (check-in não solicitado)'), findsOneWidget);
     });
   });
 

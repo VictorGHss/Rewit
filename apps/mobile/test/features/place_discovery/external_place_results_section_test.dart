@@ -76,20 +76,38 @@ class _FakeDiscoveryRepository implements PlaceDiscoveryRepository {
 
 class _FakeLocationService implements LocationService {
   int calls = 0;
+  int openAppSettingsCalls = 0;
+  int openLocationSettingsCalls = 0;
+  LocationPurpose? lastPurpose;
+  Duration? lastTimeout;
   LocationResult result = const LocationSuccess(
     DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 20),
   );
   Completer<LocationResult>? locationCompleter;
 
   @override
-  Future<LocationResult> getCurrentLocation({Duration timeout = const Duration(seconds: 10)}) async {
+  Future<LocationResult> getCurrentLocation({
+    Duration? timeout,
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
     calls++;
+    lastPurpose = purpose;
+    lastTimeout = timeout;
     if (locationCompleter != null) return locationCompleter!.future;
     return result;
   }
 
   @override
-  Future<bool> openAppSettings() async => true;
+  Future<bool> openAppSettings() async {
+    openAppSettingsCalls++;
+    return true;
+  }
+
+  @override
+  Future<bool> openLocationSettings() async {
+    openLocationSettingsCalls++;
+    return true;
+  }
 }
 
 const _attributions = [
@@ -630,5 +648,38 @@ void main() {
     // Deve continuar exibindo o resultado atual da busca mais recente e não o da busca atrasada
     expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
     expect(find.text('Padaria Super Pão'), findsNothing);
+  });
+
+  testWidgets('descoberta usa LocationPurpose.discovery e serviceDisabled abre openLocationSettings com retry',
+      (tester) async {
+    location.result = const LocationFailure(
+      reason: LocationFailureReason.serviceDisabled,
+      message: 'GPS desligado.',
+    );
+
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await selectNearby(tester);
+
+    expect(location.lastPurpose, LocationPurpose.discovery);
+    expect(location.lastTimeout, const Duration(seconds: 5));
+    expect(find.byKey(const Key('external_location_device_settings_button')), findsOneWidget);
+    expect(find.byKey(const Key('external_location_settings_button')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('external_location_device_settings_button')));
+    await tester.pumpAndSettle();
+    expect(location.openLocationSettingsCalls, 1);
+    expect(location.openAppSettingsCalls, 0);
+
+    // Após ligar GPS e tentar novamente, busca funciona
+    location.result = const LocationSuccess(
+      DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 45),
+    );
+    discovery.results = const [_adoptable];
+    await tester.tap(find.byKey(const Key('external_location_retry_button')));
+    await tester.pumpAndSettle();
+
+    expect(discovery.searchCalls, 1);
+    expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
   });
 }
