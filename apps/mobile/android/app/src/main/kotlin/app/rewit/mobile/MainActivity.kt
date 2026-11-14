@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
@@ -24,10 +25,8 @@ class MainActivity : FlutterActivity() {
         private const val PREFS_NAME = "rewit_camera_permission_prefs"
         private const val KEY_PERMANENTLY_DENIED =
             "camera_permission_permanently_denied"
-
-        private const val STATUS_GRANTED = "granted"
-        private const val STATUS_DENIED = "denied"
-        private const val STATUS_PERMANENTLY_DENIED = "permanentlyDenied"
+        private const val KEY_HAS_REQUESTED_PERMISSION =
+            "camera_permission_has_requested"
     }
 
     private var pendingCameraPermissionResult: MethodChannel.Result? = null
@@ -57,29 +56,17 @@ class MainActivity : FlutterActivity() {
 
     private fun resolveCameraPermissionStatus(afterRequest: Boolean): String {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (checkSelfPermission(Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            prefs.edit().remove(KEY_PERMANENTLY_DENIED).apply()
-            return STATUS_GRANTED
-        }
-
-        if (shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)) {
-            prefs.edit().remove(KEY_PERMANENTLY_DENIED).apply()
-            return STATUS_DENIED
-        }
-
-        if (afterRequest) {
-            prefs.edit().putBoolean(KEY_PERMANENTLY_DENIED, true).apply()
-            return STATUS_PERMANENTLY_DENIED
-        }
-
-        val permanentlyDenied = prefs.getBoolean(KEY_PERMANENTLY_DENIED, false)
-        return if (permanentlyDenied) {
-            STATUS_PERMANENTLY_DENIED
-        } else {
-            STATUS_DENIED
-        }
+        val transition = CameraPermissionStateMachine.resolveStatusCheck(
+            state = readPersistedPermissionState(prefs),
+            isGranted =
+                checkSelfPermission(Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED,
+            shouldShowRationale =
+                shouldShowRequestPermissionRationale(Manifest.permission.CAMERA),
+            afterRequest = afterRequest,
+        )
+        writePersistedPermissionState(prefs, transition.nextState)
+        return transition.status.wireValue
     }
 
     private fun requestCameraPermission(result: MethodChannel.Result) {
@@ -87,8 +74,14 @@ class MainActivity : FlutterActivity() {
         if (checkSelfPermission(Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
         ) {
-            prefs.edit().remove(KEY_PERMANENTLY_DENIED).apply()
-            result.success(STATUS_GRANTED)
+            val transition = CameraPermissionStateMachine.resolveStatusCheck(
+                state = readPersistedPermissionState(prefs),
+                isGranted = true,
+                shouldShowRationale = false,
+                afterRequest = false,
+            )
+            writePersistedPermissionState(prefs, transition.nextState)
+            result.success(transition.status.wireValue)
             return
         }
 
@@ -124,21 +117,51 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        if (grantResults.isEmpty()) {
-            pendingResult.success(STATUS_DENIED)
-            return
+        val outcome = when {
+            grantResults.isEmpty() -> CameraPermissionRequestOutcome.CANCELLED
+            grantResults[0] == PackageManager.PERMISSION_GRANTED ->
+                CameraPermissionRequestOutcome.GRANTED
+            else -> CameraPermissionRequestOutcome.DENIED
         }
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val transition = CameraPermissionStateMachine.resolveRequestResult(
+            state = readPersistedPermissionState(prefs),
+            outcome = outcome,
+            isGrantedAfterResult =
+                checkSelfPermission(Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED,
+            shouldShowRationale =
+                shouldShowRequestPermissionRationale(Manifest.permission.CAMERA),
+        )
+        writePersistedPermissionState(prefs, transition.nextState)
+        pendingResult.success(transition.status.wireValue)
+    }
 
-        if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .remove(KEY_PERMANENTLY_DENIED)
-                .apply()
-            pendingResult.success(STATUS_GRANTED)
-            return
-        }
+    private fun readPersistedPermissionState(
+        prefs: SharedPreferences,
+    ): CameraPermissionPersistedState {
+        return CameraPermissionPersistedState(
+            hasRequestedBefore = prefs.getBoolean(KEY_HAS_REQUESTED_PERMISSION, false),
+            permanentlyDenied = prefs.getBoolean(KEY_PERMANENTLY_DENIED, false),
+        )
+    }
 
-        pendingResult.success(resolveCameraPermissionStatus(afterRequest = true))
+    private fun writePersistedPermissionState(
+        prefs: SharedPreferences,
+        state: CameraPermissionPersistedState,
+    ) {
+        prefs.edit().apply {
+            if (state.hasRequestedBefore) {
+                putBoolean(KEY_HAS_REQUESTED_PERMISSION, true)
+            } else {
+                remove(KEY_HAS_REQUESTED_PERMISSION)
+            }
+            if (state.permanentlyDenied) {
+                putBoolean(KEY_PERMANENTLY_DENIED, true)
+            } else {
+                remove(KEY_PERMANENTLY_DENIED)
+            }
+        }.apply()
     }
 
     private fun openApplicationSettings(): Boolean {
