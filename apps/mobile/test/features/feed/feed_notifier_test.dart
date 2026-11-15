@@ -11,14 +11,22 @@ import 'package:rewit_mobile/features/review_detail/domain/entities/update_revie
 
 
 class FakeFeedRepository implements FeedRepository {
+  int getFeedCallCount = 0;
+  int getFollowingFeedCallCount = 0;
+  int toggleHelpfulCallCount = 0;
   FeedPage? page0Response;
   FeedPage? page1Response;
+  FeedPage? followingPage0Response;
+  FeedPage? followingPage1Response;
   bool shouldThrowOnInitial = false;
   bool shouldThrowOnLoadMore = false;
+  bool shouldThrowOnFollowingInitial = false;
+  bool shouldThrowOnFollowingLoadMore = false;
   bool shouldThrowOnHelpful = false;
   Completer<HelpfulResult>? toggleHelpfulCompleter;
   Completer<FeedPage>? delayedPage1Completer;
   Future<FeedPage> Function({int page, int size})? customGetFeedHandler;
+  Future<FeedPage> Function({int page, int size})? customGetFollowingFeedHandler;
 
   FeedReview _makeReview(String id, {bool isHelpful = false, int helpfulCount = 0}) {
     return FeedReview(
@@ -34,6 +42,7 @@ class FakeFeedRepository implements FeedRepository {
 
   @override
   Future<FeedPage> getFeed({int page = 0, int size = 10}) async {
+    getFeedCallCount++;
     if (customGetFeedHandler != null) {
       return customGetFeedHandler!(page: page, size: size);
     }
@@ -74,12 +83,39 @@ class FakeFeedRepository implements FeedRepository {
   }
 
   @override
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10}) async {
+    getFollowingFeedCallCount++;
+    if (customGetFollowingFeedHandler != null) {
+      return customGetFollowingFeedHandler!(page: page, size: size);
+    }
+    if (page == 0 && shouldThrowOnFollowingInitial) {
+      throw const NetworkException('Sem conexão com o servidor no following');
+    }
+    if (page > 0 && shouldThrowOnFollowingLoadMore) {
+      throw const ApiException(ProblemDetail(
+        type: 'about:blank',
+        title: 'Erro de Servidor',
+        status: 500,
+        detail: 'Falha temporária ao carregar página do following',
+      ));
+    }
+    if (page == 0 && followingPage0Response != null) {
+      return followingPage0Response!;
+    }
+    if (page > 0 && followingPage1Response != null) {
+      return followingPage1Response!;
+    }
+    return getFeed(page: page, size: size);
+  }
+
+  @override
   Future<FeedReview> getReviewById(String reviewId) async {
     return _makeReview(reviewId);
   }
 
   @override
   Future<HelpfulResult> toggleHelpful(String reviewId, {required bool currentlyHelpful}) async {
+    toggleHelpfulCallCount++;
     if (shouldThrowOnHelpful) {
       throw const NetworkException('Falha de rede ao votar útil');
     }
@@ -528,6 +564,697 @@ void main() {
       final successFinal = notifier.state as FeedSuccess;
       expect(successFinal.reviews.length, 14);
       expect(successFinal.reviews.map((r) => r.id), containsAll(['rev-11', 'rev-12', 'rev-13', 'rev-14', 'rev-15']));
+    });
+
+    test('reset descarta o feed da sessão encerrada e ignora a página ainda em curso', () async {
+      await notifier.loadInitial();
+      final pendingPage = Completer<FeedPage>();
+      repository.customGetFeedHandler = ({int page = 0, int size = 10}) => pendingPage.future;
+      final staleLoad = notifier.refresh();
+
+      notifier.reset();
+      expect(notifier.state, isA<FeedInitial>());
+
+      pendingPage.complete(FeedPage(
+        items: [repository._makeReview('rev-outra-conta')],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 1,
+      ));
+      await staleLoad;
+      expect(notifier.state, isA<FeedInitial>(), reason: 'a resposta pedida pela sessão anterior não é exibida');
+
+      repository.customGetFeedHandler = null;
+      await notifier.loadInitial();
+      expect((notifier.state as FeedSuccess).reviews.map((r) => r.id).toList(), ['rev-1', 'rev-2']);
+    });
+
+    test('reset: voto útil em curso da sessão encerrada não altera nem libera o voto da sessão seguinte', () async {
+      await notifier.loadInitial();
+      final previousVote = Completer<HelpfulResult>();
+      repository.toggleHelpfulCompleter = previousVote;
+      final previousToggle = notifier.toggleHelpful('rev-1');
+
+      notifier.reset();
+      expect(notifier.isTogglingHelpful('rev-1'), isFalse);
+
+      // Outra conta carrega o próprio feed, com a mesma avaliação, e vota nela
+      await notifier.loadInitial();
+      final currentVote = Completer<HelpfulResult>();
+      repository.toggleHelpfulCompleter = currentVote;
+      final currentToggle = notifier.toggleHelpful('rev-1');
+      expect(notifier.isTogglingHelpful('rev-1'), isTrue);
+
+      previousVote.complete(const HelpfulResult(helpful: false, helpfulCount: 42));
+      await previousToggle;
+      final duringCurrentVote = (notifier.state as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-1');
+      expect(duringCurrentVote.isHelpfulByMe, isTrue, reason: 'otimista do voto atual, não o resultado anterior');
+      expect(duringCurrentVote.helpfulCount, 1);
+      expect(notifier.isTogglingHelpful('rev-1'), isTrue);
+
+      currentVote.complete(const HelpfulResult(helpful: true, helpfulCount: 1));
+      await currentToggle;
+      expect(notifier.isTogglingHelpful('rev-1'), isFalse);
+      expect((notifier.state as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-1').isHelpfulByMe, isTrue);
+    });
+  });
+
+  group('Home V2 Dual Feeds and Mutation Synchronization', () {
+    late FakeFeedRepository repository;
+    late FeedNotifier notifier;
+
+    FeedReview makeReview(String id, {bool isHelpful = false, int helpfulCount = 0, String text = 'Review text'}) {
+      return FeedReview(
+        id: id,
+        author: const FeedAuthor(displayName: 'Test User', handle: 'tester'),
+        experienceText: text,
+        visibility: 'PUBLIC',
+        status: 'ACTIVE',
+        isHelpfulByMe: isHelpful,
+        helpfulCount: helpfulCount,
+        createdAt: DateTime.now(),
+      );
+    }
+
+    setUp(() {
+      repository = FakeFeedRepository();
+      notifier = FeedNotifier(feedRepository: repository);
+    });
+
+    test('1. Carregamento inicial independente dos dois feeds (forYou e following)', () async {
+      repository.page0Response = FeedPage(
+        items: [makeReview('foryou-1'), makeReview('foryou-2')],
+        page: 0,
+        size: 10,
+        windowSize: 20,
+        totalPages: 2,
+      );
+      repository.followingPage0Response = FeedPage(
+        items: [makeReview('following-1'), makeReview('following-2')],
+        page: 0,
+        size: 10,
+        windowSize: 20,
+        totalPages: 2,
+      );
+
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedInitial>());
+      expect(notifier.stateOf(FeedType.following), isA<FeedInitial>());
+
+      // Carrega forYou
+      await notifier.loadInitial(type: FeedType.forYou);
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedSuccess>());
+      expect(notifier.stateOf(FeedType.following), isA<FeedInitial>());
+      final forYouState = notifier.stateOf(FeedType.forYou) as FeedSuccess;
+      expect(forYouState.reviews.map((r) => r.id).toList(), ['foryou-1', 'foryou-2']);
+
+      // Carrega following
+      await notifier.loadInitial(type: FeedType.following);
+      expect(notifier.stateOf(FeedType.following), isA<FeedSuccess>());
+      final followingState = notifier.stateOf(FeedType.following) as FeedSuccess;
+      expect(followingState.reviews.map((r) => r.id).toList(), ['following-1', 'following-2']);
+
+      // Ambos preservam seus dados independentes
+      expect((notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.first.id, 'foryou-1');
+      expect((notifier.stateOf(FeedType.following) as FeedSuccess).reviews.first.id, 'following-1');
+    });
+
+    test('2. Paginação independente entre forYou e following', () async {
+      repository.page0Response = FeedPage(items: [makeReview('fy-1')], page: 0, size: 10, windowSize: 10, totalPages: 2);
+      repository.page1Response = FeedPage(items: [makeReview('fy-2')], page: 1, size: 10, windowSize: 10, totalPages: 2);
+      repository.followingPage0Response = FeedPage(items: [makeReview('foll-1')], page: 0, size: 10, windowSize: 10, totalPages: 2);
+      repository.followingPage1Response = FeedPage(items: [makeReview('foll-2')], page: 1, size: 10, windowSize: 10, totalPages: 2);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+
+      // Pagina apenas forYou
+      await notifier.loadMore(type: FeedType.forYou);
+      final forYouSuccess = notifier.stateOf(FeedType.forYou) as FeedSuccess;
+      expect(forYouSuccess.currentPage, 1);
+      expect(forYouSuccess.hasMore, isFalse);
+      expect(forYouSuccess.reviews.map((r) => r.id).toList(), ['fy-1', 'fy-2']);
+
+      // Following permanece na página 0 com hasMore true
+      final followingInitialState = notifier.stateOf(FeedType.following) as FeedSuccess;
+      expect(followingInitialState.currentPage, 0);
+      expect(followingInitialState.hasMore, isTrue);
+      expect(followingInitialState.reviews.map((r) => r.id).toList(), ['foll-1']);
+
+      // Pagina following
+      await notifier.loadMore(type: FeedType.following);
+      final followingPaginated = notifier.stateOf(FeedType.following) as FeedSuccess;
+      expect(followingPaginated.currentPage, 1);
+      expect(followingPaginated.hasMore, isFalse);
+      expect(followingPaginated.reviews.map((r) => r.id).toList(), ['foll-1', 'foll-2']);
+    });
+
+    test('3. Refresh independente (forYou não afeta following e vice-versa)', () async {
+      repository.page0Response = FeedPage(items: [makeReview('fy-1')], page: 0, size: 10, windowSize: 10, totalPages: 2);
+      repository.page1Response = FeedPage(items: [makeReview('fy-2')], page: 1, size: 10, windowSize: 10, totalPages: 2);
+      repository.followingPage0Response = FeedPage(items: [makeReview('foll-1')], page: 0, size: 10, windowSize: 10, totalPages: 2);
+      repository.followingPage1Response = FeedPage(items: [makeReview('foll-2')], page: 1, size: 10, windowSize: 10, totalPages: 2);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadMore(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+      await notifier.loadMore(type: FeedType.following);
+
+      expect((notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.length, 2);
+      expect((notifier.stateOf(FeedType.following) as FeedSuccess).reviews.length, 2);
+
+      // Refresh em forYou
+      await notifier.refresh(type: FeedType.forYou);
+      expect((notifier.stateOf(FeedType.forYou) as FeedSuccess).currentPage, 0);
+      expect((notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.length, 1);
+
+      // Following permanece intacto com 2 reviews e página 1
+      final follState = notifier.stateOf(FeedType.following) as FeedSuccess;
+      expect(follState.currentPage, 1);
+      expect(follState.reviews.length, 2);
+      expect(follState.reviews.map((r) => r.id).toList(), ['foll-1', 'foll-2']);
+    });
+
+    test('4. Reset independente e reset global', () async {
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedSuccess>());
+      expect(notifier.stateOf(FeedType.following), isA<FeedSuccess>());
+
+      // Reset exclusivo do forYou
+      notifier.reset(type: FeedType.forYou);
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedInitial>());
+      expect(notifier.stateOf(FeedType.following), isA<FeedSuccess>());
+
+      // Reset global (logout) reseta ambos
+      notifier.reset();
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedInitial>());
+      expect(notifier.stateOf(FeedType.following), isA<FeedInitial>());
+    });
+
+    test('5. Preservação dos dados ao alternar entre feeds sem novas requisições', () async {
+      repository.page0Response = FeedPage(items: [makeReview('fy-1')], page: 0, size: 10, windowSize: 10, totalPages: 1);
+      repository.followingPage0Response = FeedPage(items: [makeReview('foll-1')], page: 0, size: 10, windowSize: 10, totalPages: 1);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+
+      final forYouCalls = repository.getFeedCallCount;
+      final followingCalls = repository.getFollowingFeedCallCount;
+
+      // Alterna feed ativo para following
+      notifier.setActiveFeedType(FeedType.following);
+      expect(notifier.activeFeedType, FeedType.following);
+      expect(notifier.state, isA<FeedSuccess>());
+      expect((notifier.state as FeedSuccess).reviews.first.id, 'foll-1');
+
+      // Alterna de volta para forYou
+      notifier.setActiveFeedType(FeedType.forYou);
+      expect(notifier.activeFeedType, FeedType.forYou);
+      expect(notifier.state, isA<FeedSuccess>());
+      expect((notifier.state as FeedSuccess).reviews.first.id, 'fy-1');
+
+      // Nenhuma chamada de rede foi disparada na alternância
+      expect(repository.getFeedCallCount, forYouCalls);
+      expect(repository.getFollowingFeedCallCount, followingCalls);
+    });
+
+    test('6. Ausência de requisições duplicadas em carregamentos concorrentes', () async {
+      final completer = Completer<FeedPage>();
+      repository.customGetFeedHandler = ({int page = 0, int size = 10}) => completer.future;
+
+      // Dispara primeira chamada (fica em FeedLoading)
+      final call1 = notifier.loadInitial(type: FeedType.forYou);
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedLoading>());
+      expect(repository.getFeedCallCount, 1);
+
+      // Dispara segunda chamada concorrente enquanto em FeedLoading
+      final call2 = notifier.loadInitial(type: FeedType.forYou);
+      expect(repository.getFeedCallCount, 1, reason: 'não duplica requisição se já está em loading');
+
+      completer.complete(FeedPage(items: [makeReview('rev-1')], page: 0, size: 10, windowSize: 10, totalPages: 1));
+      await call1;
+      await call2;
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedSuccess>());
+    });
+
+    test('7. Tratamento de erro isolado sem contaminar o outro feed', () async {
+      await notifier.loadInitial(type: FeedType.forYou);
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedSuccess>());
+
+      repository.shouldThrowOnFollowingInitial = true;
+      await notifier.loadInitial(type: FeedType.following);
+
+      expect(notifier.stateOf(FeedType.following), isA<FeedError>());
+      // forYou continua íntegro em FeedSuccess
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedSuccess>());
+    });
+
+    test('8. Retry após erro recupera apenas o feed afetado', () async {
+      await notifier.loadInitial(type: FeedType.forYou);
+      repository.shouldThrowOnFollowingInitial = true;
+      await notifier.loadInitial(type: FeedType.following);
+      expect(notifier.stateOf(FeedType.following), isA<FeedError>());
+
+      // Corrige erro e dá retry em following
+      repository.shouldThrowOnFollowingInitial = false;
+      await notifier.retry(type: FeedType.following);
+
+      expect(notifier.stateOf(FeedType.following), isA<FeedSuccess>());
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedSuccess>());
+    });
+
+    test('9. Proteção contra respostas assíncronas obsoletas em canais independentes', () async {
+      await notifier.loadInitial(type: FeedType.forYou);
+      final slowPage1 = Completer<FeedPage>();
+      repository.delayedPage1Completer = slowPage1;
+
+      final loadMoreFuture = notifier.loadMore(type: FeedType.forYou);
+      // Dispara refresh antes do loadMore responder
+      await notifier.refresh(type: FeedType.forYou);
+
+      // Agora responde o loadMore antigo da página 1
+      slowPage1.complete(FeedPage(items: [makeReview('stale-fy-2')], page: 1, size: 10, windowSize: 10, totalPages: 2));
+      await loadMoreFuture;
+
+      final currentState = notifier.stateOf(FeedType.forYou) as FeedSuccess;
+      expect(currentState.currentPage, 0, reason: 'resposta obsoleta de loadMore não sobrescreve refresh');
+      expect(currentState.reviews.map((r) => r.id).toList(), ['rev-1', 'rev-2']);
+    });
+
+    test('10. Sincronização de voto útil entre feeds (otimista, reconciliação e rollback)', () async {
+      final sharedReview = makeReview('rev-shared', isHelpful: false, helpfulCount: 0);
+      final forYouOnly = makeReview('rev-fy-only');
+      final followingOnly = makeReview('rev-foll-only');
+
+      repository.page0Response = FeedPage(items: [sharedReview, forYouOnly], page: 0, size: 10, windowSize: 10, totalPages: 1);
+      repository.followingPage0Response = FeedPage(items: [sharedReview, followingOnly], page: 0, size: 10, windowSize: 10, totalPages: 1);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+
+      // Cenário A: Voto útil com sucesso sincroniza em ambos
+      final voteFuture = notifier.toggleHelpful('rev-shared');
+
+      // Otimista imediato em ambos os feeds
+      final forYouOti = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-shared');
+      final follOti = (notifier.stateOf(FeedType.following) as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-shared');
+      expect(forYouOti.isHelpfulByMe, isTrue);
+      expect(forYouOti.helpfulCount, 1);
+      expect(follOti.isHelpfulByMe, isTrue);
+      expect(follOti.helpfulCount, 1);
+      expect(repository.toggleHelpfulCallCount, 1, reason: 'apenas 1 requisição de rede para a mesma avaliação');
+
+      await voteFuture;
+
+      // Reconciliado com backend
+      final forYouRec = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-shared');
+      final follRec = (notifier.stateOf(FeedType.following) as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-shared');
+      expect(forYouRec.isHelpfulByMe, isTrue);
+      expect(forYouRec.helpfulCount, 1);
+      expect(follRec.isHelpfulByMe, isTrue);
+      expect(follRec.helpfulCount, 1);
+
+      // Cenário B: Rollback quando o backend falha reverte em ambos
+      repository.shouldThrowOnHelpful = true;
+      try {
+        await notifier.toggleHelpful('rev-shared');
+      } catch (_) {}
+
+      final forYouRoll = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-shared');
+      final follRoll = (notifier.stateOf(FeedType.following) as FeedSuccess).reviews.firstWhere((r) => r.id == 'rev-shared');
+      expect(forYouRoll.isHelpfulByMe, isTrue, reason: 'revertido para o estado anterior');
+      expect(forYouRoll.helpfulCount, 1);
+      expect(follRoll.isHelpfulByMe, isTrue);
+      expect(follRoll.helpfulCount, 1);
+    });
+
+    test('11. Sincronização de edição de avaliação entre feeds', () async {
+      final sharedReview = makeReview('rev-shared', text: 'Texto original');
+      repository.page0Response = FeedPage(items: [sharedReview], page: 0, size: 10, windowSize: 10, totalPages: 1);
+      repository.followingPage0Response = FeedPage(items: [sharedReview], page: 0, size: 10, windowSize: 10, totalPages: 1);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+
+      final updated = sharedReview.copyWith(experienceText: 'Texto editado e sincronizado!');
+      notifier.updateReview(updated);
+
+      final forYouReview = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.first;
+      final followingReview = (notifier.stateOf(FeedType.following) as FeedSuccess).reviews.first;
+
+      expect(forYouReview.experienceText, 'Texto editado e sincronizado!');
+      expect(followingReview.experienceText, 'Texto editado e sincronizado!');
+    });
+
+    test('12. Sincronização de remoção de avaliação entre feeds', () async {
+      final shared = makeReview('rev-shared');
+      final fyKeep = makeReview('fy-keep');
+      final follKeep = makeReview('foll-keep');
+
+      repository.page0Response = FeedPage(items: [shared, fyKeep], page: 0, size: 10, windowSize: 10, totalPages: 1);
+      repository.followingPage0Response = FeedPage(items: [shared, follKeep], page: 0, size: 10, windowSize: 10, totalPages: 1);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+
+      notifier.removeReview('rev-shared');
+
+      final forYouList = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.map((r) => r.id).toList();
+      final followingList = (notifier.stateOf(FeedType.following) as FeedSuccess).reviews.map((r) => r.id).toList();
+
+      expect(forYouList, ['fy-keep']);
+      expect(followingList, ['foll-keep']);
+      expect(forYouList.contains('rev-shared'), isFalse);
+      expect(followingList.contains('rev-shared'), isFalse);
+    });
+
+    test('13. Avaliações presentes em apenas um feed não alteram o outro', () async {
+      final forYouOnly = makeReview('fy-only', text: 'Texto ForYou');
+      final followingOnly = makeReview('foll-only', text: 'Texto Following');
+
+      repository.page0Response = FeedPage(items: [forYouOnly], page: 0, size: 10, windowSize: 10, totalPages: 1);
+      repository.followingPage0Response = FeedPage(items: [followingOnly], page: 0, size: 10, windowSize: 10, totalPages: 1);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+
+      // Edita avaliação exclusiva do forYou
+      notifier.updateReview(forYouOnly.copyWith(experienceText: 'ForYou modificado'));
+      expect((notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.first.experienceText, 'ForYou modificado');
+      expect((notifier.stateOf(FeedType.following) as FeedSuccess).reviews.first.experienceText, 'Texto Following');
+
+      // Vota útil na avaliação exclusiva do following
+      await notifier.toggleHelpful('foll-only');
+      expect((notifier.stateOf(FeedType.following) as FeedSuccess).reviews.first.isHelpfulByMe, isTrue);
+      expect((notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.first.isHelpfulByMe, isFalse);
+
+      // Remove avaliação exclusiva do forYou
+      notifier.removeReview('fy-only');
+      expect(notifier.stateOf(FeedType.forYou), isA<FeedEmpty>());
+      expect(notifier.stateOf(FeedType.following), isA<FeedSuccess>());
+      expect((notifier.stateOf(FeedType.following) as FeedSuccess).reviews.map((r) => r.id).toList(), ['foll-only']);
+    });
+
+    test('14. Avaliações repetidas em diferentes páginas com deduplicação', () async {
+      // Página 1 retorna item repetido já presente na página 0
+      repository.page0Response = FeedPage(items: [makeReview('rev-dup')], page: 0, size: 10, windowSize: 10, totalPages: 2);
+      repository.page1Response = FeedPage(items: [makeReview('rev-dup'), makeReview('rev-unique')], page: 1, size: 10, windowSize: 10, totalPages: 2);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadMore(type: FeedType.forYou);
+
+      final reviews = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews;
+      expect(reviews.length, 2);
+      expect(reviews.map((r) => r.id).toList(), ['rev-dup', 'rev-unique']);
+    });
+
+    test('15. Ausência de efeitos colaterais em avaliações não relacionadas', () async {
+      final r1 = makeReview('r1', isHelpful: false, helpfulCount: 5, text: 'R1');
+      final r2 = makeReview('r2', isHelpful: true, helpfulCount: 10, text: 'R2');
+      final r3 = makeReview('r3', isHelpful: false, helpfulCount: 2, text: 'R3');
+
+      repository.page0Response = FeedPage(items: [r1, r2, r3], page: 0, size: 10, windowSize: 10, totalPages: 1);
+      await notifier.loadInitial(type: FeedType.forYou);
+
+      // Vota em r1
+      await notifier.toggleHelpful('r1');
+      var list = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews;
+      expect(list[1].id, 'r2');
+      expect(list[1].isHelpfulByMe, isTrue);
+      expect(list[1].helpfulCount, 10);
+      expect(list[2].id, 'r3');
+      expect(list[2].isHelpfulByMe, isFalse);
+      expect(list[2].helpfulCount, 2);
+
+      // Edita r1
+      notifier.updateReview(r1.copyWith(experienceText: 'R1 Editado'));
+      list = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews;
+      expect(list[1].experienceText, 'R2');
+      expect(list[2].experienceText, 'R3');
+
+      // Remove r1
+      notifier.removeReview('r1');
+      list = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews;
+      expect(list.length, 2);
+      expect(list[0].id, 'r2');
+      expect(list[0].experienceText, 'R2');
+      expect(list[0].helpfulCount, 10);
+      expect(list[1].id, 'r3');
+      expect(list[1].experienceText, 'R3');
+      expect(list[1].helpfulCount, 2);
+    });
+  });
+
+  group('Audit Fixes: IMP-01 (Rollback granular) e MEN-01 (removedReviewIds)', () {
+    late FakeFeedRepository repository;
+    late FeedNotifier notifier;
+
+    FeedReview makeReview(
+      String id, {
+      bool isHelpful = false,
+      int helpfulCount = 0,
+      String? text,
+    }) {
+      return FeedReview(
+        id: id,
+        author: const FeedAuthor(displayName: 'Test User', handle: 'tester'),
+        visibility: 'PUBLIC',
+        status: 'ACTIVE',
+        isHelpfulByMe: isHelpful,
+        helpfulCount: helpfulCount,
+        experienceText: text,
+        createdAt: DateTime.now(),
+      );
+    }
+
+    setUp(() {
+      repository = FakeFeedRepository();
+      notifier = FeedNotifier(feedRepository: repository);
+    });
+
+    test('1. toggleHelpful em andamento com loadMore concluído e falha de rede reverte voto e preserva novos itens', () async {
+      final r1 = makeReview('r1', isHelpful: false, helpfulCount: 0);
+      final r2 = makeReview('r2', isHelpful: false, helpfulCount: 5);
+      final r3 = makeReview('r3', isHelpful: false, helpfulCount: 1);
+      final r4 = makeReview('r4', isHelpful: false, helpfulCount: 2);
+
+      repository.page0Response = FeedPage(
+        items: [r1, r2],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 2,
+      );
+      repository.page1Response = FeedPage(
+        items: [r3, r4],
+        page: 1,
+        size: 10,
+        windowSize: 10,
+        totalPages: 2,
+      );
+
+      await notifier.loadInitial();
+      expect((notifier.state as FeedSuccess).reviews.length, 2);
+
+      // Inicia voto útil pendente em r1
+      repository.toggleHelpfulCompleter = Completer<HelpfulResult>();
+      final voteFuture = notifier.toggleHelpful('r1');
+
+      // Voto otimista aplicado
+      var reviews = (notifier.state as FeedSuccess).reviews;
+      expect(reviews.firstWhere((r) => r.id == 'r1').isHelpfulByMe, isTrue);
+      expect(reviews.firstWhere((r) => r.id == 'r1').helpfulCount, 1);
+
+      // Concorre com loadMore que anexa r3 e r4
+      await notifier.loadMore();
+      reviews = (notifier.state as FeedSuccess).reviews;
+      expect(reviews.length, 4, reason: 'loadMore anexou r3 e r4 com sucesso');
+      expect(reviews.map((r) => r.id).toList(), ['r1', 'r2', 'r3', 'r4']);
+
+      // Voto útil falha com erro de rede
+      repository.toggleHelpfulCompleter!.completeError(const NetworkException('Falha no servidor'));
+      await expectLater(voteFuture, throwsA(isA<NetworkException>()));
+
+      // Rollback cirúrgico: apenas r1 teve voto restaurado; r3 e r4 anexados pelo loadMore são preservados!
+      reviews = (notifier.state as FeedSuccess).reviews;
+      expect(reviews.length, 4, reason: 'novas avaliações anexadas via loadMore foram preservadas');
+      expect(reviews.map((r) => r.id).toList(), ['r1', 'r2', 'r3', 'r4']);
+
+      final rolledBackR1 = reviews.firstWhere((r) => r.id == 'r1');
+      expect(rolledBackR1.isHelpfulByMe, isFalse, reason: 'voto otimista foi revertido');
+      expect(rolledBackR1.helpfulCount, 0, reason: 'contador foi restaurado ao original');
+    });
+
+    test('2. Rollback do voto útil preserva edições concorrentes em outras avaliações e na avaliação alvo', () async {
+      final r1 = makeReview('r1', isHelpful: false, helpfulCount: 0, text: 'Texto original R1');
+      final r2 = makeReview('r2', isHelpful: false, helpfulCount: 3, text: 'Texto original R2');
+
+      repository.page0Response = FeedPage(
+        items: [r1, r2],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 1,
+      );
+
+      await notifier.loadInitial();
+
+      repository.toggleHelpfulCompleter = Completer<HelpfulResult>();
+      final voteFuture = notifier.toggleHelpful('r1');
+
+      // Edita concorrentemente r2 enquanto voto está pendente
+      notifier.updateReview(r2.copyWith(experienceText: 'R2 Atualizado Concorrentemente'));
+
+      // Edita concorrentemente outro campo de r1 (ex.: experienceText)
+      notifier.updateReview(r1.copyWith(experienceText: 'R1 Atualizado Concorrentemente'));
+
+      // Falha no voto
+      repository.toggleHelpfulCompleter!.completeError(const NetworkException('Falha'));
+      await expectLater(voteFuture, throwsA(isA<NetworkException>()));
+
+      final reviews = (notifier.state as FeedSuccess).reviews;
+      final finalR1 = reviews.firstWhere((r) => r.id == 'r1');
+      final finalR2 = reviews.firstWhere((r) => r.id == 'r2');
+
+      // r1 teve apenas voto revertido, seu experienceText atualizado foi preservado
+      expect(finalR1.isHelpfulByMe, isFalse);
+      expect(finalR1.helpfulCount, 0);
+      expect(finalR1.experienceText, 'R1 Atualizado Concorrentemente');
+
+      // r2 foi integralmente preservado
+      expect(finalR2.experienceText, 'R2 Atualizado Concorrentemente');
+      expect(finalR2.helpfulCount, 3);
+    });
+
+    test('3. Rollback funciona corretamente em ambos os canais quando a avaliação está presente nos dois feeds', () async {
+      final r1 = makeReview('r1', isHelpful: false, helpfulCount: 10);
+      repository.page0Response = FeedPage(items: [r1], page: 0, size: 10, windowSize: 10, totalPages: 1);
+      repository.followingPage0Response = FeedPage(items: [r1], page: 0, size: 10, windowSize: 10, totalPages: 1);
+
+      await notifier.loadInitial(type: FeedType.forYou);
+      await notifier.loadInitial(type: FeedType.following);
+
+      repository.toggleHelpfulCompleter = Completer<HelpfulResult>();
+      final voteFuture = notifier.toggleHelpful('r1');
+
+      // Ambos os canais recebem atualização otimista
+      expect((notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.first.isHelpfulByMe, isTrue);
+      expect((notifier.stateOf(FeedType.following) as FeedSuccess).reviews.first.isHelpfulByMe, isTrue);
+
+      repository.toggleHelpfulCompleter!.completeError(const NetworkException('Falha'));
+      await expectLater(voteFuture, throwsA(isA<NetworkException>()));
+
+      // Ambos os canais sofrem rollback restaurando estado original
+      final forYouR1 = (notifier.stateOf(FeedType.forYou) as FeedSuccess).reviews.first;
+      final followingR1 = (notifier.stateOf(FeedType.following) as FeedSuccess).reviews.first;
+      expect(forYouR1.isHelpfulByMe, isFalse);
+      expect(forYouR1.helpfulCount, 10);
+      expect(followingR1.isHelpfulByMe, isFalse);
+      expect(followingR1.helpfulCount, 10);
+    });
+
+    test('4. Remoção de item seguida de recarregamento transparente preserva removedReviewIds e não ressuscita avaliação', () async {
+      final rDel = makeReview('r-del');
+      final rNovo = makeReview('r-novo');
+
+      repository.page0Response = FeedPage(
+        items: [rDel],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 2, // hasMore = true
+      );
+
+      await notifier.loadInitial();
+      expect((notifier.state as FeedSuccess).reviews.length, 1);
+
+      // Simula backend que por delay de consistência ainda retorna r-del na página 0 junto com r-novo
+      repository.page0Response = FeedPage(
+        items: [rDel, rNovo],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 2,
+      );
+
+      // Remove r-del; como a lista zera e hasMore é true, dispara recarregamento transparente
+      notifier.removeReview('r-del');
+
+      // Aguarda o recarregamento assíncrono interno completar
+      await Future<void>.delayed(Duration.zero);
+
+      final state = notifier.state;
+      expect(state, isA<FeedSuccess>());
+      final reviews = (state as FeedSuccess).reviews;
+      expect(reviews.length, 1);
+      expect(reviews.first.id, 'r-novo', reason: 'r-del foi filtrado por removedReviewIds e não ressuscitou');
+    });
+
+    test('5. Refresh explícito posterior limpa removedReviewIds', () async {
+      final rDel = makeReview('r-del');
+      final rOutro = makeReview('r-outro');
+
+      repository.page0Response = FeedPage(
+        items: [rDel],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 2,
+      );
+
+      await notifier.loadInitial();
+      notifier.removeReview('r-del');
+      await Future<void>.delayed(Duration.zero);
+
+      // Agora o usuário aciona um Pull-to-refresh explícito
+      repository.page0Response = FeedPage(
+        items: [rDel, rOutro],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 1,
+      );
+
+      await notifier.refresh();
+
+      final state = notifier.state as FeedSuccess;
+      expect(state.reviews.length, 2, reason: 'refresh explícito limpou removedReviewIds');
+      expect(state.reviews.map((r) => r.id).toList(), ['r-del', 'r-outro']);
+    });
+
+    test('6. Reset de sessão limpa removedReviewIds', () async {
+      final rDel = makeReview('r-del');
+      repository.page0Response = FeedPage(
+        items: [rDel],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 2,
+      );
+
+      await notifier.loadInitial();
+      notifier.removeReview('r-del');
+      await Future<void>.delayed(Duration.zero);
+
+      // Reset global (ex: logout)
+      notifier.reset();
+      expect(notifier.state, isA<FeedInitial>());
+
+      // Nova sessão carrega o feed novamente
+      repository.page0Response = FeedPage(
+        items: [rDel],
+        page: 0,
+        size: 10,
+        windowSize: 10,
+        totalPages: 1,
+      );
+
+      await notifier.loadInitial();
+      final state = notifier.state as FeedSuccess;
+      expect(state.reviews.length, 1);
+      expect(state.reviews.first.id, 'r-del', reason: 'reset de sessão liberou o conjunto de IDs removidos');
     });
   });
 }

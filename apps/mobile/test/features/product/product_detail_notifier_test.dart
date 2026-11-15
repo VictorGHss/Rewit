@@ -5,6 +5,7 @@ import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
+import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
@@ -13,6 +14,9 @@ import 'package:rewit_mobile/features/product/presentation/state/product_detail_
 import 'package:rewit_mobile/features/product/presentation/state/product_detail_state.dart';
 
 class _FakeProductRepository implements ProductRepository {
+  @override
+  Future<ProductDetail> createProduct(CreateProductInput input) async => throw UnimplementedError();
+
   ProductDetail? productToReturn;
   List<ProductIdentifier>? identifiersToReturn;
   TargetStats? statsToReturn;

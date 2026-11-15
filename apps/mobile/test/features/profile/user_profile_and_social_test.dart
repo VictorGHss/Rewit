@@ -11,6 +11,7 @@ import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
 import 'package:rewit_mobile/features/discussions/presentation/widgets/discussion_item_widget.dart';
@@ -59,6 +60,34 @@ class MockHttpClient extends http.BaseClient {
 }
 
 class FakeAuthRepo implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   final AuthUserDto user;
 
   FakeAuthRepo({
@@ -303,6 +332,10 @@ class FakeFeedRepoForSocial implements FeedRepository {
   @override
   Future<FeedPage> getFeed({int page = 0, int size = 10}) async =>
       FeedPage(items: [review], page: 0, size: 10, windowSize: 1, totalPages: 1);
+
+  @override
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10}) async =>
+      getFeed(page: page, size: size);
 
   @override
   Future<FeedReview> getReviewById(String reviewId) async => review;
@@ -1305,6 +1338,7 @@ void main() {
           isFollowing: true,
           stats: UserStats(
             totalReviews: 1234567,
+            verifiedReviewsCount: 765432,
             followersCount: 7654321,
             followingCount: 98765,
             helpfulVotesReceived: 4567890,
@@ -1326,13 +1360,25 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
-      for (final label in ['Seguidores', 'Avaliações', 'Votos Úteis']) {
-        expect(find.text(label), findsOneWidget);
+      const labels = [
+        'Seguidores',
+        'Seguindo',
+        'Avaliações publicadas',
+        'Check-ins verificados',
+        'Votos úteis recebidos',
+      ];
+      // "Seguindo" também é o rótulo do botão de seguir: os contadores ficam no cartão de estatísticas
+      Finder stat(String label) => find.descendant(of: find.byType(Card), matching: find.text(label));
+      for (final label in labels) {
+        expect(stat(label), findsOneWidget);
       }
-      // Os quatro contadores dividem a largura: nenhum invade o vizinho
-      final followers = tester.getRect(find.text('Seguidores'));
-      final reviews = tester.getRect(find.text('Avaliações'));
-      expect(followers.overlaps(reviews), isFalse);
+      // Os contadores de cada linha dividem a largura: nenhum invade o vizinho
+      final rects = [for (final label in labels) tester.getRect(stat(label))];
+      for (var i = 0; i < rects.length; i++) {
+        for (var j = i + 1; j < rects.length; j++) {
+          expect(rects[i].overlaps(rects[j]), isFalse, reason: '${labels[i]} x ${labels[j]}');
+        }
+      }
     });
   });
 }

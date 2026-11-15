@@ -8,8 +8,10 @@ import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.application.port.ReviewTargetRepository;
 import com.rewit.application.port.UserFollowRepository;
+import com.rewit.application.port.UserInterestProfileRepository;
 import com.rewit.application.port.UserRepository;
 import com.rewit.domain.enums.AuthProvider;
+import com.rewit.domain.enums.InterestCategory;
 import com.rewit.domain.enums.ReviewStatus;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.model.Place;
@@ -18,24 +20,28 @@ import com.rewit.domain.model.RateableTarget;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewTarget;
 import com.rewit.domain.model.User;
+import com.rewit.domain.model.UserInterestProfile;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Teste de integração do pipeline de aplicação do Feed V2 (Step 24.4.1).
+ * Teste de integração do pipeline de aplicação do Feed V2 (Step 24.4.1 + Personalização por Interesses).
  *
  * <p>Fluxo testado end-to-end sem camada HTTP:
- * {@code PostgreSQL → Candidate Retrieval → FeedV2Ranker → FeedV2Diversifier → FeedV2Service → FeedV2CandidatePage}
+ * {@code PostgreSQL → Candidate Retrieval (com batch categories) → FeedV2Ranker (com afinidade por interesses) → FeedV2Diversifier → FeedV2Service → FeedV2CandidatePage}
  */
 @SpringBootTest
 @ActiveProfiles("local")
@@ -69,6 +75,12 @@ class FeedV2ServiceIntegrationTest {
     @Autowired
     private ReviewReactionRepository reviewReactionRepository;
 
+    @Autowired
+    private UserInterestProfileRepository userInterestProfileRepository;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     private User createActiveUser() {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 10);
         User user = new User(null, "v2service-" + suffix + "@rewit.com", "hash123", AuthProvider.LOCAL, null);
@@ -79,9 +91,13 @@ class FeedV2ServiceIntegrationTest {
     }
 
     private Place createPlace() {
+        return createPlace("RESTAURANTE");
+    }
+
+    private Place createPlace(String category) {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         Place place = new Place(
-                null, "Place Srv " + suffix, "place-srv-" + suffix, "RESTAURANTE",
+                null, "Place Srv " + suffix, "place-srv-" + suffix, category != null ? category : "RESTAURANTE",
                 "Desc", "Rua Srv, 10", "10", "Bairro", "Cidade", "SP", "BR",
                 -23.55, -46.63, 50, "USER", false, null, "ACTIVE"
         );
@@ -110,6 +126,22 @@ class FeedV2ServiceIntegrationTest {
         Review saved = reviewRepository.save(review);
         reviewTargetRepository.save(rt);
         return saved;
+    }
+
+    private void setUserInterests(UUID userId, InterestCategory... categories) {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.execute(status -> {
+            Instant now = Instant.now();
+            userInterestProfileRepository.findOrCreateForUpdate(userId, now);
+            UserInterestProfile profile = new UserInterestProfile(
+                    userId,
+                    Set.of(categories),
+                    now,
+                    now,
+                    now
+            );
+            return userInterestProfileRepository.save(profile);
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -266,11 +298,14 @@ class FeedV2ServiceIntegrationTest {
     @DisplayName("4. PostgreSQL → FeedV2Service: requester sem seguidos aciona fallback de descoberta sem exceção")
     void shouldReturnDiscoveryCandidatesWhenNoFollowsExist() {
         User requester = createActiveUser();
+        User author = createActiveUser();
+        Place place = createPlace();
+        RateableTarget target = createTarget();
+        createReview(author, place, target, "PUBLIC", ReviewStatus.ACTIVE, false, false, Instant.now());
 
         FeedV2CandidatePage page = feedV2Service.getCandidatePage(requester.getId(), 0, 10, Instant.now());
 
         assertNotNull(page);
-        // Com o Cold Start (Step 24.5.1), requester sem seguidos recebe candidatos de descoberta pública existentes
         assertFalse(page.isEmpty(), "Com cold start ativo e avaliações públicas existentes, a página não deve ser vazia");
         assertTrue(page.windowSize() > 0, "Window size deve refletir os candidatos de descoberta");
         assertTrue(page.totalPages() > 0);
@@ -278,5 +313,142 @@ class FeedV2ServiceIntegrationTest {
         page.items().forEach(item ->
                 assertFalse(item.candidate().isDirectFollow(), "Candidato de descoberta deve ter isDirectFollow=false")
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. Personalização por Interesses: Match de categoria eleva score (+0.20)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("5. PostgreSQL → FeedV2Service: afinidade por interesses eleva o score do candidato compatível")
+    void shouldPrioritizeCandidatesMatchingUserInterests() {
+        User requester = createActiveUser();
+        User author = createActiveUser();
+        userFollowRepository.follow(requester.getId(), author.getId());
+
+        // Define interesse em Cafés
+        setUserInterests(requester.getId(), InterestCategory.CAFE, InterestCategory.RESTAURANT, InterestCategory.TECHNOLOGY);
+
+        Place cafePlace = createPlace("CAFETERIA");
+        Place gymPlace = createPlace("ACADEMIA");
+        RateableTarget targetCafe = createTarget();
+        RateableTarget targetGym = createTarget();
+
+        Instant referenceTime = Instant.now();
+        Instant sameTimestamp = referenceTime.minusSeconds(100);
+
+        // Ambas as reviews com a mesma idade e mesmo autor
+        Review reviewGym = createReview(author, gymPlace, targetGym, "PUBLIC", ReviewStatus.ACTIVE, false, false, sameTimestamp);
+        Review reviewCafe = createReview(author, cafePlace, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, false, sameTimestamp);
+
+        FeedV2CandidatePage page = feedV2Service.getCandidatePage(requester.getId(), 0, 10, referenceTime);
+
+        assertNotNull(page);
+        assertEquals(2, page.items().size());
+
+        // A review de cafeteria deve liderar devido ao boost de interesse (+0.20)
+        assertEquals(reviewCafe.getId(), page.items().get(0).candidate().reviewId(),
+                "Candidato compatível com interesse do usuário deve vir em primeiro lugar");
+        assertEquals(reviewGym.getId(), page.items().get(1).candidate().reviewId());
+
+        double cafeScore = page.items().get(0).score().value();
+        double gymScore = page.items().get(1).score().value();
+
+        // Diferença esperada entre match (1.0 * 0.20) e no-match (0.0 * 0.20) = exatamente 0.20
+        assertEquals(0.20d, cafeScore - gymScore, 0.001d,
+                "Diferença de score entre match e não-match deve ser o peso de interesse (0.20)");
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. Atualização Dinâmica: Alterar interesses inverte o ranking
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("6. PostgreSQL → FeedV2Service: alteração de interesses reflete imediatamente na ordenação")
+    void shouldReorderCandidatesWhenUserChangesInterests() {
+        User requester = createActiveUser();
+        User author = createActiveUser();
+        userFollowRepository.follow(requester.getId(), author.getId());
+
+        // Inicialmente interessado em CAFE
+        setUserInterests(requester.getId(), InterestCategory.CAFE, InterestCategory.RESTAURANT, InterestCategory.BOOKS);
+
+        Place cafePlace = createPlace("CAFETERIA");
+        Place gamesPlace = createPlace("LOJA DE GAMES");
+        RateableTarget targetCafe = createTarget();
+        RateableTarget targetGames = createTarget();
+
+        Instant referenceTime = Instant.now();
+        Instant sameTimestamp = referenceTime.minusSeconds(200);
+
+        Review reviewCafe = createReview(author, cafePlace, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, false, sameTimestamp);
+        Review reviewGames = createReview(author, gamesPlace, targetGames, "PUBLIC", ReviewStatus.ACTIVE, false, false, sameTimestamp);
+
+        // Consulta 1: cafe lidera
+        FeedV2CandidatePage p1 = feedV2Service.getCandidatePage(requester.getId(), 0, 10, referenceTime);
+        assertEquals(reviewCafe.getId(), p1.items().get(0).candidate().reviewId());
+
+        // Altera interesse para GAMES
+        setUserInterests(requester.getId(), InterestCategory.GAMES, InterestCategory.TECHNOLOGY, InterestCategory.CULTURE);
+
+        // Consulta 2: games agora lidera
+        FeedV2CandidatePage p2 = feedV2Service.getCandidatePage(requester.getId(), 0, 10, referenceTime);
+        assertEquals(reviewGames.getId(), p2.items().get(0).candidate().reviewId(),
+                "Após mudar interesses para GAMES, review do nicho de jogos deve assumir o topo");
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. Cold Start / Sem Interesses: Relevância Factual Preservada
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("7. PostgreSQL → FeedV2Service: usuário sem interesses mantém score neutro (0.0) de interesse")
+    void shouldMaintainNeutralAffinityForUserWithoutInterests() {
+        User requesterWithoutInterests = createActiveUser();
+        User author = createActiveUser();
+        userFollowRepository.follow(requesterWithoutInterests.getId(), author.getId());
+
+        Place cafePlace = createPlace("CAFETERIA");
+        Place gymPlace = createPlace("ACADEMIA");
+        RateableTarget targetCafe = createTarget();
+        RateableTarget targetGym = createTarget();
+
+        Instant referenceTime = Instant.now();
+        // reviewGym é mais recente (criada 10s atrás vs 50s atrás)
+        Review reviewGym = createReview(author, gymPlace, targetGym, "PUBLIC", ReviewStatus.ACTIVE, false, false, referenceTime.minusSeconds(10));
+        Review reviewCafe = createReview(author, cafePlace, targetCafe, "PUBLIC", ReviewStatus.ACTIVE, false, false, referenceTime.minusSeconds(50));
+
+        FeedV2CandidatePage page = feedV2Service.getCandidatePage(requesterWithoutInterests.getId(), 0, 10, referenceTime);
+
+        // Como não há preferências, recência prevalece: gym (10s) na frente de cafe (50s)
+        assertEquals(reviewGym.getId(), page.items().get(0).candidate().reviewId());
+        assertEquals(reviewCafe.getId(), page.items().get(1).candidate().reviewId());
+    }
+
+    // -------------------------------------------------------------------------
+    // 8. Categoria Não Mapeada: Afinidade Neutra sem Exceção
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("8. PostgreSQL → FeedV2Service: alvo com categoria não mapeada recebe afinidade neutra e não é descartado")
+    void shouldHandleCandidatesWithUnmappedCategoryGracefully() {
+        User requester = createActiveUser();
+        User author = createActiveUser();
+        userFollowRepository.follow(requester.getId(), author.getId());
+
+        setUserInterests(requester.getId(), InterestCategory.CAFE, InterestCategory.RESTAURANT, InterestCategory.TECHNOLOGY);
+
+        // Categoria livre não mapeada na taxonomia de interesses
+        Place unmappedPlace = createPlace("CATEGORIA_INVENTADA_XYZ");
+        RateableTarget target = createTarget();
+
+        Review review = createReview(author, unmappedPlace, target, "PUBLIC", ReviewStatus.ACTIVE, false, false, Instant.now());
+
+        FeedV2CandidatePage page = feedV2Service.getCandidatePage(requester.getId(), 0, 10, Instant.now());
+
+        assertNotNull(page);
+        assertEquals(1, page.items().size());
+        assertEquals(review.getId(), page.items().get(0).candidate().reviewId());
+        assertNull(page.items().get(0).candidate().category(), "Categoria não mapeada resulta em InterestCategory nulo");
     }
 }

@@ -1,6 +1,5 @@
 package com.rewit.application.service;
 
-import com.rewit.application.dto.reputation.ReputationDtos.ReputationView;
 import com.rewit.application.port.ReputationRepository;
 import com.rewit.application.port.ReviewReactionRepository;
 import com.rewit.application.port.ReviewRepository;

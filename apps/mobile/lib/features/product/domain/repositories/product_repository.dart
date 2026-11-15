@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
+import '../entities/create_product_input.dart';
 import '../entities/product_detail.dart';
 import '../entities/product_identifier.dart';
 import '../entities/products_in_place_page.dart';
@@ -9,6 +10,9 @@ import '../entities/products_in_place_page.dart';
 abstract class ProductRepository {
   /// Obtém os detalhes completos de um produto pelo seu identificador único.
   Future<ProductDetail> getProductById(String id);
+
+  /// Cadastra um produto global no catálogo e devolve o produto criado (`POST /api/v1/products`).
+  Future<ProductDetail> createProduct(CreateProductInput input);
 
   /// Lista os identificadores comerciais públicos (EAN, UPC, GTIN, ISBN) cadastrados para o produto.
   Future<List<ProductIdentifier>> getProductIdentifiers(String id);

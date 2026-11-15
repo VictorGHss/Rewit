@@ -211,11 +211,17 @@ class MockLocationService implements LocationService {
   );
   int callCount = 0;
   bool openSettingsCalled = false;
+  bool openLocationSettingsCalled = false;
+  LocationPurpose? lastPurpose;
   Duration? simulatedDelay;
 
   @override
-  Future<LocationResult> getCurrentLocation({Duration timeout = const Duration(seconds: 10)}) async {
+  Future<LocationResult> getCurrentLocation({
+    Duration? timeout,
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
     callCount++;
+    lastPurpose = purpose;
     if (simulatedDelay != null) {
       await Future.delayed(simulatedDelay!);
     }
@@ -225,6 +231,12 @@ class MockLocationService implements LocationService {
   @override
   Future<bool> openAppSettings() async {
     openSettingsCalled = true;
+    return true;
+  }
+
+  @override
+  Future<bool> openLocationSettings() async {
+    openLocationSettingsCalled = true;
     return true;
   }
 }
@@ -246,6 +258,7 @@ void main() {
     String? initialCategory,
     File? initialPhoto,
     Future<File?> Function(ImageSource source)? onPickManualPlacePhoto,
+    Future<SearchResultItem?> Function()? onScanTarget,
   }) {
     return MaterialApp(
       theme: AppTheme.lightTheme,
@@ -263,6 +276,7 @@ void main() {
         initialCategory: initialCategory,
         initialPhoto: initialPhoto,
         onPickManualPlacePhoto: onPickManualPlacePhoto,
+        onScanTarget: onScanTarget,
       ),
     );
   }
@@ -975,6 +989,158 @@ void main() {
       expect(reenabledButton.onPressed, isNotNull);
     });
 
+    testWidgets('serviceDisabled oferece openLocationSettings e retorno de Settings permite nova captura', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final locService = MockLocationService();
+      locService.resultToReturn = const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'O serviço de localização está desativado no aparelho.',
+      );
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      expect(locService.lastPurpose, LocationPurpose.presenceVerification);
+      expect(find.byKey(const Key('open_location_settings_button')), findsOneWidget);
+      expect(find.byKey(const Key('open_settings_button')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('open_location_settings_button')));
+      await tester.pumpAndSettle();
+      expect(locService.openLocationSettingsCalled, isTrue);
+      expect(locService.openSettingsCalled, isFalse);
+
+      // Usuário ativa GPS e retorna
+      locService.resultToReturn = const LocationSuccess(
+        DeviceLocation(latitude: -23.5505, longitude: -46.6333, accuracyMeters: 15.0),
+      );
+      await tester.tap(find.byKey(const Key('retry_location_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('review_location_verified_card')), findsOneWidget);
+      expect(find.text('Precisão aproximada: 15 m'), findsOneWidget);
+    });
+
+    testWidgets('permissão aproximada ou acurácia > 100m não promete verificação mas mantém avaliação publicável', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final locService = MockLocationService();
+      locService.resultToReturn = const LocationSuccess(
+        DeviceLocation(
+          latitude: -23.5505,
+          longitude: -46.6333,
+          accuracyMeters: 220.0,
+          isPermissionApproximate: true,
+        ),
+      );
+      repository.mockResult = FeedReview(
+        id: 'rev-approx',
+        author: const FeedAuthor(displayName: 'Autor Teste'),
+        contextPlaceId: validTargetId,
+        isVerifiedOnSite: false,
+        visibility: 'PUBLIC',
+        status: 'ACTIVE',
+        createdAt: DateTime(2026, 11, 11),
+        checkIn: const CheckInResult(
+          status: CheckInResultStatus.notVerified,
+          reason: 'ACCURACY_TOO_LOW',
+        ),
+      );
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: locService,
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
+      ));
+
+      await tester.tap(find.byKey(const Key('validate_presence_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('review_location_approximate_card')), findsOneWidget);
+      expect(find.byKey(const Key('review_location_verified_card')), findsNothing);
+      expect(find.text('Precisão aproximada: 220 m'), findsOneWidget);
+      expect(find.byKey(const Key('approximate_open_settings_button')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('approximate_open_settings_button')));
+      await tester.pumpAndSettle();
+      expect(locService.openSettingsCalled, isTrue);
+
+      // Avaliação continua publicável mesmo com localização aproximada
+      await tester.tap(find.text('Publicar Avaliação'));
+      await tester.pumpAndSettle();
+
+      expect(repository.capturedInput?.locationAccuracyMeters, 220.0);
+      expect(find.textContaining('Avaliação publicada, mas check-in não verificado'), findsOneWidget);
+      expect(find.textContaining('precisão do GPS estava baixa demais'), findsOneWidget);
+    });
+
+    testWidgets('feedback pós-publicação distingue check-in verificado e não solicitado', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      repository.mockResult = FeedReview(
+        id: 'rev-verified',
+        author: const FeedAuthor(displayName: 'Autor Teste'),
+        contextPlaceId: validTargetId,
+        isVerifiedOnSite: true,
+        visibility: 'PUBLIC',
+        status: 'ACTIVE',
+        createdAt: DateTime(2026, 11, 11),
+        checkIn: const CheckInResult(status: CheckInResultStatus.verified),
+      );
+
+      await tester.pumpWidget(buildSubject(
+        repository: repository,
+        locationService: MockLocationService(),
+        initialTargetId: validTargetId,
+        initialTargetType: 'PLACE',
+      ));
+
+      await tester.tap(find.text('Publicar Avaliação'));
+      await tester.pumpAndSettle();
+      expect(find.text('Avaliação publicada com check-in verificado!'), findsOneWidget);
+
+      // Agora simula check-in não solicitado
+      repository.mockResult = FeedReview(
+        id: 'rev-not-requested',
+        author: const FeedAuthor(displayName: 'Autor Teste'),
+        contextPlaceId: validTargetId,
+        isVerifiedOnSite: false,
+        visibility: 'PUBLIC',
+        status: 'ACTIVE',
+        createdAt: DateTime(2026, 11, 11),
+        checkIn: const CheckInResult(status: CheckInResultStatus.notRequested),
+      );
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Identificador do Alvo (UUID) *'),
+        validTargetId,
+      );
+      await tester.tap(find.text('Publicar Avaliação'));
+      await tester.pumpAndSettle();
+      expect(find.text('Avaliação publicada (check-in não solicitado).'), findsOneWidget);
+    });
+
     group('Regras e controles de privacidade (Security S2.1)', () {
       testWidgets('1. criação anônima com visibilidade pública submete com sucesso', (tester) async {
         tester.view.physicalSize = const Size(800, 2400);
@@ -1381,6 +1547,120 @@ void main() {
           expect(find.text('Estabelecimento vinculado: Pastel da Dona Ana'), findsOneWidget);
         },
       );
+    });
+
+    group('Scanner target selection forwarding (onScanTarget)', () {
+      testWidgets('oculta botão de scanner quando onScanTarget não é fornecido e encaminha seleção preservando local de contexto', (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final searchRepo = MockSearchRepository();
+
+        // 1. Sem onScanTarget: botão não deve existir
+        await tester.pumpWidget(
+          buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+          ),
+        );
+        expect(find.byKey(const Key('target_scanner_button_0')), findsNothing);
+
+        // 2. Com onScanTarget: primeiro seleciona um Local (atualiza local de contexto)
+        const scannedPlace = SearchResultItem(
+          id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          name: 'Livraria Central',
+          category: 'LIVRARIA',
+          targetType: TargetType.place,
+          rawTargetType: 'PLACE',
+          status: 'ACTIVE',
+        );
+        const scannedProduct = SearchResultItem(
+          id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          name: 'Dom Casmurro',
+          category: 'LIVROS',
+          targetType: TargetType.product,
+          rawTargetType: 'PRODUCT',
+          status: 'ACTIVE',
+        );
+
+        var scanCount = 0;
+        await tester.pumpWidget(
+          buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+            onScanTarget: () async {
+              scanCount++;
+              if (scanCount == 1) return scannedPlace;
+              return scannedProduct;
+            },
+          ),
+        );
+
+        final scannerBtn0 = find.byKey(const Key('target_scanner_button_0'));
+        expect(scannerBtn0, findsOneWidget);
+
+        await tester.tap(scannerBtn0);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Livraria Central'), findsOneWidget);
+        expect(find.text('Estabelecimento vinculado: Livraria Central'), findsOneWidget);
+
+        // Adiciona segundo alvo e seleciona um produto pelo scanner: local de contexto deve continuar Livraria Central
+        await tester.tap(find.text('Adicionar Outro Alvo / Item'));
+        await tester.pumpAndSettle();
+
+        final scannerBtn1 = find.byKey(const Key('target_scanner_button_1'));
+        expect(scannerBtn1, findsOneWidget);
+
+        await tester.tap(scannerBtn1);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Dom Casmurro'), findsOneWidget);
+        expect(find.text('Estabelecimento vinculado: Livraria Central'), findsOneWidget);
+      });
+
+      testWidgets('bloqueia seleção duplicada via scanner entre múltiplos alvos no ReviewCreateScreen', (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final searchRepo = MockSearchRepository();
+        const duplicateProduct = SearchResultItem(
+          id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+          name: 'Espresso Duplo',
+          category: 'BEBIDAS',
+          targetType: TargetType.product,
+          rawTargetType: 'PRODUCT',
+          status: 'ACTIVE',
+        );
+
+        await tester.pumpWidget(
+          buildSubject(
+            repository: repository,
+            searchRepository: searchRepo,
+            onScanTarget: () async => duplicateProduct,
+          ),
+        );
+
+        await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+        await tester.pumpAndSettle();
+        expect(find.text('Espresso Duplo'), findsOneWidget);
+
+        await tester.tap(find.text('Adicionar Outro Alvo / Item'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('target_scanner_button_1')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('O alvo "Espresso Duplo" já foi adicionado a esta avaliação.'),
+          findsOneWidget,
+        );
+        expect(find.text('Espresso Duplo'), findsOneWidget);
+      });
     });
   });
 }

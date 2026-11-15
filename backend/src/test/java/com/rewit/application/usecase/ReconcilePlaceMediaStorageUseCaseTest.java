@@ -1,7 +1,6 @@
 package com.rewit.application.usecase;
 
 import com.rewit.application.dto.storage.StorageReconciliationDtos.OrphanCandidate;
-import com.rewit.application.dto.storage.StorageReconciliationDtos.ReviewMediaReference;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StorageReconciliationReport;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObject;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.StoredObjectPage;
@@ -20,7 +19,6 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
@@ -76,7 +74,7 @@ class ReconcilePlaceMediaStorageUseCaseTest {
     void removedReferenceIsReportedButNotCandidate() {
         String key = managedKey();
         SortedStorage storage = new SortedStorage().add(key);
-        PlaceMedia media = repository.register(key, ReviewMediaStatus.REMOVED);
+        repository.register(key, ReviewMediaStatus.REMOVED);
 
         StorageReconciliationReport report = useCase(storage, 10, 10).reconcile(null, NOW);
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 
@@ -261,6 +262,101 @@ void main() {
         detail: 'Falha no banco',
       ));
       expect(serverError.isServerError, isTrue);
+    });
+
+    group('Decodificação de bytes e charset HTTP (UTF-8 por padrão)', () {
+      test('decodifica Credenciais inválidas em application/problem+json sem charset', () {
+        final payload = jsonEncode({
+          'type': 'https://rewit.app/errors/invalid-credentials',
+          'title': 'Não autorizado',
+          'status': 401,
+          'detail': 'Credenciais inválidas',
+          'code': 'INVALID_CREDENTIALS',
+        });
+
+        final problem = ProblemDetail.fromResponseBytes(
+          utf8.encode(payload),
+          401,
+          contentType: 'application/problem+json',
+        );
+
+        expect(problem.title, equals('Não autorizado'));
+        expect(problem.detail, equals('Credenciais inválidas'));
+        expect(problem.detail, isNot(contains('Ã')));
+        expect(problem.code, equals('INVALID_CREDENTIALS'));
+      });
+
+      test('preserva acentos e cedilha com application/problem+json; charset=utf-8 e sem header', () {
+        final payload = jsonEncode({
+          'title': 'Atenção na validação',
+          'status': 422,
+          'detail': 'Localização indisponível para ação em café/açúcar (não é possível concluir).',
+        });
+        final bytes = utf8.encode(payload);
+
+        final withCharset = ProblemDetail.fromResponseBytes(
+          bytes,
+          422,
+          contentType: 'application/problem+json; charset="UTF-8"',
+        );
+        final withoutHeader = ProblemDetail.fromResponseBytes(bytes, 422);
+
+        expect(
+          withCharset.detail,
+          equals('Localização indisponível para ação em café/açúcar (não é possível concluir).'),
+        );
+        expect(withCharset.title, equals('Atenção na validação'));
+        expect(withoutHeader.detail, equals(withCharset.detail));
+      });
+
+      test('decodifica payload ASCII puro normalmente', () {
+        final payload = jsonEncode({
+          'title': 'Bad Request',
+          'status': 400,
+          'detail': 'Simple ASCII validation failure.',
+        });
+
+        final problem = ProblemDetail.fromResponseBytes(
+          ascii.encode(payload),
+          400,
+          contentType: 'application/problem+json',
+        );
+
+        expect(problem.title, equals('Bad Request'));
+        expect(problem.detail, equals('Simple ASCII validation failure.'));
+      });
+
+      test('respeita charset=iso-8859-1 explicitamente declarado', () {
+        const latin1Json = '{"title":"Não autorizado","status":401,"detail":"Credenciais inválidas e localização"}';
+        final problem = ProblemDetail.fromResponseBytes(
+          latin1.encode(latin1Json),
+          401,
+          contentType: 'application/problem+json; charset=iso-8859-1',
+        );
+
+        expect(problem.title, equals('Não autorizado'));
+        expect(problem.detail, equals('Credenciais inválidas e localização'));
+      });
+
+      test('trata sequências de bytes UTF-8 inválidas sem lançar FormatException', () {
+        final invalidBytes = <int>[
+          ...utf8.encode('Erro '),
+          0xFF,
+          0xFE,
+          ...utf8.encode(' crítico'),
+        ];
+
+        final problem = ProblemDetail.fromResponseBytes(
+          invalidBytes,
+          500,
+          contentType: 'application/problem+json',
+        );
+
+        expect(problem.status, equals(500));
+        expect(problem.detail, contains('Erro '));
+        expect(problem.detail, contains('crítico'));
+        expect(problem.detail, contains('\uFFFD'));
+      });
     });
   });
 }

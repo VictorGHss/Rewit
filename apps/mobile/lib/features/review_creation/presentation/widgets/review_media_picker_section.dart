@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_notifier.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/state/review_create_state.dart';
@@ -18,16 +19,18 @@ class ReviewMediaPickerSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final mediaList = notifier.selectedMedia;
-    final canAddMore = mediaList.length < SelectedMediaItem.maxItemsPerReview && enabled;
+    final canAddMore =
+        mediaList.length < SelectedMediaItem.maxItemsPerReview && enabled;
 
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 16),
-      color: theme.colorScheme.surface,
+      color: theme.cardTheme.color ?? scheme.surfaceContainerLow,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(100)),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -43,7 +46,7 @@ class ReviewMediaPickerSection extends StatelessWidget {
                     Icon(
                       Icons.photo_library_outlined,
                       size: 22,
-                      color: theme.colorScheme.primary,
+                      color: scheme.primary,
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -54,9 +57,12 @@ class ReviewMediaPickerSection extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withAlpha(30),
+                        color: scheme.secondaryContainer,
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
@@ -64,18 +70,22 @@ class ReviewMediaPickerSection extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.primary,
+                          color: scheme.onSecondaryContainer,
                         ),
                       ),
                     ),
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: mediaList.length >= SelectedMediaItem.maxItemsPerReview
-                        ? theme.colorScheme.errorContainer
-                        : theme.colorScheme.primaryContainer.withAlpha(120),
+                    color:
+                        mediaList.length >= SelectedMediaItem.maxItemsPerReview
+                            ? scheme.errorContainer
+                            : scheme.primaryContainer,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -83,9 +93,10 @@ class ReviewMediaPickerSection extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: mediaList.length >= SelectedMediaItem.maxItemsPerReview
-                          ? theme.colorScheme.onErrorContainer
-                          : theme.colorScheme.onPrimaryContainer,
+                      color: mediaList.length >=
+                              SelectedMediaItem.maxItemsPerReview
+                          ? scheme.onErrorContainer
+                          : scheme.onPrimaryContainer,
                     ),
                   ),
                 ),
@@ -97,7 +108,7 @@ class ReviewMediaPickerSection extends StatelessWidget {
               'As fotos são processadas e sanitizadas pelo servidor após a publicação.',
               style: TextStyle(
                 fontSize: 12,
-                color: theme.colorScheme.onSurface.withAlpha(170),
+                color: scheme.onSurfaceVariant,
                 height: 1.3,
               ),
             ),
@@ -121,7 +132,10 @@ class ReviewMediaPickerSection extends StatelessWidget {
                       onRetry: () {
                         final state = notifier.state;
                         if (state is ReviewCreateSuccess) {
-                          notifier.retryMediaUpload(index, state.createdReview.id);
+                          notifier.retryMediaUpload(
+                            index,
+                            state.createdReview.id,
+                          );
                         }
                       },
                     );
@@ -175,19 +189,24 @@ class _SelectedMediaThumbnailCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
 
     return Container(
       width: 110,
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: item.status == MediaUploadStatus.failed
-              ? theme.colorScheme.error
+              ? scheme.error
               : item.status == MediaUploadStatus.uploaded
-                  ? Colors.green
-                  : theme.colorScheme.outlineVariant.withAlpha(100),
-          width: item.status == MediaUploadStatus.failed || item.status == MediaUploadStatus.uploaded ? 1.5 : 1,
+                  ? semantic.success.accent
+                  : scheme.outlineVariant,
+          width: item.status == MediaUploadStatus.failed ||
+                  item.status == MediaUploadStatus.uploaded
+              ? 1.5
+              : 1,
         ),
       ),
       child: Stack(
@@ -198,57 +217,82 @@ class _SelectedMediaThumbnailCard extends StatelessWidget {
             children: [
               Expanded(
                 child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(7),
+                  ),
                   child: item.bytes.isNotEmpty
                       ? Image.memory(
                           item.bytes,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => Container(
-                            color: Colors.grey.shade200,
-                            child: const Icon(Icons.broken_image, size: 28),
+                          errorBuilder: (context, error, stackTrace) =>
+                              Container(
+                            color: scheme.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.broken_image,
+                              size: 28,
+                              color: scheme.onSurfaceVariant,
+                            ),
                           ),
                         )
                       : Container(
-                          color: Colors.grey.shade200,
-                          child: const Icon(Icons.image, size: 28),
+                          color: scheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.image,
+                            size: 28,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                 ),
               ),
               // Rodapé com tamanho e status
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                color: theme.colorScheme.surface,
+                color: theme.cardTheme.color ?? scheme.surfaceContainerLow,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       item.formattedSize,
-                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                     if (item.status == MediaUploadStatus.uploaded)
-                      const Text(
+                      Text(
                         'Enviada',
-                        style: TextStyle(fontSize: 9, color: Colors.green, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: semantic.success.accent,
+                          fontWeight: FontWeight.bold,
+                        ),
                       )
                     else if (item.status == MediaUploadStatus.failed)
                       Text(
                         item.isTerminalError ? 'Inválida' : 'Falhou',
                         style: TextStyle(
                           fontSize: 9,
-                          color: theme.colorScheme.error,
+                          color: scheme.error,
                           fontWeight: FontWeight.bold,
                         ),
                       )
                     else if (item.status == MediaUploadStatus.uploading)
-                      const Text(
+                      Text(
                         'Enviando...',
-                        style: TextStyle(fontSize: 9, color: Colors.blue, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: scheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
                       )
                     else
-                      const Text(
+                      Text(
                         'Na fila',
-                        style: TextStyle(fontSize: 9, color: Colors.grey),
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                   ],
                 ),
@@ -256,7 +300,7 @@ class _SelectedMediaThumbnailCard extends StatelessWidget {
             ],
           ),
 
-          // Botão de remoção antes do upload (quando na fila)
+          // Botão de remoção antes do upload sobre a miniatura fotográfica
           if (item.status == MediaUploadStatus.queued && enabled)
             Positioned(
               top: 2,
@@ -266,26 +310,33 @@ class _SelectedMediaThumbnailCard extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(3),
                   decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(150),
+                    color: semantic.mediaScrim,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                  child: Icon(
+                    Icons.close,
+                    size: 14,
+                    color: semantic.onMediaScrim,
+                  ),
                 ),
               ),
             ),
 
-          // Overlay de progresso durante upload
+          // Overlay de progresso durante upload sobre a miniatura
           if (item.status == MediaUploadStatus.uploading)
             Container(
               decoration: BoxDecoration(
-                color: Colors.black.withAlpha(100),
+                color: semantic.mediaScrim,
                 borderRadius: BorderRadius.circular(7),
               ),
-              child: const Center(
+              child: Center(
                 child: SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: semantic.onMediaScrim,
+                  ),
                 ),
               ),
             ),
@@ -297,11 +348,16 @@ class _SelectedMediaThumbnailCard extends StatelessWidget {
               left: 4,
               child: Container(
                 padding: const EdgeInsets.all(2),
-                decoration: const BoxDecoration(
-                  color: Colors.green,
+                decoration: BoxDecoration(
+                  color: semantic.success.container,
                   shape: BoxShape.circle,
+                  border: Border.all(color: semantic.success.border),
                 ),
-                child: const Icon(Icons.check, size: 12, color: Colors.white),
+                child: Icon(
+                  Icons.check,
+                  size: 12,
+                  color: semantic.success.onContainer,
+                ),
               ),
             ),
 
@@ -316,10 +372,14 @@ class _SelectedMediaThumbnailCard extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.all(2),
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.error,
+                          color: scheme.error,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.error, size: 14, color: Colors.white),
+                        child: Icon(
+                          Icons.error,
+                          size: 14,
+                          color: scheme.onError,
+                        ),
                       ),
                     )
                   : GestureDetector(
@@ -327,10 +387,14 @@ class _SelectedMediaThumbnailCard extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.error,
+                          color: scheme.error,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.refresh, size: 14, color: Colors.white),
+                        child: Icon(
+                          Icons.refresh,
+                          size: 14,
+                          color: scheme.onError,
+                        ),
                       ),
                     ),
             ),

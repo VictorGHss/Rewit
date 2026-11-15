@@ -12,6 +12,7 @@ import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/account_settings_screen.dart';
@@ -27,6 +28,34 @@ class MockHttpHandler extends http.BaseClient {
 }
 
 class TestMockAuthRepo implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   bool shouldSucceedReactivate = true;
   bool shouldThrowNetworkOnReactivate = false;
   bool shouldThrowApiErrorOnDeactivate = false;
@@ -615,6 +644,7 @@ void main() {
 
       await tester.pumpWidget(buildSubject(notifier));
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -650,6 +680,7 @@ void main() {
 
       await tester.pumpWidget(buildSubject(notifier));
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -673,6 +704,7 @@ void main() {
         }),
       );
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -696,6 +728,7 @@ void main() {
 
       await tester.pumpWidget(buildSubject(notifier));
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -720,6 +753,7 @@ void main() {
 
       await tester.pumpWidget(buildSubject(notifier));
 
+      await tester.ensureVisible(find.text('Desativar minha conta'));
       await tester.tap(find.text('Desativar minha conta'));
       await tester.pumpAndSettle();
 
@@ -733,7 +767,7 @@ void main() {
   });
 
   group('Navigation & AppRouter - Configurações de Conta', () {
-    testWidgets('abrir configurações da conta pelo ícone no AppBar da HomeScreen', (tester) async {
+    testWidgets('abrir configurações da conta pelo avatar no AppBar da HomeScreen -> Perfil -> ícone de configurações', (tester) async {
       final repo = TestMockAuthRepo();
       final notifier = AuthNotifier(authRepository: repo);
       await notifier.checkAuthStatus();
@@ -747,10 +781,11 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Configurações ficam no menu "Mais opções" do AppBar (título centralizado com dois controles por lado)
-      await tester.tap(find.byTooltip('Mais opções'));
+      // Na Home V2, o perfil é aberto pelo avatar à esquerda do AppBar
+      await tester.tap(find.byKey(const Key('home_avatar_button')));
       await tester.pumpAndSettle();
 
+      expect(find.text('Perfil de Usuário'), findsOneWidget);
       final settingsIcon = find.byIcon(Icons.settings_outlined);
       expect(settingsIcon, findsOneWidget);
 
@@ -759,10 +794,11 @@ void main() {
 
       // Navegou para AccountSettingsScreen
       expect(find.text('Configurações da Conta'), findsOneWidget);
+      expect(find.text('Sair da Conta'), findsOneWidget);
       expect(find.text('Desativar minha conta'), findsOneWidget);
     });
 
-    testWidgets('abrir configurações da conta pelo botão na ProfilePlaceholderScreen', (tester) async {
+    testWidgets('abrir configurações da conta pelo botão na UserProfileScreen', (tester) async {
       final repo = TestMockAuthRepo();
       final notifier = AuthNotifier(authRepository: repo);
       await notifier.checkAuthStatus();
@@ -776,14 +812,17 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Seleciona aba Perfil
-      await tester.tap(find.text('Perfil'));
+      // Abre o Perfil pelo avatar da Home V2
+      await tester.tap(find.byKey(const Key('home_avatar_button')));
       await tester.pumpAndSettle();
 
       expect(find.text('Perfil de Usuário'), findsOneWidget);
       final configButton = find.widgetWithText(OutlinedButton, 'Configurações da Conta');
       expect(configButton, findsOneWidget);
 
+      // O perfil rola: com o atalho "Meus check-ins" o botão pode ficar abaixo da área visível
+      await tester.ensureVisible(configButton);
+      await tester.pumpAndSettle();
       await tester.tap(configButton);
       await tester.pumpAndSettle();
 

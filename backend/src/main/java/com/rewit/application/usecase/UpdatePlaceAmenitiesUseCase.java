@@ -19,7 +19,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * Substituição integral das comodidades de um local reivindicado (F2.2).

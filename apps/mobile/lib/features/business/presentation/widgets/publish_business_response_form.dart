@@ -59,18 +59,21 @@ class _PublishBusinessResponseFormState
         .toList();
 
     if (validAccounts.isNotEmpty) {
-      // Se a conta selecionada anteriormente ainda for válida, mantém
       if (_selectedAccount != null &&
-          validAccounts.any((a) => a.businessAccountId == _selectedAccount!.businessAccountId)) {
+          validAccounts.any(
+            (a) => a.businessAccountId == _selectedAccount!.businessAccountId,
+          )) {
         _selectedAccount = validAccounts.firstWhere(
-            (a) => a.businessAccountId == _selectedAccount!.businessAccountId);
+          (a) => a.businessAccountId == _selectedAccount!.businessAccountId,
+        );
       } else {
         _selectedAccount = validAccounts.first;
       }
 
       if (_selectedAccount!.places.isNotEmpty) {
         if (_selectedPlace != null &&
-            _selectedAccount!.places.any((p) => p.placeId == _selectedPlace!.placeId)) {
+            _selectedAccount!.places
+                .any((p) => p.placeId == _selectedPlace!.placeId)) {
           _selectedPlace = _selectedAccount!.places
               .firstWhere((p) => p.placeId == _selectedPlace!.placeId);
         } else {
@@ -112,7 +115,8 @@ class _PublishBusinessResponseFormState
 
     if (_selectedAccount == null || _selectedPlace == null) {
       setState(() {
-        _errorMessage = 'Selecione a empresa e o local que esta resposta representa.';
+        _errorMessage =
+            'Selecione a empresa e o local que esta resposta representa.';
       });
       return;
     }
@@ -161,7 +165,8 @@ class _PublishBusinessResponseFormState
       if (mounted) {
         setState(() {
           _isSubmitting = false;
-          _errorMessage = 'Falha ao publicar resposta oficial. Verifique sua conexão.';
+          _errorMessage =
+              'Falha ao publicar resposta oficial. Verifique sua conexão.';
         });
       }
     }
@@ -170,11 +175,14 @@ class _PublishBusinessResponseFormState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final validAccounts = widget.eligibility.accounts
         .where((a) => a.canPublish && a.places.isNotEmpty)
         .toList();
 
-    if (validAccounts.isEmpty || _selectedAccount == null || _selectedPlace == null) {
+    if (validAccounts.isEmpty ||
+        _selectedAccount == null ||
+        _selectedPlace == null) {
       return const SizedBox.shrink();
     }
 
@@ -182,10 +190,10 @@ class _PublishBusinessResponseFormState
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: theme.cardTheme.color ?? scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: theme.colorScheme.primary.withAlpha(100),
+          color: scheme.primary.withAlpha(110),
           width: 1.2,
         ),
       ),
@@ -195,13 +203,13 @@ class _PublishBusinessResponseFormState
           // Título do Formulário
           Row(
             children: [
-              Icon(Icons.rate_review_outlined, size: 18, color: theme.colorScheme.primary),
+              Icon(Icons.rate_review_outlined, size: 18, color: scheme.primary),
               const SizedBox(width: 8),
               Text(
                 'Responder como Empresa',
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
+                  color: scheme.primary,
                 ),
               ),
               const Spacer(),
@@ -222,7 +230,7 @@ class _PublishBusinessResponseFormState
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: theme.colorScheme.onSurface.withAlpha(180),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 4),
@@ -232,7 +240,8 @@ class _PublishBusinessResponseFormState
               isExpanded: true,
               decoration: const InputDecoration(
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 border: OutlineInputBorder(),
               ),
               items: validAccounts.map((account) {
@@ -251,7 +260,8 @@ class _PublishBusinessResponseFormState
                       if (val != null) {
                         setState(() {
                           _selectedAccount = validAccounts.firstWhere(
-                              (a) => a.businessAccountId == val);
+                            (a) => a.businessAccountId == val,
+                          );
                           _selectedPlace = _selectedAccount!.places.first;
                         });
                       }
@@ -273,7 +283,7 @@ class _PublishBusinessResponseFormState
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: theme.colorScheme.onSurface.withAlpha(180),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 4),
@@ -283,7 +293,8 @@ class _PublishBusinessResponseFormState
               isExpanded: true,
               decoration: const InputDecoration(
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 border: OutlineInputBorder(),
               ),
               items: _selectedAccount!.places.map((place) {
@@ -302,7 +313,8 @@ class _PublishBusinessResponseFormState
                       if (val != null) {
                         setState(() {
                           _selectedPlace = _selectedAccount!.places.firstWhere(
-                              (p) => p.placeId == val);
+                            (p) => p.placeId == val,
+                          );
                         });
                       }
                     },
@@ -313,7 +325,7 @@ class _PublishBusinessResponseFormState
               'Local: ${_selectedPlace!.placeName}',
               style: TextStyle(
                 fontSize: 12,
-                color: theme.colorScheme.onSurface.withAlpha(180),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 10),
@@ -325,19 +337,22 @@ class _PublishBusinessResponseFormState
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: scheme.errorContainer,
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.red.shade200),
+                border: Border.all(color: scheme.error.withAlpha(80)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.error_outline, size: 16, color: Colors.red.shade700),
+                  Icon(Icons.error_outline, size: 16, color: scheme.error),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       _errorMessage!,
                       key: const Key('publish_business_response_error'),
-                      style: TextStyle(color: Colors.red.shade800, fontSize: 12),
+                      style: TextStyle(
+                        color: scheme.onErrorContainer,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ],
@@ -354,7 +369,8 @@ class _PublishBusinessResponseFormState
             maxLines: 4,
             minLines: 2,
             decoration: const InputDecoration(
-              hintText: 'Escreva a resposta oficial da empresa (máximo 2000 caracteres)...',
+              hintText:
+                  'Escreva a resposta oficial da empresa (máximo 2000 caracteres)...',
               isDense: true,
               contentPadding: EdgeInsets.all(10),
               border: OutlineInputBorder(),
@@ -369,16 +385,18 @@ class _PublishBusinessResponseFormState
               key: const Key('submit_business_response_button'),
               onPressed: _isSubmitting ? null : _handleSubmit,
               icon: _isSubmitting
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: scheme.onSurfaceVariant,
                       ),
                     )
                   : const Icon(Icons.send, size: 16),
-              label: Text(_isSubmitting ? 'Publicando...' : 'Publicar Resposta Oficial'),
+              label: Text(
+                _isSubmitting ? 'Publicando...' : 'Publicar Resposta Oficial',
+              ),
             ),
           ),
         ],

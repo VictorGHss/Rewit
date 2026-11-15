@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
@@ -41,8 +42,10 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
   bool _isSubmitting = false;
   String? _errorMessage;
 
-  bool get _hasAllowedPrivacy =>
-      ReviewPrivacyRules.isAllowed(isAnonymous: _isAnonymous, visibility: _visibility);
+  bool get _hasAllowedPrivacy => ReviewPrivacyRules.isAllowed(
+        isAnonymous: _isAnonymous,
+        visibility: _visibility,
+      );
 
   bool get _canSubmit => !_isSubmitting && _hasAllowedPrivacy;
 
@@ -57,6 +60,19 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
       child: Semantics(
         hint: ReviewPrivacyRules.incompatibleCombinationMessage,
         child: button,
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    final scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: scheme.onErrorContainer),
+        ),
+        backgroundColor: scheme.errorContainer,
       ),
     );
   }
@@ -120,17 +136,13 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
       }
     } on ApiException catch (e) {
       if (mounted) {
-        final message = ReviewPrivacyRules.messageForError(e.errorCode, e.detail);
+        final message =
+            ReviewPrivacyRules.messageForError(e.errorCode, e.detail);
         setState(() {
           _isSubmitting = false;
           _errorMessage = message;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar(message);
       }
     } on NetworkException catch (e) {
       if (mounted) {
@@ -138,25 +150,17 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
           _isSubmitting = false;
           _errorMessage = e.message;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar(e.message);
       }
     } catch (_) {
       if (mounted) {
+        const msg =
+            'Falha inesperada ao atualizar avaliação. Tente novamente.';
         setState(() {
           _isSubmitting = false;
-          _errorMessage = 'Falha inesperada ao atualizar avaliação. Tente novamente.';
+          _errorMessage = msg;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Falha inesperada ao atualizar avaliação. Tente novamente.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar(msg);
       }
     }
   }
@@ -164,6 +168,8 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
 
     return PopScope(
       canPop: !_isSubmitting,
@@ -183,11 +189,13 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 ),
               )
             else
-              _explainDisabledSave(TextButton(
-                key: const Key('save_review_edit_button'),
-                onPressed: _canSubmit ? _submitEdit : null,
-                child: const Text('Salvar'),
-              )),
+              _explainDisabledSave(
+                TextButton(
+                  key: const Key('save_review_edit_button'),
+                  onPressed: _canSubmit ? _submitEdit : null,
+                  child: const Text('Salvar'),
+                ),
+              ),
           ],
         ),
         body: Form(
@@ -200,19 +208,19 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.errorContainer,
+                    color: scheme.errorContainer,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: theme.colorScheme.error.withAlpha(100)),
+                    border: Border.all(color: scheme.error.withAlpha(100)),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.error_outline, color: theme.colorScheme.error, size: 20),
+                      Icon(Icons.error_outline, color: scheme.error, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
                           style: TextStyle(
-                            color: theme.colorScheme.onErrorContainer,
+                            color: scheme.onErrorContainer,
                             fontSize: 13,
                           ),
                         ),
@@ -229,19 +237,26 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                   key: const Key('legacy_privacy_notice'),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
+                    color: semantic.warning.container,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.amber.shade400),
+                    border: Border.all(color: semantic.warning.border),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.lock_outline, color: Colors.amber.shade900, size: 20),
+                      Icon(
+                        Icons.lock_outline,
+                        color: semantic.warning.accent,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           ReviewPrivacyRules.legacyCombinationNotice,
-                          style: TextStyle(color: Colors.amber.shade900, fontSize: 12),
+                          style: TextStyle(
+                            color: semantic.warning.onContainer,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                     ],
@@ -255,20 +270,24 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
+                    color: semantic.warning.container,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.amber.shade400),
+                    border: Border.all(color: semantic.warning.border),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.info_outline, color: Colors.amber.shade900, size: 20),
+                      Icon(
+                        Icons.info_outline,
+                        color: semantic.warning.accent,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Esta avaliação já possui ${widget.review.helpfulCount} voto(s) de útil. Caso as notas dos alvos sejam modificadas, a alteração poderá ser recusada pelo servidor.',
                           style: TextStyle(
-                            color: Colors.amber.shade900,
+                            color: semantic.warning.onContainer,
                             fontSize: 12,
                           ),
                         ),
@@ -291,12 +310,13 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 Text(
                   'Alvos não podem ser adicionados ou removidos após a publicação.',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withAlpha(150),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 12),
                 ...widget.review.targets.map((target) {
-                  final currentRating = _targetRatings[target.targetId] ?? target.rating;
+                  final currentRating =
+                      _targetRatings[target.targetId] ?? target.rating;
                   final typeBadge = target.targetType ?? 'ITEM';
 
                   return Card(
@@ -304,7 +324,7 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                     margin: const EdgeInsets.only(bottom: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Colors.grey.withAlpha(50)),
+                      side: BorderSide(color: scheme.outlineVariant),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
@@ -314,9 +334,12 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: theme.colorScheme.primaryContainer,
+                                  color: scheme.primaryContainer,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
@@ -324,16 +347,18 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.onPrimaryContainer,
+                                    color: scheme.onPrimaryContainer,
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  (target.targetName != null && target.targetName!.trim().isNotEmpty)
+                                  (target.targetName != null &&
+                                          target.targetName!.trim().isNotEmpty)
                                       ? target.targetName!.trim()
-                                      : (target.targetType?.toUpperCase() == 'PRODUCT'
+                                      : (target.targetType?.toUpperCase() ==
+                                              'PRODUCT'
                                           ? 'Produto avaliado'
                                           : 'Local avaliado'),
                                   style: const TextStyle(
@@ -363,7 +388,7 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontStyle: FontStyle.italic,
-                                color: Colors.grey.shade600,
+                                color: scheme.onSurfaceVariant,
                               ),
                             ),
                           ],
@@ -416,7 +441,8 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 initialValue: _visibility,
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
                 items: [
                   const DropdownMenuItem(
@@ -431,7 +457,9 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                     ),
                     // Opção desabilitada anuncia o motivo ao leitor de tela
                     child: Semantics(
-                      hint: _isAnonymous ? ReviewPrivacyRules.followersUnavailableForAnonymous : null,
+                      hint: _isAnonymous
+                          ? ReviewPrivacyRules.followersUnavailableForAnonymous
+                          : null,
                       child: const Text('Apenas seguidores'),
                     ),
                   ),
@@ -444,7 +472,10 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                     ? null
                     : (value) {
                         if (value != null &&
-                            ReviewPrivacyRules.canSelectVisibility(value: value, isAnonymous: _isAnonymous)) {
+                            ReviewPrivacyRules.canSelectVisibility(
+                              value: value,
+                              isAnonymous: _isAnonymous,
+                            )) {
                           setState(() {
                             _visibility = value;
                           });
@@ -453,10 +484,13 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
               ),
               if (_isAnonymous) ...[
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   ReviewPrivacyRules.followersUnavailableForAnonymous,
-                  key: Key('edit_followers_unavailable_hint'),
-                  style: TextStyle(fontSize: 12),
+                  key: const Key('edit_followers_unavailable_hint'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
               const SizedBox(height: 20),
@@ -466,7 +500,7 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.grey.withAlpha(50)),
+                  side: BorderSide(color: scheme.outlineVariant),
                 ),
                 child: SwitchListTile(
                   key: const Key('edit_anonymous_switch'),
@@ -480,36 +514,41 @@ class _ReviewEditScreenState extends State<ReviewEditScreen> {
                   ),
                   value: _isAnonymous,
                   // Ligar o anonimato com "Apenas seguidores" fica bloqueado; desligar é sempre possível
-                  onChanged: _isSubmitting || (!_isAnonymous && !_canEnableAnonymous)
-                      ? null
-                      : (val) {
-                          setState(() {
-                            _isAnonymous = val;
-                          });
-                        },
+                  onChanged:
+                      _isSubmitting || (!_isAnonymous && !_canEnableAnonymous)
+                          ? null
+                          : (val) {
+                              setState(() {
+                                _isAnonymous = val;
+                              });
+                            },
                 ),
               ),
               const SizedBox(height: 32),
 
               // 7. Botão principal de salvar
-              _explainDisabledSave(FilledButton.icon(
-                key: const Key('submit_edit_button'),
-                onPressed: _canSubmit ? _submitEdit : null,
-                icon: _isSubmitting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.check),
-                label: Text(_isSubmitting ? 'Salvando...' : 'Salvar Alterações'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+              _explainDisabledSave(
+                FilledButton.icon(
+                  key: const Key('submit_edit_button'),
+                  onPressed: _canSubmit ? _submitEdit : null,
+                  icon: _isSubmitting
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        )
+                      : const Icon(Icons.check),
+                  label: Text(
+                    _isSubmitting ? 'Salvando...' : 'Salvar Alterações',
+                  ),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
                 ),
-              )),
+              ),
             ],
           ),
         ),

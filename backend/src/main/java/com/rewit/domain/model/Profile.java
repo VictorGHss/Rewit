@@ -19,6 +19,7 @@ public class Profile {
     private String avatarUrl;
     private int reputationScore;
     private boolean isAnonymousDefault;
+    private boolean showInRankings;
     private final Instant createdAt;
     private Instant updatedAt;
 
@@ -34,13 +35,14 @@ public class Profile {
         this.avatarUrl = avatarUrl != null && !avatarUrl.isBlank() ? avatarUrl.trim() : null;
         this.reputationScore = 0;
         this.isAnonymousDefault = false;
+        this.showInRankings = false;
         this.createdAt = Instant.now();
         this.updatedAt = Instant.now();
     }
 
     private Profile(UUID id, UUID userId, String handle, String displayName,
                     String bio, String avatarUrl, int reputationScore,
-                    boolean isAnonymousDefault, Instant createdAt, Instant updatedAt) {
+                    boolean isAnonymousDefault, boolean showInRankings, Instant createdAt, Instant updatedAt) {
         this.id = id;
         this.userId = userId;
         this.handle = handle;
@@ -49,6 +51,7 @@ public class Profile {
         this.avatarUrl = avatarUrl;
         this.reputationScore = reputationScore;
         this.isAnonymousDefault = isAnonymousDefault;
+        this.showInRankings = showInRankings;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -83,13 +86,15 @@ public class Profile {
                 || !DELETED_DISPLAY_NAME.equals(this.displayName)
                 || this.bio != null
                 || this.avatarUrl != null
-                || this.reputationScore != 0;
+                || this.reputationScore != 0
+                || this.showInRankings;
         if (changed) {
             this.handle = reservedHandle;
             this.displayName = DELETED_DISPLAY_NAME;
             this.bio = null;
             this.avatarUrl = null;
             this.reputationScore = 0;
+            this.showInRankings = false;
             this.updatedAt = Instant.now();
         }
         return changed;
@@ -114,11 +119,21 @@ public class Profile {
     }
 
     /**
-     * Reconstrói uma instância de Profile a partir da camada de persistência.
+     * Reconstrói uma instância de Profile a partir da camada de persistência (retrocompatibilidade).
      */
     public static Profile rehydrate(UUID id, UUID userId, String handle, String displayName,
                                     String bio, String avatarUrl, int reputationScore,
                                     boolean isAnonymousDefault, Instant createdAt, Instant updatedAt) {
+        return rehydrate(id, userId, handle, displayName, bio, avatarUrl, reputationScore, isAnonymousDefault, false, createdAt, updatedAt);
+    }
+
+    /**
+     * Reconstrói uma instância de Profile a partir da camada de persistência com preferência de ranking.
+     */
+    public static Profile rehydrate(UUID id, UUID userId, String handle, String displayName,
+                                    String bio, String avatarUrl, int reputationScore,
+                                    boolean isAnonymousDefault, boolean showInRankings,
+                                    Instant createdAt, Instant updatedAt) {
         if (id == null) {
             throw new BusinessException("O identificador do perfil é obrigatório", "MISSING_PROFILE_ID");
         }
@@ -131,7 +146,7 @@ public class Profile {
         return new Profile(id, userId, normalizeHandle(handle), validateDisplayName(displayName),
                 bio != null && !bio.isBlank() ? bio.trim() : null,
                 avatarUrl != null && !avatarUrl.isBlank() ? avatarUrl.trim() : null,
-                reputationScore, isAnonymousDefault,
+                reputationScore, isAnonymousDefault, showInRankings,
                 createdAt != null ? createdAt : Instant.now(),
                 updatedAt != null ? updatedAt : Instant.now());
     }
@@ -161,6 +176,11 @@ public class Profile {
         this.updatedAt = Instant.now();
     }
 
+    public void updateRankingPreferences(boolean showInRankings) {
+        this.showInRankings = showInRankings;
+        this.updatedAt = Instant.now();
+    }
+
     public void adjustReputation(int delta) {
         int newScore = this.reputationScore + delta;
         if (newScore < 0) {
@@ -173,6 +193,10 @@ public class Profile {
     public void setAnonymousDefault(boolean anonymousDefault) {
         this.isAnonymousDefault = anonymousDefault;
         this.updatedAt = Instant.now();
+    }
+
+    public void setShowInRankings(boolean showInRankings) {
+        updateRankingPreferences(showInRankings);
     }
 
     public UUID getId() {
@@ -205,6 +229,10 @@ public class Profile {
 
     public boolean isAnonymousDefault() {
         return isAnonymousDefault;
+    }
+
+    public boolean isShowInRankings() {
+        return showInRankings;
     }
 
     public Instant getCreatedAt() {

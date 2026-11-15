@@ -396,4 +396,86 @@ void main() {
       expect(sessionExpired, isTrue);
     });
   });
+
+  group('TokenRefreshingClient: repetição só na mesma conta', () {
+    String jwtFor(String subject, {String suffix = 'a'}) {
+      String segment(Map<String, dynamic> json) => base64Url.encode(utf8.encode(jsonEncode(json))).replaceAll('=', '');
+      return '${segment({'alg': 'HS256'})}.${segment({'sub': subject, 'jti': suffix})}.assinatura';
+    }
+
+    http.Request putInterests(String token) =>
+        http.Request('PUT', Uri.parse('https://api.rewit.test/api/v1/me/interests'))
+          ..headers['Authorization'] = 'Bearer $token'
+          ..body = '{"interests":["CAFE"],"completeOnboarding":false}';
+
+    test('token renovado de outra conta (outro sub) não repete a requisição e devolve o 401 original', () async {
+      final tokenA = jwtFor('usuario-a');
+      final tokenB = jwtFor('usuario-b');
+      final refresher = SessionRefresher(refreshAccessToken: () async => tokenB);
+      final inner = _RecordingClient((request) async =>
+          request.headers['authorization'] == 'Bearer $tokenB' ? _json(200, {'ok': true}) : _tokenRejected());
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      final response = await http.Response.fromStream(await client.send(putInterests(tokenA)));
+
+      expect(response.statusCode, 401);
+      expect(jsonDecode(response.body)['code'], 'AUTHENTICATION_REQUIRED');
+      expect(inner.requests, hasLength(1), reason: 'as respostas de A nunca podem ir com o token de B');
+    });
+
+    test('token renovado da mesma conta repete a requisição com o token novo', () async {
+      final oldToken = jwtFor('usuario-a', suffix: 'velho');
+      final newToken = jwtFor('usuario-a', suffix: 'novo');
+      final refresher = SessionRefresher(refreshAccessToken: () async => newToken);
+      final inner = _RecordingClient((request) async =>
+          request.headers['authorization'] == 'Bearer $newToken' ? _json(200, {'ok': true}) : _tokenRejected());
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      final response = await http.Response.fromStream(await client.send(putInterests(oldToken)));
+
+      expect(response.statusCode, 200);
+      expect(inner.requests, hasLength(2));
+      expect(inner.requests[1].headers['authorization'], 'Bearer $newToken');
+      expect(inner.bodies[1], '{"interests":["CAFE"],"completeOnboarding":false}');
+    });
+
+    test('token renovado ilegível não é aceito como sendo da conta original', () async {
+      final refresher = SessionRefresher(refreshAccessToken: () async => 'token-opaco');
+      final inner = _RecordingClient((_) async => _tokenRejected());
+      final client = TokenRefreshingClient(inner: inner, sessionRefresher: refresher);
+
+      final response = await http.Response.fromStream(await client.send(putInterests(jwtFor('usuario-a'))));
+
+      expect(response.statusCode, 401);
+      expect(inner.requests, hasLength(1));
+    });
+
+    test('pelo RewitHttpClient: a conta trocada vira 401 e aciona a verificação de sessão, sem gravar', () async {
+      final storage = InMemoryTokenStorage();
+      final tokenA = jwtFor('usuario-a');
+      final tokenB = jwtFor('usuario-b');
+      await storage.saveTokens(accessToken: tokenA, refreshToken: 'refresh-a');
+      // Enquanto a requisição de A estava em voo, B entrou neste aparelho
+      final refresher = SessionRefresher(refreshAccessToken: () async {
+        await storage.saveTokens(accessToken: tokenB, refreshToken: 'refresh-b');
+        return tokenB;
+      });
+      final inner = _RecordingClient((request) async =>
+          request.headers['authorization'] == 'Bearer $tokenB' ? _json(200, {'ok': true}) : _tokenRejected());
+      var sessionChecks = 0;
+      final client = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: TokenRefreshingClient(inner: inner, sessionRefresher: refresher),
+        tokenStorage: storage,
+        onSessionExpired: () => sessionChecks++,
+      );
+
+      await expectLater(
+        client.put('/api/v1/me/interests', body: {'interests': ['CAFE'], 'completeOnboarding': false}),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401)),
+      );
+      expect(inner.requests, hasLength(1));
+      expect(sessionChecks, 1);
+    });
+  });
 }

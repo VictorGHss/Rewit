@@ -7,6 +7,7 @@ import 'package:rewit_mobile/core/services/url_launcher_service.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/business/domain/entities/business_entities.dart';
 import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
@@ -25,6 +26,7 @@ import 'package:rewit_mobile/features/place/presentation/screens/place_opening_h
 import 'package:rewit_mobile/features/place/presentation/widgets/place_amenities_section.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/place_commercial_offers_section.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/place_opening_hours_section.dart';
+import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
@@ -33,6 +35,34 @@ import 'package:rewit_mobile/features/search/domain/entities/search_entities.dar
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
 class _StubAuthRepo implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   @override
   Future<bool> hasStoredSession() async => true;
   @override
@@ -430,6 +460,9 @@ class _E2ESearchRepository implements SearchRepository {
 }
 
 class _E2EProductRepository implements ProductRepository {
+  @override
+  Future<ProductDetail> createProduct(CreateProductInput input) async => throw UnimplementedError();
+
   @override
   Future<ProductsInPlacePage> getProductsInPlace(String placeId, {int page = 0, int size = 20}) async {
     return const ProductsInPlacePage(

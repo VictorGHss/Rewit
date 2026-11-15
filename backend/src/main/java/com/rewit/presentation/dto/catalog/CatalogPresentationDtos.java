@@ -4,7 +4,9 @@ import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.constraints.DecimalMax;
+import com.rewit.domain.model.PresenceVerificationPolicy;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -61,6 +63,8 @@ public final class CatalogPresentationDtos {
             Double longitude,
 
             @Min(value = 1, message = "O raio de validação deve ser maior que zero")
+            @Max(value = PresenceVerificationPolicy.MAX_VALIDATION_RADIUS_METERS,
+                    message = "O raio de validação deve ser de até 250 metros")
             Integer validationRadiusMeters
     ) {}
 
@@ -111,6 +115,8 @@ public final class CatalogPresentationDtos {
             Double longitude,
 
             @Min(value = 1, message = "O raio de validação deve ser maior que zero")
+            @Max(value = PresenceVerificationPolicy.MAX_VALIDATION_RADIUS_METERS,
+                    message = "O raio de validação deve ser de até 250 metros")
             Integer validationRadiusMeters,
 
             @jakarta.validation.Valid

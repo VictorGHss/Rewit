@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:rewit_mobile/app/theme/theme_controller.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/screens/login_screen.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -8,6 +9,10 @@ import 'package:rewit_mobile/features/business/domain/repositories/business_repo
 import 'package:rewit_mobile/features/business/domain/repositories/business_response_repository.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/my_business_accounts_screen.dart';
 import 'package:rewit_mobile/features/business/presentation/screens/place_management_dashboard_screen.dart';
+import 'package:rewit_mobile/features/check_ins/domain/repositories/check_in_repository.dart';
+import 'package:rewit_mobile/features/rankings/domain/repositories/ranking_repository.dart';
+import 'package:rewit_mobile/features/rankings/presentation/screens/rankings_screen.dart';
+import 'package:rewit_mobile/features/check_ins/presentation/screens/my_check_ins_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
@@ -18,7 +23,11 @@ import 'package:rewit_mobile/features/discussions/domain/repositories/discussion
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
+import 'package:rewit_mobile/features/feed/presentation/state/feed_state.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:rewit_mobile/features/interests/domain/repositories/interest_repository.dart';
+import 'package:rewit_mobile/features/interests/presentation/screens/edit_interests_screen.dart';
+import 'package:rewit_mobile/features/interests/presentation/widgets/interests_gate.dart';
 import 'package:rewit_mobile/features/notifications/domain/repositories/notification_repository.dart';
 import 'package:rewit_mobile/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:rewit_mobile/features/notifications/presentation/state/notifications_notifier.dart';
@@ -28,6 +37,7 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_detail_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_business_profile_edit_screen.dart';
+import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
 import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
 import 'package:rewit_mobile/features/product/presentation/screens/product_detail_screen.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
@@ -42,10 +52,35 @@ import 'package:rewit_mobile/features/review_creation/domain/services/media_pick
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/features/scanner/presentation/screens/scanner_screen.dart';
+import 'package:rewit_mobile/features/scanner/presentation/state/scanner_notifier.dart';
+import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 import 'package:rewit_mobile/features/search/presentation/screens/search_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
+
+/// Argumentos tipados opcionais para a rota [AppRouter.scanner].
+class ScannerRouteArgs {
+  final bool selectionMode;
+  final ProductRepository? productRepository;
+  final PlaceRepository? placeRepository;
+  final ScannerNotifier? notifier;
+  final Widget Function(
+    BuildContext context,
+    void Function(BarcodeCapture) onDetect,
+  )? cameraBuilder;
+  final bool autoStartCamera;
+
+  const ScannerRouteArgs({
+    this.selectionMode = false,
+    this.productRepository,
+    this.placeRepository,
+    this.notifier,
+    this.cameraBuilder,
+    this.autoStartCamera = true,
+  });
+}
 
 /// Definição de rotas nomeadas e gerador centralizado de navegação.
 class AppRouter {
@@ -59,11 +94,14 @@ class AppRouter {
   static const String reviewCreate = '/review/create';
   static const String profile = '/profile';
   static const String myReviews = '/profile/my-reviews';
+  static const String myCheckIns = '/profile/my-check-ins';
+  static const String rankings = '/rankings';
   static const String followList = '/profile/follows';
   static const String reviewDetail = '/review/detail';
   static const String accountSettings = '/settings';
   static const String changePassword = '/settings/change-password';
   static const String businessAccounts = '/settings/business-accounts';
+  static const String editInterests = '/settings/interests';
   static const String placeManagement = '/business/place-management';
   static const String placeMediaGallery = '/place/media-gallery';
   static const String placeOpeningHoursEdit = '/business/place-opening-hours-edit';
@@ -86,16 +124,35 @@ class AppRouter {
   final PlaceRepository? placeRepository;
   final PlaceCommercialRepository? placeCommercialRepository;
   final ProductRepository? productRepository;
+  final PlaceDiscoveryRepository? placeDiscoveryRepository;
   final NotificationRepository? notificationRepository;
   final NotificationsNotifier? notificationsNotifier;
   final BusinessRepository? businessRepository;
   final BusinessResponseRepository? businessResponseRepository;
 
+  /// Interesses do usuário; com ele, a sessão autenticada passa pelo questionário inicial antes do app.
+  final InterestRepository? interestRepository;
+
   /// Operações pendentes de cadastro de local, com escopo por usuário (MB-1c/MB-1d).
   final PendingPlaceRegistrationStore? pendingRegistrationStore;
 
+  /// Locais próximos da aba Check-in e histórico de check-ins verificados.
+  final CheckInRepository? checkInRepository;
+
+  /// Rankings da Região e participação voluntária (Configurações da Conta).
+  final RankingRepository? rankingRepository;
+
+  /// Controlador local de aparência do aplicativo (`ThemeMode.system`, `light` ou `dark`).
+  final ThemeController? themeController;
+
   /// Seletor da fotografia do cadastro manual; nulo usa a câmera/galeria do dispositivo.
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+
+  /// Construtor opcional da visão de câmera do Scanner (usado para testes de integração de rotas).
+  final Widget Function(
+    BuildContext context,
+    void Function(BarcodeCapture) onDetect,
+  )? scannerCameraBuilder;
 
   const AppRouter({
     required this.authNotifier,
@@ -111,13 +168,64 @@ class AppRouter {
     this.placeRepository,
     this.placeCommercialRepository,
     this.productRepository,
+    this.placeDiscoveryRepository,
     this.notificationRepository,
     this.notificationsNotifier,
     this.businessRepository,
     this.businessResponseRepository,
+    this.interestRepository,
     this.pendingRegistrationStore,
     this.onPickManualPlacePhoto,
+    this.checkInRepository,
+    this.rankingRepository,
+    this.themeController,
+    this.scannerCameraBuilder,
   });
+
+  String? _currentUserId() {
+    final state = authNotifier.state;
+    return state is Authenticated ? state.user.id : null;
+  }
+
+  /// Constrói a [HomeScreen] com todas as dependências injetadas e escopo por sessão.
+  Widget _buildHomeScreen(Authenticated? session) {
+    return HomeScreen(
+      key: ValueKey('home-${session?.user.id ?? 'anon'}'),
+      authNotifier: authNotifier,
+      feedNotifier: feedNotifier,
+      reviewCreationRepository: reviewCreationRepository,
+      mediaRepository: reviewMediaRepository,
+      mediaPickerService: mediaPickerService,
+      locationService: locationService,
+      searchRepository: searchRepository,
+      placeRepository: placeRepository,
+      productRepository: productRepository,
+      placeDiscoveryRepository: placeDiscoveryRepository,
+      userProfileRepository: userProfileRepository,
+      notificationRepository: notificationRepository,
+      notificationsNotifier: notificationsNotifier,
+      pendingRegistrationStore: pendingRegistrationStore,
+      onPickManualPlacePhoto: onPickManualPlacePhoto,
+      checkInRepository: checkInRepository,
+      rankingRepository: rankingRepository,
+      interestRepository: interestRepository,
+    );
+  }
+
+  /// App da sessão autenticada; com [interestRepository], passa antes pelo questionário inicial de interesses. O
+  /// portão tem uma chave por usuário: outra conta começa do zero, sem herdar estado nem respostas.
+  Widget _authenticatedHome(BuildContext context, Authenticated session, WidgetBuilder home) {
+    final repository = interestRepository;
+    if (repository == null) return home(context);
+    return InterestsGate(
+      key: ValueKey('interests-gate-${session.user.id}'),
+      userId: session.user.id,
+      repository: repository,
+      currentUserId: _currentUserId,
+      homeBuilder: home,
+      onLogout: authNotifier.logout,
+    );
+  }
 
   Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -133,20 +241,10 @@ class AppRouter {
                 );
               }
               if (state is Authenticated) {
-                return HomeScreen(
-                  authNotifier: authNotifier,
-                  feedNotifier: feedNotifier,
-                  reviewCreationRepository: reviewCreationRepository,
-                  mediaRepository: reviewMediaRepository,
-                  mediaPickerService: mediaPickerService,
-                  locationService: locationService,
-                  searchRepository: searchRepository,
-                  placeRepository: placeRepository,
-                  userProfileRepository: userProfileRepository,
-                  notificationRepository: notificationRepository,
-                  notificationsNotifier: notificationsNotifier,
-                  pendingRegistrationStore: pendingRegistrationStore,
-                  onPickManualPlacePhoto: onPickManualPlacePhoto,
+                return _authenticatedHome(
+                  context,
+                  state,
+                  (_) => _buildHomeScreen(state),
                 );
               }
               return LoginScreen(authNotifier: authNotifier);
@@ -163,19 +261,17 @@ class AppRouter {
 
       case home:
         return MaterialPageRoute(
-          builder: (context) => HomeScreen(
-            authNotifier: authNotifier,
-            feedNotifier: feedNotifier,
-            reviewCreationRepository: reviewCreationRepository,
-            mediaRepository: reviewMediaRepository,
-            mediaPickerService: mediaPickerService,
-            locationService: locationService,
-            searchRepository: searchRepository,
-            placeRepository: placeRepository,
-            userProfileRepository: userProfileRepository,
-            notificationRepository: notificationRepository,
-            notificationsNotifier: notificationsNotifier,
-          ),
+          builder: (context) {
+            final state = authNotifier.state;
+            if (state is Authenticated) {
+              return _authenticatedHome(
+                context,
+                state,
+                (_) => _buildHomeScreen(state),
+              );
+            }
+            return _buildHomeScreen(null);
+          },
           settings: settings,
         );
 
@@ -321,35 +417,63 @@ class AppRouter {
         String? initialTargetType;
         String? initialCategory;
         File? initialPhoto;
+        Future<SearchResultItem?> Function()? customOnScanTarget;
         if (args is Map<String, dynamic>) {
           initialTargetId = args['targetId'] as String?;
           initialTargetName = args['targetName'] as String?;
           initialTargetType = args['targetType'] as String?;
           initialCategory = args['category'] as String?;
           initialPhoto = args['initialPhoto'] as File?;
+          final rawOnScan = args['onScanTarget'];
+          if (rawOnScan is Future<SearchResultItem?> Function()) {
+            customOnScanTarget = rawOnScan;
+          }
         }
 
         return MaterialPageRoute(
-          builder: (context) => ReviewCreateScreen(
-            repository: reviewCreationRepository,
-            mediaRepository: reviewMediaRepository,
-            mediaPickerService: mediaPickerService,
-            locationService: locationService,
-            searchRepository: searchRepository,
-            placeRepository: placeRepository,
-            initialTargetId: initialTargetId,
-            initialTargetName: initialTargetName,
-            initialTargetType: initialTargetType,
-            initialCategory: initialCategory,
-            initialPhoto: initialPhoto,
-            authNotifier: authNotifier,
-            pendingRegistrationStore: pendingRegistrationStore,
-            onPickManualPlacePhoto: onPickManualPlacePhoto,
-            onReviewCreated: (createdReview) {
-              feedNotifier?.refresh();
-              Navigator.of(context).pushReplacementNamed(
-                AppRouter.reviewDetail,
-                arguments: createdReview,
+          builder: (context) => ListenableBuilder(
+            listenable: authNotifier,
+            builder: (context, _) {
+              if (authNotifier.state is Unauthenticated) {
+                return LoginScreen(authNotifier: authNotifier);
+              }
+              return ReviewCreateScreen(
+                repository: reviewCreationRepository,
+                mediaRepository: reviewMediaRepository,
+                mediaPickerService: mediaPickerService,
+                locationService: locationService,
+                searchRepository: searchRepository,
+                placeRepository: placeRepository,
+                productRepository: productRepository,
+                placeDiscoveryRepository: placeDiscoveryRepository,
+                initialTargetId: initialTargetId,
+                initialTargetName: initialTargetName,
+                initialTargetType: initialTargetType,
+                initialCategory: initialCategory,
+                initialPhoto: initialPhoto,
+                authNotifier: authNotifier,
+                pendingRegistrationStore: pendingRegistrationStore,
+                onPickManualPlacePhoto: onPickManualPlacePhoto,
+                onScanTarget: customOnScanTarget ??
+                    () async {
+                      final result = await Navigator.of(context).pushNamed(
+                        AppRouter.scanner,
+                        arguments: ScannerRouteArgs(
+                          selectionMode: true,
+                          productRepository: productRepository,
+                          placeRepository: placeRepository,
+                          cameraBuilder: scannerCameraBuilder,
+                        ),
+                      );
+                      return result is SearchResultItem ? result : null;
+                    },
+                onReviewCreated: (createdReview) {
+                  feedNotifier?.refresh();
+                  Navigator.of(context).pushReplacementNamed(
+                    AppRouter.reviewDetail,
+                    arguments: createdReview,
+                  );
+                },
               );
             },
           ),
@@ -384,6 +508,25 @@ class AppRouter {
           settings: settings,
         );
 
+      case rankings:
+        return MaterialPageRoute(
+          builder: (context) => RankingsScreen(
+            repository: rankingRepository,
+            interestRepository: interestRepository,
+            authNotifier: authNotifier,
+          ),
+          settings: settings,
+        );
+
+      case myCheckIns:
+        return MaterialPageRoute(
+          builder: (context) => MyCheckInsScreen(
+            repository: checkInRepository,
+            onOpenReview: (reviewId) => Navigator.of(context).pushNamed(reviewDetail, arguments: reviewId),
+          ),
+          settings: settings,
+        );
+
       case followList:
         final args = settings.arguments;
         if (args is FollowListArgs) {
@@ -408,7 +551,29 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (context) => AccountSettingsScreen(
             authNotifier: authNotifier,
+            rankingRepository: rankingRepository,
+            themeController: themeController,
           ),
+          settings: settings,
+        );
+
+      case editInterests:
+        return MaterialPageRoute(
+          builder: (context) {
+            final userId = _currentUserId() ?? '';
+            return EditInterestsScreen(
+              repository: interestRepository,
+              userId: userId,
+              currentUserId: _currentUserId,
+              // O Feed V2 é ordenado pelos interesses: a volta ao app já mostra o feed com a seleção nova. Se a
+              // sessão terminou enquanto gravava, o feed já foi descartado e não é recarregado para outra sessão
+              onSaved: () {
+                if (_currentUserId() == userId) {
+                  feedNotifier?.refresh(type: FeedType.forYou);
+                }
+              },
+            );
+          },
           settings: settings,
         );
 
@@ -421,9 +586,17 @@ class AppRouter {
         );
 
       case scanner:
-        return MaterialPageRoute(
+        final args = settings.arguments;
+        final routeArgs = args is ScannerRouteArgs ? args : null;
+        return MaterialPageRoute<SearchResultItem?>(
           builder: (context) => ScannerScreen(
-            productRepository: productRepository,
+            productRepository:
+                routeArgs?.productRepository ?? productRepository,
+            placeRepository: routeArgs?.placeRepository ?? placeRepository,
+            selectionMode: routeArgs?.selectionMode ?? false,
+            notifier: routeArgs?.notifier,
+            cameraBuilder: routeArgs?.cameraBuilder ?? scannerCameraBuilder,
+            autoStartCamera: routeArgs?.autoStartCamera ?? true,
           ),
           settings: settings,
         );

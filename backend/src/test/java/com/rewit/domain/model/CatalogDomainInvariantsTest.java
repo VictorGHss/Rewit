@@ -1,7 +1,6 @@
 package com.rewit.domain.model;
 
 import com.rewit.common.exception.BusinessException;
-import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.enums.VerificationStatus;

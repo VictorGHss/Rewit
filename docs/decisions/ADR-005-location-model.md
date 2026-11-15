@@ -21,8 +21,14 @@ Diferente de redes sociais tradicionais de check-in que transformaram a funciona
      ```sql
      ST_DWithin(place.coordinates, user_coordinates, place.validation_radius_meters)
      ```
-   - O raio de tolerância (`validation_radius_meters`) é **configurável por local/categoria** e nunca fixo no código. Locais amplos (shoppings, parques) possuem raios maiores; quiosques ou pequenas lojas possuem raios mais restritos (ex: 30 a 80 metros).
-5. **Evolução Futura**:
+   - O raio de tolerância (`validation_radius_meters`) é **configurável por local/categoria** e nunca fixo no código. Locais amplos (shoppings, parques) possuem raios maiores; quiosques ou pequenas lojas possuem raios mais restritos (ex: 30 a 80 metros), respeitando o teto de 250 metros garantido pelo banco (V41).
+5. **Políticas Explícitas de Captura no Cliente (`LocationCapturePolicy`)**:
+   - **Descoberta (`discovery`)**: Utilizada na busca de locais próximos em raio de até 10 km. Prioriza velocidade, aceita cache de até 5 minutos, precisão média e timeout máximo de 5 segundos.
+   - **Verificação de Presença (`presenceVerification`)**: Utilizada no momento da publicação da avaliação e na aba de check-in. Rejeita cache antigo, exige leitura fresca (<= 1 minuto), alta precisão GPS, timeout de 10 a 15 segundos para aquecimento de satélites e retry único de até 5 segundos caso a acurácia inicial seja aproximada (> 100 metros).
+6. **Localização Simulada em QA e Autoridade do Backend**:
+   - O cliente mobile não bloqueia coordenadas simuladas/mock no dispositivo, assegurando a viabilidade de testes automatizados, CI e testes em emuladores de desenvolvimento.
+   - A verificação de presença é estritamente autoritativa no backend (`PresenceVerificationPolicy`): distância geodésica via PostGIS, acurácia horizontal reportada <= 100m, trava transacional `pg_advisory_xact_lock` e teto de no máximo um check-in verificado por usuário e local em janela móvel de 24 horas.
+7. **Evolução Futura**:
    - A modelagem prevê suporte a polígonos delimitadores exatos (`GEOGRAPHY(Polygon, 4326)`) em fases posteriores, substituindo o raio esférico simplificado para locais complexos via `ST_Contains`.
 
 ## Consequências

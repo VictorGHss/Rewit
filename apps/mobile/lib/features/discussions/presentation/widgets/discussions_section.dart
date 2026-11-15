@@ -56,7 +56,8 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
     if (widget.notifier.state is DiscussionInitial) {
       widget.notifier.loadDiscussions(widget.reviewId);
     } else if (widget.notifier.state is DiscussionLoaded) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _checkAndHighlightTarget());
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _checkAndHighlightTarget());
     }
   }
 
@@ -100,7 +101,9 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
     final targetId = widget.targetDiscussionId!;
 
     // Caso 1: Alvo é uma resposta com rootDiscussionId explícito (C6)
-    if (widget.isReplyTarget && widget.rootDiscussionId != null && widget.rootDiscussionId!.isNotEmpty) {
+    if (widget.isReplyTarget &&
+        widget.rootDiscussionId != null &&
+        widget.rootDiscussionId!.isNotEmpty) {
       final rootId = widget.rootDiscussionId!;
       final rootIndex = state.threads.indexWhere((t) => t.id == rootId);
 
@@ -130,7 +133,9 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
 
       // Resposta ainda não carregada: avança respostas da raiz sequencialmente
       final bool isAlreadyLoadingReplies = state.loadingReplies[rootId] == true;
-      if ((thread.hasMoreReplies || thread.replyCount > thread.replies.length) && !isAlreadyLoadingReplies) {
+      if ((thread.hasMoreReplies ||
+              thread.replyCount > thread.replies.length) &&
+          !isAlreadyLoadingReplies) {
         _isSearching = true;
         widget.notifier.loadMoreReplies(rootId).whenComplete(() {
           _isSearching = false;
@@ -144,11 +149,11 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
     }
 
     // Caso 2: Alvo raiz ou resposta legada sem rootDiscussionId
-    // Verifica se já está presente nas threads/replies carregadas
     final bool found;
     if (widget.isReplyTarget) {
-      found = state.threads.any((t) => t.replies.any((r) => r.id == targetId)) ||
-          state.threads.any((t) => t.id == targetId);
+      found =
+          state.threads.any((t) => t.replies.any((r) => r.id == targetId)) ||
+              state.threads.any((t) => t.id == targetId);
     } else {
       found = state.threads.any((t) => t.id == targetId);
     }
@@ -156,7 +161,6 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
     if (found) {
       _highlightAndScroll(targetId);
     }
-    // Se não encontrado, mantém _hasHandledTarget = false para destacar quando carregado
   }
 
   void _highlightAndScroll(String targetId) {
@@ -205,7 +209,8 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
   void _startReply(DiscussionThread thread) {
     setState(() {
       _replyingToParentId = thread.id;
-      _replyingToAuthorName = thread.author?.displayName ?? (thread.isFromOwner ? 'Autor da Avaliação' : 'Usuário');
+      _replyingToAuthorName = thread.author?.displayName ??
+          (thread.isFromOwner ? 'Autor da Avaliação' : 'Usuário');
     });
   }
 
@@ -219,21 +224,29 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
   Future<void> _confirmDelete(DiscussionItem item) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Excluir comentário'),
-        content: const Text('Tem certeza que deseja excluir seu comentário? Esta ação não pode ser desfeita.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
+      builder: (ctx) {
+        final dialogScheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: const Text('Excluir comentário'),
+          content: const Text(
+            'Tem certeza que deseja excluir seu comentário? Esta ação não pode ser desfeita.',
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Excluir'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: dialogScheme.error,
+                foregroundColor: dialogScheme.onError,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirmed != true) return;
@@ -250,10 +263,14 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
       }
     } on ApiException catch (e) {
       if (mounted) {
+        final scheme = Theme.of(context).colorScheme;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.detail),
-            backgroundColor: Colors.red.shade800,
+            content: Text(
+              e.detail,
+              style: TextStyle(color: scheme.onErrorContainer),
+            ),
+            backgroundColor: scheme.errorContainer,
           ),
         );
       }
@@ -277,6 +294,7 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return ListenableBuilder(
       listenable: widget.notifier,
@@ -333,21 +351,28 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
             ] else if (state is DiscussionEmpty) ...[
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 24,
+                  horizontal: 16,
+                ),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
+                  color: theme.cardTheme.color ?? scheme.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(60)),
+                  border: Border.all(color: scheme.outlineVariant),
                 ),
                 child: Column(
                   children: [
-                    Icon(Icons.chat_bubble_outline, size: 36, color: Colors.grey.shade400),
+                    Icon(
+                      Icons.chat_bubble_outline,
+                      size: 36,
+                      color: scheme.onSurfaceVariant,
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       'Nenhum comentário ainda.',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.onSurface.withAlpha(180),
+                        color: scheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -355,7 +380,7 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
                       'Seja o primeiro a compartilhar sua opinião sobre esta avaliação!',
                       style: TextStyle(
                         fontSize: 12,
-                        color: theme.colorScheme.onSurface.withAlpha(140),
+                        color: scheme.onSurfaceVariant,
                       ),
                       textAlign: TextAlign.center,
                     ),
@@ -380,7 +405,8 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: state.threads.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 10),
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   final thread = state.threads[index];
                   return DiscussionThreadWidget(
@@ -395,7 +421,8 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
                     onAuthorTap: widget.onAuthorTap,
                     highlightedDiscussionId: _highlightedDiscussionId,
                     keyProvider: _getKeyFor,
-                    businessResponseRepository: widget.businessResponseRepository,
+                    businessResponseRepository:
+                        widget.businessResponseRepository,
                     eligibility: widget.eligibility,
                     myBusinessAccountIds: widget.myBusinessAccountIds,
                   );
@@ -411,7 +438,8 @@ class _DiscussionsSectionState extends State<DiscussionsSection> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : OutlinedButton.icon(
-                          onPressed: () => widget.notifier.loadMore(widget.reviewId),
+                          onPressed: () =>
+                              widget.notifier.loadMore(widget.reviewId),
                           icon: const Icon(Icons.arrow_downward, size: 16),
                           label: const Text('Carregar mais comentários'),
                         ),

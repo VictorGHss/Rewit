@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import '../../../business/domain/entities/business_response_entities.dart';
 import '../../../business/domain/repositories/business_response_repository.dart';
@@ -53,15 +54,44 @@ class _DiscussionBusinessResponsesWidgetState
   BusinessResponseEligibility? get _effectiveEligibility {
     if (widget.eligibility == null) return null;
     final availableAccounts = widget.eligibility!.accounts.where((account) {
-      final alreadyResponded =
-          _responses.any((r) => r.businessAccountId == account.businessAccountId);
-      return account.canPublish && account.places.isNotEmpty && !alreadyResponded;
+      final alreadyResponded = _responses
+          .any((r) => r.businessAccountId == account.businessAccountId);
+      return account.canPublish &&
+          account.places.isNotEmpty &&
+          !alreadyResponded;
     }).toList();
 
     return BusinessResponseEligibility(
       reviewId: widget.eligibility!.reviewId,
-      respondable: widget.eligibility!.respondable && availableAccounts.isNotEmpty,
+      respondable:
+          widget.eligibility!.respondable && availableAccounts.isNotEmpty,
       accounts: availableAccounts,
+    );
+  }
+
+  void _showSuccessSnackBar(String message) {
+    final semantic = RewitSemanticColors.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: semantic.success.onContainer),
+        ),
+        backgroundColor: semantic.success.container,
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    final scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: scheme.onErrorContainer),
+        ),
+        backgroundColor: scheme.errorContainer,
+      ),
     );
   }
 
@@ -72,7 +102,8 @@ class _DiscussionBusinessResponsesWidgetState
     });
 
     try {
-      final pageResult = await widget.repository.getDiscussionBusinessResponses(
+      final pageResult =
+          await widget.repository.getDiscussionBusinessResponses(
         widget.discussionId,
         page: 0,
         size: 20,
@@ -97,7 +128,8 @@ class _DiscussionBusinessResponsesWidgetState
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Falha ao carregar respostas oficiais do comentário.';
+          _errorMessage =
+              'Falha ao carregar respostas oficiais do comentário.';
         });
       }
     }
@@ -112,7 +144,8 @@ class _DiscussionBusinessResponsesWidgetState
 
     try {
       final nextPage = _page + 1;
-      final pageResult = await widget.repository.getDiscussionBusinessResponses(
+      final pageResult =
+          await widget.repository.getDiscussionBusinessResponses(
         widget.discussionId,
         page: nextPage,
         size: 20,
@@ -131,24 +164,14 @@ class _DiscussionBusinessResponsesWidgetState
         setState(() {
           _isLoadingMore = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Falha ao carregar mais respostas: ${e.detail}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Falha ao carregar mais respostas: ${e.detail}');
       }
     } catch (_) {
       if (mounted) {
         setState(() {
           _isLoadingMore = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Falha ao carregar mais respostas.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Falha ao carregar mais respostas.');
       }
     }
   }
@@ -167,12 +190,7 @@ class _DiscussionBusinessResponsesWidgetState
           _deletingResponseId = null;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Resposta oficial removida com sucesso.'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        _showSuccessSnackBar('Resposta oficial removida com sucesso.');
       }
     } on ApiException catch (e) {
       if (mounted) {
@@ -182,24 +200,14 @@ class _DiscussionBusinessResponsesWidgetState
             _responses.removeWhere((r) => r.id == response.id);
           }
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Falha ao remover resposta: ${e.detail}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Falha ao remover resposta: ${e.detail}');
       }
     } catch (_) {
       if (mounted) {
         setState(() {
           _deletingResponseId = null;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Erro inesperado ao remover resposta.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Erro inesperado ao remover resposta.');
       }
     }
   }
@@ -224,12 +232,7 @@ class _DiscussionBusinessResponsesWidgetState
         _showPublishForm = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Resposta oficial publicada na discussão!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _showSuccessSnackBar('Resposta oficial publicada na discussão!');
     }
   }
 
@@ -265,7 +268,10 @@ class _DiscussionBusinessResponsesWidgetState
             ),
             TextButton(
               onPressed: _loadResponses,
-              child: const Text('Tentar novamente', style: TextStyle(fontSize: 11)),
+              child: const Text(
+                'Tentar novamente',
+                style: TextStyle(fontSize: 11),
+              ),
             ),
           ],
         ),
@@ -307,9 +313,14 @@ class _DiscussionBusinessResponsesWidgetState
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : TextButton(
-                      key: ValueKey('load_more_discussion_responses_${widget.discussionId}'),
+                      key: ValueKey(
+                        'load_more_discussion_responses_${widget.discussionId}',
+                      ),
                       onPressed: _loadMoreResponses,
-                      child: const Text('Carregar mais respostas oficiais', style: TextStyle(fontSize: 12)),
+                      child: const Text(
+                        'Carregar mais respostas oficiais',
+                        style: TextStyle(fontSize: 12),
+                      ),
                     ),
             ),
           ],
@@ -319,7 +330,9 @@ class _DiscussionBusinessResponsesWidgetState
             Padding(
               padding: const EdgeInsets.only(top: 2.0),
               child: InkWell(
-                key: ValueKey('reply_as_business_button_${widget.discussionId}'),
+                key: ValueKey(
+                  'reply_as_business_button_${widget.discussionId}',
+                ),
                 onTap: () {
                   setState(() {
                     _showPublishForm = true;
@@ -327,7 +340,10 @@ class _DiscussionBusinessResponsesWidgetState
                 },
                 borderRadius: BorderRadius.circular(4),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -353,7 +369,9 @@ class _DiscussionBusinessResponsesWidgetState
           ],
 
           // Formulário aberto
-          if (canPublish && _showPublishForm && effectiveEligibility != null) ...[
+          if (canPublish &&
+              _showPublishForm &&
+              effectiveEligibility != null) ...[
             Padding(
               padding: const EdgeInsets.only(top: 6.0),
               child: PublishBusinessResponseForm(

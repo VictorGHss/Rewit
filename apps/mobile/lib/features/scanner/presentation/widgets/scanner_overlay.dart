@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 
 /// Overlay visual que posiciona uma mira centralizada e orientações de escaneamento.
 class ScannerOverlay extends StatelessWidget {
@@ -12,107 +13,115 @@ class ScannerOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = RewitSemanticColors.of(context);
 
     return IgnorePointer(
       child: LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final height = constraints.maxHeight;
-        final scanSize = scanAreaSize.clamp(180.0, width * 0.85);
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final height = constraints.maxHeight;
+          final scanSize = scanAreaSize.clamp(180.0, width * 0.85);
 
-        return Stack(
-          children: [
-            // Máscara semitransparente com recorte central
-            ColorFiltered(
-              colorFilter: ColorFilter.mode(
-                Colors.black.withAlpha(140),
-                BlendMode.srcOut,
-              ),
-              child: Stack(
-                children: [
-                  Container(
-                    decoration: const BoxDecoration(
-                      color: Colors.transparent,
-                      backgroundBlendMode: BlendMode.dstOut,
-                    ),
-                  ),
-                  Center(
-                    child: Container(
-                      width: scanSize,
-                      height: scanSize,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Moldura com cantos destacados da área de captura
-            Center(
-              child: Container(
-                width: scanSize,
-                height: scanSize,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: theme.colorScheme.primary,
-                    width: 2.5,
-                  ),
+          return Stack(
+            children: [
+              // Máscara semitransparente com recorte central via composição de canal alfa
+              ColorFiltered(
+                colorFilter: ColorFilter.mode(
+                  Colors.black.withAlpha(140),
+                  BlendMode.srcOut,
                 ),
                 child: Stack(
                   children: [
-                    // Rótulo central sutil
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.transparent,
+                        backgroundBlendMode: BlendMode.dstOut,
+                      ),
+                    ),
                     Center(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        width: scanSize,
+                        height: scanSize,
                         decoration: BoxDecoration(
-                          color: Colors.black.withAlpha(80),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Text(
-                          'escaneie aqui',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
+                          // Opaco 100% necessário para o recorte BlendMode.srcOut
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
 
-            // Instrução textual abaixo da área de escaneamento
-            Positioned(
-              top: (height / 2) + (scanSize / 2) + 24,
-              left: 24,
-              right: 24,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.black.withAlpha(160),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Text(
-                  'Aponte para um código de barras ou QR Code',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+              // Moldura com cantos destacados da área de captura
+              Center(
+                child: Container(
+                  width: scanSize,
+                  height: scanSize,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: theme.colorScheme.primary,
+                      width: 2.5,
+                    ),
+                  ),
+                  child: Stack(
+                    children: [
+                      // Rótulo central sutil sobre vídeo da câmera
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: semantic.mediaScrim,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'escaneie aqui',
+                            style: TextStyle(
+                              color: semantic.onMediaScrim.withAlpha(220),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
-          ],
-        );
-      },
-    ),
-  );
-}
+
+              // Instrução textual abaixo da área de escaneamento
+              Positioned(
+                top: (height / 2) + (scanSize / 2) + 24,
+                left: 24,
+                right: 24,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: semantic.mediaScrim,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Aponte para um código de barras ou QR Code',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: semantic.onMediaScrim,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 }

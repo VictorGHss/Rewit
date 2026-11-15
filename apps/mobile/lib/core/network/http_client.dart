@@ -638,15 +638,66 @@ class RewitHttpClient {
       abortCompleter: abortCompleter,
     );
 
+    final normalizedHeaders = _normalizeJsonTextHeadersForUtf8(
+      streamedResponse.headers,
+    );
+
     return http.Response.bytes(
       bodyBytes,
       streamedResponse.statusCode,
       request: streamedResponse.request,
-      headers: streamedResponse.headers,
+      headers: normalizedHeaders,
       isRedirect: streamedResponse.isRedirect,
       persistentConnection: streamedResponse.persistentConnection,
       reasonPhrase: streamedResponse.reasonPhrase,
     );
+  }
+
+  /// Garante que respostas JSON ou textuais sem `charset` explícito usem UTF-8 ao
+  /// serem lidas via `http.Response.body`, evitando o fallback Latin-1 do `package:http`.
+  Map<String, String> _normalizeJsonTextHeadersForUtf8(
+    Map<String, String> headers,
+  ) {
+    String? contentTypeKey;
+    String? contentTypeValue;
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == 'content-type') {
+        contentTypeKey = entry.key;
+        contentTypeValue = entry.value;
+        break;
+      }
+    }
+
+    if (contentTypeKey == null ||
+        contentTypeValue == null ||
+        contentTypeValue.trim().isEmpty) {
+      return headers;
+    }
+
+    try {
+      final mediaType = MediaType.parse(contentTypeValue);
+      final existingCharset = mediaType.parameters['charset'];
+      if (existingCharset != null && existingCharset.trim().isNotEmpty) {
+        return headers;
+      }
+
+      final mimeType = mediaType.mimeType.toLowerCase();
+      final isJsonOrText =
+          mimeType == 'application/json' ||
+          mimeType == 'application/problem+json' ||
+          mimeType.endsWith('+json') ||
+          mimeType.startsWith('text/');
+
+      if (!isJsonOrText) {
+        return headers;
+      }
+
+      final updated = Map<String, String>.from(headers);
+      updated[contentTypeKey] = '$contentTypeValue; charset=utf-8';
+      return updated;
+    } catch (_) {
+      return headers;
+    }
   }
 
   bool _isSupportedMethod(String method) {
@@ -820,8 +871,15 @@ class RewitHttpClient {
       retryAfterSeconds = int.tryParse(retryAfterHeader.trim());
     }
 
-    // Parsing estruturado de erro RFC 7807
-    final problem = ProblemDetail.fromResponseBody(response.body, statusCode);
+    // Parsing estruturado de erro RFC 7807 a partir dos bytes originais (UTF-8 por padrão)
+    final problem = ProblemDetail.fromResponseBytes(
+      response.bodyBytes,
+      statusCode,
+      contentType: _extractHeaderCaseInsensitive(
+        response.headers,
+        'content-type',
+      ),
+    );
 
     // Se a sessão expirou em requisição autenticada (401 não autorizado)
     if (statusCode == 401 && requiresAuth) {

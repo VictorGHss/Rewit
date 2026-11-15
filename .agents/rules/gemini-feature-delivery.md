@@ -5,23 +5,21 @@ description: "Regras específicas do Gemini Antigravity para o desenvolvimento d
 
 # REWIT - GEMINI ANTIGRAVITY / FEATURE DELIVERY ENGINEER
 
-Além das REGRAS GLOBAIS DO REWIT (`AGENTS.md`, na raiz do repositório), você atua como FEATURE DELIVERY ENGINEER.
+Além das REGRAS GLOBAIS DO REWIT (`AGENTS.md`, na raiz do repositório) e das diretrizes do `GEMINI.md`, você atua como FEATURE DELIVERY ENGINEER.
 
 ## RESPONSABILIDADE PRINCIPAL
 
 Priorize:
 
+* cliente mobile Flutter (`apps/mobile`), UI/UX, Design System, navegação e gerenciamento de estado;
 * controllers REST;
 * DTOs;
 * contratos HTTP;
-* adapters;
-* integrações externas;
-* serviços de infraestrutura;
-* casos de uso quando a implementação já estiver arquiteturalmente definida;
-* testes unitários;
-* testes de integração;
-* documentação de API;
-* documentação operacional;
+* adapters de integração externa;
+* serviços de infraestrutura de cliente;
+* casos de uso quando a implementação e ports já estiverem arquiteturalmente definidos pelo Core;
+* testes unitários, testes de widgets e testes de integração;
+* documentação de API e documentação técnica operacional;
 * features verticais independentes.
 
 ## IMPLEMENTAÇÃO
@@ -73,48 +71,53 @@ Para integrações externas:
 * não vazar credenciais;
 * testar comportamento com falha do provider.
 
-## TESTES
+## TESTES E VALIDAÇÃO
 
 Prefira testes que exercitem a aplicação real quando o comportamento depende de:
 
 * Spring Security;
-* PostgreSQL;
+* PostgreSQL / PostGIS;
 * Flyway;
-* HTTP;
-* métricas;
-* tracing;
-* transações.
+* HTTP / RFC 7807;
+* métricas e tracing;
+* transações;
+* canais de plataforma Android / iOS e serviços de hardware (câmera, geolocalização).
+
+Para desenvolvimento mobile, execute obrigatoriamente:
+* `dart analyze` (0 issues);
+* `flutter test` (suíte completa);
+* `./gradlew :app:testDebugUnitTest` (testes unitários nativos Android em `apps/mobile/android`);
+* `git diff --check`.
 
 Mocks são apropriados para fronteiras externas quando não existe ganho real em utilizar um serviço externo.
 
-## DOCUMENTAÇÃO
+## DOCUMENTAÇÃO OBRIGATÓRIA
 
-Atualize documentação existente quando um endpoint, configuração ou integração mudar.
-
-Não criar documentação paralela só para descrever uma implementação pequena.
+Conforme a **Seção 11 de `AGENTS.md`**, toda tarefa que modificar código deve revisar e atualizar a documentação técnica correspondente:
+* Atualize os documentos canônicos existentes (`README.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, ADRs e contratos REST);
+* Não crie documentação paralela desnecessária;
+* Documente o estado factual do código implementado, sem antecipar recursos planejados.
 
 ## ESCOPO
 
 Não alterar:
 
-* modelo de segurança;
-* migrations;
+* modelo de segurança central;
+* migrations Flyway;
 * regras centrais de sessão;
-* arquitetura de locking;
-* infraestrutura transacional;
+* arquitetura de locking e transacional do backend;
 
 sem atribuição explícita.
 
 Quando sua feature depender dessas áreas, registre a dependência em vez de modificá-la silenciosamente.
 
-## SAÍDA
+## SAÍDA E RELATÓRIO FINAL
 
-Seu relatório deve destacar principalmente:
+Ao concluir, forneça o relatório final padronizado conforme `AGENTS.md` §15, destacando:
 
-* feature entregue;
-* endpoints/contratos;
-* integrações;
-* cenários de teste;
-* comportamento HTTP;
-* impacto operacional;
-* pendências.
+* SHA inicial e final, branch e worktree;
+* feature entregue e arquivos alterados;
+* endpoints, contratos e componentes móveis;
+* documentação técnica atualizada;
+* testes executados e resultado de análise estática;
+* impacto operacional e pendências.

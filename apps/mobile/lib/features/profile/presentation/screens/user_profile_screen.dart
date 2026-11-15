@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -34,6 +36,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   bool _isLoading = true;
   bool _isActionLoading = false;
   bool _isNotFound = false;
+  bool _avatarLoadFailed = false;
   String? _errorMessage;
 
   @override
@@ -85,6 +88,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             id: state.user.id,
             handle: state.user.handle,
             displayName: state.user.displayName,
+            avatarUrl: state.user.avatarUrl,
             stats: const UserStats(),
           );
           _isLoading = false;
@@ -99,8 +103,19 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     }
 
     try {
-      final profile = await widget.userProfileRepository!.getUserProfile(targetId);
+      final profile =
+          await widget.userProfileRepository!.getUserProfile(targetId);
       if (mounted) {
+        if (_isMyProfile) {
+          widget.authNotifier.updateCurrentUser(
+            handle: profile.handle,
+            displayName: profile.displayName,
+            isAnonymousDefault: profile.isAnonymousDefault,
+            avatarUrl: profile.avatarUrl,
+            clearAvatarUrl: profile.avatarUrl == null ||
+                profile.avatarUrl!.trim().isEmpty,
+          );
+        }
         setState(() {
           _profile = profile;
           _isLoading = false;
@@ -128,14 +143,33 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Não foi possível carregar as informações do perfil.';
+          _errorMessage =
+              'Não foi possível carregar as informações do perfil.';
         });
       }
     }
   }
 
+  void _showDangerSnackBar(String message) {
+    if (!mounted) return;
+    final danger = RewitSemanticColors.of(context).danger;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: danger.onContainer),
+        ),
+        backgroundColor: danger.container,
+      ),
+    );
+  }
+
   Future<void> _toggleFollow() async {
-    if (_profile == null || _isActionLoading || widget.userProfileRepository == null) return;
+    if (_profile == null ||
+        _isActionLoading ||
+        widget.userProfileRepository == null) {
+      return;
+    }
 
     final targetId = _profile!.id;
     final currentlyFollowing = _profile!.isFollowing;
@@ -171,32 +205,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         }
       }
     } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.detail),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
+      _showDangerSnackBar(e.detail);
     } on NetworkException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
+      _showDangerSnackBar(e.message);
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Ocorreu um erro ao atualizar o relacionamento.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
+      _showDangerSnackBar('Ocorreu um erro ao atualizar o relacionamento.');
     } finally {
       if (mounted) {
         setState(() {
@@ -267,7 +280,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurface.withAlpha(160),
+            color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
       ],
@@ -287,7 +300,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         child: onTap != null
             ? InkWell(
                 onTap: onTap,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: RewitRadius.borderMd,
                 child: padded,
               )
             : padded,
@@ -301,7 +314,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isMyProfile ? 'Perfil de Usuário' : (_profile?.displayName ?? 'Perfil')),
+        title: Text(
+          _isMyProfile ? 'Perfil de Usuário' : (_profile?.displayName ?? 'Perfil'),
+        ),
         actions: [
           if (_isMyProfile)
             IconButton(
@@ -318,6 +333,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Widget _buildBody(BuildContext context, ThemeData theme) {
+    final scheme = theme.colorScheme;
+
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -329,17 +346,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.person_off_outlined, size: 64, color: Colors.grey.shade500),
+              Icon(Icons.person_off_outlined, size: 64, color: scheme.outline),
               const SizedBox(height: 16),
               Text(
                 'Perfil Indisponível',
-                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Text(
                 'Usuário não encontrado ou inativo.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: theme.colorScheme.onSurface.withAlpha(160)),
+                style: TextStyle(color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 24),
               if (Navigator.of(context).canPop())
@@ -360,12 +378,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
+              Icon(Icons.error_outline, size: 48, color: scheme.error),
               const SizedBox(height: 16),
               Text(
                 _errorMessage ?? 'Erro ao carregar perfil',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: theme.colorScheme.error),
+                style: TextStyle(color: scheme.error),
               ),
               const SizedBox(height: 16),
               ElevatedButton(
@@ -391,11 +409,26 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             children: [
               CircleAvatar(
                 radius: 36,
-                backgroundColor: theme.colorScheme.primary.withAlpha(30),
-                backgroundImage: profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty
+                backgroundColor: scheme.secondaryContainer,
+                backgroundImage: profile.avatarUrl != null &&
+                        profile.avatarUrl!.isNotEmpty &&
+                        !_avatarLoadFailed
                     ? NetworkImage(profile.avatarUrl!)
                     : null,
-                child: profile.avatarUrl == null || profile.avatarUrl!.isEmpty
+                onBackgroundImageError: profile.avatarUrl != null &&
+                        profile.avatarUrl!.isNotEmpty &&
+                        !_avatarLoadFailed
+                    ? (_, __) {
+                        if (mounted && !_avatarLoadFailed) {
+                          setState(() {
+                            _avatarLoadFailed = true;
+                          });
+                        }
+                      }
+                    : null,
+                child: profile.avatarUrl == null ||
+                        profile.avatarUrl!.isEmpty ||
+                        _avatarLoadFailed
                     ? Text(
                         profile.displayName.isNotEmpty
                             ? profile.displayName[0].toUpperCase()
@@ -403,7 +436,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.primary,
+                          color: scheme.onSecondaryContainer,
                         ),
                       )
                     : null,
@@ -424,7 +457,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       Text(
                         '@${profile.handle}',
                         style: TextStyle(
-                          color: theme.colorScheme.onSurface.withAlpha(160),
+                          color: scheme.onSurfaceVariant,
                           fontSize: 14,
                         ),
                       ),
@@ -441,7 +474,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               profile.bio!,
               style: TextStyle(
                 fontSize: 14,
-                color: theme.colorScheme.onSurface.withAlpha(200),
+                color: scheme.onSurface,
                 height: 1.4,
               ),
             ),
@@ -454,13 +487,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 Icon(
                   Icons.visibility_off_outlined,
                   size: 16,
-                  color: theme.colorScheme.onSurface.withAlpha(150),
+                  color: scheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 6),
                 Text(
                   'Avaliações anônimas por padrão ativado',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withAlpha(150),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -469,42 +502,61 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
           const SizedBox(height: 24),
 
-          // Painel de Estatísticas Factuais
+          // Painel de Estatísticas Factuais: contagens do backend (avaliações ativas e não anônimas), nunca um score
           Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
-            ),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 12.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+              child: Column(
                 children: [
-                  _buildStatItem(
-                    context: context,
-                    label: 'Seguidores',
-                    count: profile.stats.followersCount,
-                    onTap: !isDeleted ? () => _openFollowList(FollowListTab.followers) : null,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildStatItem(
+                        context: context,
+                        label: 'Seguidores',
+                        count: profile.stats.followersCount,
+                        onTap: !isDeleted
+                            ? () => _openFollowList(FollowListTab.followers)
+                            : null,
+                      ),
+                      _buildStatItem(
+                        context: context,
+                        label: 'Seguindo',
+                        count: profile.stats.followingCount,
+                        onTap: !isDeleted
+                            ? () => _openFollowList(FollowListTab.following)
+                            : null,
+                      ),
+                    ],
                   ),
-                  _buildStatItem(
-                    context: context,
-                    label: 'Seguindo',
-                    count: profile.stats.followingCount,
-                    onTap: !isDeleted ? () => _openFollowList(FollowListTab.following) : null,
-                  ),
-                  _buildStatItem(
-                    context: context,
-                    label: 'Avaliações',
-                    count: profile.stats.totalReviews,
-                    onTap: _isMyProfile
-                        ? () => Navigator.of(context).pushNamed(AppRouter.myReviews)
-                        : null,
-                  ),
-                  _buildStatItem(
-                    context: context,
-                    label: 'Votos Úteis',
-                    count: profile.stats.helpfulVotesReceived,
+                  const Divider(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildStatItem(
+                        context: context,
+                        label: 'Avaliações publicadas',
+                        count: profile.stats.totalReviews,
+                        onTap: _isMyProfile
+                            ? () => Navigator.of(context)
+                                .pushNamed(AppRouter.myReviews)
+                            : null,
+                      ),
+                      _buildStatItem(
+                        context: context,
+                        label: 'Check-ins verificados',
+                        count: profile.stats.verifiedReviewsCount,
+                        onTap: _isMyProfile
+                            ? () => Navigator.of(context)
+                                .pushNamed(AppRouter.myCheckIns)
+                            : null,
+                      ),
+                      _buildStatItem(
+                        context: context,
+                        label: 'Votos úteis recebidos',
+                        count: profile.stats.helpfulVotesReceived,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -533,12 +585,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   : ElevatedButton.icon(
                       onPressed: _isActionLoading ? null : _toggleFollow,
                       icon: _isActionLoading
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                color: Colors.white,
+                                color: scheme.primary,
                               ),
                             )
                           : const Icon(Icons.person_add_outlined, size: 18),
@@ -562,6 +614,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               },
               icon: const Icon(Icons.rate_review_outlined),
               label: const Text('Minhas avaliações'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('my_check_ins_button'),
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRouter.myCheckIns);
+              },
+              icon: const Icon(Icons.place_outlined),
+              label: const Text('Meus check-ins'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('profile_rankings_button'),
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRouter.rankings);
+              },
+              icon: const Icon(Icons.leaderboard_outlined),
+              label: const Text('Rankings da Região'),
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(

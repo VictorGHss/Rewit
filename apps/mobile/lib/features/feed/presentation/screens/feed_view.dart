@@ -10,6 +10,7 @@ import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 /// Visão principal da timeline do Feed V2 com suporte a paginação infinita e pull-to-refresh.
 class FeedView extends StatefulWidget {
   final FeedNotifier feedNotifier;
+  final FeedType? feedType;
   final ReviewMediaRepository? mediaRepository;
   final void Function(FeedReview review)? onReviewTap;
   final void Function(String authorId)? onAuthorTap;
@@ -18,6 +19,7 @@ class FeedView extends StatefulWidget {
   const FeedView({
     super.key,
     required this.feedNotifier,
+    this.feedType,
     this.mediaRepository,
     this.onReviewTap,
     this.onAuthorTap,
@@ -28,11 +30,16 @@ class FeedView extends StatefulWidget {
   State<FeedView> createState() => _FeedViewState();
 }
 
-class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin {
+class _FeedViewState extends State<FeedView>
+    with AutomaticKeepAliveClientMixin {
   final ScrollController _scrollController = ScrollController();
 
   @override
   bool get wantKeepAlive => true;
+
+  FeedState get _effectiveState => widget.feedType != null
+      ? widget.feedNotifier.stateOf(widget.feedType!)
+      : widget.feedNotifier.state;
 
   @override
   void initState() {
@@ -40,8 +47,9 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
     _scrollController.addListener(_onScroll);
     // Dispara carregamento inicial caso ainda não tenha sido iniciado
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (widget.feedNotifier.state is FeedInitial) {
-        widget.feedNotifier.loadInitial();
+      if (!mounted) return;
+      if (_effectiveState is FeedInitial) {
+        widget.feedNotifier.loadInitial(type: widget.feedType);
       }
     });
   }
@@ -59,7 +67,7 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
     final currentScroll = _scrollController.position.pixels;
     // Carrega mais quando o usuário estiver a 200 pixels do final
     if (currentScroll >= maxScroll - 200) {
-      widget.feedNotifier.loadMore();
+      widget.feedNotifier.loadMore(type: widget.feedType);
     }
   }
 
@@ -81,10 +89,13 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return ListenableBuilder(
       listenable: widget.feedNotifier,
       builder: (context, _) {
-        final state = widget.feedNotifier.state;
+        final state = _effectiveState;
 
         if (state is FeedLoading || state is FeedInitial) {
           return const Center(
@@ -97,14 +108,14 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
             child: ErrorView(
               title: 'Não foi possível carregar o feed',
               message: state.message,
-              onRetry: () => widget.feedNotifier.retry(),
+              onRetry: () => widget.feedNotifier.retry(type: widget.feedType),
             ),
           );
         }
 
         if (state is FeedEmpty) {
           return RefreshIndicator(
-            onRefresh: () => widget.feedNotifier.refresh(),
+            onRefresh: () => widget.feedNotifier.refresh(type: widget.feedType),
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
@@ -118,27 +129,28 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
                         Icon(
                           Icons.feed_outlined,
                           size: 64,
-                          color: Theme.of(context).colorScheme.primary.withAlpha(120),
+                          color: scheme.primary,
                         ),
                         const SizedBox(height: 16),
                         Text(
                           'Nenhuma avaliação no feed',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           'Quando as pessoas e estabelecimentos que você acompanha publicarem avaliações, elas aparecerão aqui.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface.withAlpha(160),
+                            color: scheme.onSurfaceVariant,
                             fontSize: 14,
                           ),
                         ),
                         const SizedBox(height: 24),
                         OutlinedButton.icon(
-                          onPressed: () => widget.feedNotifier.refresh(),
+                          onPressed: () =>
+                              widget.feedNotifier.refresh(type: widget.feedType),
                           icon: const Icon(Icons.refresh, size: 18),
                           label: const Text('Atualizar'),
                         ),
@@ -155,12 +167,16 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
           final reviews = state.reviews;
 
           return RefreshIndicator(
-            onRefresh: () => widget.feedNotifier.refresh(),
+            onRefresh: () => widget.feedNotifier.refresh(type: widget.feedType),
             child: ListView.builder(
-              key: const PageStorageKey('feed_list_view'),
+              key: PageStorageKey(
+                widget.feedType != null
+                    ? 'feed_list_view_${widget.feedType!.name}'
+                    : 'feed_list_view',
+              ),
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
-              // Folga inferior para o botão "Nova Avaliação" não cobrir o rodapé (voto útil) do último card
+              // Folga inferior para o botão de ações rápidas não cobrir o rodapé (voto útil) do último card
               padding: const EdgeInsets.only(top: 8.0, bottom: 96.0),
               itemCount: reviews.length + (state.hasMore ? 1 : 0),
               itemBuilder: (context, index) {
@@ -173,7 +189,8 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
                     onTap: () => widget.onReviewTap?.call(review),
                     onAuthorTap: widget.onAuthorTap,
                     onTargetTap: widget.onTargetTap,
-                    isHelpfulLoading: widget.feedNotifier.isTogglingHelpful(review.id),
+                    isHelpfulLoading:
+                        widget.feedNotifier.isTogglingHelpful(review.id),
                     onHelpfulTap: () => _handleToggleHelpful(review.id),
                   );
                 }
@@ -194,12 +211,14 @@ class _FeedViewState extends State<FeedView> with AutomaticKeepAliveClientMixin 
                                   Text(
                                     state.loadMoreError!,
                                     style: TextStyle(
-                                      color: Theme.of(context).colorScheme.error,
+                                      color: scheme.error,
                                       fontSize: 12,
                                     ),
                                   ),
                                   TextButton.icon(
-                                    onPressed: () => widget.feedNotifier.retry(),
+                                    onPressed: () => widget.feedNotifier.retry(
+                                      type: widget.feedType,
+                                    ),
                                     icon: const Icon(Icons.refresh, size: 16),
                                     label: const Text('Tentar novamente'),
                                   ),

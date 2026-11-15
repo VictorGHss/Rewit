@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
@@ -137,7 +138,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           // Fallback seguro para notificações legadas sem reviewId associado
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Notificação de resposta em discussão marcada como lida.'),
+              content: Text(
+                'Notificação de resposta em discussão marcada como lida.',
+              ),
               duration: Duration(seconds: 2),
             ),
           );
@@ -149,7 +152,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Future<void> _markAllAsRead() async {
     await _runAction(
       _notifier.markAllAsRead,
-      fallbackMessage: 'Não foi possível marcar todas as notificações como lidas.',
+      fallbackMessage:
+          'Não foi possível marcar todas as notificações como lidas.',
     );
   }
 
@@ -173,10 +177,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
+    final danger = RewitSemanticColors.of(context).danger;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: Theme.of(context).colorScheme.error,
+        content: Text(
+          message,
+          style: TextStyle(color: danger.onContainer),
+        ),
+        backgroundColor: danger.container,
       ),
     );
   }
@@ -215,6 +223,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Widget _buildBody(BuildContext context, NotificationsState state) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     if (state is NotificationsLoading || state is NotificationsInitial) {
       return const Center(
         child: LoadingIndicator(message: 'Carregando notificações...'),
@@ -246,23 +257,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       Icon(
                         Icons.notifications_none_outlined,
                         size: 64,
-                        color: Theme.of(context).colorScheme.primary.withAlpha(140),
+                        color: scheme.primary,
                       ),
                       const SizedBox(height: 16),
                       Text(
                         'Nenhuma notificação por enquanto',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         'Quando outros membros seguirem você ou interagirem com suas avaliações, você verá aqui.',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurface.withAlpha(160),
-                            ),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -280,7 +291,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         child: ListView.builder(
           controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
-          itemCount: state.notifications.length + (state.isLoadingMore ? 1 : 0),
+          itemCount:
+              state.notifications.length + (state.isLoadingMore ? 1 : 0),
           itemBuilder: (context, index) {
             if (index >= state.notifications.length) {
               return const Padding(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/widgets/review_card.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
@@ -256,6 +257,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
   ) {
     final place = state.place;
     final stats = state.stats;
+    final semantic = RewitSemanticColors.of(context);
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -300,15 +302,15 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         if (place.isVerified)
-                          const Row(
+                          Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.verified, color: Colors.blue, size: 16),
-                              SizedBox(width: 4),
+                              Icon(Icons.verified, color: semantic.verified.accent, size: 16),
+                              const SizedBox(width: 4),
                               Text(
                                 'Verificado',
                                 style: TextStyle(
-                                  color: Colors.blue,
+                                  color: semantic.verified.accent,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                 ),
@@ -336,7 +338,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
               child: Row(
                 children: [
-                  const Icon(Icons.star_rounded, color: Colors.amber, size: 32),
+                  Icon(Icons.star_rounded, color: semantic.starFilled, size: 32),
                   const SizedBox(width: 8),
                   if (stats != null && stats.hasReviews) ...[
                     Text(

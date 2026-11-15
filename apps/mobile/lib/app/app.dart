@@ -2,20 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/config/app_config.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
+import 'package:rewit_mobile/app/theme/theme_controller.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 
 /// Widget raiz do aplicativo Rewit.
 ///
 /// Quando a sessão expira de fato, volta a pilha à rota raiz. Antes, a rota raiz trocava para o login por baixo
 /// das telas abertas e o usuário só descobria ao pressionar voltar, como se o app o tivesse deslogado ali.
+///
+/// Ao fim de cada sessão (logout, expiração ou outra conta), descarta o feed compartilhado entre as sessões: a conta
+/// seguinte, inclusive a que acaba de concluir o questionário de interesses, carrega o próprio Feed V2.
 class RewitApp extends StatefulWidget {
   final AppConfig config;
   final AppRouter router;
+  final ThemeController? themeController;
 
   const RewitApp({
     super.key,
     required this.config,
     required this.router,
+    this.themeController,
   });
 
   @override
@@ -25,9 +31,19 @@ class RewitApp extends StatefulWidget {
 class _RewitAppState extends State<RewitApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
+  /// Usuário da última sessão resolvida (autenticada ou encerrada); estados intermediários não contam.
+  String? _sessionUserId;
+  ThemeController? _fallbackThemeController;
+
+  ThemeController get _effectiveThemeController =>
+      widget.themeController ??
+      widget.router.themeController ??
+      (_fallbackThemeController ??= ThemeController());
+
   @override
   void initState() {
     super.initState();
+    _sessionUserId = _resolvedUserId(widget.router.authNotifier.state);
     widget.router.authNotifier.addListener(_onAuthChanged);
   }
 
@@ -43,25 +59,49 @@ class _RewitAppState extends State<RewitApp> {
   @override
   void dispose() {
     widget.router.authNotifier.removeListener(_onAuthChanged);
+    _fallbackThemeController?.dispose();
     super.dispose();
   }
 
   void _onAuthChanged() {
     final state = widget.router.authNotifier.state;
-    if (state is Unauthenticated && state.errorCode == 'SESSION_EXPIRED') {
-      _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    // Authenticating (ex.: troca de senha recusada) não encerra a sessão: só Authenticated e Unauthenticated contam
+    if (state is Authenticated || state is Unauthenticated) {
+      final prevUserId = _sessionUserId;
+      final userId = _resolvedUserId(state);
+      if (userId != _sessionUserId) {
+        _sessionUserId = userId;
+        widget.router.feedNotifier?.reset();
+      }
+      if (prevUserId != null && userId == null) {
+        _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      }
     }
   }
 
+  static String? _resolvedUserId(AuthState state) =>
+      state is Authenticated ? state.user.id : null;
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: _navigatorKey,
-      title: widget.config.appName,
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      initialRoute: AppRouter.root,
-      onGenerateRoute: widget.router.onGenerateRoute,
+    final themeController = _effectiveThemeController;
+    return ThemeControllerScope(
+      controller: themeController,
+      child: ListenableBuilder(
+        listenable: themeController,
+        builder: (context, _) {
+          return MaterialApp(
+            navigatorKey: _navigatorKey,
+            title: widget.config.appName,
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: themeController.themeMode,
+            initialRoute: AppRouter.root,
+            onGenerateRoute: widget.router.onGenerateRoute,
+          );
+        },
+      ),
     );
   }
 }

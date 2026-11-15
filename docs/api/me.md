@@ -181,3 +181,88 @@ A conta passa de `ACTIVE` para `DEACTIVATED` e todas as sessões de refresh são
 
 ### Códigos de Erro
 - `401 Unauthorized`: token ausente ou expirado (`AUTHENTICATION_REQUIRED`); conta não operacional (`ACCOUNT_DISABLED`).
+
+---
+
+## 5. Interesses e Questionário Inicial
+
+No primeiro acesso, o app apresenta um questionário de interesses. As respostas ficam no backend, que é a fonte de verdade: o questionário pode ser retomado em outro aparelho, não se repete depois de concluído e alimenta o Feed V2 sem que o cliente reenvie interesses (contrato em `roadmap/backend-roadmap.md` §5.3).
+
+Os três endpoints exigem `Authorization: Bearer <access-token>`. O usuário vem somente da claim `sub`: `userId`, `id` ou qualquer outro campo no corpo é ignorado.
+
+### 5.1 Catálogo do questionário
+
+- **Método**: `GET`
+- **Rota**: `/api/v1/interests/catalog`
+
+```json
+{
+  "minInterestsToComplete": 3,
+  "questions": [
+    {
+      "code": "FOOD_AND_DRINK",
+      "title": "Comer e beber",
+      "question": "Onde você gosta de comer e beber?",
+      "options": [{ "code": "RESTAURANT", "label": "Restaurantes" }, { "code": "CAFE", "label": "Cafés e cafeterias" }]
+    }
+  ]
+}
+```
+
+Perguntas na ordem do questionário; opções na ordem do catálogo (exemplo abreviado). Catálogo completo (`InterestCategory`; o código é o identificador canônico, o rótulo é só exibição):
+
+| Pergunta (`code`) | Interesses (`code`: rótulo) |
+| :--- | :--- |
+| `FOOD_AND_DRINK` | `RESTAURANT`: Restaurantes · `FAST_FOOD`: Lanchonetes e hamburguerias · `CAFE`: Cafés e cafeterias · `BAKERY`: Padarias · `BAR`: Bares e pubs · `ICE_CREAM`: Sorveterias e doces |
+| `SHOPPING_AND_SERVICES` | `SUPERMARKET`: Supermercados e feiras · `FASHION`: Moda e vestuário · `BOOKS`: Livrarias · `TECHNOLOGY`: Tecnologia e eletrônicos · `SHOPPING_MALL`: Shoppings · `BEAUTY`: Beleza e barbearias · `PET`: Pet shops e veterinários · `AUTOMOTIVE`: Postos e oficinas |
+| `LEISURE_AND_WELLBEING` | `PARK`: Parques e atividades ao ar livre · `FITNESS`: Academias e esportes · `CULTURE`: Cinema, teatro e museus · `EVENTS`: Shows, festivais e eventos · `GAMES`: Games e entretenimento · `TRAVEL`: Hotéis e viagens · `HEALTH`: Saúde e farmácias |
+
+Os interesses seguem os tipos de estabelecimento que a descoberta já reconhece (`GeoapifyCategories`) e os exemplos de `UserInterest` em `domain/entities.md`. Incluir um interesse exige nova constante e migração que amplie `chk_user_interest_category_code`.
+
+### 5.2 Consulta dos interesses
+
+- **Método**: `GET`
+- **Rota**: `/api/v1/me/interests`
+
+```json
+{
+  "onboardingStatus": "IN_PROGRESS",
+  "onboardingCompletedAt": null,
+  "interests": [{ "code": "CAFE", "label": "Cafés e cafeterias" }, { "code": "BAR", "label": "Bares e pubs" }]
+}
+```
+
+- `onboardingStatus`: `NOT_STARTED` (nenhuma resposta gravada), `IN_PROGRESS` (rascunho gravado, questionário não confirmado) ou `COMPLETED` (confirmado; o app não volta a apresentar o questionário).
+- `onboardingCompletedAt`: data da primeira confirmação; `null` enquanto não concluído.
+- `interests`: interesses gravados, na ordem do catálogo.
+- Contas criadas antes desta funcionalidade (V40) aparecem como `COMPLETED` sem interesses: o comportamento delas não muda, e os interesses podem ser cadastrados pelo perfil.
+
+### 5.3 Gravação dos interesses
+
+- **Método**: `PUT`
+- **Rota**: `/api/v1/me/interests`
+- **Resposta**: `200 OK` com o mesmo corpo da consulta.
+
+```json
+{ "interests": ["CAFE", "BAR", "PARK"], "completeOnboarding": true }
+```
+
+- `interests` (obrigatório, até 50 elementos): substitui integralmente a seleção. Cada código precisa existir no catálogo, exatamente como publicado (maiúsculas), sem repetição.
+- `completeOnboarding` (obrigatório): `false` grava um rascunho com qualquer quantidade, inclusive nenhuma; `true` confirma o questionário e exige ao menos `minInterestsToComplete`.
+- **Depois da conclusão**: o questionário continua concluído (`false` não desfaz) e toda gravação exige o mínimo. É assim que o perfil edita os interesses.
+- **Reenvio**: idempotente. O mesmo corpo produz o mesmo estado e a data de conclusão não muda; interesses mantidos não são regravados.
+- **Concorrência**: gravações do mesmo usuário são serializadas por uma trava por usuário, inclusive a primeira; a seleção final é sempre uma das gravações inteira, nunca uma mistura.
+- **Conta**: o estado atual da conta é lido no início da gravação; conta desativada, suspensa ou excluída responde `401 ACCOUNT_DISABLED`, mesmo com access token ainda válido.
+
+### Códigos de Erro
+| Status | Código | Situação |
+| :--- | :--- | :--- |
+| `400` | `VALIDATION_ERROR` | `interests` ou `completeOnboarding` ausente, elemento nulo ou mais de 50 elementos |
+| `400` | `MALFORMED_REQUEST` | Corpo que não é JSON ou campo com tipo inválido (ex.: `interests` como texto) |
+| `400` | `INVALID_INTEREST_CODE` | Código fora do catálogo |
+| `400` | `DUPLICATE_INTEREST` | Código repetido na lista |
+| `401` | `AUTHENTICATION_REQUIRED` | Token ausente, inválido ou expirado |
+| `401` | `ACCOUNT_DISABLED` | Conta não operacional (consulta e gravação) |
+| `422` | `INTERESTS_BELOW_MINIMUM` | Conclusão, ou gravação depois dela, com menos interesses que o mínimo |
+
+Nenhuma resposta de erro altera o que estava gravado.

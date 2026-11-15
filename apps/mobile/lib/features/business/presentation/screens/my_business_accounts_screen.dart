@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/shared/widgets/error_view.dart';
-import 'place_management_dashboard_screen.dart';
 import 'package:rewit_mobile/shared/widgets/loading_indicator.dart';
 import '../../domain/entities/business_entities.dart';
 import '../../domain/repositories/business_repository.dart';
 import '../state/business_accounts_notifier.dart';
+import 'place_management_dashboard_screen.dart';
 
 class MyBusinessAccountsScreen extends StatefulWidget {
   final BusinessRepository? repository;
@@ -18,7 +19,8 @@ class MyBusinessAccountsScreen extends StatefulWidget {
   });
 
   @override
-  State<MyBusinessAccountsScreen> createState() => _MyBusinessAccountsScreenState();
+  State<MyBusinessAccountsScreen> createState() =>
+      _MyBusinessAccountsScreenState();
 }
 
 class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
@@ -34,7 +36,9 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
       _notifier = BusinessAccountsNotifier(repository: widget.repository!);
       _ownsNotifier = true;
     } else {
-      throw StateError('BusinessRepository ou BusinessAccountsNotifier deve ser fornecido.');
+      throw StateError(
+        'BusinessRepository ou BusinessAccountsNotifier deve ser fornecido.',
+      );
     }
 
     _notifier.loadMyAccounts();
@@ -60,6 +64,7 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
+        final sheetScheme = Theme.of(sheetContext).colorScheme;
         return Padding(
           padding: EdgeInsets.only(
             left: 20,
@@ -79,7 +84,10 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                     children: [
                       Text(
                         'Cadastrar Empresa',
-                        style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
+                        style: Theme.of(sheetContext)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
                       ),
@@ -93,7 +101,7 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                   Text(
                     'Cadastre a conta comercial com a qual você poderá reivindicar locais físicos.',
                     style: TextStyle(
-                      color: Theme.of(sheetContext).colorScheme.onSurface.withAlpha(160),
+                      color: sheetScheme.onSurfaceVariant,
                       fontSize: 13,
                     ),
                   ),
@@ -124,7 +132,8 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                       border: OutlineInputBorder(),
                     ),
                     validator: (value) {
-                      final clean = (value ?? '').replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+                      final clean = (value ?? '')
+                          .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
                       if (clean.length < 8 || clean.length > 32) {
                         return 'O documento fiscal deve ter entre 8 e 32 dígitos/caracteres.';
                       }
@@ -140,7 +149,9 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                         onPressed: _notifier.isCreatingAccount
                             ? null
                             : () async {
-                                if (formKey.currentState?.validate() != true) return;
+                                if (formKey.currentState?.validate() != true) {
+                                  return;
+                                }
 
                                 final success = await _notifier.createAccount(
                                   corporateName: corporateNameController.text,
@@ -148,21 +159,36 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                                 );
 
                                 if (!mounted) return;
+                                final semantic =
+                                    RewitSemanticColors.of(context);
+                                final scheme = Theme.of(context).colorScheme;
                                 if (success) {
                                   if (sheetContext.mounted) {
                                     Navigator.of(sheetContext).pop();
                                   }
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content: Text(_notifier.successMessage ?? 'Conta criada com sucesso!'),
-                                      backgroundColor: Colors.green,
+                                      content: Text(
+                                        _notifier.successMessage ??
+                                            'Conta criada com sucesso!',
+                                        style: TextStyle(
+                                          color: semantic.success.onContainer,
+                                        ),
+                                      ),
+                                      backgroundColor:
+                                          semantic.success.container,
                                     ),
                                   );
                                 } else if (_notifier.errorMessage != null) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content: Text(_notifier.errorMessage!),
-                                      backgroundColor: Colors.red,
+                                      content: Text(
+                                        _notifier.errorMessage!,
+                                        style: TextStyle(
+                                          color: scheme.onErrorContainer,
+                                        ),
+                                      ),
+                                      backgroundColor: scheme.errorContainer,
                                     ),
                                   );
                                 }
@@ -174,7 +200,9 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                             ? const SizedBox(
                                 height: 20,
                                 width: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Text('Cadastrar Conta Comercial'),
                       );
@@ -189,37 +217,37 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
     );
   }
 
-  Widget _buildStatusChip(String status) {
-    Color color;
-    String label;
-
+  RewitSemanticTone _statusTone(String status, RewitSemanticColors semantic) {
     switch (status) {
       case 'APPROVED':
-        color = Colors.green;
-        label = 'Verificada';
-        break;
+        return semantic.success;
       case 'REJECTED':
-        color = Colors.red;
-        label = 'Rejeitada';
-        break;
+        return semantic.danger;
       case 'PENDING':
       default:
-        color = Colors.orange;
-        label = 'Em Análise';
-        break;
+        return semantic.warning;
     }
+  }
+
+  Widget _buildStatusChip(String status, RewitSemanticColors semantic) {
+    final tone = _statusTone(status, semantic);
+    final String label = switch (status) {
+      'APPROVED' => 'Verificada',
+      'REJECTED' => 'Rejeitada',
+      _ => 'Em Análise',
+    };
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withAlpha(30),
+        color: tone.container,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withAlpha(120)),
+        border: Border.all(color: tone.border),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: color,
+          color: tone.onContainer,
           fontSize: 12,
           fontWeight: FontWeight.bold,
         ),
@@ -227,36 +255,25 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
     );
   }
 
-  Widget _buildClaimStatusBadge(String status) {
-    Color color;
-    String label;
-
-    switch (status) {
-      case 'APPROVED':
-        color = Colors.green;
-        label = 'Aprovada';
-        break;
-      case 'REJECTED':
-        color = Colors.red;
-        label = 'Rejeitada';
-        break;
-      case 'PENDING':
-      default:
-        color = Colors.orange;
-        label = 'Pendente';
-        break;
-    }
+  Widget _buildClaimStatusBadge(String status, RewitSemanticColors semantic) {
+    final tone = _statusTone(status, semantic);
+    final String label = switch (status) {
+      'APPROVED' => 'Aprovada',
+      'REJECTED' => 'Rejeitada',
+      _ => 'Pendente',
+    };
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withAlpha(25),
+        color: tone.container,
         borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: tone.border),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: color,
+          color: tone.onContainer,
           fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
@@ -266,6 +283,8 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
 
   Widget _buildAccountCard(BuildContext context, BusinessAccount account) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
     final claims = _notifier.claimsByAccount[account.id] ?? [];
 
     return Card(
@@ -273,7 +292,7 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -298,34 +317,38 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                       Text(
                         'Documento: ${account.taxId}',
                         style: TextStyle(
-                          color: theme.colorScheme.onSurface.withAlpha(160),
+                          color: scheme.onSurfaceVariant,
                           fontSize: 13,
                         ),
                       ),
                     ],
                   ),
                 ),
-                _buildStatusChip(account.verificationStatus),
+                _buildStatusChip(account.verificationStatus, semantic),
               ],
             ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest.withAlpha(70),
+                color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.workspace_premium_outlined, size: 16, color: theme.colorScheme.primary),
+                  Icon(
+                    Icons.workspace_premium_outlined,
+                    size: 16,
+                    color: scheme.primary,
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     'Plano: ${account.planTier}',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSurface.withAlpha(200),
+                      color: scheme.onSurface,
                     ),
                   ),
                 ],
@@ -345,7 +368,7 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                 child: Text(
                   'Nenhum local reivindicado por esta conta ainda.',
                   style: TextStyle(
-                    color: theme.colorScheme.onSurface.withAlpha(140),
+                    color: scheme.onSurfaceVariant,
                     fontSize: 13,
                   ),
                 ),
@@ -358,6 +381,8 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                 separatorBuilder: (_, __) => const Divider(height: 16),
                 itemBuilder: (context, index) {
                   final claim = claims[index];
+                  final decisionTone =
+                      claim.isApproved ? semantic.success : semantic.danger;
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -367,17 +392,20 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                           Expanded(
                             child: Text(
                               claim.placeName,
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
                             ),
                           ),
-                          _buildClaimStatusBadge(claim.status),
+                          _buildClaimStatusBadge(claim.status, semantic),
                         ],
                       ),
                       const SizedBox(height: 2),
                       Text(
                         '${claim.city} / ${claim.state}',
                         style: TextStyle(
-                          color: theme.colorScheme.onSurface.withAlpha(140),
+                          color: scheme.onSurfaceVariant,
                           fontSize: 12,
                         ),
                       ),
@@ -385,7 +413,7 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                       Text(
                         'Evidências: ${claim.evidenceDescription}',
                         style: TextStyle(
-                          color: theme.colorScheme.onSurface.withAlpha(170),
+                          color: scheme.onSurfaceVariant,
                           fontSize: 12,
                         ),
                         maxLines: 2,
@@ -410,24 +438,29 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                                 ),
                               );
                             },
-                            icon: const Icon(Icons.settings_outlined, size: 18),
+                            icon: const Icon(
+                              Icons.settings_outlined,
+                              size: 18,
+                            ),
                             label: const Text('Gerenciar estabelecimento'),
                           ),
                         ),
                       ],
-                      if (claim.decisionReason != null && claim.decisionReason!.isNotEmpty) ...[
+                      if (claim.decisionReason != null &&
+                          claim.decisionReason!.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
+                            color: decisionTone.container,
                             borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: decisionTone.border),
                           ),
                           child: Text(
                             'Decisão: ${claim.decisionReason}',
                             style: TextStyle(
                               fontSize: 12,
-                              color: claim.isApproved ? Colors.green.shade800 : Colors.red.shade800,
+                              color: decisionTone.onContainer,
                             ),
                           ),
                         ),
@@ -444,6 +477,9 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Minhas Empresas'),
@@ -465,7 +501,9 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
         listenable: _notifier,
         builder: (context, _) {
           if (_notifier.isLoading) {
-            return const LoadingIndicator(message: 'Carregando contas comerciais...');
+            return const LoadingIndicator(
+              message: 'Carregando contas comerciais...',
+            );
           }
 
           if (_notifier.errorMessage != null && _notifier.accounts.isEmpty) {
@@ -486,21 +524,21 @@ class _MyBusinessAccountsScreenState extends State<MyBusinessAccountsScreen> {
                     Icon(
                       Icons.storefront_outlined,
                       size: 64,
-                      color: Theme.of(context).colorScheme.primary.withAlpha(120),
+                      color: scheme.primary,
                     ),
                     const SizedBox(height: 16),
                     Text(
                       'Nenhuma empresa cadastrada',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Cadastre sua empresa com razão social e documento fiscal para solicitar a gestão de estabelecimentos físicos na rede Rewit.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(160),
+                        color: scheme.onSurfaceVariant,
                         fontSize: 14,
                       ),
                     ),

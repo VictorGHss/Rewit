@@ -45,7 +45,7 @@ O **Rewit** transcende os catálogos estáticos de avaliação baseados em simpl
 ```
 /
 ├── apps/
-│   ├── mobile/                # Aplicação cliente Flutter (Android & iOS)
+│   ├── mobile/                # Aplicação cliente Flutter (Android & iOS) com Design System Next-Gen V1
 │   └── admin/                 # Painel administrativo web (React / TypeScript / Vite)
 │
 ├── backend/                   # API REST Central (Java 25 LTS / Spring Boot 4.1.x)
@@ -135,6 +135,9 @@ cd apps/mobile
 flutter pub get
 flutter run
 ```
+- **Análise Estática**: `flutter analyze`
+- **Execução da Suíte Completa de Testes**: `flutter test`
+- **Testes do Design System e Widgets**: `flutter test test/shared/widgets/design_system_widgets_test.dart`
 
 ---
 
@@ -228,6 +231,177 @@ flutter run
   - **Backend REST API**: Publicação, consulta e exclusão de respostas oficiais de estabelecimentos comerciais a avaliações (`/api/v1/reviews/{reviewId}/business-responses`) e discussões raiz (`/api/v1/discussions/{discussionId}/business-responses`), com unicidade de resposta ativa por par (empresa, alvo), rate limiting distribuído com Redis (`BUSINESS_RESPONSE_CREATION`), fila administrativa de respostas removidas (`/api/v1/admin/business-responses/removed`) e moderação/restauração formal auditada com justificativa obrigatória (15 a 1.000 caracteres);
   - **Cliente Mobile (Flutter)**: Renderização destacada de respostas oficiais com selo de verificação da empresa proprietária em avaliações e discussões, além de fluxo de resposta para proprietários verificados;
   - **Painel Administrativo Web (React + TypeScript + Vite)**: Nova área "Respostas Oficiais Removidas" com fila de triagem paginada, filtros avançados (`BUSINESS` / `MODERATION`), visualização contextual de datas (`moderatedAt`), status de restaurabilidade (`restorable`) e modal de restauração com tratamento de conflitos e recarga reativa.
+
+- **Design System Next-Gen V1 Mobile (Flutter)**:
+  - **Arquitetura e Fundações**:
+    - Centralização de temas em `apps/mobile/lib/app/theme/app_theme.dart` (`AppTheme.lightTheme` e `AppTheme.darkTheme`), plenamente integrado ao Material 3 (`ColorScheme`, tipografia unificada, `AppBarTheme`, `CardTheme`, `BottomSheetThemeData`, `DialogTheme`, `InputDecorationTheme`, `ElevatedButtonThemeData`, `OutlinedButtonThemeData`, `TextButtonThemeData` e `NavigationBarThemeData`);
+    - Escala geométrica padronizada de espaçamentos em `apps/mobile/lib/app/theme/rewit_tokens.dart` (`RewitSpacing`: `xxs = 2.0`, `xs = 4.0`, `sm = 8.0`, `md = 12.0`, `lg = 16.0`, `xl = 20.0`, `xxl = 24.0`, `xxxl = 32.0`, além dos preenchimentos semânticos estruturados `screenPadding`, `cardPadding` e `bannerPadding`);
+    - Padronização de raios de curvatura e bordas pré-calculadas em `RewitRadius` (`xs = 4.0`, `sm = 6.0`, `md = 8.0`, `lg = 12.0`, `xl = 16.0`, `sheet = 20.0`, `pill = 999.0`, `borderXs`, `borderSm`, `borderMd`, `borderLg`, `borderXl`, `borderPill` e `sheetTop`);
+    - Extensão semântica oficial em `apps/mobile/lib/app/theme/rewit_semantic_colors.dart` (`RewitSemanticColors extends ThemeExtension<RewitSemanticColors>`), estruturada em blocos funcionais imutáveis `RewitSemanticTone` (`container`, `onContainer`, `border`, `accent`) para estados contextuais (`success`, `warning`, `danger`, `info`), selo de presença verificada (`verified`), avaliações e estrelas (`ratingBadge`, `starFilled`, `starEmpty`), categorias multi-alvo (`placeTarget`, `productTarget`, `serviceTarget`) e superfícies focais (`elevatedFocalSurface`, `anonymousAvatarBackground`, `anonymousAvatarForeground`, `mediaScrim`, `onMediaScrim`). Acesso via `RewitSemanticColors.of(context)`;
+    - Gerenciamento reativo de aparência em `apps/mobile/lib/app/theme/theme_controller.dart` (`ThemeController` baseado em `ChangeNotifier`, com contrato `ThemePreferenceStorage` e escopo `ThemeControllerScope` via `InheritedNotifier`).
+  - **Temas Disponíveis e Cores Canônicas**:
+    - **Sistema (`ThemeMode.system`)**: Padrão inicial de fábrica. Acompanha instantaneamente o brilho configurado no sistema operacional do dispositivo;
+    - **Claro (`ThemeMode.light`)**: Lavanda suave e roxo focal:
+      - Fundo da aplicação (`scaffoldBackgroundColor`): `#F6F4FB`;
+      - Superfície padrão de cards (`surfaceContainerLow`): `#F1EEFA`;
+      - Superfície elevada focal moderada (`elevatedFocalSurface` / `surfaceContainerLowest`): `#FFFFFF` (utilizado com moderação exclusivamente em modais, bottom sheets, inputs e miras do scanner);
+      - Cor primária de ação e foco: `#6D28D9`;
+      - Cor secundária: `#7C3AED`;
+      - Texto principal (`onSurface`): `#181520` (grafite profundo);
+      - Texto secundário (`onSurfaceVariant`): `#534C63` (grafite médio);
+      - Bordas e divisores: `#D5CDE8` / `#79718A`;
+    - **Escuro (`ThemeMode.dark`)**: Predominância de preto e grafite com toques de lavanda:
+      - Fundo predominante da tela (`scaffoldBackgroundColor`): `#09090D`;
+      - Superfície principal de cards (`surface` / `cardTheme`): `#17151D`;
+      - Superfície elevada focal (`elevatedFocalSurface` / `surfaceContainerHigh`): `#211B2B`;
+      - Ações primárias (botões e controles ativos): `#8055D9`;
+      - Destaque textual primário de alta legibilidade: `#9D78F2`;
+      - Detalhes secundários em lavanda (`secondary`): `#B69AFF`;
+      - Texto principal suave (`onSurface`): `#F2EFFA`;
+      - Texto secundário (`onSurfaceVariant`): `#B5AFC4`;
+      - Bordas e divisores sutis: `#2E283D` / `#8A829C`;
+    - **Diretrizes Inegociáveis do Modo Escuro**: Proibição terminante de cards brancos no tema escuro; nenhuma grande superfície pintada em roxo saturado em bloco (o roxo é reservado estritamente para ações primárias, botões, indicadores de foco e estados ativos, e o lavanda para detalhes e ícones secundários); legibilidade priorizada e distinção semântica estrita preservada para estados de sucesso, alerta, erro e avaliação.
+  - **Persistência Local e Ciclo de Vida Desacoplado**:
+    - Persistência exclusiva no dispositivo via `FlutterSecureStorage` sob a chave `rewit_app_theme_mode` (`SecureThemePreferenceStorage`);
+    - Desacoplamento total da sessão de usuário: chamadas a `TokenStorage.clearTokens()` decorrentes de logout ou expiração de credenciais não resetam a preferência visual do dispositivo;
+    - Fallback resiliente em memória (`InMemoryThemePreferenceStorage`) ativado automaticamente em caso de falha de I/O na chave de armazenamento seguro;
+    - Carregamento assíncrono antes do bootstrap do app (`await themeController.load()` em `main.dart`);
+    - Painel acessível de configuração na tela de configurações (`AccountSettingsScreen`), com semântica de rádio, ícones dedicados e feedback visual imediato.
+  - **Guia Prático de Desenvolvimento (Consumo de Tokens e Componentes)**:
+    - O desenvolvimento de novas telas e widgets deve consumir os tokens exclusivamente via contexto do Flutter, prevenindo cores literais hardcoded:
+      ```dart
+      import 'package:flutter/material.dart';
+      import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
+      import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+
+      class ExemploCardReview extends StatelessWidget {
+        const ExemploCardReview({super.key});
+
+        @override
+        Widget build(BuildContext context) {
+          final theme = Theme.of(context);
+          final scheme = theme.colorScheme;
+          final semantics = RewitSemanticColors.of(context);
+
+          return Card(
+            margin: RewitSpacing.screenPadding,
+            shape: const RoundedRectangleBorder(borderRadius: RewitRadius.borderLg),
+            child: Padding(
+              padding: RewitSpacing.cardPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      // Selo semântico de verificação presencial
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: RewitSpacing.sm,
+                          vertical: RewitSpacing.xs,
+                        ),
+                        decoration: BoxDecoration(
+                          color: semantics.verified.container,
+                          borderRadius: RewitRadius.borderPill,
+                          border: Border.all(color: semantics.verified.border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.verified, size: 14, color: semantics.verified.accent),
+                            const SizedBox(width: RewitSpacing.xs),
+                            Text(
+                              'Presença Verificada',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: semantics.verified.onContainer,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: RewitSpacing.md),
+                  Text(
+                    'Excelente atendimento no local',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: RewitSpacing.xs),
+                  Text(
+                    'Relato da experiência em conformidade com o Design System.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      }
+      ```
+    - **Boas Práticas de Implementação**:
+      - Nunca utilizar `Colors.white`, `Colors.black` ou hexadecimais literais soltos no corpo de widgets. Para superfícies dinâmicas elevadas (modais, cards focais ou inputs), utilize `semantics.elevatedFocalSurface` ou `scheme.surfaceContainerHigh`;
+      - Para espaçamentos e alinhamentos, utilize os múltiplos canônicos de `RewitSpacing` (`RewitSpacing.xs`, `RewitSpacing.sm`, `RewitSpacing.md`, `RewitSpacing.lg`, etc.);
+      - Para cantos arredondados, utilize as constantes pré-calculadas de `RewitRadius` (`RewitRadius.borderMd`, `RewitRadius.borderLg`, `RewitRadius.borderPill`, `RewitRadius.sheetTop`);
+      - Assegure contraste mínimo WCAG AA em ambos os temas testando a legibilidade de textos e ícones contra seus respectivos containers.
+  - **Acessibilidade e Garantia de Qualidade**:
+    - Verificação estrita de contraste WCAG AA: relação `>= 4.5:1` para tipografia de leitura regular e `>= 3:1` para divisores estruturais, bordas e ícones gráficos;
+    - Bateria de testes automatizados Flutter: **1.323 testes aprovados** (`flutter test`, `All tests passed!`), 0 falhas, 0 erros e 0 alertas no `dart analyze`;
+    - Testes unitários nativos Android: **9 testes aprovados** (`:app:testDebugUnitTest` em `CameraPermissionStateMachineTest`) cobrindo a máquina de estados de permissão;
+    - **Status de Homologação**: A suíte de testes automatizados e regressões estruturais de widget foi 100% validada no ambiente de desenvolvimento e CI/CD. A inspeção visual interativa em hardware físico real (dispositivos Android e iOS) permanece como pendência formal para validação prática pela equipe/mantenedor.
+
+- **Navegação & Home V2 Mobile (`apps/mobile`)**:
+  - **Barra de Navegação Inferior (5 destinos canônicos)**:
+    - **Início** (índice 0): Feed de atividades dual (`FeedView`) com alternância fluida entre as abas "Para você" e "Seguindo";
+    - **Explorar** (índice 1): Busca unificada de locais e produtos (`SearchScreen(embedded: true)`) com suporte a cadastro manual de novos locais;
+    - **Rankings** (índice 2): Rankings da região (`RankingsScreen(embedded: true)`) com filtro por categorias e interesses;
+    - **Check-in** (índice 3): Área rápida de registro presencial (`CheckInScreen(embedded: true)`) com busca de locais próximos por geolocalização e histórico de check-ins;
+    - **Coleção** (índice 4): Área reservada para organização de listas salvas (`CollectionScreen(embedded: true)`). Exibe estado vazio honesto e informativo, sem subtabs cosméticas nem mocks de dados, enquanto o backend de coleções aguarda implementação.
+  - **Cabeçalho Unificado (AppBar)**:
+    - Avatar do usuário autenticado no canto esquerdo com inicial de fallback e navegação direta para Meu Perfil (`/profile`);
+    - Título centralizado "Rewit" com suporte a acessibilidade semântica;
+    - Botão de mensagens com aviso contextual de funcionalidade em desenvolvimento ("em breve");
+    - Botão de notificações com badge reativo de contagem de notificações não lidas (`NotificationsNotifier`).
+  - **Ações Rápidas Flutuantes (FAB)**:
+    - Botão flutuante central (`home_fab_button`) aciona bottom sheet modal com duas ações claras: "Nova Avaliação" (abre o fluxo multi-alvo em `/review/create`) e "Fazer Check-in" (alterna imediatamente para a aba de Check-in).
+  - **Gestão de Histórico e PopScope**:
+    - Navegação defensiva: pressionar o botão de retorno do dispositivo fora da aba Início redireciona para a aba Início antes de sinalizar o fechamento da aplicação.
+
+- **Feed Duplo (Para Você / Seguindo) e Sincronização Reativa**:
+  - Suporte completo aos dois contratos oficiais de timeline: `/api/v2/feed` (descoberta personalizada baseada em conexões, interesses e recência) e `/api/v1/feed` (feed cronológico estrito de contas seguidas);
+  - `FeedNotifier` com canais de estado isolados para cada tipo de feed (`forYou` e `following`), preservando scroll, paginação e itens de forma independente;
+  - Voto útil com atualização otimista imediata e rollback granular reversível em caso de falha de conexão;
+  - Preservação estrita dos identificadores de avaliações removidas ou ocultadas durante recargas de recuperação de rede;
+  - Sincronização automática entre telas: publicação de nova avaliação ou alteração de interesses (`AppRouter.editInterests`) aciona recarga imediata do canal `forYou`.
+
+- **Scanner Barcode/QR Code e Target Selection Mode**:
+  - Suporte a leitura óptica em tempo real via câmera (EAN-13, EAN-8, UPC-A, ITF-14 e QR Code) e fallback manual com sanitização e normalização de texto;
+  - **Target Selection Mode (`ScannerRouteArgs(selectionMode: true)`)**:
+    - Modo acionado diretamente a partir da criação de avaliação (`ReviewCreateScreen` / `TargetSearchSelectorWidget` / `TargetItemInputWidget`);
+    - Ao identificar um código ou produto existente, retorna o alvo selecionado tipado diretamente para o formulário de avaliação;
+  - Hardening completo do ciclo de vida: pausa automática da câmera quando o app entra em `inactive` ou `paused`, e restauração limpa e revalidação de permissões ao retornar a `resumed`;
+  - Debounce de detecção ótica e prevenção de requisições concorrentes ou duplicadas.
+
+- **Permissões de Câmera e Máquina de Estados Nativa Android (API 36)**:
+  - Máquina de estados determinística em Kotlin (`CameraPermissionStateMachine.kt`, `MainActivity.kt`), projetada especificamente para contornar peculiaridades de permissão no Android API 36 (onde um primeiro diálogo cancelado ou recusado poderia incorretamente reportar `shouldShowRequestPermissionRationale == false` e causar negação permanente prematura);
+  - Persistência das decisões do usuário em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`), exposta também via método `hasRequestedPermissionBefore` para decidir com segurança se é a primeira abertura;
+  - Canal de plataforma nativo via `MethodChannel` (`app.rewit.mobile/camera_permission`) e serviço Flutter `AndroidCameraPermissionService`;
+  - Interface do Scanner com tela contextual pré-permissão (`ScannerPermissionRationale`) antes da primeira solicitação nativa, AppBar de alto contraste (`semantic.onMediaScrim` sobre `semantic.mediaScrim` independente do `ThemeData`), botão de repetição e redirecionamento assistido para as configurações do sistema operacional (`openAppSettings`) quando permanentemente negado.
+
+- **Hardening HTTP UTF-8 (`RewitHttpClient` & `ProblemDetail`)**:
+  - Decodificação explícita como UTF-8 por padrão em respostas `application/json`, `application/problem+json` e textuais quando o servidor omite `; charset=utf-8` no header `Content-Type`, preservando acentuação e cedilha em mensagens de erro RFC 7807 e cargas JSON, mantendo respeito a charsets explícitos (ex.: `iso-8859-1`) e fallback seguro para sequências inválidas.
+
+- **Localização e Check-in Hardening**:
+  - Implementação de `GeolocatorLocationService` com política explícita por finalidade (`LocationCapturePolicy`):
+    - **Política de Descoberta (`discovery`)**: utilizada na busca de locais próximos no raio de 10 km. Prioriza velocidade com cache recente (<= 5 min) e captura inicial em precisão média com timeout de até 5 segundos; caso não haja cache válido e a tentativa inicial falhe ou expire, executa no máximo um fallback controlado em alta precisão (<= 4 segundos, dentro de orçamento total de 9 segundos), sem polling contínuo;
+    - **Política de Verificação de Presença (`presenceVerification`)**: utilizada na criação de avaliação e na aba de check-in. Rejeita cache antigo, exige leitura recente (<= 1 minuto), alta precisão horizontal do GPS, timeout ampliado (10s a 15s) para aquecimento de GPS frio e retry único caso a acurácia seja aproximada (> 100 metros);
+  - **Localização Simulada em QA**: o cliente não bloqueia coordenadas simuladas/mock em emuladores ou dispositivos de teste, permitindo cenários completos de homologação e validação funcional sem adulterar código;
+  - **Autoridade Estrita do Backend**: a validação da presença física permanece 100% autoritativa no backend (PostGIS `ST_DWithin`, teto de 250m de raio por local, acurácia horizontal <= 100m, trava transacional `pg_advisory_xact_lock` e teto de 1 check-in verificado por usuário e local em janela móvel de 24 horas).
 
 ### 7.2 Funcionalidades Planejadas (Fases Futuras)
 

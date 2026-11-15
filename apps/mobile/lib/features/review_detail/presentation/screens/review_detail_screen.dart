@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/business/domain/entities/business_response_entities.dart';
 import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
@@ -72,7 +73,6 @@ class ReviewDetailScreen extends StatefulWidget {
     this.nowProvider,
   });
 
-
   @override
   State<ReviewDetailScreen> createState() => _ReviewDetailScreenState();
 }
@@ -107,7 +107,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   Future<void> _loadBusinessContext() async {
     if (widget.businessRepository != null) {
       try {
-        final accounts = await widget.businessRepository!.getMyBusinessAccounts();
+        final accounts =
+            await widget.businessRepository!.getMyBusinessAccounts();
         if (mounted) {
           setState(() {
             _myBusinessAccountIds = accounts.map((a) => a.id).toSet();
@@ -118,12 +119,14 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
 
     if (widget.businessResponseRepository != null) {
       try {
-        final el = await widget.businessResponseRepository!.getReviewEligibility(widget.reviewId);
+        final el = await widget.businessResponseRepository!
+            .getReviewEligibility(widget.reviewId);
         if (mounted) {
           setState(() {
             _eligibility = el;
             if (_myBusinessAccountIds.isEmpty) {
-              _myBusinessAccountIds = el.accounts.map((a) => a.businessAccountId).toSet();
+              _myBusinessAccountIds =
+                  el.accounts.map((a) => a.businessAccountId).toSet();
             }
           });
         }
@@ -161,7 +164,6 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     return review.status.toUpperCase() == 'ACTIVE';
   }
 
-
   @override
   void initState() {
     super.initState();
@@ -170,7 +172,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     if (widget.discussionNotifier != null) {
       _discussionNotifier = widget.discussionNotifier;
     } else if (widget.discussionRepository != null) {
-      _discussionNotifier = DiscussionNotifier(repository: widget.discussionRepository!);
+      _discussionNotifier =
+          DiscussionNotifier(repository: widget.discussionRepository!);
       _ownsNotifier = true;
     }
 
@@ -208,20 +211,28 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     final requestVersion = _mutationVersion;
 
     try {
-      final review = await widget.feedRepository!.getReviewById(widget.reviewId);
+      final review =
+          await widget.feedRepository!.getReviewById(widget.reviewId);
       if (mounted) {
         setState(() {
           if (requestVersion != _mutationVersion) {
             // Uma mutação local ocorreu enquanto a requisição canônica estava em andamento.
             // Preserva a mutação local mais recente, apenas enriquecendo isMine se ainda não definido.
-            if (_review != null && review.isMine != null && _review!.isMine == null) {
+            if (_review != null &&
+                review.isMine != null &&
+                _review!.isMine == null) {
               _review = _review!.copyWith(isMine: review.isMine);
             }
           } else {
             _review = review.copyWith(
-              mediaItems: _mediaItems.isNotEmpty ? _mediaItems : review.mediaItems,
-              isHelpfulByMe: _isTogglingHelpful ? _review?.isHelpfulByMe : review.isHelpfulByMe,
-              helpfulCount: _isTogglingHelpful ? _review?.helpfulCount : review.helpfulCount,
+              mediaItems:
+                  _mediaItems.isNotEmpty ? _mediaItems : review.mediaItems,
+              isHelpfulByMe: _isTogglingHelpful
+                  ? _review?.isHelpfulByMe
+                  : review.isHelpfulByMe,
+              helpfulCount: _isTogglingHelpful
+                  ? _review?.helpfulCount
+                  : review.helpfulCount,
               isMine: review.isMine ?? _review?.isMine,
             );
           }
@@ -236,7 +247,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
         setState(() {
           _isLoading = false;
           if (_review == null) {
-            _errorMessage = 'Não foi possível carregar os detalhes da avaliação.';
+            _errorMessage =
+                'Não foi possível carregar os detalhes da avaliação.';
           }
         });
       }
@@ -269,34 +281,65 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
       if (mounted) {
         setState(() {
           _isLoadingMedia = false;
-          _mediaErrorMessage = 'Não foi possível carregar as fotos da avaliação.';
+          _mediaErrorMessage =
+              'Não foi possível carregar as fotos da avaliação.';
         });
       }
     }
   }
 
+  void _showSuccessSnackBar(String message) {
+    final semantic = RewitSemanticColors.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: semantic.success.onContainer),
+        ),
+        backgroundColor: semantic.success.container,
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    final scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: scheme.onErrorContainer),
+        ),
+        backgroundColor: scheme.errorContainer,
+      ),
+    );
+  }
+
   Future<void> _confirmAndDeleteMedia(ReviewMediaItem item) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Excluir Foto'),
-        content: const Text(
-          'Deseja realmente remover esta foto da avaliação? Esta ação não pode ser desfeita.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
+      builder: (ctx) {
+        final dialogScheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: const Text('Excluir Foto'),
+          content: const Text(
+            'Deseja realmente remover esta foto da avaliação? Esta ação não pode ser desfeita.',
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar'),
             ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Excluir'),
-          ),
-        ],
-      ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: dialogScheme.error,
+                foregroundColor: dialogScheme.onError,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirmed != true || !mounted) return;
@@ -318,36 +361,21 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           _mediaItems.removeWhere((m) => m.id == item.id);
           _deletingMediaId = null;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Foto removida com sucesso!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        _showSuccessSnackBar('Foto removida com sucesso!');
       }
     } on ApiException catch (e) {
       if (mounted) {
         setState(() {
           _deletingMediaId = null;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Falha ao excluir foto: ${e.detail}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Falha ao excluir foto: ${e.detail}');
       }
     } catch (_) {
       if (mounted) {
         setState(() {
           _deletingMediaId = null;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Erro inesperado ao excluir foto.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Erro inesperado ao excluir foto.');
       }
     }
   }
@@ -355,68 +383,85 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   void _openMediaPreview(ReviewMediaItem item) {
     showDialog<void>(
       context: context,
-      builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AppBar(
-              title: Text(item.mimeType.split('/').last.toUpperCase()),
-              actions: [
-                if (_canDelete)
+      builder: (ctx) {
+        final dialogScheme = Theme.of(ctx).colorScheme;
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppBar(
+                title: Text(item.mimeType.split('/').last.toUpperCase()),
+                actions: [
+                  if (_canDelete)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Excluir Foto',
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _confirmAndDeleteMedia(item);
+                      },
+                    ),
                   IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Excluir Foto',
-                    onPressed: () {
-                      Navigator.of(ctx).pop();
-                      _confirmAndDeleteMedia(item);
-                    },
-                  ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(ctx).pop(),
-                ),
-              ],
-            ),
-            if (widget.mediaRepository != null)
-              AuthenticatedImage(
-                url: item.url,
-                mediaRepository: widget.mediaRepository!,
-                fit: BoxFit.contain,
-                height: 300,
-              )
-            else
-              Container(
-                height: 300,
-                color: Colors.grey.shade100,
-                child: const Center(child: Icon(Icons.image, size: 60)),
-              ),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Tamanho: ${(item.sizeBytes / 1024).toStringAsFixed(1)} KB',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                  ),
-                  Text(
-                    _formatDate(item.createdAt),
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(ctx).pop(),
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
+              if (widget.mediaRepository != null)
+                AuthenticatedImage(
+                  url: item.url,
+                  mediaRepository: widget.mediaRepository!,
+                  fit: BoxFit.contain,
+                  height: 300,
+                )
+              else
+                Container(
+                  height: 300,
+                  color: dialogScheme.surfaceContainerHighest,
+                  child: Center(
+                    child: Icon(
+                      Icons.image,
+                      size: 60,
+                      color: dialogScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Tamanho: ${(item.sizeBytes / 1024).toStringAsFixed(1)} KB',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      _formatDate(item.createdAt),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: dialogScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Future<void> _handleToggleHelpful() async {
     final review = _review;
-    if (review == null || widget.feedRepository == null || _isTogglingHelpful) return;
+    if (review == null || widget.feedRepository == null || _isTogglingHelpful) {
+      return;
+    }
 
     setState(() {
       _isTogglingHelpful = true;
@@ -444,7 +489,9 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           _isTogglingHelpful = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Falha ao atualizar voto útil. Tente novamente.')),
+          const SnackBar(
+            content: Text('Falha ao atualizar voto útil. Tente novamente.'),
+          ),
         );
       }
     }
@@ -467,17 +514,14 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
       setState(() {
         _mutationVersion++;
         _review = updatedReview.copyWith(
-          mediaItems: _mediaItems.isNotEmpty ? _mediaItems : updatedReview.mediaItems,
+          mediaItems: _mediaItems.isNotEmpty
+              ? _mediaItems
+              : updatedReview.mediaItems,
         );
         _wasEdited = true;
       });
       widget.feedNotifier?.updateReview(_review!);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Avaliação atualizada com sucesso!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _showSuccessSnackBar('Avaliação atualizada com sucesso!');
     }
   }
 
@@ -486,26 +530,30 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Excluir Avaliação'),
-        content: const Text(
-          'Deseja realmente excluir esta avaliação? Essa publicação será removida e deixará de aparecer para outras pessoas.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
+      builder: (ctx) {
+        final dialogScheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: const Text('Excluir Avaliação'),
+          content: const Text(
+            'Deseja realmente excluir esta avaliação? Essa publicação será removida e deixará de aparecer para outras pessoas.',
           ),
-          FilledButton(
-            key: const Key('confirm_delete_review_button'),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar'),
             ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Excluir'),
-          ),
-        ],
-      ),
+            FilledButton(
+              key: const Key('confirm_delete_review_button'),
+              style: FilledButton.styleFrom(
+                backgroundColor: dialogScheme.error,
+                foregroundColor: dialogScheme.onError,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirmed != true || !mounted) return;
@@ -519,49 +567,30 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
 
       if (mounted) {
         widget.feedNotifier?.removeReview(widget.reviewId);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Avaliação excluída com sucesso.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.of(context).pop({'deleted': true, 'reviewId': widget.reviewId});
+        _showSuccessSnackBar('Avaliação excluída com sucesso.');
+        Navigator.of(context)
+            .pop({'deleted': true, 'reviewId': widget.reviewId});
       }
     } on ApiException catch (e) {
       if (mounted) {
         setState(() {
           _isDeleting = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Falha ao excluir avaliação: ${e.detail}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Falha ao excluir avaliação: ${e.detail}');
       }
     } on NetworkException catch (e) {
       if (mounted) {
         setState(() {
           _isDeleting = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar(e.message);
       }
     } catch (_) {
       if (mounted) {
         setState(() {
           _isDeleting = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Erro inesperado ao excluir avaliação.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showErrorSnackBar('Erro inesperado ao excluir avaliação.');
       }
     }
   }
@@ -573,6 +602,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
 
     if (_isLoading) {
       return Scaffold(
@@ -598,6 +629,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
 
     final review = _review!;
     final author = review.author;
+    final cardSurfaceColor =
+        theme.cardTheme.color ?? scheme.surfaceContainerLow;
 
     return PopScope(
       canPop: false,
@@ -649,497 +682,568 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
             ),
           ],
         ),
-
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 1. Cabeçalho do Autor
-            InkWell(
-              onTap: !review.isAnonymous &&
-                      author.id != null &&
-                      author.id!.isNotEmpty &&
-                      author.displayName != 'Usuário excluído'
-                  ? () => Navigator.of(context).pushNamed(
-                        AppRouter.profile,
-                        arguments: author.id,
-                      )
-                  : null,
-              borderRadius: BorderRadius.circular(8),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: review.isAnonymous
-                        ? Colors.grey.shade300
-                        : theme.colorScheme.primary.withAlpha(30),
-                    child: review.isAnonymous
-                        ? Icon(Icons.person_off_outlined, color: Colors.grey.shade700)
-                        : Text(
-                            author.displayName.isNotEmpty
-                                ? author.displayName[0].toUpperCase()
-                                : 'U',
-                            style: TextStyle(
-                              fontSize: 20,
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                author.displayName,
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 1. Cabeçalho do Autor
+              InkWell(
+                onTap: !review.isAnonymous &&
+                        author.id != null &&
+                        author.id!.isNotEmpty &&
+                        author.displayName != 'Usuário excluído'
+                    ? () => Navigator.of(context).pushNamed(
+                          AppRouter.profile,
+                          arguments: author.id,
+                        )
+                    : null,
+                borderRadius: BorderRadius.circular(8),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 24,
+                      backgroundColor: review.isAnonymous
+                          ? semantic.anonymousAvatarBackground
+                          : scheme.primaryContainer,
+                      child: review.isAnonymous
+                          ? Icon(
+                              Icons.person_off_outlined,
+                              color: semantic.anonymousAvatarForeground,
+                            )
+                          : Text(
+                              author.displayName.isNotEmpty
+                                  ? author.displayName[0].toUpperCase()
+                                  : 'U',
+                              style: TextStyle(
+                                fontSize: 20,
+                                color: scheme.onPrimaryContainer,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                            if (review.isAnonymous) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade200,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
                                 child: Text(
-                                  'Anônimo',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey.shade700,
+                                  author.displayName,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
-                            ],
-                          ],
-                        ),
-                        if (!review.isAnonymous && author.handle != null) ...[
-                          Text(
-                            '@${author.handle}',
-                            style: TextStyle(
-                              color: theme.colorScheme.onSurface.withAlpha(160),
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                        Text(
-                          _formatDate(review.createdAt),
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurface.withAlpha(130),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // 2. Badge de Check-in (Verificação Presencial)
-            if (review.isVerifiedOnSite) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade300),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.check_circle, size: 16, color: Colors.green.shade700),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        'Presença confirmada no estabelecimento (Check-in validado)',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.green.shade800,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // 3. Alvos da Avaliação e Notas
-            if (review.targets.isNotEmpty) ...[
-              Text(
-                'Alvos da Avaliação',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              ...review.targets.map((target) {
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  color: theme.colorScheme.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                (target.targetName != null && target.targetName!.trim().isNotEmpty)
-                                    ? target.targetName!.trim()
-                                    : (target.targetType?.toUpperCase() == 'PRODUCT'
-                                        ? 'Produto avaliado'
-                                        : 'Local avaliado'),
-                                style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              if (target.specificComment != null && target.specificComment!.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  target.specificComment!,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: theme.colorScheme.onSurface.withAlpha(180),
+                              if (review.isAnonymous) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: scheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    'Anônimo',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
                                   ),
                                 ),
                               ],
                             ],
                           ),
-                        ),
-                        Row(
-                          children: [
-                            const Icon(Icons.star, color: Colors.amber, size: 18),
-                            const SizedBox(width: 4),
+                          if (!review.isAnonymous && author.handle != null) ...[
                             Text(
-                              target.rating.toStringAsFixed(1),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
+                              '@${author.handle}',
+                              style: TextStyle(
+                                color: scheme.onSurfaceVariant,
+                                fontSize: 13,
                               ),
                             ),
                           ],
+                          Text(
+                            _formatDate(review.createdAt),
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // 2. Badge de Check-in (Verificação Presencial)
+              if (review.isVerifiedOnSite) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: semantic.verified.container,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: semantic.verified.border),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.check_circle,
+                        size: 16,
+                        color: semantic.verified.accent,
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'Presença confirmada no estabelecimento (Check-in validado)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: semantic.verified.onContainer,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // 3. Alvos da Avaliação e Notas
+              if (review.targets.isNotEmpty) ...[
+                Text(
+                  'Alvos da Avaliação',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...review.targets.map((target) {
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    color: cardSurfaceColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(color: scheme.outlineVariant),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  (target.targetName != null &&
+                                          target.targetName!.trim().isNotEmpty)
+                                      ? target.targetName!.trim()
+                                      : (target.targetType?.toUpperCase() ==
+                                              'PRODUCT'
+                                          ? 'Produto avaliado'
+                                          : 'Local avaliado'),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 13,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (target.specificComment != null &&
+                                    target.specificComment!.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    target.specificComment!,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.star,
+                                color: semantic.starFilled,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                target.rating.toStringAsFixed(1),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 16),
+              ],
+
+              // 4. Texto completo da experiência
+              if (review.experienceText != null &&
+                  review.experienceText!.isNotEmpty) ...[
+                Text(
+                  'Experiência',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  review.experienceText!,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+
+              // 5. Mídia quando disponível
+              if (_isLoadingMedia) ...[
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8.0),
+                    child: LoadingIndicator(message: 'Carregando fotos...'),
+                  ),
+                ),
+              ] else if (_mediaErrorMessage != null) ...[
+                Card(
+                  color: scheme.errorContainer,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Row(
+                      children: [
+                        Icon(Icons.error_outline, color: scheme.error),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _mediaErrorMessage!,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: scheme.onErrorContainer,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _loadMedia,
+                          child: const Text('Tentar novamente'),
                         ),
                       ],
                     ),
                   ),
-                );
-              }),
-              const SizedBox(height: 16),
-            ],
+                ),
+                const SizedBox(height: 16),
+              ] else if (_mediaItems.isNotEmpty) ...[
+                Text(
+                  'Fotos e Anexos (${_mediaItems.length})',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 120,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _mediaItems.length,
+                    separatorBuilder: (context, _) => const SizedBox(width: 10),
+                    itemBuilder: (context, index) {
+                      final item = _mediaItems[index];
+                      final isDeletingThis = _deletingMediaId == item.id;
 
-            // 4. Texto completo da experiência
-            if (review.experienceText != null && review.experienceText!.isNotEmpty) ...[
-              Text(
-                'Experiência',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                review.experienceText!,
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
-
-            // 5. Mídia quando disponível
-            if (_isLoadingMedia) ...[
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8.0),
-                  child: LoadingIndicator(message: 'Carregando fotos...'),
-                ),
-              ),
-            ] else if (_mediaErrorMessage != null) ...[
-              Card(
-                color: theme.colorScheme.errorContainer.withAlpha(80),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline, color: theme.colorScheme.error),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _mediaErrorMessage!,
-                          style: TextStyle(fontSize: 13, color: theme.colorScheme.onErrorContainer),
+                      return GestureDetector(
+                        onTap: isDeletingThis
+                            ? null
+                            : () => _openMediaPreview(item),
+                        child: Container(
+                          width: 120,
+                          decoration: BoxDecoration(
+                            color: scheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: scheme.outlineVariant),
+                          ),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: widget.mediaRepository != null
+                                    ? AuthenticatedImage(
+                                        url: item.url,
+                                        mediaRepository:
+                                            widget.mediaRepository!,
+                                        borderRadius: BorderRadius.circular(7),
+                                        fit: BoxFit.cover,
+                                      )
+                                    : Center(
+                                        child: Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              Icons.image,
+                                              size: 36,
+                                              color: scheme.primary,
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              item.mimeType
+                                                  .split('/')
+                                                  .last
+                                                  .toUpperCase(),
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            Text(
+                                              '${(item.sizeBytes / 1024).toStringAsFixed(0)} KB',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: scheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                              ),
+                              // Rodapé com tamanho quando renderizado com AuthenticatedImage
+                              if (widget.mediaRepository != null)
+                                Positioned(
+                                  bottom: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: semantic.mediaScrim,
+                                      borderRadius:
+                                          const BorderRadius.vertical(
+                                        bottom: Radius.circular(7),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '${(item.sizeBytes / 1024).toStringAsFixed(0)} KB',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: semantic.onMediaScrim,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                              // Botão de exclusão sobre miniatura fotográfica (usa mediaScrim semântico)
+                              if (_canDelete)
+                                Positioned(
+                                  top: 4,
+                                  right: 4,
+                                  child: isDeletingThis
+                                      ? Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: semantic.mediaScrim,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: SizedBox(
+                                            width: 14,
+                                            height: 14,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: semantic.onMediaScrim,
+                                            ),
+                                          ),
+                                        )
+                                      : GestureDetector(
+                                          key: ValueKey(
+                                            'delete_media_${item.id}',
+                                          ),
+                                          onTap: () =>
+                                              _confirmAndDeleteMedia(item),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(4),
+                                            decoration: BoxDecoration(
+                                              color: semantic.mediaScrim,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Icon(
+                                              Icons.delete_outline,
+                                              size: 16,
+                                              color: semantic.onMediaScrim,
+                                            ),
+                                          ),
+                                        ),
+                                ),
+                            ],
+                          ),
                         ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+
+              // 6. Seção Helpful Interativa
+              Card(
+                elevation: 0,
+                color: cardSurfaceColor,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: BorderSide(color: scheme.outlineVariant),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  // Wrap: em tela estreita ou fonte ampliada o botão desce para a linha de baixo em vez de
+                  // sobrepor o contador
+                  child: Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            review.isHelpfulByMe
+                                ? Icons.thumb_up
+                                : Icons.thumb_up_outlined,
+                            color: review.isHelpfulByMe
+                                ? scheme.primary
+                                : scheme.onSurfaceVariant,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              review.helpfulCount == 1
+                                  ? '1 pessoa achou útil'
+                                  : '${review.helpfulCount} pessoas acharam útil',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                color: scheme.onSurface,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      TextButton(
-                        onPressed: _loadMedia,
-                        child: const Text('Tentar novamente'),
+                      OutlinedButton.icon(
+                        key: const Key('review_detail_helpful_button'),
+                        onPressed:
+                            _isTogglingHelpful ? null : _handleToggleHelpful,
+                        icon: _isTogglingHelpful
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(
+                                review.isHelpfulByMe
+                                    ? Icons.thumb_up
+                                    : Icons.thumb_up_outlined,
+                                size: 16,
+                              ),
+                        label: Text(
+                          review.isHelpfulByMe ? 'Útil' : 'Votar útil',
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-            ] else if (_mediaItems.isNotEmpty) ...[
-              Text(
-                'Fotos e Anexos (${_mediaItems.length})',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 120,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _mediaItems.length,
-                  separatorBuilder: (context, _) => const SizedBox(width: 10),
-                  itemBuilder: (context, index) {
-                    final item = _mediaItems[index];
-                    final isDeletingThis = _deletingMediaId == item.id;
+              const SizedBox(height: 24),
 
-                    return GestureDetector(
-                      onTap: isDeletingThis ? null : () => _openMediaPreview(item),
-                      child: Container(
-                        width: 120,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(100)),
-                        ),
-                        child: Stack(
-                          children: [
-                            Positioned.fill(
-                              child: widget.mediaRepository != null
-                                  ? AuthenticatedImage(
-                                      url: item.url,
-                                      mediaRepository: widget.mediaRepository!,
-                                      borderRadius: BorderRadius.circular(7),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : Center(
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(Icons.image, size: 36, color: theme.colorScheme.primary),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            item.mimeType.split('/').last.toUpperCase(),
-                                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                                          ),
-                                          Text(
-                                            '${(item.sizeBytes / 1024).toStringAsFixed(0)} KB',
-                                            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                            ),
-                            // Rodapé com tamanho quando renderizado com AuthenticatedImage
-                            if (widget.mediaRepository != null)
-                              Positioned(
-                                bottom: 0,
-                                left: 0,
-                                right: 0,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withAlpha(130),
-                                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(7)),
-                                  ),
-                                  child: Text(
-                                    '${(item.sizeBytes / 1024).toStringAsFixed(0)} KB',
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                              ),
-                            // Botão de exclusão (apenas para o autor em ACTIVE)
-                            if (_canDelete)
-                              Positioned(
-                                top: 4,
-                                right: 4,
-                                child: isDeletingThis
-                                    ? Container(
-                                        padding: const EdgeInsets.all(4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withAlpha(150),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const SizedBox(
-                                          width: 14,
-                                          height: 14,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      )
-                                    : GestureDetector(
-                                        key: ValueKey('delete_media_${item.id}'),
-                                        onTap: () => _confirmAndDeleteMedia(item),
-                                        child: Container(
-                                          padding: const EdgeInsets.all(4),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black.withAlpha(150),
-                                            shape: BoxShape.circle,
-                                          ),
-                                          child: const Icon(
-                                            Icons.delete_outline,
-                                            size: 16,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                              ),
-                          ],
-                        ),
-                      ),
+              // 7. Respostas Oficiais de Empresas (C11)
+              if (widget.businessResponseRepository != null) ...[
+                ReviewBusinessResponsesSection(
+                  reviewId: widget.reviewId,
+                  repository: widget.businessResponseRepository!,
+                  businessRepository: widget.businessRepository,
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // 8. Seção de Discussões Comunitárias
+              if (_discussionNotifier != null) ...[
+                DiscussionsSection(
+                  reviewId: widget.reviewId,
+                  notifier: _discussionNotifier!,
+                  targetDiscussionId: widget.targetDiscussionId,
+                  rootDiscussionId: widget.rootDiscussionId,
+                  isReplyTarget: widget.isReplyTarget,
+                  businessResponseRepository: widget.businessResponseRepository,
+                  eligibility: _eligibility,
+                  myBusinessAccountIds: _myBusinessAccountIds,
+                  onAuthorTap: (authorId) {
+                    Navigator.of(context).pushNamed(
+                      AppRouter.profile,
+                      arguments: authorId,
                     );
                   },
                 ),
-              ),
-              const SizedBox(height: 20),
-            ],
-
-            // 6. Seção Helpful Interativa
-            Card(
-              elevation: 0,
-              color: theme.colorScheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                // Wrap: em tela estreita ou fonte ampliada o botão desce para a linha de baixo em vez de
-                // sobrepor o contador
-                child: Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
+              ] else ...[
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(color: scheme.outlineVariant),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
                       children: [
                         Icon(
-                          review.isHelpfulByMe ? Icons.thumb_up : Icons.thumb_up_outlined,
-                          color: review.isHelpfulByMe
-                              ? theme.colorScheme.primary
-                              : theme.colorScheme.onSurface.withAlpha(180),
-                          size: 20,
+                          Icons.forum_outlined,
+                          color: scheme.onSurfaceVariant,
                         ),
-                        const SizedBox(width: 8),
-                        Flexible(
+                        const SizedBox(width: 12),
+                        Expanded(
                           child: Text(
-                            review.helpfulCount == 1
-                                ? '1 pessoa achou útil'
-                                : '${review.helpfulCount} pessoas acharam útil',
+                            'Conexão de discussões indisponível.',
                             style: TextStyle(
-                              fontWeight: FontWeight.w500,
-                              color: theme.colorScheme.onSurface.withAlpha(200),
+                              color: scheme.onSurfaceVariant,
+                              fontSize: 13,
                             ),
                           ),
                         ),
                       ],
                     ),
-                    OutlinedButton.icon(
-                      key: const Key('review_detail_helpful_button'),
-                      onPressed: _isTogglingHelpful ? null : _handleToggleHelpful,
-                      icon: _isTogglingHelpful
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(
-                              review.isHelpfulByMe ? Icons.thumb_up : Icons.thumb_up_outlined,
-                              size: 16,
-                            ),
-                      label: Text(review.isHelpfulByMe ? 'Útil' : 'Votar útil'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // 7. Respostas Oficiais de Empresas (C11)
-            if (widget.businessResponseRepository != null) ...[
-              ReviewBusinessResponsesSection(
-                reviewId: widget.reviewId,
-                repository: widget.businessResponseRepository!,
-                businessRepository: widget.businessRepository,
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // 8. Seção de Discussões Comunitárias
-            if (_discussionNotifier != null) ...[
-              DiscussionsSection(
-                reviewId: widget.reviewId,
-                notifier: _discussionNotifier!,
-                targetDiscussionId: widget.targetDiscussionId,
-                rootDiscussionId: widget.rootDiscussionId,
-                isReplyTarget: widget.isReplyTarget,
-                businessResponseRepository: widget.businessResponseRepository,
-                eligibility: _eligibility,
-                myBusinessAccountIds: _myBusinessAccountIds,
-                onAuthorTap: (authorId) {
-                  Navigator.of(context).pushNamed(
-                    AppRouter.profile,
-                    arguments: authorId,
-                  );
-                },
-              ),
-            ] else ...[
-              Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  side: BorderSide(color: Colors.grey.withAlpha(60)),
-                ),
-                child: const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      Icon(Icons.forum_outlined, color: Colors.grey),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Conexão de discussões indisponível.',
-                          style: TextStyle(color: Colors.grey, fontSize: 13),
-                        ),
-                      ),
-                    ],
                   ),
                 ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
-    ),
     );
   }
 }

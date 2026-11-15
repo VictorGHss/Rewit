@@ -4,8 +4,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
+import 'package:rewit_mobile/features/search/presentation/widgets/target_type_style.dart';
 import '../../domain/entities/review_creation_input.dart';
 import 'rating_bar_widget.dart';
 import 'target_search_selector_widget.dart';
@@ -18,6 +22,15 @@ class TargetItemInputWidget extends StatefulWidget {
   final bool enabled;
   final SearchRepository? searchRepository;
   final PlaceRepository? placeRepository;
+
+  /// Habilita o cadastro de produto inexistente a partir da busca de alvos.
+  final ProductRepository? productRepository;
+
+  /// Habilita a busca em fonte externa e a adoção de local a partir da busca de alvos.
+  final PlaceDiscoveryRepository? placeDiscoveryRepository;
+
+  /// Localização sob demanda para a opção "Perto de mim" da busca externa.
+  final LocationService? locationService;
   final ValueChanged<String> onTargetIdChanged;
   final ValueChanged<double> onRatingChanged;
   final ValueChanged<String> onSpecificCommentChanged;
@@ -27,6 +40,7 @@ class TargetItemInputWidget extends StatefulWidget {
   final bool Function(String targetId)? isTargetSelectedElsewhere;
   final ValueChanged<File>? onManualPlacePhotoSelected;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+  final Future<SearchResultItem?> Function()? onScanTarget;
 
   final String? currentUserId;
   final AuthNotifier? authNotifier;
@@ -40,6 +54,9 @@ class TargetItemInputWidget extends StatefulWidget {
     this.enabled = true,
     this.searchRepository,
     this.placeRepository,
+    this.productRepository,
+    this.placeDiscoveryRepository,
+    this.locationService,
     required this.onTargetIdChanged,
     required this.onRatingChanged,
     required this.onSpecificCommentChanged,
@@ -49,6 +66,7 @@ class TargetItemInputWidget extends StatefulWidget {
     this.isTargetSelectedElsewhere,
     this.onManualPlacePhotoSelected,
     this.onPickManualPlacePhoto,
+    this.onScanTarget,
     this.currentUserId,
     this.authNotifier,
     this.pendingRegistrationStore,
@@ -65,8 +83,10 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
   @override
   void initState() {
     super.initState();
-    _targetIdController = TextEditingController(text: widget.target.rateableTargetId);
-    _commentController = TextEditingController(text: widget.target.specificComment ?? '');
+    _targetIdController =
+        TextEditingController(text: widget.target.rateableTargetId);
+    _commentController =
+        TextEditingController(text: widget.target.specificComment ?? '');
   }
 
   @override
@@ -92,6 +112,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final isTargetSelected = widget.target.targetName != null &&
         widget.target.targetName!.isNotEmpty &&
         widget.target.rateableTargetId.isNotEmpty;
@@ -101,7 +122,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.withAlpha(50)),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -116,7 +137,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                     Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withAlpha(20),
+                        color: scheme.secondaryContainer,
                         shape: BoxShape.circle,
                       ),
                       child: Text(
@@ -124,7 +145,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.primary,
+                          color: scheme.onSecondaryContainer,
                         ),
                       ),
                     ),
@@ -139,7 +160,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                 ),
                 if (widget.canRemove)
                   IconButton(
-                    icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+                    icon: Icon(Icons.delete_outline, color: scheme.error),
                     tooltip: 'Remover este alvo',
                     onPressed: widget.enabled ? widget.onRemove : null,
                   ),
@@ -154,6 +175,9 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
               TargetSearchSelectorWidget(
                 searchRepository: widget.searchRepository!,
                 placeRepository: widget.placeRepository,
+                productRepository: widget.productRepository,
+                placeDiscoveryRepository: widget.placeDiscoveryRepository,
+                locationService: widget.locationService,
                 targetIndex: widget.index,
                 enabled: widget.enabled,
                 isTargetSelectedElsewhere: widget.isTargetSelectedElsewhere,
@@ -163,12 +187,14 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                 onManualTargetIdEntered: widget.onTargetIdChanged,
                 onManualPlacePhotoSelected: widget.onManualPlacePhotoSelected,
                 onPickManualPlacePhoto: widget.onPickManualPlacePhoto,
+                onScanTarget: widget.onScanTarget,
                 currentUserId: widget.currentUserId,
                 authNotifier: widget.authNotifier,
                 pendingRegistrationStore: widget.pendingRegistrationStore,
               ),
             ] else ...[
-              // Fallback para inserção direta de UUID quando searchRepository não for injetado
+              // Fallback legado para inserção direta de UUID quando searchRepository não for injetado
+              // (caminho usado apenas em testes unitários isolados; em produção AppRouter injeta SearchRepository).
               TextFormField(
                 controller: _targetIdController,
                 enabled: widget.enabled,
@@ -189,7 +215,7 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
               'Nota de Avaliação *',
               style: theme.textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.w600,
-                color: theme.colorScheme.onSurface.withAlpha(180),
+                color: scheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 4),
@@ -220,33 +246,19 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
   }
 
   Widget _buildSelectedTargetCard(BuildContext context, ThemeData theme) {
-    final isPlace = widget.target.targetType?.toUpperCase() == 'PLACE';
-    final isProduct = widget.target.targetType?.toUpperCase() == 'PRODUCT';
-
-    final Color badgeColor = isPlace
-        ? theme.colorScheme.primary
-        : isProduct
-            ? Colors.teal
-            : theme.colorScheme.secondary;
-
-    final IconData typeIcon = isPlace
-        ? Icons.storefront_rounded
-        : isProduct
-            ? Icons.inventory_2_outlined
-            : Icons.category_outlined;
-
-    final String typeLabel = isPlace
-        ? 'Local'
-        : isProduct
-            ? 'Produto'
-            : (widget.target.targetType ?? 'Alvo');
+    final scheme = theme.colorScheme;
+    final type = TargetType.fromString(widget.target.targetType);
+    final style = TargetTypeStyle.of(type, scheme);
+    final String typeLabel = type == TargetType.unknown
+        ? (widget.target.targetType ?? 'Alvo')
+        : style.label;
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withAlpha(60),
+        color: scheme.surfaceContainerHighest.withAlpha(110),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: badgeColor.withAlpha(80)),
+        border: Border.all(color: style.borderColor),
       ),
       child: Row(
         children: [
@@ -254,10 +266,10 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: badgeColor.withAlpha(25),
+              color: style.containerColor,
               shape: BoxShape.circle,
             ),
-            child: Icon(typeIcon, color: badgeColor, size: 22),
+            child: Icon(style.icon, color: style.color, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -275,9 +287,12 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 1.5,
+                      ),
                       decoration: BoxDecoration(
-                        color: badgeColor.withAlpha(25),
+                        color: style.containerColor,
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
@@ -285,18 +300,19 @@ class _TargetItemInputWidgetState extends State<TargetItemInputWidget> {
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: badgeColor,
+                          color: style.onContainerColor,
                         ),
                       ),
                     ),
-                    if (widget.target.category != null && widget.target.category!.isNotEmpty) ...[
+                    if (widget.target.category != null &&
+                        widget.target.category!.isNotEmpty) ...[
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
                           '• ${widget.target.category!}',
                           style: TextStyle(
                             fontSize: 11,
-                            color: theme.colorScheme.onSurface.withAlpha(140),
+                            color: scheme.onSurfaceVariant,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),

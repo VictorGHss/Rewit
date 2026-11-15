@@ -6,6 +6,7 @@ import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/discussions/domain/entities/discussion_entities.dart';
 import 'package:rewit_mobile/features/discussions/domain/repositories/discussion_repository.dart';
@@ -17,6 +18,7 @@ import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/product/domain/entities/create_product_input.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_identifier.dart';
 import 'package:rewit_mobile/features/product/domain/entities/products_in_place_page.dart';
@@ -27,6 +29,34 @@ import 'package:rewit_mobile/features/review_detail/domain/entities/update_revie
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 
 class MockAuthRepo implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   @override
   Future<bool> hasStoredSession() async => true;
 
@@ -113,6 +143,10 @@ class MockFeedRepo implements FeedRepository {
       totalPages: 1,
     );
   }
+
+  @override
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10}) async =>
+      getFeed(page: page, size: size);
 
   @override
   Future<FeedReview> getReviewById(String reviewId) async {
@@ -269,6 +303,9 @@ class MockPlaceRepo implements PlaceRepository {
 }
 
 class MockProductRepo implements ProductRepository {
+  @override
+  Future<ProductDetail> createProduct(CreateProductInput input) async => throw UnimplementedError();
+
   @override
   Future<ProductDetail> getProductById(String id) async => const ProductDetail(
         id: 'prod-milkshake',

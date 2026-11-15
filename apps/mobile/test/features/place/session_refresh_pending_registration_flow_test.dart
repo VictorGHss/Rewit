@@ -241,25 +241,31 @@ void main() {
   Future<void> login(WidgetTester tester, _App app, AuthUserDto user) async {
     await app.auth.login(user.email, 'senha');
     await tester.pumpAndSettle();
-    expect(find.text('Avaliar'), findsOneWidget, reason: 'Home autenticada de ${user.id}');
+    expect(find.byKey(const Key('home_fab_button')), findsOneWidget, reason: 'Home autenticada de ${user.id}');
   }
 
   Future<void> openReviewTab(WidgetTester tester) async {
-    await tester.tap(find.text('Avaliar'));
+    await tester.tap(find.byKey(const Key('home_fab_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('home_quick_action_review_create')));
     await tester.pumpAndSettle();
   }
 
   Future<void> logoutThroughUi(WidgetTester tester) async {
-    final moreOptions = find.byKey(const Key('home_more_options_button'));
-    if (moreOptions.evaluate().isNotEmpty) {
-      await tester.tap(moreOptions);
+    if (find.byKey(const Key('home_avatar_button')).evaluate().isEmpty) {
+      tester.state<NavigatorState>(find.byType(Navigator).first).popUntil((route) => route.isFirst);
       await tester.pumpAndSettle();
     }
-    await tester.tap(find.byIcon(Icons.logout));
+    await tester.tap(find.byKey(const Key('home_avatar_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('logout_account_button')));
+    await tester.tap(find.byKey(const Key('logout_account_button')));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ElevatedButton, 'Sair'));
     await tester.pumpAndSettle();
-    expect(find.text('Avaliar'), findsNothing, reason: 'Home desmontada após logout');
+    expect(find.byKey(const Key('home_fab_button')), findsNothing, reason: 'Home desmontada após logout');
   }
 
   /// Cadastra o local e tenta enviar a foto; o sheet fica aberto com o resultado do upload.
@@ -454,7 +460,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('manual_place_close_button')));
     await tester.pumpAndSettle();
-    expect(find.text('Avaliar'), findsOneWidget, reason: 'Home continua montada');
+    expect(find.text('Criar Avaliação'), findsOneWidget, reason: 'Fluxo de avaliação continua montado');
 
     // Troca de conta: B não vê a operação de A
     await logoutThroughUi(tester);

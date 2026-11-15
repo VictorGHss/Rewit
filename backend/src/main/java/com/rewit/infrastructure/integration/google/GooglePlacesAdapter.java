@@ -3,11 +3,13 @@ package com.rewit.infrastructure.integration.google;
 import com.rewit.application.port.PlaceDiscoveryPort;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.model.PlaceCandidate;
+import com.rewit.infrastructure.integration.PlaceDiscoveryProperties;
 import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -25,9 +27,11 @@ import java.util.*;
 /**
  * Adaptador de infraestrutura para integração com o Google Places API (New).
  * Implementa a porta {@link PlaceDiscoveryPort} de forma isolada, sem expor contratos ou detalhes
- * do Google para o núcleo da aplicação.
+ * do Google para o núcleo da aplicação. Provedor padrão: ativo quando {@code rewit.place-discovery.provider} é
+ * {@code GOOGLE} ou não está definido.
  */
 @Component
+@ConditionalOnProperty(name = PlaceDiscoveryProperties.PROPERTY, havingValue = "GOOGLE", matchIfMissing = true)
 public class GooglePlacesAdapter implements PlaceDiscoveryPort {
 
     private static final Logger log = LoggerFactory.getLogger(GooglePlacesAdapter.class);

@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * Configuração e atualização dos horários semanais recorrentes de funcionamento de um local reivindicado (F2.1).

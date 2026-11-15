@@ -5,12 +5,41 @@ import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/presentation/widgets/review_card.dart';
 import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart';
 
 class _StubAuthRepo implements AuthRepository {
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
   @override
   Future<bool> hasStoredSession() async => true;
   @override
@@ -86,15 +115,16 @@ void main() {
       expect(find.text('Rewit'), findsOneWidget);
     });
 
-    testWidgets('tocar no cartão do usuário abre a aba Perfil e voltar retorna ao Início', (tester) async {
+    testWidgets('alternar para outra aba da barra inferior e voltar no Android retorna ao Início sem fechar o app', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('home_user_header_card')));
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Coleção')));
       await tester.pumpAndSettle();
-      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 3);
-      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 3);
+      // Coleção é a quinta aba: Início, Explorar, Rankings, Check-in, Coleção
+      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 4);
+      expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, 4);
 
       // Voltar do Android numa aba que não é o Início volta ao Início, sem fechar o app
       await tester.binding.handlePopRoute();
@@ -103,31 +133,66 @@ void main() {
       expect(find.byType(HomeScreen), findsOneWidget);
     });
 
-    testWidgets('botão "Meu perfil" do AppBar abre a aba Perfil sem afetar os demais controles', (tester) async {
+    testWidgets('AppBar V2 tem avatar à esquerda, título Rewit centralizado e ícones de mensagens e notificações à direita', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      expect(find.byTooltip('Escanear Código'), findsOneWidget);
-      expect(find.byTooltip('Mais opções'), findsOneWidget);
+      final appBar = find.byType(AppBar);
+      final avatar = find.descendant(of: appBar, matching: find.byKey(const Key('home_avatar_button')));
+      expect(avatar, findsOneWidget);
+      expect(tester.getCenter(avatar).dx, lessThan(360 / 2));
 
-      await tester.tap(find.byTooltip('Meu perfil'));
-      await tester.pumpAndSettle();
-      expect(tester.widget<IndexedStack>(find.byType(IndexedStack)).index, 3);
+      // Antigos controles removidos da AppBar da Home
+      expect(find.byKey(const Key('home_scanner_button')), findsNothing);
+      expect(find.byKey(const Key('home_more_options_button')), findsNothing);
+      expect(find.byKey(const Key('home_user_header_card')), findsNothing);
+
+      final messages = find.descendant(of: appBar, matching: find.byKey(const Key('home_messages_button')));
+      expect(messages, findsOneWidget);
+      expect(tester.getCenter(messages).dx, greaterThan(360 / 2));
+
+      final notifications = find.descendant(of: appBar, matching: find.byKey(const Key('home_notifications_button')));
+      expect(notifications, findsOneWidget);
+      expect(tester.getCenter(notifications).dx, greaterThan(360 / 2));
     });
 
-    testWidgets('menu "Mais opções" leva às configurações da conta', (tester) async {
+    testWidgets('tocar no avatar do AppBar abre a rota de perfil', (tester) async {
       _setScreen(tester, 360);
       await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Mais opções'));
+      await tester.tap(find.byKey(const Key('home_avatar_button')));
       await tester.pumpAndSettle();
-      expect(find.text('Sair da Conta'), findsOneWidget);
-      await tester.tap(find.text('Configurações da Conta'));
+      expect(find.text('rota ${AppRouter.profile}'), findsOneWidget);
+    });
+
+    testWidgets('scanner na aba Explorar abre a rota do scanner', (tester) async {
+      _setScreen(tester, 360);
+      await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
       await tester.pumpAndSettle();
 
-      expect(find.text('rota ${AppRouter.accountSettings}'), findsOneWidget);
+      await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Explorar')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('search_scanner_button')));
+      await tester.pumpAndSettle();
+      expect(find.text('rota ${AppRouter.scanner}'), findsOneWidget);
+    });
+
+    testWidgets('ícone de mensagens exibe aviso honesto de recurso não implementado sem navegar para tela falsa', (tester) async {
+      _setScreen(tester, 360);
+      await tester.pumpWidget(_withTextScale(HomeScreen(authNotifier: notifier), 1.0));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('home_messages_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('O Chat de mensagens ainda não foi implementado nesta versão do Rewit.'),
+        findsOneWidget,
+      );
+      expect(find.byType(HomeScreen), findsOneWidget);
     });
   });
 

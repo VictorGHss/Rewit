@@ -5,14 +5,18 @@ import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/app/app.dart';
 import 'package:rewit_mobile/app/config/app_config.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/theme_controller.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/core/network/session_refresher.dart';
 import 'package:rewit_mobile/core/network/token_refreshing_client.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/repositories/auth_repository_impl.dart';
+import 'package:rewit_mobile/features/auth/data/services/platform_social_sign_in_service.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/business/data/repositories/business_repository_impl.dart';
 import 'package:rewit_mobile/features/business/data/repositories/business_response_repository_impl.dart';
+import 'package:rewit_mobile/features/check_ins/data/repositories/check_in_repository_impl.dart';
+import 'package:rewit_mobile/features/rankings/data/repositories/ranking_repository_impl.dart';
 import 'package:rewit_mobile/features/discussions/data/repositories/discussion_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/data/repositories/feed_repository_impl.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
@@ -20,6 +24,8 @@ import 'package:rewit_mobile/features/place/data/repositories/place_commercial_r
 import 'package:rewit_mobile/features/place/data/repositories/place_repository_impl.dart';
 import 'package:rewit_mobile/features/place/data/services/secure_pending_place_registration_persistence.dart';
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
+import 'package:rewit_mobile/features/interests/data/repositories/interest_repository_impl.dart';
+import 'package:rewit_mobile/features/place_discovery/data/repositories/place_discovery_repository_impl.dart';
 import 'package:rewit_mobile/features/product/data/repositories/product_repository_impl.dart';
 import 'package:rewit_mobile/features/profile/data/repositories/user_profile_repository_impl.dart';
 import 'package:rewit_mobile/features/notifications/data/repositories/notification_repository_impl.dart';
@@ -35,8 +41,12 @@ void main() async {
   // 1. Carregar configuração de ambiente
   final config = AppConfig.fromEnvironment();
 
-  // 2. Inicializar armazenamento seguro de tokens (KeyStore / Keychain com fallback resiliente)
+  // 2. Inicializar armazenamento seguro de tokens e preferência local de aparência
   final tokenStorage = SecureTokenStorage();
+  final themeController = ThemeController(
+    storage: SecureThemePreferenceStorage(),
+  );
+  await themeController.load();
 
   // 3. Inicializar cliente HTTP e repositórios
   late final AuthNotifier authNotifier;
@@ -44,7 +54,8 @@ void main() async {
 
   // Renovação única e compartilhada do access token (15 min): evita encerrar a sessão enquanto o refresh vale
   final sessionRefresher = SessionRefresher(
-    refreshAccessToken: () async => (await authRepository.refreshTokens()).tokens.accessToken,
+    refreshAccessToken: () async =>
+        (await authRepository.refreshTokens()).tokens.accessToken,
   );
 
   final httpClient = RewitHttpClient(
@@ -67,18 +78,28 @@ void main() async {
 
   final feedRepository = FeedRepositoryImpl(httpClient: httpClient);
   final discussionRepository = DiscussionRepositoryImpl(httpClient: httpClient);
-  final reviewCreationRepository = ReviewCreationRepositoryImpl(httpClient: httpClient);
+  final reviewCreationRepository =
+      ReviewCreationRepositoryImpl(httpClient: httpClient);
   final searchRepository = SearchRepositoryImpl(httpClient: httpClient);
-  final userProfileRepository = UserProfileRepositoryImpl(httpClient: httpClient);
+  final userProfileRepository =
+      UserProfileRepositoryImpl(httpClient: httpClient);
   final placeRepository = PlaceRepositoryImpl(httpClient: httpClient);
-  final placeCommercialRepository = PlaceCommercialRepositoryImpl(httpClient: httpClient);
+  final placeCommercialRepository =
+      PlaceCommercialRepositoryImpl(httpClient: httpClient);
   final productRepository = ProductRepositoryImpl(httpClient: httpClient);
+  final placeDiscoveryRepository =
+      PlaceDiscoveryRepositoryImpl(httpClient: httpClient);
   final mediaRepository = ReviewMediaRepositoryImpl(client: httpClient);
   final mediaPickerService = ImagePickerMediaService();
   const locationService = GeolocatorLocationService();
-  final notificationRepository = NotificationRepositoryImpl(httpClient: httpClient);
+  final notificationRepository =
+      NotificationRepositoryImpl(httpClient: httpClient);
   final businessRepository = BusinessRepositoryImpl(httpClient: httpClient);
-  final businessResponseRepository = BusinessResponseRepositoryImpl(httpClient: httpClient);
+  final businessResponseRepository =
+      BusinessResponseRepositoryImpl(httpClient: httpClient);
+  final interestRepository = InterestRepositoryImpl(httpClient: httpClient);
+  final checkInRepository = CheckInRepositoryImpl(httpClient: httpClient);
+  final rankingRepository = RankingRepositoryImpl(httpClient: httpClient);
   // Cadastros de local com foto pendente sobrevivem a logout e reinício, com escopo por usuário
   final pendingRegistrationStore = PendingPlaceRegistrationStore(
     persistence: SecurePendingPlaceRegistrationPersistence(),
@@ -86,6 +107,9 @@ void main() async {
 
   authNotifier = AuthNotifier(
     authRepository: authRepository,
+    // Login social com os client IDs públicos definidos por build (--dart-define); sem eles, fica indisponível
+    socialSignInService:
+        PlatformSocialSignInService(config: SocialAuthConfig.fromEnvironment()),
     sessionRefresher: sessionRefresher,
     clearLocalSession: tokenStorage.clearTokens,
   );
@@ -109,17 +133,25 @@ void main() async {
     placeRepository: placeRepository,
     placeCommercialRepository: placeCommercialRepository,
     productRepository: productRepository,
+    placeDiscoveryRepository: placeDiscoveryRepository,
     notificationRepository: notificationRepository,
     businessRepository: businessRepository,
     businessResponseRepository: businessResponseRepository,
+    // Sessão autenticada passa pelo questionário inicial de interesses, se ainda não concluído
+    interestRepository: interestRepository,
     pendingRegistrationStore: pendingRegistrationStore,
+    // Aba Check-in: locais próximos do catálogo do Rewit (sem provedor externo) e histórico de check-ins
+    checkInRepository: checkInRepository,
+    // Rankings da Região e participação voluntária (desativada até a pessoa ativar nas configurações)
+    rankingRepository: rankingRepository,
+    themeController: themeController,
   );
-
 
   runApp(
     RewitApp(
       config: config,
       router: router,
+      themeController: themeController,
     ),
   );
 }

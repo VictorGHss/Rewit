@@ -71,14 +71,15 @@ class _CreateDiscussionFormState extends State<CreateDiscussionForm> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final isReplying = widget.replyingToParentId != null;
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: theme.cardTheme.color ?? scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -89,12 +90,12 @@ class _CreateDiscussionFormState extends State<CreateDiscussionForm> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withAlpha(20),
+                color: scheme.secondaryContainer,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.reply, size: 14, color: theme.colorScheme.primary),
+                  Icon(Icons.reply, size: 14, color: scheme.primary),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -102,7 +103,7 @@ class _CreateDiscussionFormState extends State<CreateDiscussionForm> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.primary,
+                        color: scheme.onSecondaryContainer,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -122,18 +123,21 @@ class _CreateDiscussionFormState extends State<CreateDiscussionForm> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: scheme.errorContainer,
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.red.shade200),
+                border: Border.all(color: scheme.error.withAlpha(80)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.error_outline, size: 16, color: Colors.red.shade700),
+                  Icon(Icons.error_outline, size: 16, color: scheme.error),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       _errorMessage!,
-                      style: TextStyle(color: Colors.red.shade800, fontSize: 12),
+                      style: TextStyle(
+                        color: scheme.onErrorContainer,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ],
@@ -157,7 +161,10 @@ class _CreateDiscussionFormState extends State<CreateDiscussionForm> {
                         ? 'Escreva sua resposta...'
                         : 'Participe da conversa e comente...',
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     border: const OutlineInputBorder(),
                     counterText: '',
                   ),
@@ -166,12 +173,16 @@ class _CreateDiscussionFormState extends State<CreateDiscussionForm> {
               const SizedBox(width: 8),
               IconButton.filled(
                 onPressed: _isSubmitting ? null : _handleSend,
-                tooltip: isReplying ? 'Enviar resposta' : 'Publicar comentário',
+                tooltip:
+                    isReplying ? 'Enviar resposta' : 'Publicar comentário',
                 icon: _isSubmitting
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: scheme.onSurfaceVariant,
+                        ),
                       )
                     : const Icon(Icons.send, size: 18),
               ),

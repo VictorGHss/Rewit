@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_commercial_repository.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_amenities_edit_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_business_profile_edit_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_media_gallery_screen.dart';
+import 'package:rewit_mobile/features/place/presentation/screens/place_offers_management_screen.dart';
 import 'package:rewit_mobile/features/place/presentation/screens/place_opening_hours_edit_screen.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
-import 'package:rewit_mobile/features/place/presentation/screens/place_offers_management_screen.dart';
-import 'package:rewit_mobile/features/place/presentation/screens/place_business_profile_edit_screen.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
 
 /// Argumentos para inicialização do painel de gestão do estabelecimento.
@@ -77,7 +78,8 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                     key: const Key('manage_media_option'),
                     icon: Icons.photo_library_outlined,
                     title: 'Fotografias e capa',
-                    subtitle: 'Gerencie a imagem principal e a galeria de fotos do estabelecimento',
+                    subtitle:
+                        'Gerencie a imagem principal e a galeria de fotos do estabelecimento',
                     onTap: () {
                       Navigator.of(context).pushNamed(
                         AppRouter.placeMediaGallery,
@@ -95,7 +97,8 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                     key: const Key('manage_opening_hours_option'),
                     icon: Icons.access_time_outlined,
                     title: 'Horários de funcionamento',
-                    subtitle: 'Configure os dias e períodos de atendimento do estabelecimento',
+                    subtitle:
+                        'Configure os dias e períodos de atendimento do estabelecimento',
                     onTap: () {
                       Navigator.of(context).pushNamed(
                         AppRouter.placeOpeningHoursEdit,
@@ -114,7 +117,8 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                     key: const Key('manage_amenities_option'),
                     icon: Icons.checklist_outlined,
                     title: 'Comodidades',
-                    subtitle: 'Selecione as facilidades oferecidas aos clientes, como Wi-Fi e estacionamento',
+                    subtitle:
+                        'Selecione as facilidades oferecidas aos clientes, como Wi-Fi e estacionamento',
                     onTap: () {
                       Navigator.of(context).pushNamed(
                         AppRouter.placeAmenitiesEdit,
@@ -133,7 +137,8 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                     key: const Key('manage_offers_option'),
                     icon: Icons.local_offer_outlined,
                     title: 'Ofertas e produtos',
-                    subtitle: 'Gerencie os produtos do catálogo oferecidos na vitrine oficial',
+                    subtitle:
+                        'Gerencie os produtos do catálogo oferecidos na vitrine oficial',
                     onTap: () {
                       Navigator.of(context).pushNamed(
                         AppRouter.placeOffersManagement,
@@ -152,7 +157,8 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                     key: const Key('manage_business_profile_option'),
                     icon: Icons.badge_outlined,
                     title: 'Perfil comercial',
-                    subtitle: 'Atualize a descrição institucional e os contatos públicos do local',
+                    subtitle:
+                        'Atualize a descrição institucional e os contatos públicos do local',
                     onTap: () {
                       Navigator.of(context).pushNamed(
                         AppRouter.placeBusinessProfileEdit,
@@ -171,7 +177,8 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                     key: const Key('view_public_profile_option'),
                     icon: Icons.storefront_outlined,
                     title: 'Ver perfil público',
-                    subtitle: 'Veja como seu estabelecimento é visualizado por clientes na comunidade',
+                    subtitle:
+                        'Veja como seu estabelecimento é visualizado por clientes na comunidade',
                     onTap: () {
                       Navigator.of(context).pushNamed(
                         AppRouter.placeDetail,
@@ -188,23 +195,26 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
   }
 
   Widget _buildUnauthorizedView(BuildContext context, ThemeData theme) {
+    final scheme = theme.colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.lock_outline, size: 64, color: theme.colorScheme.error),
+            Icon(Icons.lock_outline, size: 64, color: scheme.error),
             const SizedBox(height: 16),
             Text(
               'Acesso Restrito',
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Apenas estabelecimentos com reivindicação aprovada podem ser gerenciados.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: theme.colorScheme.onSurface.withAlpha(160)),
+              style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 24),
             ElevatedButton(
@@ -218,16 +228,19 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
   }
 
   Widget _buildContextCard(BuildContext context, ThemeData theme) {
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
     final locationText = [
       if (args.city != null && args.city!.trim().isNotEmpty) args.city!.trim(),
-      if (args.state != null && args.state!.trim().isNotEmpty) args.state!.trim(),
+      if (args.state != null && args.state!.trim().isNotEmpty)
+        args.state!.trim(),
     ].join(' / ');
 
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -240,13 +253,13 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withAlpha(20),
+                    color: scheme.secondaryContainer,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     Icons.storefront,
                     size: 32,
-                    color: theme.colorScheme.primary,
+                    color: scheme.primary,
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -265,7 +278,7 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
                         Text(
                           locationText,
                           style: TextStyle(
-                            color: theme.colorScheme.onSurface.withAlpha(150),
+                            color: scheme.onSurfaceVariant,
                             fontSize: 13,
                           ),
                         ),
@@ -279,19 +292,23 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.green.withAlpha(25),
+                color: semantic.verified.container,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green.withAlpha(100)),
+                border: Border.all(color: semantic.verified.border),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.verified, size: 16, color: Colors.green),
-                  SizedBox(width: 6),
+                  Icon(
+                    Icons.verified,
+                    size: 16,
+                    color: semantic.verified.accent,
+                  ),
+                  const SizedBox(width: 6),
                   Text(
                     'Reivindicação Aprovada',
                     style: TextStyle(
-                      color: Colors.green,
+                      color: semantic.verified.onContainer,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -313,24 +330,24 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    final theme = Theme.of(context);
+    final scheme = Theme.of(context).colorScheme;
 
     return Card(
       key: key,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+            color: scheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(icon, color: theme.colorScheme.primary),
+          child: Icon(icon, color: scheme.primary),
         ),
         title: Text(
           title,
@@ -340,7 +357,7 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
           subtitle,
           style: TextStyle(
             fontSize: 12,
-            color: theme.colorScheme.onSurface.withAlpha(160),
+            color: scheme.onSurfaceVariant,
           ),
         ),
         trailing: const Icon(Icons.chevron_right),
@@ -350,24 +367,25 @@ class PlaceManagementDashboardScreen extends StatelessWidget {
   }
 
   Widget _buildNextStepsNotice(BuildContext context, ThemeData theme) {
+    final scheme = theme.colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
+        color: scheme.surfaceContainerHighest.withAlpha(110),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(60)),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline, size: 20, color: theme.colorScheme.primary),
+          Icon(Icons.info_outline, size: 20, color: scheme.primary),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               'Métricas de desempenho e relatórios comerciais serão integrados nos próximos passos de evolução do painel.',
               style: TextStyle(
                 fontSize: 12,
-                color: theme.colorScheme.onSurface.withAlpha(160),
+                color: scheme.onSurfaceVariant,
                 height: 1.3,
               ),
             ),

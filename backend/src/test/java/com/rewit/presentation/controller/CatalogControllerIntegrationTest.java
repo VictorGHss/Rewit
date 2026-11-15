@@ -660,6 +660,48 @@ class CatalogControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("17b. Adoção de candidato GEOAPIFY usa o mesmo fluxo: 201 na primeira, 200 sem duplicar na repetição")
+    void shouldAdoptGeoapifyCandidateWithSameDeduplication() throws Exception {
+        TestUser user = registerUser("adopt_geo");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        // Formato de place_id do Geoapify (hex longo), sem relação com ids do Google
+        String extId = "51c3f2a8d1e4" + suffix + "f00103f9";
+
+        AdoptPlaceRequest request = new AdoptPlaceRequest(
+                "Padaria Geo " + suffix, null, null, null,
+                "Rua XV de Novembro, 100, Ponta Grossa - PR, Brasil", null, null,
+                "Ponta Grossa", "PR", "BR", -25.0945, -50.1633, null,
+                new ExternalReferenceRequest("GEOAPIFY", extId)
+        );
+
+        MvcResult first = mockMvc.perform(post("/api/v1/places/adopt")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String placeId = objectMapper.readTree(first.getResponse().getContentAsString()).get("id").asText();
+
+        // Mesmo candidato com o provedor em minúsculas: a referência é normalizada e reaproveitada
+        AdoptPlaceRequest repeat = new AdoptPlaceRequest(
+                "Nome diferente", null, null, null, "Outro endereço", null, null,
+                "Curitiba", "PR", "BR", -25.43, -49.27, null,
+                new ExternalReferenceRequest("geoapify", extId)
+        );
+        MvcResult second = mockMvc.perform(post("/api/v1/places/adopt")
+                        .header("Authorization", "Bearer " + user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(repeat)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode secondNode = objectMapper.readTree(second.getResponse().getContentAsString());
+        assertEquals(placeId, secondNode.get("id").asText(), "Deve devolver o mesmo local, sem duplicar");
+        assertEquals("Ponta Grossa", secondNode.get("city").asText(), "Dados do local original são preservados");
+        assertTrue(referenceRepository.findByProviderAndExternalId("GEOAPIFY", extId).isPresent());
+    }
+
+    @Test
     @DisplayName("18. Caso C: POST /api/v1/places/adopt com dados Google extras não persiste conteúdo externo")
     void shouldNotPersistExtraGoogleData() throws Exception {
         TestUser user = registerUser("adopt_c");

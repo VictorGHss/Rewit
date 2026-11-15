@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
+import 'package:rewit_mobile/app/theme/rewit_tokens.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -41,7 +43,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     super.initState();
     widget.authNotifier.addListener(_onAuthStateChanged);
     if (widget.authNotifier.state is Unauthenticated &&
-        (widget.authNotifier.state as Unauthenticated).errorCode != 'PASSWORD_CHANGED') {
+        (widget.authNotifier.state as Unauthenticated).errorCode !=
+            'PASSWORD_CHANGED') {
       WidgetsBinding.instance.addPostFrameCallback((_) => _returnToAuthFlow());
     }
   }
@@ -118,11 +121,15 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         _newPasswordController.clear();
         _confirmPasswordController.clear();
 
+        final successTone = RewitSemanticColors.of(context).success;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Senha alterada com sucesso! Entre novamente com sua nova senha.'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 4),
+          SnackBar(
+            content: Text(
+              'Senha alterada com sucesso! Entre novamente com sua nova senha.',
+              style: TextStyle(color: successTone.onContainer),
+            ),
+            backgroundColor: successTone.container,
+            duration: const Duration(seconds: 4),
           ),
         );
 
@@ -162,20 +169,21 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   @override
   Widget build(BuildContext context) {
     if (widget.authNotifier.state is Unauthenticated &&
-        (widget.authNotifier.state as Unauthenticated).errorCode != 'PASSWORD_CHANGED') {
+        (widget.authNotifier.state as Unauthenticated).errorCode !=
+            'PASSWORD_CHANGED') {
       return const Scaffold(
         body: SizedBox.shrink(),
       );
     }
 
-    final theme = Theme.of(context);
+    final infoTone = RewitSemanticColors.of(context).info;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Alterar Senha'),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+        padding: RewitSpacing.screenPadding,
         child: Form(
           key: _formKey,
           child: Column(
@@ -184,7 +192,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               // Banner de Erro RFC 7807 / Rede
               if (_errorMessage != null) ...[
                 ErrorBanner(
-                  margin: const EdgeInsets.only(bottom: 16),
+                  margin: const EdgeInsets.only(bottom: RewitSpacing.lg),
                   message: _errorMessage!,
                   retryAfterSeconds: _retryAfterSeconds,
                 ),
@@ -192,18 +200,17 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
               // Card Informativo de Segurança
               Card(
-                elevation: 0,
-                color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+                color: infoTone.container,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(80)),
+                  borderRadius: RewitRadius.borderLg,
+                  side: BorderSide(color: infoTone.border),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(14.0),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.info_outline, size: 20, color: theme.colorScheme.primary),
+                      Icon(Icons.info_outline, size: 20, color: infoTone.accent),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -212,7 +219,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                           'Você precisará entrar novamente com a nova senha.',
                           style: TextStyle(
                             fontSize: 12.5,
-                            color: theme.colorScheme.onSurface.withAlpha(180),
+                            color: infoTone.onContainer,
                             height: 1.4,
                           ),
                         ),
@@ -235,7 +242,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                   suffixIcon: IconButton(
                     key: const Key('toggle_current_password_visibility'),
                     icon: Icon(
-                      _obscureCurrentPassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      _obscureCurrentPassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
                       size: 20,
                     ),
                     onPressed: () {
@@ -268,7 +277,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                   suffixIcon: IconButton(
                     key: const Key('toggle_new_password_visibility'),
                     icon: Icon(
-                      _obscureNewPassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      _obscureNewPassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
                       size: 20,
                     ),
                     onPressed: () {
@@ -306,7 +317,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                   suffixIcon: IconButton(
                     key: const Key('toggle_confirm_password_visibility'),
                     icon: Icon(
-                      _obscureConfirmPassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      _obscureConfirmPassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
                       size: 20,
                     ),
                     onPressed: () {

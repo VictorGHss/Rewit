@@ -18,7 +18,8 @@ Este documento registra formalmente as versões estáveis homologadas e suportad
 | **Redis** | **Linha 8.x estável** (`8-alpine`) | Versão Estável | Versão estável compatível | Cache de sessões, rate limiting e feeds |
 | **SeaweedFS** | `chrislusf/seaweedfs:4.47` | Versão Fixada | Compatível com API AWS S3 | Armazenamento de objetos (fotos e mídias sanitizadas) |
 | **Node.js** | **24 LTS** | Versão LTS Estável | Suporte ativo de longo prazo | Runtime JavaScript dos clientes Web e ferramentas |
-| **Flutter SDK** | **3.47 stable** | Versão Estável Oficial | Canal Stable homologado | Cliente mobile multiplataforma (Android & iOS) |
+| **Flutter SDK** | **3.47 stable** (Dart 3.13+) | Versão Estável Oficial | Canal Stable homologado | Cliente mobile multiplataforma (Android & iOS) |
+| **Android SDK** | **API 36** (`compileSdk = 36`, `minSdk = 24`) | Plataforma Homologada | Android 16 / VanillaIceCream preview | Compilação e execução nativa do app mobile |
 | **React** | **19.3** | Versão Estável Oficial | Suporte a Server/Client Components | Biblioteca de interface do Painel Admin |
 | **TypeScript** | **5.8.x** | Versão Estável Oficial | Tipagem estática rigorosa | Linguagem do Painel Administrativo |
 | **Vite** | **8.x** | Versão Estável Oficial | Bundler ultrarrápido ESM | Ferramenta de build e dev server do Admin |
@@ -55,3 +56,8 @@ Para desenvolvimento local e persistência de fotos e mídias, o projeto adota o
 - Endpoint Master/Admin: `http://localhost:9333` (com `/cluster/status` para healthcheck)
 - Bucket padrão de desenvolvimento: `${OBJECT_STORAGE_BUCKET:-rewit-local}`
 - O backend interage através de uma abstração de object storage S3-compatible desacoplada do provedor subjacente, permitindo transição transparente para AWS S3 ou Cloudflare R2 em produção.
+
+### Android API 36 e Máquina de Estados Nativa de Permissões
+O módulo mobile Android está configurado com `compileSdk = 36`, compatível com a plataforma Android API 36 (emulador de referência `Rewit_API_36`).
+- Para mitigar particularidades do ciclo de solicitação de permissões em runtime na API 36 (onde um cancelamento de diálogo ou primeira negação sem rationale nativo poderia ser interpretado prematuramente como negação permanente), o app adota a máquina de estados em Kotlin `CameraPermissionStateMachine` com persistência em `SharedPreferences` e integração com o Flutter via `MethodChannel`.
+- A compatibilidade com JVM 17 e Gradle 9.3+ é mantida estritamente nas configurações do `build.gradle.kts`.

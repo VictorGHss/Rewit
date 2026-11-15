@@ -496,6 +496,50 @@ class DatabaseUpgradeMigrationTest {
         }
     }
 
+    // ============================================================================================ V40
+
+    @Test
+    @DisplayName("V40: upgrade V39 -> V40 dispensa do questionário as contas existentes (concluído, sem interesses); "
+            + "contas novas começam sem perfil; CHECK do catálogo ativo; runtime grava sem apagar")
+    void upgradeToV40ExemptsExistingAccountsFromOnboarding() throws SQLException {
+        flyway("39").migrate();
+        UUID active = UUID.randomUUID();
+        UUID deactivated = UUID.randomUUID();
+        try (Connection conn = owner()) {
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'USER')",
+                    active, "v39a." + active + "@rewit.test");
+            update(conn, "INSERT INTO users (id, email, auth_provider, role, account_status, is_active) "
+                    + "VALUES (?, ?, 'LOCAL', 'USER', 'DEACTIVATED', false)", deactivated, "v39d." + deactivated + "@rewit.test");
+        }
+
+        assertTrue(flyway(null).migrate().success);
+        try (Connection conn = owner(); Statement st = conn.createStatement()) {
+            assertEquals(1, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE version = '40' AND success"));
+            assertEquals(2, count(conn, "SELECT count(*) FROM user_interest_profiles WHERE user_id IN (?, ?) "
+                    + "AND onboarding_completed_at IS NOT NULL", active, deactivated));
+            assertEquals(0, count(conn, "SELECT count(*) FROM user_interests WHERE user_id IN (?, ?)", active, deactivated));
+
+            UUID created = UUID.randomUUID();
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'USER')",
+                    created, "v40." + created + "@rewit.test");
+            assertEquals(0, count(conn, "SELECT count(*) FROM user_interest_profiles WHERE user_id = ?", created));
+
+            update(conn, "INSERT INTO user_interests (user_id, interest_name, category_code) VALUES (?, 'Cafés', 'CAFE')",
+                    created);
+            assertThrows(SQLException.class, () -> update(conn,
+                    "INSERT INTO user_interests (user_id, interest_name, category_code) VALUES (?, 'Sauna', 'SAUNA')",
+                    created));
+
+            for (String privilege : new String[]{"SELECT", "INSERT", "UPDATE"}) {
+                assertEquals("true", string(conn,
+                        "SELECT has_table_privilege('rewit_app', 'user_interest_profiles', ?)::text", privilege));
+            }
+            assertEquals("false", string(conn,
+                    "SELECT has_table_privilege('rewit_app', 'user_interest_profiles', 'DELETE')::text"));
+            st.execute("SELECT rewit_assert_runtime_privileges()");
+        }
+    }
+
     private static void update(Connection conn, String sql, Object... args) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (int i = 0; i < args.length; i++) {

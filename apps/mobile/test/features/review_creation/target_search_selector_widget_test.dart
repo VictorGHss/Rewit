@@ -3,9 +3,93 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
+import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
+import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
+import 'package:rewit_mobile/features/auth/domain/repositories/auth_repository.dart';
+import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/widgets/target_search_selector_widget.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
+
+class _FakeAuthRepository implements AuthRepository {
+  AuthUserDto currentUser = const AuthUserDto(
+    id: 'user-1',
+    email: 'user1@rewit.test',
+    handle: 'user1',
+    displayName: 'Usuário Um',
+    isVerified: true,
+    reputationScore: 100,
+  );
+
+  @override
+  Future<bool> hasStoredSession() async => true;
+
+  @override
+  Future<AuthUserDto> getMe() async => currentUser;
+
+  @override
+  Future<Authenticated> login({
+    required String email,
+    required String password,
+  }) async {
+    return Authenticated(
+      user: currentUser,
+      tokens: const AuthTokens(accessToken: 'acc', refreshToken: 'ref'),
+    );
+  }
+
+  @override
+  Future<void> logout() async {}
+
+  @override
+  Future<Authenticated> register({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> requestSocialNonce() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> signInWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Authenticated> reactivateWithSocial({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Authenticated> refreshTokens() => throw UnimplementedError();
+
+  @override
+  Future<Authenticated> reactivate({
+    required String email,
+    required String password,
+  }) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deactivateAccount() async {}
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {}
+}
 
 class FakeSearchRepository implements SearchRepository {
   int callCount = 0;
@@ -67,9 +151,14 @@ void main() {
 
   Widget buildSubject({
     required FakeSearchRepository repository,
+    int targetIndex = 0,
+    bool enabled = true,
     ValueChanged<SearchResultItem>? onTargetSelected,
     bool Function(String targetId)? isTargetSelectedElsewhere,
     ValueChanged<String>? onManualTargetIdEntered,
+    Future<SearchResultItem?> Function()? onScanTarget,
+    String? currentUserId,
+    AuthNotifier? authNotifier,
   }) {
     return MaterialApp(
       theme: AppTheme.lightTheme,
@@ -78,10 +167,14 @@ void main() {
           padding: const EdgeInsets.all(16.0),
           child: TargetSearchSelectorWidget(
             searchRepository: repository,
-            targetIndex: 0,
+            targetIndex: targetIndex,
+            enabled: enabled,
             onTargetSelected: onTargetSelected ?? (_) {},
             isTargetSelectedElsewhere: isTargetSelectedElsewhere,
             onManualTargetIdEntered: onManualTargetIdEntered,
+            onScanTarget: onScanTarget,
+            currentUserId: currentUserId,
+            authNotifier: authNotifier,
           ),
         ),
       ),
@@ -351,6 +444,422 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('O que você quer avaliar? *'), findsOneWidget);
+    });
+  });
+
+  group('TargetSearchSelectorWidget - Integração com Scanner (onScanTarget)', () {
+    late FakeSearchRepository repository;
+
+    setUp(() {
+      repository = FakeSearchRepository();
+    });
+
+    testWidgets('botão de scanner fica visível apenas quando onScanTarget é fornecido', (tester) async {
+      await tester.pumpWidget(buildSubject(repository: repository));
+      expect(find.byKey(const Key('target_scanner_button_0')), findsNothing);
+      expect(find.byIcon(Icons.qr_code_scanner), findsNothing);
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => null,
+        ),
+      );
+
+      final scannerBtn = find.byKey(const Key('target_scanner_button_0'));
+      expect(scannerBtn, findsOneWidget);
+      expect(find.byTooltip('Escanear QR, EAN ou ISBN'), findsOneWidget);
+    });
+
+    testWidgets('botão de scanner respeita enabled: false e não dispara callback', (tester) async {
+      var callbackCalls = 0;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          enabled: false,
+          onScanTarget: () async {
+            callbackCalls++;
+            return productItem;
+          },
+        ),
+      );
+
+      final buttonFinder = find.byKey(const Key('target_scanner_button_0'));
+      expect(buttonFinder, findsOneWidget);
+      final iconButton = tester.widget<IconButton>(buttonFinder);
+      expect(iconButton.onPressed, isNull);
+
+      await tester.tap(buttonFinder);
+      await tester.pump();
+
+      expect(callbackCalls, equals(0));
+    });
+
+    testWidgets('seleciona produto e lugar retornados pelo scanner', (tester) async {
+      SearchResultItem? selectedProduct;
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          targetIndex: 0,
+          onScanTarget: () async => productItem,
+          onTargetSelected: (item) => selectedProduct = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+      expect(selectedProduct?.id, equals(productItem.id));
+      expect(selectedProduct?.targetType, equals(TargetType.product));
+
+      SearchResultItem? selectedPlace;
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          targetIndex: 1,
+          onScanTarget: () async => placeItem,
+          onTargetSelected: (item) => selectedPlace = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_1')));
+      await tester.pumpAndSettle();
+      expect(selectedPlace?.id, equals(placeItem.id));
+      expect(selectedPlace?.targetType, equals(TargetType.place));
+    });
+
+    testWidgets('bloqueia alvo duplicado retornado pelo scanner e exibe feedback equivalente', (tester) async {
+      SearchResultItem? selectedItem;
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => productItem,
+          isTargetSelectedElsewhere: (id) => id == productItem.id,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+
+      expect(selectedItem, isNull);
+      expect(
+        find.text('O alvo "${productItem.name}" já foi adicionado a esta avaliação.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('descarta retorno do scanner quando widget é desmontado durante await', (tester) async {
+      final completer = Completer<SearchResultItem?>();
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () => completer.future,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+
+      // Desmonta o seletor antes do retorno do scanner
+      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox.shrink())));
+      completer.complete(productItem);
+      await tester.pumpAndSettle();
+
+      expect(selectedItem, isNull);
+    });
+
+    testWidgets('descarta retorno do scanner quando usuário atual muda durante await (MB-1a)', (tester) async {
+      final completer = Completer<SearchResultItem?>();
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          currentUserId: 'user-1',
+          onScanTarget: () => completer.future,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+
+      // Troca o usuário autenticado enquanto a tela de scanner está aberta
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          currentUserId: 'user-2',
+          onScanTarget: () => completer.future,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      completer.complete(placeItem);
+      await tester.pumpAndSettle();
+
+      expect(selectedItem, isNull);
+    });
+
+    testWidgets('L-2: descarta retorno do scanner quando enabled passa de true para false durante await e libera lock', (tester) async {
+      var completer = Completer<SearchResultItem?>();
+      SearchResultItem? selectedItem;
+      var scanCalls = 0;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          enabled: true,
+          onScanTarget: () {
+            scanCalls++;
+            return completer.future;
+          },
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+      expect(scanCalls, equals(1));
+
+      // Widget é desabilitado enquanto a tela do scanner ainda está suspensa
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          enabled: false,
+          onScanTarget: () {
+            scanCalls++;
+            return completer.future;
+          },
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      completer.complete(productItem);
+      await tester.pumpAndSettle();
+
+      // Seleção não pode ser propagada porque enabled == false no retorno
+      expect(selectedItem, isNull);
+
+      // Reabilitar o widget prova que o lock _isOpeningScanner foi liberado no finally
+      completer = Completer<SearchResultItem?>();
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          enabled: true,
+          onScanTarget: () {
+            scanCalls++;
+            return completer.future;
+          },
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+      expect(scanCalls, equals(2));
+
+      completer.complete(productItem);
+      await tester.pumpAndSettle();
+      expect(selectedItem?.id, equals(productItem.id));
+    });
+
+    testWidgets('L-2: bloqueia toques concorrentes enquanto scanner está aberto e libera lock após cancelamento', (tester) async {
+      var completer = Completer<SearchResultItem?>();
+      var scanCalls = 0;
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () {
+            scanCalls++;
+            return completer.future;
+          },
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+      // Segundo toque imediato enquanto completer está pendente deve ser ignorado
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+      expect(scanCalls, equals(1));
+
+      // Usuário cancela o scanner (retorno null)
+      completer.complete(null);
+      await tester.pumpAndSettle();
+      expect(selectedItem, isNull);
+
+      // Lock foi liberado no finally: próximo toque abre normalmente
+      completer = Completer<SearchResultItem?>();
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+      expect(scanCalls, equals(2));
+      completer.complete(placeItem);
+      await tester.pumpAndSettle();
+      expect(selectedItem?.id, equals(placeItem.id));
+    });
+
+    testWidgets('L-2: descarta SearchResultItem com id ou nome vazio retornado pelo scanner', (tester) async {
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => const SearchResultItem(
+            id: '   ',
+            name: 'Nome Aparente',
+            targetType: TargetType.product,
+            rawTargetType: 'PRODUCT',
+            status: 'ACTIVE',
+          ),
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+      expect(selectedItem, isNull);
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => const SearchResultItem(
+            id: 'valid-id-123',
+            name: '   ',
+            targetType: TargetType.place,
+            rawTargetType: 'PLACE',
+            status: 'ACTIVE',
+          ),
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+      expect(selectedItem, isNull);
+    });
+
+    testWidgets('M-1: troca de conta via AuthNotifier real descarta retorno do scanner (MB-1a)', (tester) async {
+      final authRepo = _FakeAuthRepository();
+      final authNotifier = AuthNotifier(authRepository: authRepo);
+      addTearDown(authNotifier.dispose);
+
+      await authNotifier.checkAuthStatus();
+      expect((authNotifier.state as Authenticated).user.id, equals('user-1'));
+
+      final completer = Completer<SearchResultItem?>();
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          authNotifier: authNotifier,
+          onScanTarget: () => completer.future,
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pump();
+
+      // Troca real de conta via AuthNotifier enquanto scanner está aberto (logout -> login outro usuário)
+      await authNotifier.logout();
+      authRepo.currentUser = const AuthUserDto(
+        id: 'user-2',
+        email: 'user2@rewit.test',
+        handle: 'user2',
+        displayName: 'Usuário Dois',
+        isVerified: true,
+        reputationScore: 50,
+      );
+      await authNotifier.login('user2@rewit.test', 'secret');
+      await tester.pump();
+      expect((authNotifier.state as Authenticated).user.id, equals('user-2'));
+
+      completer.complete(placeItem);
+      await tester.pumpAndSettle();
+
+      expect(selectedItem, isNull);
+    });
+
+    testWidgets('L-B: normaliza id e nome com espaços nas bordas preservando case e demais campos', (tester) async {
+      String? checkedDuplicateId;
+      SearchResultItem? selectedItem;
+
+      const untrimmedItem = SearchResultItem(
+        id: '  Prod-MixedCase-UUID-42  ',
+        name: '  Café Torrado Especial  ',
+        slug: 'cafe-torrado-especial',
+        category: 'BEBIDAS',
+        targetType: TargetType.product,
+        rawTargetType: 'PRODUCT',
+        status: 'ACTIVE',
+      );
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => untrimmedItem,
+          isTargetSelectedElsewhere: (id) {
+            checkedDuplicateId = id;
+            return false;
+          },
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+
+      expect(checkedDuplicateId, equals('Prod-MixedCase-UUID-42'));
+      expect(selectedItem, isNotNull);
+      expect(selectedItem!.id, equals('Prod-MixedCase-UUID-42'));
+      expect(selectedItem!.name, equals('Café Torrado Especial'));
+      expect(selectedItem!.slug, equals('cafe-torrado-especial'));
+      expect(selectedItem!.category, equals('BEBIDAS'));
+      expect(selectedItem!.targetType, equals(TargetType.product));
+      expect(selectedItem!.rawTargetType, equals('PRODUCT'));
+      expect(selectedItem!.status, equals('ACTIVE'));
+    });
+
+    testWidgets('L-B: checagem de duplicidade usa ID já normalizado quando callback retorna espaços nas bordas', (tester) async {
+      final duplicateCheckArgs = <String>[];
+      SearchResultItem? selectedItem;
+
+      await tester.pumpWidget(
+        buildSubject(
+          repository: repository,
+          onScanTarget: () async => SearchResultItem(
+            id: '  ${productItem.id}  ',
+            name: '  ${productItem.name}  ',
+            category: productItem.category,
+            targetType: TargetType.product,
+            rawTargetType: 'PRODUCT',
+            status: 'ACTIVE',
+          ),
+          isTargetSelectedElsewhere: (id) {
+            duplicateCheckArgs.add(id);
+            return id == productItem.id;
+          },
+          onTargetSelected: (item) => selectedItem = item,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('target_scanner_button_0')));
+      await tester.pumpAndSettle();
+
+      expect(duplicateCheckArgs, equals([productItem.id]));
+      expect(selectedItem, isNull);
+      expect(
+        find.text('O alvo "${productItem.name}" já foi adicionado a esta avaliação.'),
+        findsOneWidget,
+      );
     });
   });
 }

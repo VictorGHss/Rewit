@@ -17,7 +17,11 @@ public record PlaceCandidateResponse(
         Double latitude,
         Double longitude,
         List<String> types,
-        List<PlaceAttributionResponse> attributions
+        List<PlaceAttributionResponse> attributions,
+        // Aditivos e opcionais (null quando o provedor não informa): cidade, UF e país para a adoção
+        String city,
+        String state,
+        String country
 ) {
     public static PlaceCandidateResponse fromDomain(PlaceCandidate candidate) {
         if (candidate == null) {
@@ -39,7 +43,10 @@ public record PlaceCandidateResponse(
                 candidate.getLatitude(),
                 candidate.getLongitude(),
                 candidate.getTypes(),
-                attrResponses
+                attrResponses,
+                candidate.getCity(),
+                candidate.getState(),
+                candidate.getCountryCode()
         );
     }
 }

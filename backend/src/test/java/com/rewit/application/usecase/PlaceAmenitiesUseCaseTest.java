@@ -113,7 +113,7 @@ class PlaceAmenitiesUseCaseTest {
     @Test
     @DisplayName("Leitura de local ausente ou inativo responde 404 sem consultar comodidades")
     void readOfMissingOrInactivePlaceIsNotFound() {
-        when(placeRepository.findById(placeId)).thenReturn(Optional.empty(), Optional.of(place("INACTIVE", null)));
+        when(placeRepository.findById(placeId)).thenReturn(Optional.empty()).thenReturn(Optional.of(place("INACTIVE", null)));
 
         assertEquals("PLACE_NOT_FOUND", assertThrows(BusinessException.class,
                 () -> getUseCase.execute(placeId)).getErrorCode());
@@ -168,11 +168,11 @@ class PlaceAmenitiesUseCaseTest {
     void updateRejectsPlaceNotRepresentedOrInactive() {
         BusinessAccount account = approvedAccount();
         when(representationPolicy.requireApprovedAccount(actorId, accountId)).thenReturn(account);
-        when(placeRepository.findByIdForUpdate(placeId)).thenReturn(
-                Optional.of(place("ACTIVE", UUID.randomUUID())),
-                Optional.of(place("ACTIVE", null)),
-                Optional.of(place("INACTIVE", accountId)),
-                Optional.empty());
+        when(placeRepository.findByIdForUpdate(placeId))
+                .thenReturn(Optional.of(place("ACTIVE", UUID.randomUUID())))
+                .thenReturn(Optional.of(place("ACTIVE", null)))
+                .thenReturn(Optional.of(place("INACTIVE", accountId)))
+                .thenReturn(Optional.empty());
 
         assertEquals("BUSINESS_NOT_RESPONSIBLE", assertThrows(BusinessException.class,
                 () -> updateUseCase.execute(command(List.of("WIFI")))).getErrorCode());

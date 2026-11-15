@@ -68,25 +68,77 @@ Um registro de `CheckIn` é criado e avaliado **exclusivamente** quando:
 1. `contextPlaceId` estiver preenchido (não nulo);
 2. Coordenadas (`userLatitude` e `userLongitude`) forem explicitamente enviadas pelo cliente.
 
-### 2.3 Presença Verificada vs. Não Verificada
-A validação espacial é executada no banco através do **PostgreSQL/PostGIS**, utilizando a função nativa `ST_DWithin` com o `validation_radius_meters` configurado para aquele estabelecimento específico e `ST_Distance` para cálculo métrico da distância até o centróide:
+Enviar coordenadas é só uma **tentativa de localização**: quem confirma a presença é o backend. A avaliação é publicada em qualquer caso; só a presença confirmada gera check-in `VERIFIED` e o selo `isVerifiedOnSite`.
 
-* **Presença Verificada (`isWithinRadius == true`)**:
+### 2.3 Regras da Verificação (Check-in V1)
+Os limites ficam em `PresenceVerificationPolicy` (domínio) e o app não os repete: ele envia coordenadas e precisão e exibe o resultado devolvido.
+
+| Regra | Limite | Onde é garantida |
+| :--- | :--- | :--- |
+| Raio de validação do local (`validation_radius_meters`) | até **250 m** (padrão 50 m) | `@Max` no DTO de criação/adoção de local, `Place.newPlaceValidationRadius` no domínio e CHECK `chk_places_validation_radius_max` (V41) no banco |
+| Precisão horizontal do GPS (`locationAccuracyMeters`) | até **100 m**; ausente ou não numérica não verifica (negativa continua recusada com `400`) | `PresenceVerificationPolicy.evaluateLocation` |
+| Frequência | no máximo **um check-in `VERIFIED` por usuário e local em 24 horas móveis** | consulta da janela depois de um `pg_advisory_xact_lock` por usuário e local, na transação da criação |
+
+A distância continua calculada pelo **PostgreSQL/PostGIS** (`ST_DWithin` com o raio do local e `ST_Distance` até o centróide); além disso, uma distância acima de 250 m nunca verifica.
+
+**Concorrência**: duas criações simultâneas do mesmo usuário no mesmo local esperam a mesma trava transacional (liberada no commit ou no rollback, inclusive se o processo cair). Em `READ COMMITTED`, a segunda passa a enxergar o check-in confirmado pela primeira e recebe `RECENT_CHECK_IN`. Sem a trava, uma rajada de 6 requisições gerava 5 check-ins verificados (`CheckInPresenceIntegrationTest`).
+
+Resultado persistido:
+
+* **Presença Verificada**:
   * `CheckIn.status`: `VERIFIED`
   * `CheckIn.verificationMethod`: `GPS`
   * `CheckIn.verifiedAt`: timestamp atual (`Instant.now()`)
   * `CheckIn.distanceToCentroidMeters`: distância real calculada em metros pelo PostGIS
   * `Review.isVerifiedOnSite`: `true`
-* **Tentativa Não Verificada / Fora do Raio (`isWithinRadius == false`)**:
+* **Tentativa Não Verificada** (fora do raio, precisão insuficiente ou ausente, ou check-in verificado recente no mesmo local):
   * `CheckIn.status`: `REJECTED`
   * `CheckIn.verificationMethod`: `GPS`
   * `CheckIn.verifiedAt`: `null` (CheckIn rejeitado não possui data de verificação)
-  * `CheckIn.distanceToCentroidMeters`: distância calculada excedente
+  * `CheckIn.distanceToCentroidMeters`: distância calculada
   * `Review.isVerifiedOnSite`: `false`
-* **Sem Coordenadas ou Sem `contextPlaceId`**:
+  * Nenhum contador (`verifiedReviewsCount`, `verifiedReviews` da reputação) é incrementado.
+* **Sem Coordenadas, Sem `contextPlaceId` ou Local sem Coordenadas**:
   * A `Review` é criada normalmente.
   * Nenhum `CheckIn` é gerado.
   * `Review.isVerifiedOnSite`: `false`.
+
+### 2.3.1 Resultado na Resposta da Criação
+`POST /api/v1/reviews` devolve, além do `ReviewResponse` habitual, o campo `checkIn` (omitido nas consultas):
+
+```json
+"checkIn": { "status": "NOT_VERIFIED", "reason": "RECENT_CHECK_IN" }
+```
+
+| `status` | `reason` | Significado |
+| :--- | :--- | :--- |
+| `VERIFIED` | `null` | Presença confirmada; `isVerifiedOnSite = true` |
+| `NOT_VERIFIED` | `OUTSIDE_RADIUS`, `ACCURACY_TOO_LOW`, `ACCURACY_UNAVAILABLE`, `RECENT_CHECK_IN`, `PLACE_WITHOUT_COORDINATES` | Avaliação publicada sem check-in verificado |
+| `NOT_REQUESTED` | `null` | Sem `contextPlaceId` ou sem coordenadas (ex.: o app não obteve a localização) |
+
+O resultado nunca traz coordenadas, precisão ou distância. O app deve mostrar a confirmação de presença só a partir deste campo, depois da resposta.
+
+### 2.3.2 Histórico de Check-ins do Usuário
+`GET /api/v1/me/check-ins?page=0&size=10` (autenticado; a conta vem do token, nenhum `userId` é aceito) lista os check-ins `VERIFIED` do próprio usuário cujas avaliações seguem `ACTIVE` e não anônimas, do mais recente ao mais antigo. É o mesmo conjunto contado em `verifiedReviewsCount`: avaliação removida, em moderação ou anônima tira o check-in da lista. Paginação igual à de `/me/reviews` (`size` de 1 a 50, envelope `PagedResponse`).
+
+```json
+{
+  "content": [
+    {
+      "id": "c1f0...", "reviewId": "9b2e...", "placeId": "4d7a...",
+      "placeName": "Café Central", "placeCategory": "CAFETERIA",
+      "placeCity": "Curitiba", "placeState": "PR",
+      "verifiedAt": "2026-10-29T15:30:00Z"
+    }
+  ],
+  "pageNumber": 0, "pageSize": 10, "totalElements": 1, "totalPages": 1, "isLast": true
+}
+```
+
+Erros: `401` sem sessão válida ou com conta inoperante (`ACCOUNT_DISABLED`); `400` para `page` negativa ou `size` fora de 1 a 50.
+
+### 2.3.3 Rankings
+Rankings de check-ins, de avaliações e de votos úteis **não existem** nesta versão. Serão entidades separadas, especificadas numa etapa posterior com os filtros temporais, geográficos e de categoria previstos em `PRODUCT_VISION.md`, sem score composto e sem usar `UserReputation` como peso (`docs/api/reputation.md`).
 
 ### 2.4 Fonte da Verdade de `isVerifiedOnSite`
 * `CheckIn(status = VERIFIED)` é a **única fonte da verdade** para a presença confirmada no local.

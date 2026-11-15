@@ -128,6 +128,8 @@ class PurgeDeletedAccountIntegrationTest {
         assertEquals(0, count("SELECT count(*) FROM user_follows WHERE follower_user_id = ? OR followed_user_id = ?", d, d));
         assertEquals(0, count("SELECT count(*) FROM saved_items WHERE user_id = ?", d));
         assertEquals(0, count("SELECT count(*) FROM user_interests WHERE user_id = ?", d));
+        // A situação do questionário (só datas) permanece, como a linha de users: o runtime não apaga a tabela (V40)
+        assertEquals(1, count("SELECT count(*) FROM user_interest_profiles WHERE user_id = ?", d));
         assertEquals(0, count("SELECT count(*) FROM user_activities WHERE user_id = ?", d));
         assertEquals(0, count("SELECT count(*) FROM notifications WHERE user_id = ?", d));
         assertEquals(0, count("SELECT count(*) FROM user_reputation WHERE user_id = ?", d));
@@ -433,6 +435,7 @@ class PurgeDeletedAccountIntegrationTest {
         // Sem fluxo HTTP: dados privados, conta empresarial e auditoria em que D foi moderadora
         jdbcTemplate.update("INSERT INTO saved_items (user_id, target_id, item_type) VALUES (?, ?, 'PLACE')", d, targetId);
         jdbcTemplate.update("INSERT INTO user_interests (user_id, interest_name, category_code) VALUES (?, 'Cafés', 'CAFE')", d);
+        jdbcTemplate.update("INSERT INTO user_interest_profiles (user_id, onboarding_completed_at) VALUES (?, NOW())", d);
         jdbcTemplate.update("INSERT INTO user_activities (user_id, activity_type, target_type, target_id) "
                 + "VALUES (?, 'VIEW', 'PLACE', ?)", d, targetId);
         jdbcTemplate.update("INSERT INTO business_accounts (user_id, corporate_name, tax_id) VALUES (?, ?, ?)",

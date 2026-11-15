@@ -1,3 +1,4 @@
+import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/product/domain/entities/product_detail.dart';
 import 'scanned_code.dart';
 
@@ -34,13 +35,39 @@ final class ScannerFound extends ScannerState {
   });
 }
 
-/// O código foi lido com sucesso, mas o produto não existe no catálogo (404 PRODUCT_NOT_FOUND).
+/// O código foi lido com sucesso, mas o produto ou local não existe no catálogo (404).
 final class ScannerNotFound extends ScannerState {
   final ScannedCode scannedCode;
   final String message;
+  final bool isPlace;
 
   const ScannerNotFound({
     required this.scannedCode,
+    required this.message,
+    this.isPlace = false,
+  });
+}
+
+/// Local físico identificado no catálogo do Rewit (ex: QR Code `rewit://places/{id}`).
+final class ScannerPlaceFound extends ScannerState {
+  final PlaceDetail place;
+  final ScannedCode scannedCode;
+
+  const ScannerPlaceFound({
+    required this.place,
+    required this.scannedCode,
+  });
+}
+
+/// Recurso interno válido que não pode ser selecionado como alvo no modo de seleção (ex: review).
+final class ScannerInvalidSelectionTarget extends ScannerState {
+  final ScannedCode scannedCode;
+  final InternalResource resource;
+  final String message;
+
+  const ScannerInvalidSelectionTarget({
+    required this.scannedCode,
+    required this.resource,
     required this.message,
   });
 }
@@ -72,6 +99,11 @@ final class ScannerQrInternal extends ScannerState {
     required this.scannedCode,
     required this.resource,
   });
+}
+
+/// Explicação contextual exibida antes da primeira solicitação nativa de câmera.
+final class ScannerPermissionRationale extends ScannerState {
+  const ScannerPermissionRationale();
 }
 
 /// Permissão de câmera negada pelo usuário ou pelo sistema.

@@ -796,12 +796,12 @@ class _ManualPlaceRegistrationSheetState
               key: const Key('manual_place_submit_button'),
               onPressed: _isSubmitting ? null : _submit,
               icon: _isSubmitting
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     )
                   : const Icon(Icons.check_circle_outline),

@@ -3,6 +3,81 @@
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/), e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.5.1] - 2026-11-14
+
+### Corrigido
+- **Decodificação UTF-8 por padrão em respostas HTTP (`apps/mobile`)**:
+  - Adicionados `ProblemDetail.decodeResponseBytes` e `ProblemDetail.fromResponseBytes` em `lib/core/error/api_exception.dart` e normalização em `RewitHttpClient` (`lib/core/network/http_client.dart`) para decodificar `application/json`, `application/problem+json` e respostas textuais sem `charset` explícito como UTF-8 por padrão, eliminando mojibake (ex.: `"Credenciais inválidas"` no login) e mantendo respeito a charsets declarados e bytes inválidos com `allowMalformed: true`.
+- **Contraste da AppBar do Scanner (`apps/mobile`)**:
+  - Configurados explicitamente `iconTheme`, `actionsIconTheme`, `titleTextStyle` e `systemOverlayStyle` na `AppBar` de `ScannerScreen` com `RewitSemanticColors.onMediaScrim` sobre `mediaScrim`, impedindo que `AppTheme.appBarTheme` sobrescrevesse os controles com tinta escura no tema claro.
+- **Descoberta de Locais Próximos sem Cache Recente (`apps/mobile`)**:
+  - `LocationCapturePolicy.discovery` em `GeolocatorLocationService` mantém captura primária leve (`LocationAccuracy.medium`, teto 5s, cache <= 5 min) e executa no máximo um fallback controlado em `LocationAccuracy.high` (até 4s adicionais, orçamento total de 9s) quando não houver cache válido e a tentativa inicial falhar ou expirar.
+- **Explicação Contextual Pré-Permissão da Câmera no Scanner (`apps/mobile`)**:
+  - Exposto `hasRequestedPermissionBefore` em `MainActivity.kt` e `CameraPermissionService` e adicionado o estado `ScannerPermissionRationale` em `ScannerNotifier` / `ScannerScreen`, exibindo justificativa clara (`"Continuar"` / `"Agora não"`) antes do primeiro prompt nativo sem disparar solicitação prematura nem repetir em loop após recusa prévia.
+- **Testes e Validação**:
+  - Suíte automatizada mobile expandida para **1.323 testes aprovados** (`flutter test`), 0 falhas e 0 issues no `dart analyze`.
+  - Testes unitários nativos Android mantidos verdes: **9 testes aprovados** (`./gradlew :app:testDebugUnitTest` em `CameraPermissionStateMachineTest`).
+
+## [0.5.0] - 2026-11-14
+
+### Adicionado
+- **Navegação & Home V2 Mobile (`apps/mobile`)**:
+  - Nova barra de navegação inferior (`NavigationBar`) com 5 destinos canônicos: Início (feed dual), Explorar (busca e cadastro de locais), Rankings (classificações dimensionais), Check-in (presença e proximidade) e Coleção (estado vazio honesto aguardando backend de coleções/listas).
+  - AppBar integrada com avatar do usuário com inicial de fallback e navegação para Meu Perfil (`/profile`), título centralizado, indicador de mensagens em breve e botão de notificações com badge reativo de não lidas.
+  - Floating Action Button (FAB) com folha modal de ações rápidas: "Nova Avaliação" (`/review/create`) e "Fazer Check-in".
+  - Navegação defensiva com `PopScope`: voltar fora da aba Início retorna à Home antes de fechar a aplicação.
+- **Feed Duplo (Para Você / Seguindo) e Sincronização Reativa**:
+  - Integração com os contratos `/api/v2/feed` ("Para você") e `/api/v1/feed` ("Seguindo").
+  - `FeedNotifier` com canais de estado isolados para cada feed, rollback granular imediato de votos úteis (`helpfulCount` e `isHelpfulByMe`) em caso de falha de rede e preservação de IDs removidos durante recargas de recuperação.
+  - Sincronização reativa de feed após criar avaliações ou salvar novos interesses em `AppRouter.editInterests`.
+- **Scanner Inteligente, Target Selection Mode e Hardening de Ciclo de Vida**:
+  - Suporte a leitura óptica de códigos de barras (EAN-13, EAN-8, UPC-A, ITF-14) e QR Codes, além de fallback manual normalizado.
+  - Modo de seleção de alvo (`ScannerRouteArgs(selectionMode: true)`) integrado diretamente à tela de criação de avaliações (`ReviewCreateScreen` / `TargetSearchSelectorWidget` / `TargetItemInputWidget`), retornando o alvo selecionado tipado para o formulário.
+  - Hardening do ciclo de vida: pausa automática da câmera quando o app entra em `inactive` ou `paused`, e religamento com rechecagem limpa de permissões em `resumed`.
+  - Debounce ótico prevenindo múltiplas leituras em rajada.
+- **Permissões de Câmera e Máquina de Estados Nativa Android (API 36)**:
+  - Máquina de estados determinística nativa em Kotlin (`CameraPermissionStateMachine.kt`, `MainActivity.kt`), tratando as especificidades do Android API 36 para evitar que recusas iniciais ou cancelamentos de diálogo causem negação permanente prematura.
+  - Persistência das decisões do usuário em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`).
+  - Canal nativo `MethodChannel` (`app.rewit.mobile/camera_permission`) e serviço Flutter `AndroidCameraPermissionService`.
+  - Diálogo de justificativa contextual, botão de repetição e redirecionamento assistido para configurações do sistema (`openAppSettings`).
+- **Localização e Check-in Hardening**:
+  - Implementação de `GeolocatorLocationService` com política explícita por finalidade (`LocationCapturePolicy`):
+    - `discovery`: raio de até 10 km, aceita cache de até 5 minutos, precisão média e timeout estrito de até 5 segundos;
+    - `presenceVerification`: para check-in e avaliações no local, rejeita cache antigo, exige leitura fresca (<= 1 min), alta precisão GPS, timeout ampliado (10s a 15s) e retry único em caso de acurácia aproximada (> 100m).
+  - Suporte a localização simulada/mock preservado no cliente para viabilizar testes ponta a ponta e auditorias em emuladores e QA.
+  - Validação de presença estritamente autoritativa no backend via PostGIS (`ST_DWithin`, raio de até 250m, acurácia <= 100m, trava `pg_advisory_xact_lock` e teto de 1 check-in por usuário/local em 24h).
+- **Testes e Validação**:
+  - Suíte de testes automatizados mobile expandida para **1.297 testes aprovados** (`flutter test`), 0 falhas, 0 issues no `dart analyze`.
+  - **9 testes unitários nativos Android aprovados** (`CameraPermissionStateMachineTest`).
+
+## [0.4.0] - 2026-11-04
+
+### Adicionado
+- **Design System Next-Gen V1 Mobile (`apps/mobile`)**:
+  - **Fundações de Temas e Paletas Material 3**:
+    - Suporte a três modos de exibição: Sistema (`ThemeMode.system` como padrão de fábrica), Claro (`ThemeMode.light` com fundo lavanda `#F6F4FB` e primária roxa `#6D28D9`) e Escuro (`ThemeMode.dark` com fundo preto predominante `#09090D`, superfícies em grafite `#17151D` / `#211B2B`, ações roxas `#8055D9` e detalhes lavanda `#B69AFF`).
+    - Aplicação estrita das diretrizes visuais: proibição de cards brancos e de grandes superfícies roxas no modo escuro, com roxo restrito a elementos interativos e lavanda a detalhes.
+  - **Tokens de Espaçamento e Borda (`RewitTokens`)**:
+    - Constantes geométricas em `RewitSpacing` (de `xxs = 2.0` a `xxxl = 32.0`) e paddings semânticos estruturados (`screenPadding`, `cardPadding`, `bannerPadding`).
+    - Raios de curvatura canônicos em `RewitRadius` (de `xs = 4.0` a `sheet = 20.0` e `pill = 999.0`) e bordas pré-computadas (`borderMd`, `borderLg`, `sheetTop`).
+  - **Cores Semânticas Contextuais via ThemeExtension (`RewitSemanticColors`)**:
+    - Extensão nativa imutável estruturada em blocos funcionais `RewitSemanticTone` (`container`, `onContainer`, `border`, `accent`) para estados contextuais (`success`, `warning`, `danger`, `info`), selo de presença verificada (`verified`), avaliações e estrelas (`ratingBadge`, `starFilled`, `starEmpty`), categorias multi-alvo (`placeTarget`, `productTarget`, `serviceTarget`) e superfícies focais (`elevatedFocalSurface`, `anonymousAvatarBackground`, `mediaScrim`).
+    - Acesso simplificado via `RewitSemanticColors.of(context)` com fallback defensivo por brilho para execução isolada em testes.
+  - **Persistência de Preferência e Gerenciamento Reativo (`ThemeController`)**:
+    - Controle de ciclo de vida com `ChangeNotifier` e injeção desacoplada na árvore via `ThemeControllerScope` (`InheritedNotifier`).
+    - Persistência segura no dispositivo via `FlutterSecureStorage` sob a chave `rewit_app_theme_mode` (`SecureThemePreferenceStorage`), completamente isolada de `TokenStorage.clearTokens()` (a aparência do app é preservada após logout ou troca de conta).
+    - Mecanismo resiliente de fallback em memória (`InMemoryThemePreferenceStorage`) contra indisponibilidade de I/O de secure storage.
+    - Seletor acessível de aparência na tela de configurações (`AccountSettingsScreen`) com opções para Sistema, Claro e Escuro.
+  - **Migração e Homogeneização Visual de Componentes e Telas**:
+    - Eliminação completa de cores e espaçamentos hardcoded em telas de Feed V2, Detalhes de Avaliação, Check-in, Scanner, Rankings, Perfil e Configurações de Conta.
+    - Adaptação estruturada de modais, diálogos, bottom sheets, inputs e banners de status.
+  - **Acessibilidade e Testes Automatizados**:
+    - Conformidade matemática com critérios WCAG AA: contraste `>= 4.5:1` para texto regular e `>= 3:1` para divisores e componentes interativos.
+    - Suíte de testes expandida para **1.172 testes automatizados** aprovados (`flutter test`), com 0 falhas, 0 erros e 0 alertas no `flutter analyze`.
+    - **Registro de Homologação Pendente**: Aprovado em todos os testes unitários e de integração de widgets; a inspeção visual interativa em hardware físico real (dispositivos móveis Android e iOS) permanece pendente de validação operacional pela equipe.
+
+---
+
 ## [0.3.0] - 2026-10-14
 
 ### Adicionado

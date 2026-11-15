@@ -1,5 +1,7 @@
 package com.rewit.presentation.dto.review;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.rewit.domain.enums.PresenceVerificationOutcome;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -131,6 +133,31 @@ public final class ReviewPresentationDtos {
             List<ReviewTargetResponse> targets,
             long helpfulCount,
             boolean isHelpfulByMe,
-            boolean isMine
-    ) {}
+            boolean isMine,
+            // Só na resposta da criação; omitido nas consultas
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            CheckInResultResponse checkIn
+    ) {
+        public ReviewResponse withCheckIn(CheckInResultResponse checkInResult) {
+            return new ReviewResponse(id, author, contextPlaceId, experienceText, isAnonymous, isVerifiedOnSite,
+                    visibility, status, createdAt, updatedAt, targets, helpfulCount, isHelpfulByMe, isMine,
+                    checkInResult);
+        }
+    }
+
+    /**
+     * Resultado da verificação de presença decidido pelo backend na criação: {@code VERIFIED} (check-in verificado),
+     * {@code NOT_VERIFIED} (avaliação publicada sem check-in verificado; {@code reason} diz o motivo) ou
+     * {@code NOT_REQUESTED} (sem local de contexto ou sem coordenadas). Nunca traz coordenadas nem distância.
+     */
+    public record CheckInResultResponse(String status, String reason) {
+
+        public static CheckInResultResponse from(PresenceVerificationOutcome outcome) {
+            return switch (outcome) {
+                case VERIFIED -> new CheckInResultResponse("VERIFIED", null);
+                case NOT_REQUESTED -> new CheckInResultResponse("NOT_REQUESTED", null);
+                default -> new CheckInResultResponse("NOT_VERIFIED", outcome.name());
+            };
+        }
+    }
 }

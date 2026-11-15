@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
@@ -51,12 +52,24 @@ class FakeLocationService implements LocationService {
     ),
   );
   bool openSettingsResult = true;
+  bool openLocationSettingsResult = true;
   int callCount = 0;
+  LocationPurpose? lastPurpose;
+  Duration? lastTimeout;
   Duration? simulatedDelay;
+  Completer<LocationResult>? pendingCompleter;
 
   @override
-  Future<LocationResult> getCurrentLocation({Duration timeout = const Duration(seconds: 10)}) async {
+  Future<LocationResult> getCurrentLocation({
+    Duration? timeout,
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
     callCount++;
+    lastPurpose = purpose;
+    lastTimeout = timeout;
+    if (pendingCompleter != null) {
+      return pendingCompleter!.future;
+    }
     if (simulatedDelay != null) {
       await Future.delayed(simulatedDelay!);
     }
@@ -65,6 +78,9 @@ class FakeLocationService implements LocationService {
 
   @override
   Future<bool> openAppSettings() async => openSettingsResult;
+
+  @override
+  Future<bool> openLocationSettings() async => openLocationSettingsResult;
 }
 
 void main() {
@@ -541,12 +557,64 @@ void main() {
         expect(locRepo.capturedInput?.locationAccuracyMeters, isNull);
       });
 
-      test('openAppSettings repassa para o LocationService', () async {
+      test('openAppSettings e openLocationSettings repassam para o LocationService', () async {
         locService.openSettingsResult = true;
         expect(await locNotifier.openAppSettings(), isTrue);
 
         locService.openSettingsResult = false;
         expect(await locNotifier.openAppSettings(), isFalse);
+
+        locService.openLocationSettingsResult = true;
+        expect(await locNotifier.openLocationSettings(), isTrue);
+
+        locService.openLocationSettingsResult = false;
+        expect(await locNotifier.openLocationSettings(), isFalse);
+      });
+
+      test('captureLocation solicita finalidade presenceVerification e preserva acurácia real', () async {
+        await locNotifier.captureLocation();
+        expect(locService.lastPurpose, LocationPurpose.presenceVerification);
+        expect(locNotifier.locationAccuracyMeters, 15.0);
+        expect(locNotifier.isPermissionApproximate, isFalse);
+      });
+
+      test('captureLocation propaga isPermissionApproximate e reseta ao limpar', () async {
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(
+            latitude: -23.5505,
+            longitude: -46.6333,
+            accuracyMeters: 50.0,
+            isPermissionApproximate: true,
+          ),
+        );
+
+        final success = await locNotifier.captureLocation();
+        expect(success, isTrue);
+        expect(locNotifier.isPermissionApproximate, isTrue);
+        expect(locNotifier.isApproximateLocation, isTrue);
+        expect(locNotifier.locationAccuracyMeters, 50.0);
+
+        locNotifier.clearCoordinates();
+        expect(locNotifier.isPermissionApproximate, isFalse);
+        expect(locNotifier.isApproximateLocation, isFalse);
+      });
+
+      test('clearCoordinates ou reset durante captura com Completer descarta resultado tardio', () async {
+        final completer = Completer<LocationResult>();
+        locService.pendingCompleter = completer;
+
+        final captureFuture = locNotifier.captureLocation();
+        expect(locNotifier.isRequestingLocation, isTrue);
+
+        locNotifier.reset();
+        expect(locNotifier.locationStatus, LocationCaptureStatus.idle);
+
+        completer.complete(const LocationSuccess(
+          DeviceLocation(latitude: -23.55, longitude: -46.63, accuracyMeters: 10.0),
+        ));
+        final success = await captureFuture;
+        expect(success, isFalse);
+        expect(locNotifier.hasLocation, isFalse);
       });
     });
 

@@ -160,6 +160,11 @@ class MockFeedRepository implements FeedRepository {
   }
 
   @override
+  Future<FeedPage> getFollowingFeed({int page = 0, int size = 10}) async {
+    return const FeedPage(items: [], page: 0, size: 10, windowSize: 0, totalPages: 0);
+  }
+
+  @override
   Future<FeedReview> getReviewById(String id) async => throw UnimplementedError();
 
   @override

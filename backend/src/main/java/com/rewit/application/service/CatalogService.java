@@ -460,8 +460,7 @@ public class CatalogService {
     }
 
     private Place executePersistPlace(CreatePlaceCommand cmd, String slug, String provider, String externalId) {
-        Integer validationRadiusValue = cmd.validationRadiusMeters();
-        int validationRadiusMeters = validationRadiusValue != null ? validationRadiusValue : 50;
+        int validationRadiusMeters = Place.newPlaceValidationRadius(cmd.validationRadiusMeters());
 
         Place place = new Place(
                 null,

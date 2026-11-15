@@ -2,6 +2,7 @@ package com.rewit.domain.model;
 
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.TargetType;
+import org.springframework.http.HttpStatus;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -143,6 +144,26 @@ public class Place extends RateableTarget {
         this(id, name, slug, category, description, addressText, null, null,
                 city, state, country, latitude, longitude, validationRadiusMeters,
                 origin, isVerified, claimedByBusinessId, null, status);
+    }
+
+    /**
+     * Raio de validação de um local novo: o padrão quando não informado; recusa raio fora de
+     * {@code (0, MAX_VALIDATION_RADIUS_METERS]}. Só a criação passa por aqui: a reconstituição do banco confia na
+     * CHECK da V41, que garante o mesmo limite para todo registro gravado.
+     */
+    public static int newPlaceValidationRadius(Integer requestedMeters) {
+        if (requestedMeters == null) {
+            return PresenceVerificationPolicy.DEFAULT_VALIDATION_RADIUS_METERS;
+        }
+        if (requestedMeters <= 0) {
+            throw new BusinessException("O raio de tolerância deve ser estritamente positivo", "INVALID_RADIUS");
+        }
+        if (requestedMeters > PresenceVerificationPolicy.MAX_VALIDATION_RADIUS_METERS) {
+            throw new BusinessException("O raio de validação deve ser de até "
+                    + PresenceVerificationPolicy.MAX_VALIDATION_RADIUS_METERS + " metros",
+                    HttpStatus.BAD_REQUEST, "VALIDATION_RADIUS_TOO_LARGE");
+        }
+        return requestedMeters;
     }
 
     public boolean hasCoordinates() {

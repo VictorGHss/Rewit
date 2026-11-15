@@ -25,6 +25,7 @@ class ProfilePlaceholderScreen extends StatelessWidget {
       );
     }
 
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Perfil de Usuário'),
@@ -35,11 +36,15 @@ class ProfilePlaceholderScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.person_outline, size: 64, color: Colors.grey),
+              Icon(
+                Icons.person_outline,
+                size: 64,
+                color: theme.colorScheme.outline,
+              ),
               const SizedBox(height: 16),
               Text(
                 'Perfil de Usuário',
-                style: Theme.of(context).textTheme.titleLarge,
+                style: theme.textTheme.titleLarge,
               ),
               const SizedBox(height: 24),
               OutlinedButton.icon(

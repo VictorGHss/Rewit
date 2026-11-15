@@ -158,7 +158,14 @@ erDiagram
 ### 19. `UserInterest` (Interesses Temáticos do Usuário - Seção 23)
 - **Papel**: Afinidades temáticas selecionadas no onboarding ou perfil (Tecnologia, Games, Restaurantes, Cinema, etc.).
 - **Campos**: `id` (UUIDv4), `user_id` (FK `users.id`), `interest_name`, `category_code`, `weight` (`NUMERIC(3, 2)` entre 0.00 e 1.00, default 1.00), `created_at`.
-- **Constraint**: `UNIQUE (user_id, category_code)`.
+- **Constraint**: `UNIQUE (user_id, category_code)`; `category_code` restrito ao catálogo `InterestCategory` (V40).
+- **Gravação (V40)**: pelo agregado `UserInterestProfile` (abaixo); `interest_name` recebe o rótulo do catálogo e `weight` é 1.00 em toda seleção explícita. A classe `UserInterest`, anterior ao questionário, não é usada pela gravação.
+
+### 19.1 `UserInterestProfile` (Interesses e Questionário Inicial - V40)
+- **Papel**: Interesses declarados pelo usuário e situação do questionário inicial que os coleta; fonte dos interesses para o Feed V2 (`roadmap/backend-roadmap.md` §5.3).
+- **Campos**: `user_id` (PK e FK `users.id`), `onboarding_completed_at` (nulo enquanto em andamento), `created_at`, `updated_at`, e os interesses em `user_interests`.
+- **Catálogo**: `InterestCategory` (código estável, rótulo, pergunta `InterestGroup`); incluir um interesse exige migração que amplie o CHECK.
+- **Regras**: sem perfil = `NOT_STARTED`; rascunho aceita qualquer quantidade; concluir exige ao menos 3 interesses; a conclusão é definitiva e, depois dela, toda gravação mantém o mínimo; a data de conclusão é a da primeira confirmação.
 
 ### 20. `UserActivity` (Eventos Comportamentais Analíticos - Seção 24)
 - **Papel**: Registro discreto de ações na plataforma para alimentação futura de motores de recomendação e ranking sem espionagem ou rastreamento contínuo.

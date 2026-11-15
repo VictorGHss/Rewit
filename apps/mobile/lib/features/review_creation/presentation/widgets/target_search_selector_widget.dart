@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
@@ -9,8 +10,17 @@ import 'package:rewit_mobile/features/place/domain/repositories/place_repository
 import 'package:rewit_mobile/features/place/domain/services/pending_place_registration_store.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
 import 'package:rewit_mobile/features/place/presentation/widgets/pending_registration_notices.dart';
+import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
+import 'package:rewit_mobile/features/place_discovery/presentation/widgets/external_place_results_section.dart';
+import 'package:rewit_mobile/features/product/domain/repositories/product_repository.dart';
+import 'package:rewit_mobile/features/product/presentation/widgets/manual_product_registration_sheet.dart';
+import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/search/domain/entities/search_entities.dart';
 import 'package:rewit_mobile/features/search/domain/repositories/search_repository.dart';
+import 'package:rewit_mobile/features/search/presentation/widgets/target_type_style.dart';
+
+/// Tipo de alvo que o usuário quer avaliar; filtra os resultados da busca unificada no próprio app.
+enum TargetKindFilter { all, place, product }
 
 /// Seletor de busca textual interativo de alvos (Search V1) com debounce,
 /// cache de sessão em memória, proteção contra respostas fora de ordem
@@ -18,6 +28,15 @@ import 'package:rewit_mobile/features/search/domain/repositories/search_reposito
 class TargetSearchSelectorWidget extends StatefulWidget {
   final SearchRepository searchRepository;
   final PlaceRepository? placeRepository;
+
+  /// Com ele, o seletor oferece o cadastro de um produto inexistente, que já volta selecionado.
+  final ProductRepository? productRepository;
+
+  /// Com ele, o seletor oferece a busca em fonte externa (pelo backend) e a adoção do local encontrado.
+  final PlaceDiscoveryRepository? placeDiscoveryRepository;
+
+  /// Habilita a opção "Perto de mim" da busca externa; a posição é lida uma vez, no toque de busca.
+  final LocationService? locationService;
   final int targetIndex;
   final bool enabled;
   final ValueChanged<SearchResultItem> onTargetSelected;
@@ -25,6 +44,7 @@ class TargetSearchSelectorWidget extends StatefulWidget {
   final ValueChanged<String>? onManualTargetIdEntered;
   final ValueChanged<File>? onManualPlacePhotoSelected;
   final Future<File?> Function(ImageSource source)? onPickManualPlacePhoto;
+  final Future<SearchResultItem?> Function()? onScanTarget;
   final String? currentUserId;
   final AuthNotifier? authNotifier;
 
@@ -35,6 +55,9 @@ class TargetSearchSelectorWidget extends StatefulWidget {
     super.key,
     required this.searchRepository,
     this.placeRepository,
+    this.productRepository,
+    this.placeDiscoveryRepository,
+    this.locationService,
     required this.targetIndex,
     this.enabled = true,
     required this.onTargetSelected,
@@ -42,16 +65,19 @@ class TargetSearchSelectorWidget extends StatefulWidget {
     this.onManualTargetIdEntered,
     this.onManualPlacePhotoSelected,
     this.onPickManualPlacePhoto,
+    this.onScanTarget,
     this.currentUserId,
     this.authNotifier,
     this.pendingRegistrationStore,
   });
 
   @override
-  State<TargetSearchSelectorWidget> createState() => _TargetSearchSelectorWidgetState();
+  State<TargetSearchSelectorWidget> createState() =>
+      _TargetSearchSelectorWidgetState();
 }
 
-class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget> {
+class _TargetSearchSelectorWidgetState
+    extends State<TargetSearchSelectorWidget> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _manualUuidController = TextEditingController();
 
@@ -62,6 +88,31 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   int? _retryAfterSeconds;
   List<SearchResultItem>? _results;
   bool _showManualInput = false;
+  TargetKindFilter _kindFilter = TargetKindFilter.all;
+  bool _isOpeningProductRegistration = false;
+  bool _isOpeningScanner = false;
+
+  /// Resultados do tipo escolhido; a busca é a mesma, só a exibição muda.
+  List<SearchResultItem>? get _visibleResults {
+    final results = _results;
+    if (results == null) return null;
+    switch (_kindFilter) {
+      case TargetKindFilter.all:
+        return results;
+      case TargetKindFilter.place:
+        return results.where((item) => item.isPlace).toList();
+      case TargetKindFilter.product:
+        return results.where((item) => item.isProduct).toList();
+    }
+  }
+
+  bool get _canRegisterPlace =>
+      widget.placeRepository != null && _kindFilter != TargetKindFilter.product;
+  bool get _canRegisterProduct =>
+      widget.productRepository != null && _kindFilter != TargetKindFilter.place;
+  bool get _canDiscoverExternally =>
+      widget.placeDiscoveryRepository != null &&
+      _kindFilter != TargetKindFilter.product;
 
   // Cache em memória durante a sessão da tela para evitar requisições idênticas
   final Map<String, List<SearchResultItem>> _queryCache = {};
@@ -70,7 +121,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   int _pendingLoadGeneration = 0;
 
   PendingPlaceRegistrationStore get _store =>
-      widget.pendingRegistrationStore ?? PendingPlaceRegistrationStore.processLocal;
+      widget.pendingRegistrationStore ??
+      PendingPlaceRegistrationStore.processLocal;
 
   @override
   void initState() {
@@ -90,7 +142,10 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     if (oldWidget.currentUserId != widget.currentUserId ||
         oldWidget.authNotifier != widget.authNotifier ||
         oldWidget.pendingRegistrationStore != widget.pendingRegistrationStore) {
-      _onIdentityMaybeChanged(force: oldWidget.pendingRegistrationStore != widget.pendingRegistrationStore);
+      _onIdentityMaybeChanged(
+        force: oldWidget.pendingRegistrationStore !=
+            widget.pendingRegistrationStore,
+      );
     }
   }
 
@@ -122,7 +177,11 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     final generation = ++_pendingLoadGeneration;
     final userId = _scopedUserId;
     final loaded = userId == null ? null : await _store.loadLatest(userId);
-    if (!mounted || generation != _pendingLoadGeneration || userId != _getCurrentUserId()) return;
+    if (!mounted ||
+        generation != _pendingLoadGeneration ||
+        userId != _getCurrentUserId()) {
+      return;
+    }
     setState(() {
       _pendingRegistration = loaded;
     });
@@ -259,24 +318,149 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     await _handleRegistrationResult(result, currentUid);
   }
 
+  /// Cadastra um produto inexistente e o seleciona como alvo; nota, comentários, demais alvos e mídia ficam no
+  /// formulário da avaliação, que este seletor não toca.
+  Future<void> _openManualProductRegistration() async {
+    if (!widget.enabled ||
+        widget.productRepository == null ||
+        _isOpeningProductRegistration) {
+      return;
+    }
+    _isOpeningProductRegistration = true;
+    try {
+      final currentUid = _getCurrentUserId();
+      final created = await ManualProductRegistrationSheet.show(
+        context,
+        productRepository: widget.productRepository!,
+        initialName: _searchController.text.trim(),
+      );
+      if (!mounted || created == null) return;
+      // Sessão trocada durante o cadastro: o produto existe no catálogo, mas não vira alvo da outra conta
+      if (_getCurrentUserId() != currentUid) return;
+
+      final createdItem = SearchResultItem(
+        id: created.id,
+        name: created.name,
+        category: created.category.isEmpty ? null : created.category,
+        targetType: TargetType.product,
+        rawTargetType: 'PRODUCT',
+        status: created.status,
+      );
+      final normalizedQuery = _searchController.text.trim().toLowerCase();
+      if (normalizedQuery.isNotEmpty) {
+        final existing = _queryCache[normalizedQuery] ?? const [];
+        _queryCache[normalizedQuery] = [
+          createdItem,
+          ...existing.where((e) => e.id != createdItem.id),
+        ];
+      }
+      widget.onTargetSelected(createdItem);
+    } finally {
+      _isOpeningProductRegistration = false;
+    }
+  }
+
+  void _showDuplicateTargetSnackBar(String targetName) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'O alvo "$targetName" já foi adicionado a esta avaliação.',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _openTargetScanner() async {
+    if (!widget.enabled || widget.onScanTarget == null || _isOpeningScanner) {
+      return;
+    }
+    _isOpeningScanner = true;
+    try {
+      final currentUid = _getCurrentUserId();
+      final item = await widget.onScanTarget!();
+      if (!mounted || !widget.enabled || item == null) return;
+      // MB-1a: Se a sessão mudou durante o await (logout ou troca de usuário), descarta o resultado.
+      if (_getCurrentUserId() != currentUid) return;
+
+      final normalizedId = item.id.trim();
+      final normalizedName = item.name.trim();
+      // Garante que apenas alvos íntegros sejam propagados para o formulário.
+      if (normalizedId.isEmpty || normalizedName.isEmpty) return;
+
+      final normalizedItem =
+          (normalizedId == item.id && normalizedName == item.name)
+              ? item
+              : SearchResultItem(
+                  id: normalizedId,
+                  name: normalizedName,
+                  slug: item.slug,
+                  category: item.category,
+                  targetType: item.targetType,
+                  rawTargetType: item.rawTargetType,
+                  status: item.status,
+                );
+
+      if (widget.isTargetSelectedElsewhere?.call(normalizedItem.id) ?? false) {
+        _showDuplicateTargetSnackBar(normalizedItem.name);
+        return;
+      }
+
+      widget.onTargetSelected(normalizedItem);
+    } finally {
+      _isOpeningScanner = false;
+    }
+  }
+
+  /// Local adotado da fonte externa: entra no cache da consulta e vira o alvo, salvo se já estiver em outro alvo.
+  void _onExternalPlaceAdopted(SearchResultItem adopted) {
+    if (widget.isTargetSelectedElsewhere?.call(adopted.id) ?? false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'O local "${adopted.name}" já foi adicionado a esta avaliação.',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    final normalizedQuery = _searchController.text.trim().toLowerCase();
+    if (normalizedQuery.isNotEmpty) {
+      final existing = _queryCache[normalizedQuery] ?? const [];
+      _queryCache[normalizedQuery] = [
+        adopted,
+        ...existing.where((e) => e.id != adopted.id),
+      ];
+    }
+    widget.onTargetSelected(adopted);
+  }
+
   Future<void> _resumePendingRegistration() async {
-    if (!widget.enabled || widget.placeRepository == null || _pendingRegistration == null) return;
+    if (!widget.enabled ||
+        widget.placeRepository == null ||
+        _pendingRegistration == null) {
+      return;
+    }
 
     final currentUid = _getCurrentUserId();
     final pending = _pendingRegistration!;
 
     File? photoToUse = pending.photoFile;
-    if (pending.photoUnavailable || (photoToUse != null && !photoToUse.existsSync())) {
+    if (pending.photoUnavailable ||
+        (photoToUse != null && !photoToUse.existsSync())) {
       photoToUse = null;
       if (mounted) {
+        final semantic = RewitSemanticColors.of(context);
         PendingRegistrationNotices.show(
           context,
           currentUid,
           SnackBar(
             content: Text(
               'A fotografia anterior do local "${pending.place.name}" não está mais disponível no dispositivo. Selecione uma nova foto.',
+              style: TextStyle(color: semantic.warning.onContainer),
             ),
-            backgroundColor: Colors.orange.shade900,
+            backgroundColor: semantic.warning.container,
           ),
         );
       }
@@ -304,7 +488,10 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     await _handleRegistrationResult(result, currentUid);
   }
 
-  Future<void> _handleRegistrationResult(ManualPlaceRegistrationResult result, String? currentUid) async {
+  Future<void> _handleRegistrationResult(
+    ManualPlaceRegistrationResult result,
+    String? currentUid,
+  ) async {
     if (result.isPhotoPending) {
       final pending = PendingPlaceRegistration(
         place: result.place,
@@ -350,6 +537,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     // Sem ação no aviso: o local criado vira o alvo e este seletor é desmontado em seguida, então a
     // retomada fica no aviso de pendência do seletor (botão "Trocar" do alvo ou nova avaliação).
     if (result.isPhotoPending && mounted) {
+      final semantic = RewitSemanticColors.of(context);
       PendingRegistrationNotices.show(
         context,
         currentUid,
@@ -357,8 +545,9 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           content: Text(
             'O local "${result.place.name}" foi registrado, mas o envio da fotografia ficou pendente. '
             'Retome o envio pelo aviso de pendência na busca de alvos.',
+            style: TextStyle(color: semantic.warning.onContainer),
           ),
-          backgroundColor: Colors.orange.shade800,
+          backgroundColor: semantic.warning.container,
         ),
       );
     }
@@ -372,6 +561,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final semantic = RewitSemanticColors.of(context);
 
     if (_showManualInput) {
       return Column(
@@ -422,13 +613,17 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.orange.shade50,
+              color: semantic.warning.container,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange.shade300),
+              border: Border.all(color: semantic.warning.border),
             ),
             child: Row(
               children: [
-                Icon(Icons.warning_amber_rounded, size: 20, color: Colors.orange.shade800),
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 20,
+                  color: semantic.warning.accent,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -441,7 +636,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                         : const Key('target_pending_photo_pending_text'),
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.orange.shade900,
+                      color: semantic.warning.onContainer,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -456,34 +651,74 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           ),
         ],
 
-        // Campo de entrada da busca
-        TextFormField(
-          controller: _searchController,
-          enabled: widget.enabled,
-          decoration: InputDecoration(
-            labelText: 'O que você quer avaliar? *',
-            hintText: 'Digite o nome do estabelecimento ou produto...',
-            prefixIcon: const Icon(Icons.search_rounded, size: 22),
-            suffixIcon: _isLoading
-                ? const Padding(
-                    padding: EdgeInsets.all(12.0),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        tooltip: 'Limpar busca',
-                        onPressed: widget.enabled ? _clearSearch : null,
-                      )
-                    : null,
-            isDense: true,
-            border: const OutlineInputBorder(),
-          ),
-          onChanged: _onSearchQueryChanged,
+        // Campo de entrada da busca e ação opcional de scanner (QR, EAN, ISBN)
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _searchController,
+                enabled: widget.enabled,
+                decoration: InputDecoration(
+                  labelText: 'O que você quer avaliar? *',
+                  hintText: 'Digite o nome do estabelecimento ou produto...',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 22),
+                  suffixIcon: _isLoading
+                      ? const Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              tooltip: 'Limpar busca',
+                              onPressed: widget.enabled ? _clearSearch : null,
+                            )
+                          : null,
+                  isDense: true,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: _onSearchQueryChanged,
+              ),
+            ),
+            if (widget.onScanTarget != null) ...[
+              const SizedBox(width: 8),
+              IconButton.outlined(
+                key: Key('target_scanner_button_${widget.targetIndex}'),
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: 'Escanear QR, EAN ou ISBN',
+                onPressed: widget.enabled ? _openTargetScanner : null,
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        // Tipo do alvo: a mesma busca, filtrada para locais ou produtos
+        SegmentedButton<TargetKindFilter>(
+          key: const Key('target_kind_filter'),
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: TargetKindFilter.all, label: Text('Todos')),
+            ButtonSegment(
+              value: TargetKindFilter.place,
+              icon: Icon(Icons.storefront_rounded, size: 16),
+              label: Text('Locais'),
+            ),
+            ButtonSegment(
+              value: TargetKindFilter.product,
+              icon: Icon(Icons.inventory_2_outlined, size: 16),
+              label: Text('Produtos'),
+            ),
+          ],
+          selected: {_kindFilter},
+          onSelectionChanged: widget.enabled
+              ? (selection) => setState(() => _kindFilter = selection.first)
+              : null,
         ),
         const SizedBox(height: 4),
 
@@ -527,7 +762,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                   'Buscando alvos...',
                   style: TextStyle(
                     fontSize: 13,
-                    color: theme.colorScheme.onSurface.withAlpha(160),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -541,23 +776,27 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
             margin: const EdgeInsets.only(top: 8),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: theme.colorScheme.errorContainer.withAlpha(120),
+              color: scheme.errorContainer,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: theme.colorScheme.error.withAlpha(80)),
+              border: Border.all(color: scheme.error.withAlpha(80)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Icon(Icons.error_outline, size: 18, color: theme.colorScheme.error),
+                    Icon(
+                      Icons.error_outline,
+                      size: 18,
+                      color: scheme.error,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _errorMessage!,
                         style: TextStyle(
                           fontSize: 12,
-                          color: theme.colorScheme.onErrorContainer,
+                          color: scheme.onErrorContainer,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -570,7 +809,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     'Aguarde $_retryAfterSeconds segundos antes de tentar novamente.',
                     style: TextStyle(
                       fontSize: 11,
-                      color: theme.colorScheme.error,
+                      color: scheme.error,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -585,10 +824,16 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                       }
                     },
                     icon: const Icon(Icons.refresh, size: 14),
-                    label: const Text('Tentar novamente', style: TextStyle(fontSize: 11)),
+                    label: const Text(
+                      'Tentar novamente',
+                      style: TextStyle(fontSize: 11),
+                    ),
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
                     ),
                   ),
                 ),
@@ -609,7 +854,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                 Icon(
                   Icons.info_outline,
                   size: 16,
-                  color: theme.colorScheme.onSurface.withAlpha(130),
+                  color: scheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -617,7 +862,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     'Digite ao menos 2 caracteres para buscar locais e produtos.',
                     style: TextStyle(
                       fontSize: 11,
-                      color: theme.colorScheme.onSurface.withAlpha(140),
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -626,16 +871,16 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           ),
         ],
 
-        // Nenhum resultado encontrado
+        // Nenhum resultado encontrado (para o tipo escolhido)
         if (!_isLoading &&
             _errorMessage == null &&
-            _results != null &&
-            _results!.isEmpty) ...[
+            _visibleResults != null &&
+            _visibleResults!.isEmpty) ...[
           Container(
             margin: const EdgeInsets.only(top: 8),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
@@ -646,7 +891,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     Icon(
                       Icons.search_off_rounded,
                       size: 20,
-                      color: theme.colorScheme.onSurface.withAlpha(150),
+                      color: scheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -654,7 +899,14 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Nenhum resultado para "${_searchController.text.trim()}".',
+                            switch (_kindFilter) {
+                              TargetKindFilter.all =>
+                                'Nenhum resultado para "${_searchController.text.trim()}".',
+                              TargetKindFilter.place =>
+                                'Nenhum local para "${_searchController.text.trim()}".',
+                              TargetKindFilter.product =>
+                                'Nenhum produto para "${_searchController.text.trim()}".',
+                            },
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -665,7 +917,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                             'Verifique a digitação ou tente outro nome.',
                             style: TextStyle(
                               fontSize: 11,
-                              color: theme.colorScheme.onSurface.withAlpha(150),
+                              color: scheme.onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -673,13 +925,24 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                     ),
                   ],
                 ),
-                if (widget.placeRepository != null) ...[
+                if (_canRegisterPlace) ...[
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(
                     key: const Key('register_manual_place_button'),
-                    onPressed: widget.enabled ? _openManualPlaceRegistration : null,
+                    onPressed:
+                        widget.enabled ? _openManualPlaceRegistration : null,
                     icon: const Icon(Icons.add_location_alt_outlined, size: 18),
                     label: const Text('Cadastrar local manualmente'),
+                  ),
+                ],
+                if (_canRegisterProduct) ...[
+                  const SizedBox(height: 8),
+                  FilledButton.tonalIcon(
+                    key: const Key('register_manual_product_button'),
+                    onPressed:
+                        widget.enabled ? _openManualProductRegistration : null,
+                    icon: const Icon(Icons.add_box_outlined, size: 18),
+                    label: const Text('Cadastrar produto'),
                   ),
                 ],
               ],
@@ -688,26 +951,26 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
         ],
 
         // Lista de resultados encontrados
-        if (_results != null && _results!.isNotEmpty) ...[
+        if (_visibleResults != null && _visibleResults!.isNotEmpty) ...[
           Container(
             margin: const EdgeInsets.only(top: 8),
             constraints: const BoxConstraints(maxHeight: 280),
             child: Material(
-              color: theme.colorScheme.surface,
+              color: theme.cardTheme.color ?? scheme.surfaceContainerLow,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
-                side: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(100)),
+                side: BorderSide(color: scheme.outlineVariant),
               ),
               child: ListView.separated(
                 shrinkWrap: true,
                 padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount: _results!.length,
+                itemCount: _visibleResults!.length,
                 separatorBuilder: (context, _) => Divider(
                   height: 1,
-                  color: theme.colorScheme.outlineVariant.withAlpha(60),
+                  color: scheme.outlineVariant,
                 ),
                 itemBuilder: (context, index) {
-                  final item = _results![index];
+                  final item = _visibleResults![index];
                   final isAlreadySelected =
                       widget.isTargetSelectedElsewhere?.call(item.id) ?? false;
 
@@ -721,7 +984,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               ),
             ),
           ),
-          if (widget.placeRepository != null) ...[
+          if (_canRegisterPlace) ...[
             const SizedBox(height: 6),
             Align(
               alignment: Alignment.centerRight,
@@ -736,7 +999,33 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               ),
             ),
           ],
+          if (_canRegisterProduct)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('register_manual_product_footer_button'),
+                onPressed:
+                    widget.enabled ? _openManualProductRegistration : null,
+                icon: const Icon(Icons.add_box_outlined, size: 16),
+                label: const Text(
+                  'Não encontrou o produto? Cadastrar',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
         ],
+
+        // Fonte externa, separada do catálogo: só depois da busca local, para não gastar cota à toa
+        if (_canDiscoverExternally && !_isLoading && _results != null)
+          ExternalPlaceResultsSection(
+            repository: widget.placeDiscoveryRepository!,
+            query: _searchController.text,
+            enabled: widget.enabled,
+            onAdopted: _onExternalPlaceAdopted,
+            onRegisterManually:
+                _canRegisterPlace ? _openManualPlaceRegistration : null,
+            locationService: widget.locationService,
+          ),
       ],
     );
   }
@@ -747,21 +1036,8 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
     required SearchResultItem item,
     required bool isAlreadySelected,
   }) {
-    final isPlace = item.isPlace;
-    final isProduct = item.isProduct;
-
-    // Ícone e cores distintivas para Place vs Product
-    final IconData typeIcon = isPlace
-        ? Icons.storefront_rounded
-        : isProduct
-            ? Icons.inventory_2_outlined
-            : Icons.category_outlined;
-
-    final Color badgeColor = isPlace
-        ? theme.colorScheme.primary
-        : isProduct
-            ? Colors.teal
-            : theme.colorScheme.secondary;
+    final scheme = theme.colorScheme;
+    final style = TargetTypeStyle.of(item.targetType, scheme);
 
     return ListTile(
       dense: true,
@@ -770,19 +1046,17 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: badgeColor.withAlpha(25),
+          color: style.containerColor,
           shape: BoxShape.circle,
         ),
-        child: Icon(typeIcon, size: 20, color: badgeColor),
+        child: Icon(style.icon, size: 20, color: style.color),
       ),
       title: Text(
         item.name,
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.bold,
-          color: isAlreadySelected
-              ? theme.colorScheme.onSurface.withAlpha(100)
-              : theme.colorScheme.onSurface,
+          color: isAlreadySelected ? scheme.onSurfaceVariant : scheme.onSurface,
         ),
       ),
       subtitle: Row(
@@ -790,7 +1064,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
             decoration: BoxDecoration(
-              color: badgeColor.withAlpha(25),
+              color: style.containerColor,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
@@ -798,7 +1072,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
-                color: badgeColor,
+                color: style.onContainerColor,
               ),
             ),
           ),
@@ -809,7 +1083,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                 '• ${item.category!}',
                 style: TextStyle(
                   fontSize: 11,
-                  color: theme.colorScheme.onSurface.withAlpha(140),
+                  color: scheme.onSurfaceVariant,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -821,7 +1095,7 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
+                color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -829,27 +1103,24 @@ class _TargetSearchSelectorWidgetState extends State<TargetSearchSelectorWidget>
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: theme.colorScheme.onSurface.withAlpha(140),
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
             )
           : TextButton(
-              onPressed: widget.enabled ? () => widget.onTargetSelected(item) : null,
+              onPressed:
+                  widget.enabled ? () => widget.onTargetSelected(item) : null,
               style: TextButton.styleFrom(
                 visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 2,
+                ),
               ),
               child: const Text('Selecionar', style: TextStyle(fontSize: 12)),
             ),
       onTap: isAlreadySelected
-          ? () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('O alvo "${item.name}" já foi adicionado a esta avaliação.'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            }
+          ? () => _showDuplicateTargetSnackBar(item.name)
           : () {
               widget.onTargetSelected(item);
             },

@@ -47,6 +47,66 @@ class FeedTarget {
   bool get isService => targetType?.toUpperCase() == 'SERVICE';
 }
 
+/// Situação da verificação de presença devolvida pelo backend na criação de uma avaliação.
+enum CheckInResultStatus {
+  /// Presença confirmada: a avaliação gerou um check-in verificado.
+  verified,
+
+  /// Avaliação publicada sem check-in verificado; [CheckInResult.reason] diz o motivo.
+  notVerified,
+
+  /// Nenhuma verificação pedida (sem local de contexto ou sem localização enviada).
+  notRequested,
+
+  /// Valor desconhecido para esta versão do app; nunca tratado como presença confirmada.
+  unknown,
+}
+
+/// Resultado da verificação de presença: o backend decide sozinho, e o app só exibe o que ele respondeu.
+class CheckInResult {
+  final CheckInResultStatus status;
+
+  /// Motivo de uma presença não verificada (`OUTSIDE_RADIUS`, `ACCURACY_TOO_LOW`, `ACCURACY_UNAVAILABLE`,
+  /// `RECENT_CHECK_IN`, `PLACE_WITHOUT_COORDINATES`); nulo nos demais casos.
+  final String? reason;
+
+  const CheckInResult({required this.status, this.reason});
+
+  bool get isVerified => status == CheckInResultStatus.verified;
+
+  /// Mensagem explicativa em português para quando o backend não verifica a presença.
+  String get notVerifiedReasonMessage {
+    if (status != CheckInResultStatus.notVerified) {
+      return 'Sua avaliação foi publicada, mas a presença no local não foi verificada.';
+    }
+    return switch (reason) {
+      'ACCURACY_TOO_LOW' =>
+        'A precisão do GPS estava baixa demais para confirmar sua presença. Tente de novo em um lugar aberto.',
+      'ACCURACY_UNAVAILABLE' =>
+        'O aparelho não informou a precisão da localização, então a presença não pôde ser confirmada.',
+      'OUTSIDE_RADIUS' =>
+        'Sua localização estava fora da área do local, então a presença não foi confirmada.',
+      'RECENT_CHECK_IN' =>
+        'Você já tem um check-in verificado recente neste local; este não conta como um novo.',
+      'PLACE_WITHOUT_COORDINATES' =>
+        'Este local não tem localização cadastrada, então a presença não pôde ser verificada.',
+      _ => 'Sua avaliação foi publicada, mas a presença no local não foi verificada.',
+    };
+  }
+
+  static CheckInResult? fromJson(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final status = switch (json['status']) {
+      'VERIFIED' => CheckInResultStatus.verified,
+      'NOT_VERIFIED' => CheckInResultStatus.notVerified,
+      'NOT_REQUESTED' => CheckInResultStatus.notRequested,
+      _ => CheckInResultStatus.unknown,
+    };
+    final reason = json['reason'];
+    return CheckInResult(status: status, reason: reason is String ? reason : null);
+  }
+}
+
 /// Entidade representacional de uma avaliação ranqueada e diversificada no Feed V2.
 class FeedReview {
   final String id;
@@ -68,6 +128,9 @@ class FeedReview {
   /// Nulo quando o payload de origem não informa (ex.: feed e listagens).
   final bool? isMine;
 
+  /// Resultado da verificação de presença; presente só na resposta da criação da avaliação.
+  final CheckInResult? checkIn;
+
   const FeedReview({
     required this.id,
     required this.author,
@@ -84,6 +147,7 @@ class FeedReview {
     this.isHelpfulByMe = false,
     this.mediaItems,
     this.isMine,
+    this.checkIn,
   });
 
   FeedReview copyWith({
@@ -101,6 +165,7 @@ class FeedReview {
     bool? isHelpfulByMe,
     List<ReviewMediaItem>? mediaItems,
     bool? isMine,
+    CheckInResult? checkIn,
   }) {
     return FeedReview(
       id: id,
@@ -118,6 +183,7 @@ class FeedReview {
       isHelpfulByMe: isHelpfulByMe ?? this.isHelpfulByMe,
       mediaItems: mediaItems ?? this.mediaItems,
       isMine: isMine ?? this.isMine,
+      checkIn: checkIn ?? this.checkIn,
     );
   }
 
@@ -130,7 +196,7 @@ class FeedReview {
 }
 
 
-/// Página de feed ranqueada devolvida pelo backend.
+/// Página de feed devolvida pelo backend (Feed V1 social ou Feed V2 ranqueado).
 class FeedPage {
   final List<FeedReview> items;
   final int page;
@@ -138,14 +204,28 @@ class FeedPage {
   final int windowSize;
   final int totalPages;
 
+  /// Total geral de elementos em todas as páginas (informado pelo Feed V1 / PagedResponse).
+  final int? totalElements;
+
+  /// Indicador explícito de última página (informado pelo Feed V1 / PagedResponse).
+  final bool? isLast;
+
   const FeedPage({
     required this.items,
     required this.page,
     required this.size,
     required this.windowSize,
     required this.totalPages,
+    this.totalElements,
+    this.isLast,
   });
 
-  bool get hasMore => page + 1 < totalPages;
+  /// Indica se existem mais páginas a carregar.
+  /// Prioriza [isLast] quando presente (Feed V1); caso contrário, avalia [page + 1 < totalPages] (Feed V2).
+  bool get hasMore {
+    if (isLast != null) return !isLast!;
+    return page + 1 < totalPages;
+  }
+
   bool get isEmpty => items.isEmpty;
 }

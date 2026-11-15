@@ -9,9 +9,16 @@ class ApiEndpoints {
   static const String authRefresh = '/api/v1/auth/refresh';
   static const String authLogout = '/api/v1/auth/logout';
   static const String authMe = '/api/v1/auth/me';
+  static const String authSocialNonce = '/api/v1/auth/social/nonce';
+  static String authSocial(String provider) => '/api/v1/auth/social/$provider';
+  static String authSocialReactivate(String provider) => '/api/v1/auth/social/$provider/reactivate';
   static const String meProfile = '/api/v1/me/profile';
   static const String meDeactivate = '/api/v1/me/deactivate';
   static const String mePassword = '/api/v1/me/password';
+
+  // Interesses e questionário inicial
+  static const String interestCatalog = '/api/v1/interests/catalog';
+  static const String myInterests = '/api/v1/me/interests';
 
   // Feed e Avaliações
   static const String feed = '/api/v1/feed';
@@ -26,6 +33,10 @@ class ApiEndpoints {
   static String placeMediaPrimary(String placeId, String mediaId) =>
       '/api/v1/places/$placeId/media/$mediaId/primary';
   static String placeDetail(String id) => '/api/v1/places/$id';
+  static const String nearbyPlaces = '/api/v1/places/nearby';
+  // Descoberta externa e adoção no catálogo
+  static const String placeDiscoverySearch = '/api/v1/places/discovery/search';
+  static const String placeAdopt = '/api/v1/places/adopt';
   static String placeMedia(String id) => '/api/v1/places/$id/media';
   static String placeMediaItem(String placeId, String mediaId) =>
       '/api/v1/places/$placeId/media/$mediaId';
@@ -62,6 +73,13 @@ class ApiEndpoints {
   static const String myReviewsPath = '/api/v1/me/reviews';
   static String myReviews({int page = 0, int size = 10}) =>
       '/api/v1/me/reviews?page=$page&size=$size';
+  static const String myCheckIns = '/api/v1/me/check-ins';
+
+  // Rankings da Região (V1) e participação voluntária
+  static const String rankingCheckIns = '/api/v1/rankings/check-ins';
+  static const String rankingPlacesExplored = '/api/v1/rankings/places-explored';
+  static const String rankingHelpfulVotes = '/api/v1/rankings/helpful-votes';
+  static const String myRankingPreferences = '/api/v1/me/ranking-preferences';
 
   // Discussões e Comentários Comunitários
   static String reviewDiscussions(String reviewId, {int page = 0, int size = 20}) =>

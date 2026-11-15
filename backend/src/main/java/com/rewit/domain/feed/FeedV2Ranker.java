@@ -1,14 +1,17 @@
 package com.rewit.domain.feed;
 
+import com.rewit.domain.enums.InterestCategory;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
- * Ranker puro e determinístico do Feed V2.
+ * Ranker puro e determinístico do Feed V2 com personalização por afinidade de interesses (V40).
  * Não consulta relógio do sistema, banco, grafo social nem HTTP.
  */
 public final class FeedV2Ranker {
@@ -32,30 +35,63 @@ public final class FeedV2Ranker {
         this.weights = Objects.requireNonNull(weights, "weights is required");
     }
 
-    public List<RankedFeedCandidate> rank(List<FeedCandidate> candidates, Instant referenceTime) {
+    public FeedRankingWeights weights() {
+        return weights;
+    }
+
+    /**
+     * Ranqueia determinísticamente os candidatos considerando o perfil de interesses do usuário.
+     *
+     * @param candidates lista de candidatos elegíveis
+     * @param referenceTime instante de referência temporal
+     * @param userInterests conjunto de interesses declarados pelo usuário autenticado
+     * @return lista imutável ranqueada por score DESC, createdAt DESC, reviewId ASC
+     */
+    public List<RankedFeedCandidate> rank(List<FeedCandidate> candidates, Instant referenceTime, Set<InterestCategory> userInterests) {
         Objects.requireNonNull(candidates, "candidates is required");
         Objects.requireNonNull(referenceTime, "referenceTime is required");
+        Set<InterestCategory> interests = userInterests != null ? userInterests : Set.of();
 
         List<RankedFeedCandidate> ranked = new ArrayList<>(candidates.size());
         for (FeedCandidate candidate : candidates) {
             Objects.requireNonNull(candidate, "candidate is required");
-            ranked.add(new RankedFeedCandidate(candidate, score(candidate, referenceTime)));
+            ranked.add(new RankedFeedCandidate(candidate, score(candidate, referenceTime, interests)));
         }
         ranked.sort(ORDER);
         return List.copyOf(ranked);
     }
 
-    FeedScore score(FeedCandidate candidate, Instant referenceTime) {
+    /**
+     * Sobrecarga de conveniência sem interesses (afinidade neutra para todos os candidatos).
+     */
+    public List<RankedFeedCandidate> rank(List<FeedCandidate> candidates, Instant referenceTime) {
+        return rank(candidates, referenceTime, Set.of());
+    }
+
+    FeedScore score(FeedCandidate candidate, Instant referenceTime, Set<InterestCategory> userInterests) {
         double social = candidate.isDirectFollow() ? 1.0d : 0.0d;
+        double interest = interestSignal(candidate.category(), userInterests);
         double recency = recencySignal(candidate.createdAt(), referenceTime);
         double verified = candidate.isVerifiedOnSite() ? 1.0d : 0.0d;
         double helpful = helpfulSignal(candidate.helpfulCount());
 
         double raw = (weights.social() * social)
+                + (weights.interest() * interest)
                 + (weights.recency() * recency)
                 + (weights.verified() * verified)
                 + (weights.helpful() * helpful);
         return new FeedScore(clampUnit(raw));
+    }
+
+    FeedScore score(FeedCandidate candidate, Instant referenceTime) {
+        return score(candidate, referenceTime, Set.of());
+    }
+
+    static double interestSignal(InterestCategory candidateCategory, Set<InterestCategory> userInterests) {
+        if (candidateCategory == null || userInterests == null || userInterests.isEmpty()) {
+            return 0.0d;
+        }
+        return userInterests.contains(candidateCategory) ? 1.0d : 0.0d;
     }
 
     static double recencySignal(Instant createdAt, Instant referenceTime) {

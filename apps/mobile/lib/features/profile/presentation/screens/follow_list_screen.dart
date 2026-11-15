@@ -205,7 +205,8 @@ class _FollowListViewState extends State<_FollowListView> {
       final nextPage = _currentPage + 1;
       final paged = widget.isFollowersTab
           ? await widget.repository!.getFollowers(widget.userId, page: nextPage)
-          : await widget.repository!.getFollowing(widget.userId, page: nextPage);
+          : await widget.repository!
+              .getFollowing(widget.userId, page: nextPage);
 
       if (mounted) {
         setState(() {
@@ -227,6 +228,7 @@ class _FollowListViewState extends State<_FollowListView> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -239,12 +241,12 @@ class _FollowListViewState extends State<_FollowListView> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
+              Icon(Icons.error_outline, size: 48, color: scheme.error),
               const SizedBox(height: 16),
               Text(
                 _errorMessage!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: theme.colorScheme.error),
+                style: TextStyle(color: scheme.error),
               ),
               const SizedBox(height: 16),
               ElevatedButton(
@@ -264,7 +266,7 @@ class _FollowListViewState extends State<_FollowListView> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.people_outline, size: 64, color: Colors.grey.shade400),
+              Icon(Icons.people_outline, size: 64, color: scheme.outline),
               const SizedBox(height: 16),
               Text(
                 widget.isFollowersTab
@@ -272,7 +274,7 @@ class _FollowListViewState extends State<_FollowListView> {
                     : 'Não está seguindo ninguém ainda',
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: Colors.grey.shade700,
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -308,10 +310,11 @@ class _FollowListViewState extends State<_FollowListView> {
 
           return ListTile(
             leading: CircleAvatar(
-              backgroundColor: theme.colorScheme.primary.withAlpha(30),
-              backgroundImage: user.avatarUrl != null && user.avatarUrl!.isNotEmpty
-                  ? NetworkImage(user.avatarUrl!)
-                  : null,
+              backgroundColor: scheme.secondaryContainer,
+              backgroundImage:
+                  user.avatarUrl != null && user.avatarUrl!.isNotEmpty
+                      ? NetworkImage(user.avatarUrl!)
+                      : null,
               child: user.avatarUrl == null || user.avatarUrl!.isEmpty
                   ? Text(
                       user.displayName.isNotEmpty
@@ -319,7 +322,7 @@ class _FollowListViewState extends State<_FollowListView> {
                           : 'U',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
+                        color: scheme.onSecondaryContainer,
                       ),
                     )
                   : null,
@@ -331,9 +334,8 @@ class _FollowListViewState extends State<_FollowListView> {
             subtitle: !isDeleted && user.handle.isNotEmpty
                 ? Text('@${user.handle}')
                 : null,
-            trailing: canNavigate
-                ? const Icon(Icons.chevron_right, size: 20)
-                : null,
+            trailing:
+                canNavigate ? const Icon(Icons.chevron_right, size: 20) : null,
             onTap: canNavigate
                 ? () {
                     Navigator.of(context).pushNamed(

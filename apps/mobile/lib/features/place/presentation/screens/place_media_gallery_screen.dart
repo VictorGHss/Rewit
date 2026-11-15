@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
 import 'package:rewit_mobile/features/place/presentation/state/place_media_notifier.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/selected_media_item.dart';
@@ -75,33 +76,41 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
     if (!mounted) return;
 
     if (_notifier.successMessage != null) {
+      final semantic = RewitSemanticColors.of(context);
       final msg = _notifier.successMessage!;
       _notifier.clearMessages();
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(msg),
-          backgroundColor: Colors.green,
+          content: Text(
+            msg,
+            style: TextStyle(color: semantic.success.onContainer),
+          ),
+          backgroundColor: semantic.success.container,
           duration: const Duration(seconds: 3),
         ),
       );
     } else if (_notifier.errorMessage != null && !_notifier.isLoading) {
       // Se for erro de carregamento inicial da página (sem fotos), a ErrorView cuida da renderização.
       if (!_notifier.hasInitialLoadError) {
+        final scheme = Theme.of(context).colorScheme;
         final err = _notifier.errorMessage!;
         final canRetry = _notifier.hasPendingRetry;
         _notifier.clearMessages();
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(err),
-            backgroundColor: Colors.red,
+            content: Text(
+              err,
+              style: TextStyle(color: scheme.onErrorContainer),
+            ),
+            backgroundColor: scheme.errorContainer,
             duration: const Duration(seconds: 5),
             action: canRetry
                 ? SnackBarAction(
                     key: const Key('snackbar_retry_upload_action'),
                     label: 'Tentar novamente',
-                    textColor: Colors.white,
+                    textColor: scheme.onErrorContainer,
                     onPressed: () => _notifier.retryUpload(),
                   )
                 : null,
@@ -112,13 +121,16 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
   }
 
   Future<void> _showPhotoSourcePicker(BuildContext context) async {
+    final semantic = RewitSemanticColors.of(context);
+
     if (_notifier.hasPendingRetry) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
             'Existe um envio pendente. Tente novamente ou descarte a operação antes de adicionar outra foto.',
+            style: TextStyle(color: semantic.warning.onContainer),
           ),
-          backgroundColor: Colors.orange,
+          backgroundColor: semantic.warning.container,
         ),
       );
       return;
@@ -126,11 +138,12 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
 
     if (_notifier.isLimitReached) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
             'Limite de 5 fotografias já foi atingido.',
+            style: TextStyle(color: semantic.warning.onContainer),
           ),
-          backgroundColor: Colors.orange,
+          backgroundColor: semantic.warning.container,
         ),
       );
       return;
@@ -237,10 +250,14 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
       );
     } catch (_) {
       if (mounted) {
+        final scheme = Theme.of(context).colorScheme;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Falha ao selecionar fotografia. Tente novamente.'),
-            backgroundColor: Colors.red,
+          SnackBar(
+            content: Text(
+              'Falha ao selecionar fotografia. Tente novamente.',
+              style: TextStyle(color: scheme.onErrorContainer),
+            ),
+            backgroundColor: scheme.errorContainer,
           ),
         );
       }
@@ -251,6 +268,7 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
     showDialog<void>(
       context: context,
       builder: (dialogContext) {
+        final dialogScheme = Theme.of(dialogContext).colorScheme;
         return AlertDialog(
           title: const Text('Excluir fotografia'),
           content: const Text(
@@ -265,7 +283,8 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
             FilledButton(
               key: Key('confirm_delete_button_${photo.id}'),
               style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
+                backgroundColor: dialogScheme.error,
+                foregroundColor: dialogScheme.onError,
               ),
               onPressed: () {
                 Navigator.of(dialogContext).pop();
@@ -320,10 +339,13 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
             key: const Key('add_photo_fab'),
             onPressed: isAddDisabled ? null : () => _showPhotoSourcePicker(context),
             icon: _notifier.isUploading
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   )
                 : const Icon(Icons.add_a_photo_outlined),
             label: Text(_notifier.isUploading ? 'Enviando...' : 'Adicionar Foto'),
@@ -358,24 +380,25 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
   Widget _buildPendingUploadBanner(BuildContext context, ThemeData theme) {
     final pending = _notifier.pendingUpload;
     if (pending == null) return const SizedBox.shrink();
+    final semantic = RewitSemanticColors.of(context);
 
     return Container(
       key: const Key('pending_upload_banner'),
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.amber.shade50,
+        color: semantic.warning.container,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.amber.shade400),
+        border: Border.all(color: semantic.warning.border),
       ),
       child: Row(
         children: [
-          const Icon(Icons.cloud_off_outlined, color: Colors.orange, size: 20),
+          Icon(Icons.cloud_off_outlined, color: semantic.warning.accent, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Envio pendente: ${pending.filename}',
-              style: const TextStyle(fontSize: 12, color: Colors.black87),
+              style: TextStyle(fontSize: 12, color: semantic.warning.onContainer),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -444,6 +467,7 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
 
   Widget _buildGalleryView(BuildContext context, ThemeData theme) {
     final mediaList = _notifier.mediaList;
+    final semantic = RewitSemanticColors.of(context);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 80),
@@ -466,13 +490,17 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withAlpha(30),
+                    color: semantic.warning.container,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.orange.withAlpha(100)),
+                    border: Border.all(color: semantic.warning.border),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Limite atingido',
-                    style: TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: semantic.warning.onContainer,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
             ],
@@ -500,6 +528,7 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
 
   Widget _buildPhotoCard(BuildContext context, ThemeData theme, PlaceMediaItem photo) {
     final isBusy = _notifier.operatingMediaId == photo.id;
+    final semantic = RewitSemanticColors.of(context);
 
     return Card(
       elevation: 0,
@@ -543,21 +572,26 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
                       key: Key('primary_badge_${photo.id}'),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.green,
+                        color: semantic.verified.container,
                         borderRadius: BorderRadius.circular(6),
-                        boxShadow: const [
-                          BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+                        border: Border.all(color: semantic.verified.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: theme.colorScheme.shadow.withAlpha(64),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
                         ],
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.star, size: 14, color: Colors.white),
-                          SizedBox(width: 4),
+                          Icon(Icons.star, size: 14, color: semantic.verified.accent),
+                          const SizedBox(width: 4),
                           Text(
                             'Capa',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: semantic.verified.onContainer,
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
                             ),
@@ -568,12 +602,15 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
                   ),
                 if (isBusy)
                   Container(
-                    color: Colors.black45,
-                    child: const Center(
+                    color: semantic.mediaScrim,
+                    child: Center(
                       child: SizedBox(
                         width: 28,
                         height: 28,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: semantic.onMediaScrim,
+                        ),
                       ),
                     ),
                   ),
@@ -603,11 +640,15 @@ class _PlaceMediaGalleryScreenState extends State<PlaceMediaGalleryScreen> {
                     label: const Text('Capa', style: TextStyle(fontSize: 12)),
                   )
                 else
-                  const Padding(
-                    padding: EdgeInsets.only(left: 8.0),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
                     child: Text(
                       'Foto Principal',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: semantic.success.accent,
+                      ),
                     ),
                   ),
                 IconButton(
