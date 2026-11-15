@@ -12,6 +12,9 @@ class LocationCapturePolicy {
   final Duration defaultTimeout;
   final Duration minTimeout;
   final Duration maxTimeout;
+  final LocationAccuracy? fallbackAccuracy;
+  final Duration fallbackTimeout;
+  final Duration maxTotalDuration;
   final bool retryOnceOnApproximateAccuracy;
   final Duration retryTimeout;
 
@@ -23,12 +26,17 @@ class LocationCapturePolicy {
     required this.defaultTimeout,
     required this.minTimeout,
     required this.maxTimeout,
+    this.fallbackAccuracy,
+    this.fallbackTimeout = Duration.zero,
+    required this.maxTotalDuration,
     required this.retryOnceOnApproximateAccuracy,
     required this.retryTimeout,
   });
 
   /// Política para descoberta externa de estabelecimentos (raio de 10 km):
-  /// prioriza velocidade, aceita cache de até 5 minutos e precisão média com teto de 5s.
+  /// prioriza velocidade com cache recente (<= 5 min) e precisão média em até 5s,
+  /// com no máximo um fallback controlado em alta precisão (<= 4s, teto total 9s)
+  /// caso não haja cache válido e a captura inicial leve falhe/expire.
   static const discovery = LocationCapturePolicy(
     purpose: LocationPurpose.discovery,
     allowCachedPosition: true,
@@ -37,6 +45,9 @@ class LocationCapturePolicy {
     defaultTimeout: Duration(seconds: 5),
     minTimeout: Duration(milliseconds: 1),
     maxTimeout: Duration(seconds: 5),
+    fallbackAccuracy: LocationAccuracy.high,
+    fallbackTimeout: Duration(seconds: 4),
+    maxTotalDuration: Duration(seconds: 9),
     retryOnceOnApproximateAccuracy: false,
     retryTimeout: Duration.zero,
   );
@@ -52,6 +63,9 @@ class LocationCapturePolicy {
     defaultTimeout: Duration(seconds: 12),
     minTimeout: Duration(seconds: 10),
     maxTimeout: Duration(seconds: 15),
+    fallbackAccuracy: null,
+    fallbackTimeout: Duration.zero,
+    maxTotalDuration: Duration(seconds: 20),
     retryOnceOnApproximateAccuracy: true,
     retryTimeout: Duration(seconds: 5),
   );
@@ -66,6 +80,16 @@ class LocationCapturePolicy {
     if (candidate < minTimeout) return minTimeout;
     if (candidate > maxTimeout) return maxTimeout;
     return candidate;
+  }
+
+  /// Orçamento total para captura ativa + fallback único, mantendo respeitado qualquer
+  /// timeout explicitamente menor que [defaultTimeout].
+  Duration resolveTotalBudget(Duration? requested) {
+    final effectivePrimary = resolveTimeout(requested);
+    if (requested != null && requested < defaultTimeout) {
+      return effectivePrimary;
+    }
+    return maxTotalDuration;
   }
 }
 
@@ -157,42 +181,52 @@ class GeolocatorLocationService implements LocationService {
       }
 
       // 2. Obtenção ativa com precisão e timeout definidos pela política da finalidade.
-      final firstPosition = await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(
-          accuracy: policy.accuracy,
-          timeLimit: effectiveTimeout,
-        ),
+      final budgetStopwatch = Stopwatch()..start();
+      final totalBudget = policy.resolveTotalBudget(timeout);
+
+      var attempt = await _captureActivePosition(
+        accuracy: policy.accuracy,
+        timeLimit: effectiveTimeout,
+        maxAge: policy.maxLocationAge,
       );
 
-      if (!_isUsablePosition(firstPosition)) {
-        return const LocationFailure(
-          reason: LocationFailureReason.error,
-          message: 'A localização obtida é inválida.',
-        );
+      // 2b. Se a tentativa primária falhou (ex.: balanced power sem cache em dispositivo
+      // somente GNSS), executa no máximo UM fallback controlado dentro do orçamento total.
+      if (attempt.failure != null &&
+          policy.fallbackAccuracy != null &&
+          policy.fallbackTimeout > Duration.zero) {
+        final remainingBudget = totalBudget - budgetStopwatch.elapsed;
+        if (remainingBudget > Duration.zero) {
+          final fallbackLimit = remainingBudget < policy.fallbackTimeout
+              ? remainingBudget
+              : policy.fallbackTimeout;
+          final fallbackAttempt = await _captureActivePosition(
+            accuracy: policy.fallbackAccuracy!,
+            timeLimit: fallbackLimit,
+            maxAge: policy.maxLocationAge,
+          );
+          if (fallbackAttempt.position != null) {
+            attempt = fallbackAttempt;
+          } else if (fallbackAttempt.failure != null) {
+            attempt = fallbackAttempt;
+          }
+        }
       }
 
-      final captureNow = _clock();
-      if (!_isCoherentAndFreshTimestamp(
-        firstPosition.timestamp,
-        captureNow,
-        maxAge: policy.maxLocationAge,
-      )) {
-        return const LocationFailure(
-          reason: LocationFailureReason.error,
-          message: 'A localização obtida está desatualizada ou inválida. Tente novamente.',
-        );
+      if (attempt.failure != null) {
+        return attempt.failure!;
       }
 
-      var chosenPosition = firstPosition;
+      var chosenPosition = attempt.position!;
 
       // 3. Em verificação de presença com permissão exata, se a primeira leitura vier
       // acima do limite de 100 m (ex.: fix inicial por rede/Wi-Fi antes do lock GNSS),
       // faz no máximo UMA tentativa curta adicional para tentar refinar sem entrar em loop.
       if (policy.retryOnceOnApproximateAccuracy &&
           !permissionReduced &&
-          firstPosition.accuracy > DeviceLocation.approximateAccuracyThresholdMeters) {
+          chosenPosition.accuracy > DeviceLocation.approximateAccuracyThresholdMeters) {
         chosenPosition = await _trySinglePrecisionRefinement(
-          initialPosition: firstPosition,
+          initialPosition: chosenPosition,
           policy: policy,
         );
       }
@@ -214,6 +248,64 @@ class GeolocatorLocationService implements LocationService {
       return const LocationFailure(
         reason: LocationFailureReason.error,
         message: 'Não foi possível obter sua localização agora.',
+      );
+    }
+  }
+
+  Future<({Position? position, LocationFailure? failure})> _captureActivePosition({
+    required LocationAccuracy accuracy,
+    required Duration timeLimit,
+    required Duration maxAge,
+  }) async {
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: LocationSettings(
+          accuracy: accuracy,
+          timeLimit: timeLimit,
+        ),
+      );
+
+      if (!_isUsablePosition(position)) {
+        return (
+          position: null,
+          failure: const LocationFailure(
+            reason: LocationFailureReason.error,
+            message: 'A localização obtida é inválida.',
+          ),
+        );
+      }
+
+      final captureNow = _clock();
+      if (!_isCoherentAndFreshTimestamp(
+        position.timestamp,
+        captureNow,
+        maxAge: maxAge,
+      )) {
+        return (
+          position: null,
+          failure: const LocationFailure(
+            reason: LocationFailureReason.error,
+            message: 'A localização obtida está desatualizada ou inválida. Tente novamente.',
+          ),
+        );
+      }
+
+      return (position: position, failure: null);
+    } on TimeoutException {
+      return (
+        position: null,
+        failure: const LocationFailure(
+          reason: LocationFailureReason.timeout,
+          message: 'Não foi possível obter sua localização agora.',
+        ),
+      );
+    } catch (_) {
+      return (
+        position: null,
+        failure: const LocationFailure(
+          reason: LocationFailureReason.error,
+          message: 'Não foi possível obter sua localização agora.',
+        ),
       );
     }
   }

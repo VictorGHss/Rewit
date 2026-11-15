@@ -206,15 +206,17 @@ void main() {
     });
 
     test('createProduct propaga ApiException com os fieldErrors do backend', () async {
-      mockBaseClient.responseToReturn = http.Response(
-        jsonEncode({
-          'type': 'about:blank',
-          'title': 'Erro de validação',
-          'status': 400,
-          'detail': 'Parâmetros da requisição inválidos',
-          'code': 'VALIDATION_ERROR',
-          'fieldErrors': {'name': 'O nome do produto é obrigatório'},
-        }),
+      mockBaseClient.responseToReturn = http.Response.bytes(
+        utf8.encode(
+          jsonEncode({
+            'type': 'about:blank',
+            'title': 'Erro de validação',
+            'status': 400,
+            'detail': 'Parâmetros da requisição inválidos',
+            'code': 'VALIDATION_ERROR',
+            'fieldErrors': {'name': 'O nome do produto é obrigatório'},
+          }),
+        ),
         400,
         headers: {'content-type': 'application/problem+json'},
       );

@@ -682,4 +682,31 @@ void main() {
     expect(discovery.searchCalls, 1);
     expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
   });
+
+  testWidgets('trocar modo para Cidade cancela efeito de captura de localização pendente no fallback',
+      (tester) async {
+    final locationCompleter = Completer<LocationResult>();
+    location.locationCompleter = locationCompleter;
+
+    await pumpSubject(tester);
+    await typeQuery(tester, 'padaria');
+    await tester.tap(find.byKey(const Key('external_region_mode_nearby')));
+    await tester.pump();
+
+    expect(location.calls, 1);
+
+    // Usuário cancela o fluxo Perto de mim trocando de modo antes do fallback completar
+    await tester.tap(find.byKey(const Key('external_region_mode_city')));
+    await tester.pump();
+
+    locationCompleter.complete(
+      const LocationSuccess(
+        DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 20),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(discovery.searchCalls, 0);
+    expect(find.byKey(const Key('external_region_city_field')), findsOneWidget);
+  });
 }

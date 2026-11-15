@@ -20,6 +20,9 @@ abstract class CameraPermissionService {
     bool afterRequest = false,
   });
 
+  /// Indica se já houve solicitação nativa prévia concluída para esta permissão.
+  Future<bool> hasRequestedPermissionBefore();
+
   /// Solicita a permissão de câmera ao sistema operacional.
   Future<CameraPermissionStatus> requestPermission();
 

@@ -289,18 +289,22 @@ O `FeedNotifier` gerencia o estado da timeline com dois canais completamente iso
 O subsistema de leitura óptica (`features/scanner/`) opera em dois modos:
 * **Modo Normal**: Navegação autônoma em `/scanner` para leitura de códigos de barras (EAN-13, EAN-8, UPC-A, ITF-14) ou QR Codes com consulta de catálogo;
 * **Target Selection Mode (`ScannerRouteArgs(selectionMode: true)`)**: Invocado pelo formulário de criação de avaliações (`ReviewCreateScreen` / `TargetSearchSelectorWidget`). Ao detectar e confirmar um produto ou local, retorna o identificador selecionado diretamente para preenchimento automático do formulário de avaliação;
+* **Explicação Pré-Permissão e Legibilidade**: Antes da primeira solicitação nativa de câmera, exibe o estado `ScannerPermissionRationale` com justificativa clara de uso (`Continuar` / `Agora não`) sem disparar prompt prematuro nem repetir em loop após recusa prévia; a `AppBar` fixa ícones e título em `RewitSemanticColors.onMediaScrim` sobre `mediaScrim` para garantir contraste sobre o preview da câmera tanto no tema claro quanto no escuro;
 * **Ciclo de Vida Resiliente**: O controller óptico (`MobileScannerController`) interrompe a câmera em eventos de pausa (`AppLifecycleState.paused` / `inactive`) e reativa de forma limpa em `resumed`.
 
 ### 9.5 Máquina de Estados Nativa de Permissão de Câmera (Android API 36)
 Para compatibilidade estrita com Android API 36 (onde diálogos cancelados ou recusados pela primeira vez poderiam reportar incorretamente `shouldShowRequestPermissionRationale == false`), foi implementada uma máquina de estados pura em Kotlin:
 * **Componente Nativo**: `app.rewit.mobile.CameraPermissionStateMachine` e `MainActivity.kt`;
-* **Persistência**: Armazenamento do histórico real em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`);
+* **Persistência**: Armazenamento do histórico real em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`), consultável sem efeitos colaterais via `hasRequestedPermissionBefore`;
 * **Canal de Plataforma**: `MethodChannel('app.rewit.mobile/camera_permission')` consumido por `AndroidCameraPermissionService`;
 * **Resolução**: Classifica deterministicamente entre `granted`, `denied` (permitindo novas tentativas via aplicativo) e `permanentlyDenied` (acionando botão para abrir configurações do sistema).
 
 ### 9.6 Política de Localização (Descoberta vs Verificação Presencial)
 A captura de coordenadas GPS no dispositivo é regida por `LocationCapturePolicy`:
-* **Descoberta Externa (`discovery`)**: Busca estabelecimentos em raio de até 10 km. Permite leitura em cache de até 5 minutos, precisão média e timeout de até 5s;
+* **Descoberta Externa (`discovery`)**: Busca estabelecimentos em raio de até 10 km. Permite leitura em cache de até 5 minutos e tentativa primária leve (`LocationAccuracy.medium`, timeout de até 5s); sem cache válido e mediante falha ou timeout da captura leve, aciona no máximo um fallback controlado (`LocationAccuracy.high`, até 4s adicionais dentro de teto total de 9s);
 * **Verificação de Presença (`presenceVerification`)**: Utilizada exclusivamente para validar check-in presencial em avaliações. Rejeita cache antigo, exige leitura fresca (idade <= 1 minuto), alta precisão GPS, timeout ampliado (10s a 15s) para aquecimento de satélites e retry único caso a acurácia retorne superior a 100 metros;
 * **Suporte a QA**: O aplicativo não bloqueia coordenadas simuladas no client, assegurando a realização de testes ponta a ponta e auditorias em emuladores;
 * **Autoridade do Backend**: A emissão do selo `isVerifiedOnSite` é 100% calculada no backend via PostGIS (`ST_DWithin`, teto de 250m de raio, acurácia horizontal <= 100m, trava transacional `pg_advisory_xact_lock` e teto de 1 check-in por usuário/local a cada 24h).
+
+### 9.7 Transporte HTTP e Decodificação UTF-8
+* `RewitHttpClient` normaliza cabeçalhos `Content-Type` JSON/textuais sem `charset` para UTF-8 e `ProblemDetail.fromResponseBytes` decodifica bytes HTTP como UTF-8 por padrão, evitando corrupção de acentuação em respostas `application/problem+json` ou `application/json` que omitam `; charset=utf-8`, respeitando charsets explícitos e bytes corrompidos com `allowMalformed: true`.

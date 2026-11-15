@@ -48,10 +48,17 @@ class MainActivity : FlutterActivity() {
                 val afterRequest = call.argument<Boolean>("afterRequest") ?: false
                 result.success(resolveCameraPermissionStatus(afterRequest))
             }
+            "hasRequestedPermissionBefore" ->
+                result.success(hasRequestedCameraPermissionBefore())
             "requestPermission" -> requestCameraPermission(result)
             "openAppSettings" -> result.success(openApplicationSettings())
             else -> result.notImplemented()
         }
+    }
+
+    private fun hasRequestedCameraPermissionBefore(): Boolean {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_HAS_REQUESTED_PERMISSION, false)
     }
 
     private fun resolveCameraPermissionStatus(afterRequest: Boolean): String {

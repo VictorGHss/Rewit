@@ -97,12 +97,31 @@ void main() {
       expect(await service.openAppSettings(), isFalse);
     });
 
+    test('hasRequestedPermissionBefore consulta histórico nativo com fallback false para null', () async {
+      bool? response = true;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'hasRequestedPermissionBefore') {
+          return response;
+        }
+        return null;
+      });
+
+      expect(await service.hasRequestedPermissionBefore(), isTrue);
+      response = false;
+      expect(await service.hasRequestedPermissionBefore(), isFalse);
+      response = null;
+      expect(await service.hasRequestedPermissionBefore(), isFalse);
+    });
+
     test('degrada com segurança em MissingPluginException e PlatformException', () async {
       // Sem handler registrado -> MissingPluginException
       expect(
         await service.checkPermissionStatus(),
         equals(CameraPermissionStatus.unknown),
       );
+      expect(await service.hasRequestedPermissionBefore(), isFalse);
       expect(
         await service.requestPermission(),
         equals(CameraPermissionStatus.unknown),
@@ -119,6 +138,7 @@ void main() {
         await service.checkPermissionStatus(),
         equals(CameraPermissionStatus.unknown),
       );
+      expect(await service.hasRequestedPermissionBefore(), isFalse);
       expect(
         await service.requestPermission(),
         equals(CameraPermissionStatus.unknown),

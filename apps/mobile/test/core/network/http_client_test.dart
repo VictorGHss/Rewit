@@ -1460,5 +1460,153 @@ void main() {
         await streamController.close();
       });
     });
+
+    group('Decodificação UTF-8 em respostas HTTP com e sem charset explícito', () {
+      test('decodifica 401 application/problem+json sem charset como UTF-8 preservando Credenciais inválidas', () async {
+        final errorPayload = jsonEncode({
+          'type': 'https://rewit.app/errors/invalid-credentials',
+          'title': 'Não autorizado',
+          'status': 401,
+          'detail': 'Credenciais inválidas',
+          'code': 'INVALID_CREDENTIALS',
+        });
+
+        final mockClient = MockBaseClient((request) async {
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(errorPayload)),
+            401,
+            headers: {'content-type': 'application/problem+json'},
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        try {
+          await client.post('/api/v1/auth/login', requiresAuth: false);
+          fail('Deveria ter lançado ApiException');
+        } on ApiException catch (e) {
+          expect(e.statusCode, equals(401));
+          expect(e.title, equals('Não autorizado'));
+          expect(e.detail, equals('Credenciais inválidas'));
+          expect(e.detail, isNot(contains('Ã')));
+        }
+      });
+
+      test('decodifica 503 application/problem+json com acentuação e cedilha mesmo sem header content-type', () async {
+        final errorPayload = jsonEncode({
+          'title': 'Serviço indisponível',
+          'status': 503,
+          'detail': 'Localização indisponível para validação de presença e avaliação.',
+        });
+
+        final mockClient = MockBaseClient((request) async {
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(errorPayload)),
+            503,
+            headers: const {},
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/api/v1/reviews'),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.title, 'title', 'Serviço indisponível')
+                .having(
+                  (e) => e.detail,
+                  'detail',
+                  'Localização indisponível para validação de presença e avaliação.',
+                ),
+          ),
+        );
+      });
+
+      test('decodifica 200 application/json sem charset como UTF-8 ao ler response.body', () async {
+        final okPayload = jsonEncode({
+          'name': 'Café São José da Conceição',
+          'description': 'Açaí, pão de queijo e refeição',
+        });
+
+        final mockClient = MockBaseClient((request) async {
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(okPayload)),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        final response = await client.get('/api/v1/places/1');
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        expect(decoded['name'], equals('Café São José da Conceição'));
+        expect(decoded['description'], equals('Açaí, pão de queijo e refeição'));
+      });
+
+      test('respeita charset=iso-8859-1 explicitamente informado em resposta de erro', () async {
+        const latin1Json = '{"title":"Não autorizado","status":401,"detail":"Sessão expirada"}';
+        final mockClient = MockBaseClient((request) async {
+          return http.StreamedResponse(
+            Stream.value(latin1.encode(latin1Json)),
+            401,
+            headers: {'content-type': 'application/problem+json; charset=iso-8859-1'},
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/api/v1/me'),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.title, 'title', 'Não autorizado')
+                .having((e) => e.detail, 'detail', 'Sessão expirada'),
+          ),
+        );
+      });
+
+      test('lida com bytes corrompidos em erro 500 sem lançar FormatException', () async {
+        final mockClient = MockBaseClient((request) async {
+          return http.StreamedResponse(
+            Stream.value(<int>[0x7B, 0x22, 0xFF, 0xFE, 0x22, 0x7D]),
+            500,
+            headers: {'content-type': 'application/problem+json'},
+          );
+        });
+
+        final client = RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: mockClient,
+          tokenStorage: tokenStorage,
+        );
+
+        await expectLater(
+          client.get('/api/v1/broken'),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.statusCode, 'statusCode', 500)
+                .having((e) => e.detail, 'detail', contains('\uFFFD')),
+          ),
+        );
+      });
+    });
   });
 }

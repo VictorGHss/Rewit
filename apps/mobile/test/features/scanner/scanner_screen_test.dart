@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
+import 'package:rewit_mobile/app/theme/app_theme.dart';
+import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
@@ -1979,7 +1981,7 @@ void main() {
     });
 
     testWidgets(
-      'concessão inicial de permissão inicia a câmera uma única vez e permite escaneamento',
+      'concessão inicial de permissão exibe explicação contextual antes do diálogo nativo e inicia câmera ao continuar',
       (tester) async {
         final fakePermission = _FakeCameraPermissionService(
           initialCheckStatus: CameraPermissionStatus.denied,
@@ -1997,15 +1999,26 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(fakePermission.checkCalls, equals(1));
+        expect(fakePermission.hasRequestedBeforeCalls, equals(1));
+        expect(fakePermission.requestCalls, equals(0));
+        expect(spyPlatform.startCalls, equals(0));
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsOneWidget);
+        expect(find.text('Continuar'), findsOneWidget);
+        expect(find.text('Agora não'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('scanner_rationale_continue_button')));
+        await tester.pumpAndSettle();
+
         expect(fakePermission.requestCalls, equals(1));
         expect(spyPlatform.startCalls, equals(1));
         expect(find.byType(MobileScanner), findsOneWidget);
         expect(find.text('Acesso à câmera necessário'), findsNothing);
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsNothing);
       },
     );
 
     testWidgets(
-      'primeira negação exibe negação temporária com Tentar novamente e concede na segunda tentativa',
+      'primeira negação após explicação contextual exibe negação temporária sem repetir explicação e concede na segunda tentativa',
       (tester) async {
         final fakePermission = _FakeCameraPermissionService(
           initialCheckStatus: CameraPermissionStatus.denied,
@@ -2025,6 +2038,11 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('scanner_rationale_continue_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsNothing);
         expect(find.text('Acesso à câmera necessário'), findsOneWidget);
         expect(find.text('Tentar novamente'), findsOneWidget);
         expect(find.text('Abrir configurações'), findsNothing);
@@ -2046,6 +2064,7 @@ void main() {
       (tester) async {
         final fakePermission = _FakeCameraPermissionService(
           initialCheckStatus: CameraPermissionStatus.denied,
+          hasRequestedBefore: true,
           requestResponses: [
             CameraPermissionStatus.denied,
             CameraPermissionStatus.permanentlyDenied,
@@ -2062,6 +2081,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsNothing);
         expect(find.text('Tentar novamente'), findsOneWidget);
         expect(find.text('Abrir configurações'), findsNothing);
 
@@ -2274,6 +2294,7 @@ void main() {
         final pendingRequest = Completer<CameraPermissionStatus>();
         final fakePermission = _FakeCameraPermissionService(
           initialCheckStatus: CameraPermissionStatus.denied,
+          hasRequestedBefore: true,
           pendingRequest: pendingRequest,
         );
         final notifier = ScannerNotifier(productRepository: fakeRepository);
@@ -2407,21 +2428,312 @@ void main() {
         expect(results.last!.targetType, equals(TargetType.product));
       },
     );
+
+    testWidgets(
+      'Bug 04: cancelar explicação prévia com Agora não fecha rota sem solicitar permissão e reabrir exibe explicação novamente',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.denied,
+          requestResponses: [CameraPermissionStatus.granted],
+        );
+        final results = <SearchResultItem?>[];
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    key: const Key('btn_open_scanner_rationale'),
+                    onPressed: () async {
+                      final res = await Navigator.of(context).push<SearchResultItem?>(
+                        MaterialPageRoute<SearchResultItem?>(
+                          builder: (_) => ScannerScreen(
+                            productRepository: fakeRepository,
+                            selectionMode: true,
+                            cameraPermissionService: fakePermission,
+                          ),
+                        ),
+                      );
+                      results.add(res);
+                    },
+                    child: const Text('Abrir Scanner'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byKey(const Key('btn_open_scanner_rationale')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsOneWidget);
+        expect(fakePermission.requestCalls, equals(0));
+        expect(fakePermission.hasRequestedBefore, isFalse);
+
+        // Cancelamento explícito ("Agora não")
+        await tester.tap(find.byKey(const Key('scanner_rationale_cancel_button')));
+        await tester.pumpAndSettle();
+
+        expect(results, equals([null]));
+        expect(fakePermission.requestCalls, equals(0));
+        expect(fakePermission.hasRequestedBefore, isFalse);
+        expect(spyPlatform.startCalls, equals(0));
+
+        // Reabertura sem histórico prévio volta a exibir explicação contextual
+        await tester.tap(find.byKey(const Key('btn_open_scanner_rationale')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsOneWidget);
+        expect(fakePermission.requestCalls, equals(0));
+
+        // Agora continua e concede
+        await tester.tap(find.byKey(const Key('scanner_rationale_continue_button')));
+        await tester.pumpAndSettle();
+        expect(fakePermission.requestCalls, equals(1));
+        expect(fakePermission.hasRequestedBefore, isTrue);
+        expect(spyPlatform.startCalls, equals(1));
+      },
+    );
+
+    testWidgets(
+      'Bug 04: após recusa anterior, reabertura não repete explicação redundante e duplo toque em Continuar só solicita uma vez',
+      (tester) async {
+        final pendingRequest = Completer<CameraPermissionStatus>();
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.denied,
+          pendingRequest: pendingRequest,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    key: const Key('btn_open_scanner_reopen'),
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ScannerScreen(
+                            productRepository: fakeRepository,
+                            cameraPermissionService: fakePermission,
+                          ),
+                        ),
+                      );
+                    },
+                    child: const Text('Abrir Scanner'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byKey(const Key('btn_open_scanner_reopen')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsOneWidget);
+
+        // Duplo toque rápido em Continuar enquanto diálogo nativo ainda pende
+        await tester.tap(find.byKey(const Key('scanner_rationale_continue_button')));
+        await tester.tap(find.byKey(const Key('scanner_rationale_continue_button')));
+        await tester.pump();
+
+        expect(fakePermission.requestCalls, equals(1));
+
+        pendingRequest.complete(CameraPermissionStatus.denied);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Acesso à câmera necessário'), findsOneWidget);
+        expect(fakePermission.hasRequestedBefore, isTrue);
+
+        // Volta e reabre: não repete mais a tela de explicação em loop
+        await tester.tap(find.text('Voltar'));
+        await tester.pumpAndSettle();
+
+        fakePermission.nextCheckStatus = CameraPermissionStatus.denied;
+        await tester.tap(find.byKey(const Key('btn_open_scanner_reopen')));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsNothing);
+        expect(fakePermission.requestCalls, equals(2));
+      },
+    );
+
+    testWidgets(
+      'Bug 04: conceder permissão nas configurações do sistema enquanto na tela de explicação inicia a câmera ao retornar ao app',
+      (tester) async {
+        final fakePermission = _FakeCameraPermissionService(
+          initialCheckStatus: CameraPermissionStatus.denied,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ScannerScreen(
+              productRepository: fakeRepository,
+              cameraPermissionService: fakePermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(0));
+
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+        fakePermission.nextCheckStatus = CameraPermissionStatus.granted;
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('scanner_permission_rationale_view')), findsNothing);
+        expect(find.byType(MobileScanner), findsOneWidget);
+        expect(spyPlatform.startCalls, equals(1));
+      },
+    );
+  });
+
+  group('Bug 02 — Contraste e legibilidade da AppBar do Scanner', () {
+    for (final entry in <String, ThemeData>{
+      'ThemeData Claro': AppTheme.lightTheme,
+      'ThemeData Escuro': AppTheme.darkTheme,
+    }.entries) {
+      testWidgets(
+        'exibe título e ícones da AppBar com cor clara sobre mediaScrim em ${entry.key} (incluindo flash ligado/desligado e Back/Close)',
+        (tester) async {
+          final spyPlatform = _SpyMobileScannerPlatform();
+          MobileScannerPlatform.instance = spyPlatform;
+          addTearDown(() async {
+            await spyPlatform.disposeStreams();
+          });
+
+          Future<void> verifyAppBarContrast({required bool fullscreenDialog}) async {
+            await tester.pumpWidget(
+              MaterialApp(
+                key: UniqueKey(),
+                theme: entry.value,
+                home: Builder(
+                  builder: (context) => Scaffold(
+                    body: TextButton(
+                      key: Key('btn_open_${fullscreenDialog ? 'close' : 'back'}'),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            fullscreenDialog: fullscreenDialog,
+                            builder: (_) => ScannerScreen(
+                              cameraPermissionService: _FakeCameraPermissionService(
+                                initialCheckStatus: CameraPermissionStatus.granted,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                      child: const Text('Abrir Scanner'),
+                    ),
+                  ),
+                ),
+              ),
+            );
+
+            await tester.tap(
+              find.byKey(Key('btn_open_${fullscreenDialog ? 'close' : 'back'}')),
+            );
+            await tester.pumpAndSettle();
+
+            final semantic = entry.value.extension<RewitSemanticColors>()!;
+            final appBar = tester.widget<AppBar>(find.byType(AppBar));
+            expect(appBar.backgroundColor, equals(semantic.mediaScrim));
+            expect(appBar.foregroundColor, equals(semantic.onMediaScrim));
+            expect(appBar.foregroundColor!.computeLuminance(), greaterThan(0.9));
+
+            // Título efetivo pintado
+            final titleRichText = tester.widget<RichText>(
+              find.descendant(
+                of: find.byType(AppBar),
+                matching: find.byWidgetPredicate(
+                  (w) => w is RichText && w.text.toPlainText() == 'Escanear Código',
+                ),
+              ),
+            );
+            expect(titleRichText.text.style?.color, equals(semantic.onMediaScrim));
+
+            // Ícone leading (CloseButton ou BackButton) efetivo
+            final expectedLeadingIcon =
+                fullscreenDialog ? Icons.close : Icons.arrow_back;
+            final leadingRichText = tester.widget<RichText>(
+              find.descendant(
+                of: find.byIcon(expectedLeadingIcon),
+                matching: find.byType(RichText),
+              ),
+            );
+            expect(
+              leadingRichText.text.style?.color,
+              equals(semantic.onMediaScrim),
+            );
+
+            // Ícone do flash (OFF -> ON) efetivo
+            final flashOffRichText = tester.widget<RichText>(
+              find.descendant(
+                of: find.byIcon(Icons.flash_off),
+                matching: find.byType(RichText),
+              ),
+            );
+            expect(
+              flashOffRichText.text.style?.color,
+              equals(semantic.onMediaScrim),
+            );
+
+            // Ícone de alternar câmera efetivo
+            final switchCameraRichText = tester.widget<RichText>(
+              find.descendant(
+                of: find.byIcon(Icons.flip_camera_ios),
+                matching: find.byType(RichText),
+              ),
+            );
+            expect(
+              switchCameraRichText.text.style?.color,
+              equals(semantic.onMediaScrim),
+            );
+
+            // Alterna flash para ON e valida que o novo ícone continua legível
+            await tester.tap(find.byIcon(Icons.flash_off));
+            await tester.pumpAndSettle();
+            final flashOnRichText = tester.widget<RichText>(
+              find.descendant(
+                of: find.byIcon(Icons.flash_on),
+                matching: find.byType(RichText),
+              ),
+            );
+            expect(
+              flashOnRichText.text.style?.color,
+              equals(semantic.onMediaScrim),
+            );
+          }
+
+          await verifyAppBarContrast(fullscreenDialog: false);
+          await verifyAppBarContrast(fullscreenDialog: true);
+        },
+      );
+    }
   });
 }
 
 class _FakeCameraPermissionService implements CameraPermissionService {
   CameraPermissionStatus nextCheckStatus;
+  bool hasRequestedBefore;
   final List<CameraPermissionStatus> _requestResponses;
   final Completer<CameraPermissionStatus>? pendingRequest;
   bool openSettingsResult;
 
   int checkCalls = 0;
+  int hasRequestedBeforeCalls = 0;
   int requestCalls = 0;
   int openSettingsCalls = 0;
 
   _FakeCameraPermissionService({
     required CameraPermissionStatus initialCheckStatus,
+    this.hasRequestedBefore = false,
     List<CameraPermissionStatus> requestResponses = const [],
     this.pendingRequest,
     this.openSettingsResult = true,
@@ -2437,11 +2749,21 @@ class _FakeCameraPermissionService implements CameraPermissionService {
   }
 
   @override
+  Future<bool> hasRequestedPermissionBefore() async {
+    hasRequestedBeforeCalls++;
+    return hasRequestedBefore;
+  }
+
+  @override
   Future<CameraPermissionStatus> requestPermission() async {
     requestCalls++;
     if (pendingRequest != null) {
-      return pendingRequest!.future;
+      final result = await pendingRequest!.future;
+      hasRequestedBefore = true;
+      nextCheckStatus = result;
+      return result;
     }
+    hasRequestedBefore = true;
     if (_requestResponses.isNotEmpty) {
       final result = _requestResponses.removeAt(0);
       nextCheckStatus = result;
@@ -2513,6 +2835,9 @@ class _SpyMobileScannerPlatform extends MobileScannerPlatform {
 
   @override
   Future<void> pause() async {}
+
+  @override
+  Future<void> toggleTorch() async {}
 
   @override
   Future<void> dispose() async {}

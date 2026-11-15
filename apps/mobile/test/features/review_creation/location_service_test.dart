@@ -847,6 +847,199 @@ void main() {
         expect(result, isA<LocationFailure>());
         expect((result as LocationFailure).reason, LocationFailureReason.timeout);
       });
+
+      group('Bug 03 — Descoberta sem cache recente e fallback limitado de alta precisão', () {
+        test('cache recente (<= 5 min) é reutilizado imediatamente sem captura ativa', () async {
+          final fixedNow = DateTime(2026, 11, 14, 15, 0, 0);
+          final customService = GeolocatorLocationService(clock: () => fixedNow);
+          fakePlatform.lastKnownPositionToReturn = makePos(
+            lat: -25.10,
+            lng: -50.16,
+            accuracy: 60.0,
+            timestamp: fixedNow.subtract(const Duration(minutes: 4, seconds: 59)),
+          );
+
+          final result = await customService.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+          );
+
+          expect(result, isA<LocationSuccess>());
+          final loc = (result as LocationSuccess).location;
+          expect(loc.latitude, -25.10);
+          expect(loc.longitude, -50.16);
+          expect(fakePlatform.getLastKnownPositionCallCount, 1);
+          expect(fakePlatform.getCurrentPositionCallCount, 0);
+        });
+
+        test('cache expirado (> 5 min) é ignorado e captura leve (medium) vence em 1 chamada', () async {
+          final fixedNow = DateTime(2026, 11, 14, 15, 0, 0);
+          final customService = GeolocatorLocationService(clock: () => fixedNow);
+          fakePlatform.lastKnownPositionToReturn = makePos(
+            lat: -25.00,
+            lng: -50.00,
+            accuracy: 15.0,
+            timestamp: fixedNow.subtract(const Duration(minutes: 6)),
+          );
+          fakePlatform.positionToReturn = makePos(
+            lat: -25.095,
+            lng: -50.162,
+            accuracy: 42.0,
+            timestamp: fixedNow,
+          );
+
+          final result = await customService.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+            timeout: const Duration(seconds: 5),
+          );
+
+          expect(result, isA<LocationSuccess>());
+          final loc = (result as LocationSuccess).location;
+          expect(loc.latitude, -25.095);
+          expect(loc.longitude, -50.162);
+          expect(fakePlatform.getCurrentPositionCallCount, 1);
+          expect(fakePlatform.capturedLocationSettings.single!.accuracy, LocationAccuracy.medium);
+          expect(fakePlatform.capturedLocationSettings.single!.timeLimit, const Duration(seconds: 5));
+        });
+
+        test('sem cache + timeout na tentativa leve executa 1 fallback high controlado e sucede', () async {
+          final fixedNow = DateTime(2026, 11, 14, 15, 0, 0);
+          final customService = GeolocatorLocationService(clock: () => fixedNow);
+          fakePlatform.lastKnownPositionToReturn = null;
+          fakePlatform.onGetCurrentPosition = (call, _) async {
+            if (call == 1) {
+              throw TimeoutException('Balanced provider sem fix em 5s');
+            }
+            return makePos(
+              lat: -25.098,
+              lng: -50.163,
+              accuracy: 18.0,
+              timestamp: fixedNow,
+            );
+          };
+
+          final result = await customService.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+            timeout: const Duration(seconds: 5),
+          );
+
+          expect(result, isA<LocationSuccess>());
+          final loc = (result as LocationSuccess).location;
+          expect(loc.latitude, -25.098);
+          expect(loc.longitude, -50.163);
+          expect(loc.accuracyMeters, 18.0);
+          expect(fakePlatform.getCurrentPositionCallCount, 2);
+          expect(fakePlatform.capturedLocationSettings[0]!.accuracy, LocationAccuracy.medium);
+          expect(fakePlatform.capturedLocationSettings[0]!.timeLimit, const Duration(seconds: 5));
+          expect(fakePlatform.capturedLocationSettings[1]!.accuracy, LocationAccuracy.high);
+          expect(
+            fakePlatform.capturedLocationSettings[1]!.timeLimit,
+            lessThanOrEqualTo(const Duration(seconds: 4)),
+          );
+        });
+
+        test('sem cache + falha de provider na tentativa leve executa fallback high único e sucede', () async {
+          final fixedNow = DateTime(2026, 11, 14, 15, 0, 0);
+          final customService = GeolocatorLocationService(clock: () => fixedNow);
+          fakePlatform.lastKnownPositionToReturn = null;
+          fakePlatform.onGetCurrentPosition = (call, _) async {
+            if (call == 1) {
+              throw Exception('Network location provider unavailable');
+            }
+            return makePos(
+              lat: -25.091,
+              lng: -50.159,
+              accuracy: 25.0,
+              timestamp: fixedNow,
+            );
+          };
+
+          final result = await customService.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+          );
+
+          expect(result, isA<LocationSuccess>());
+          expect(fakePlatform.getCurrentPositionCallCount, 2);
+          expect(fakePlatform.capturedLocationSettings[0]!.accuracy, LocationAccuracy.medium);
+          expect(fakePlatform.capturedLocationSettings[1]!.accuracy, LocationAccuracy.high);
+        });
+
+        test('quando fallback também falha ou expira, falha limpo sem entrar em loop', () async {
+          final fixedNow = DateTime(2026, 11, 14, 15, 0, 0);
+          final customService = GeolocatorLocationService(clock: () => fixedNow);
+          fakePlatform.lastKnownPositionToReturn = null;
+          fakePlatform.onGetCurrentPosition = (call, _) async {
+            if (call == 1) {
+              throw Exception('Sem fix network');
+            }
+            throw TimeoutException('GNSS frio também expirou');
+          };
+
+          final result = await customService.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+          );
+
+          expect(result, isA<LocationFailure>());
+          expect((result as LocationFailure).reason, LocationFailureReason.timeout);
+          expect(fakePlatform.getCurrentPositionCallCount, 2);
+        });
+
+        test('orçamento explícito curto esgotado impede disparo do fallback (cancelamento/teto)', () async {
+          const customService = GeolocatorLocationService();
+          fakePlatform.lastKnownPositionToReturn = null;
+          fakePlatform.onGetCurrentPosition = (call, _) async {
+            await Future<void>.delayed(const Duration(milliseconds: 35));
+            throw TimeoutException('Timeout dentro do orçamento reduzido');
+          };
+
+          final result = await customService.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+            timeout: const Duration(milliseconds: 20),
+          );
+
+          expect(result, isA<LocationFailure>());
+          expect((result as LocationFailure).reason, LocationFailureReason.timeout);
+          expect(fakePlatform.getCurrentPositionCallCount, 1);
+        });
+
+        test('descoberta com permissão aproximada continua sucedendo após fallback', () async {
+          final fixedNow = DateTime(2026, 11, 14, 15, 0, 0);
+          final customService = GeolocatorLocationService(clock: () => fixedNow);
+          fakePlatform.locationAccuracyResult = LocationAccuracyStatus.reduced;
+          fakePlatform.onGetCurrentPosition = (call, _) async {
+            if (call == 1) {
+              throw TimeoutException('Timeout inicial');
+            }
+            return makePos(
+              lat: -25.10,
+              lng: -50.16,
+              accuracy: 1200.0,
+              timestamp: fixedNow,
+            );
+          };
+
+          final result = await customService.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+          );
+
+          expect(result, isA<LocationSuccess>());
+          final loc = (result as LocationSuccess).location;
+          expect(loc.accuracyMeters, 1200.0);
+          expect(fakePlatform.getCurrentPositionCallCount, 2);
+        });
+
+        test('descoberta com serviço de localização desligado falha imediatamente sem tentar fallback', () async {
+          fakePlatform.serviceEnabled = false;
+
+          final result = await service.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+          );
+
+          expect(result, isA<LocationFailure>());
+          expect((result as LocationFailure).reason, LocationFailureReason.serviceDisabled);
+          expect(fakePlatform.getLastKnownPositionCallCount, 0);
+          expect(fakePlatform.getCurrentPositionCallCount, 0);
+        });
+      });
     });
   });
 }

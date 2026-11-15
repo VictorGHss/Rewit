@@ -101,6 +101,11 @@ final class ScannerQrInternal extends ScannerState {
   });
 }
 
+/// Explicação contextual exibida antes da primeira solicitação nativa de câmera.
+final class ScannerPermissionRationale extends ScannerState {
+  const ScannerPermissionRationale();
+}
+
 /// Permissão de câmera negada pelo usuário ou pelo sistema.
 final class ScannerPermissionDenied extends ScannerState {
   final bool permanentlyDenied;

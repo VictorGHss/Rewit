@@ -1220,5 +1220,17 @@ void main() {
       expect(customNotifier.isDisposed, isTrue);
       expect(listenerCalls, equals(callsBeforeDispose));
     });
+
+    test('onPermissionRationaleRequired transiciona para ScannerPermissionRationale e bloqueia capturas', () {
+      var listenerCalls = 0;
+      notifier.addListener(() => listenerCalls++);
+
+      notifier.onPermissionRationaleRequired();
+
+      expect(notifier.state, isA<ScannerPermissionRationale>());
+      expect(notifier.isScanning, isFalse);
+      expect(notifier.isProcessing, isFalse);
+      expect(listenerCalls, equals(1));
+    });
   });
 }

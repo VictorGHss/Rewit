@@ -150,14 +150,16 @@ void main() {
     });
 
     test('lança ApiException ao receber erro 400 RFC 7807 (INVALID_SEARCH_QUERY)', () async {
-      innerClient.responseToReturn = http.Response(
-        jsonEncode({
-          'type': 'https://api.rewit.app/errors/invalid-search-query',
-          'title': 'Bad Request',
-          'status': 400,
-          'detail': 'O termo de busca não pode ser vazio ou conter apenas espaços.',
-          'code': 'INVALID_SEARCH_QUERY',
-        }),
+      innerClient.responseToReturn = http.Response.bytes(
+        utf8.encode(
+          jsonEncode({
+            'type': 'https://api.rewit.app/errors/invalid-search-query',
+            'title': 'Bad Request',
+            'status': 400,
+            'detail': 'O termo de busca não pode ser vazio ou conter apenas espaços.',
+            'code': 'INVALID_SEARCH_QUERY',
+          }),
+        ),
         400,
         headers: {'content-type': 'application/problem+json'},
       );

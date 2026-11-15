@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
@@ -141,7 +142,8 @@ class _ScannerScreenState extends State<ScannerScreen>
       _cameraController?.stop();
     } else if (state == AppLifecycleState.resumed) {
       if (_isPermissionFlowInProgress) return;
-      if (_notifier.state is ScannerPermissionDenied) {
+      if (_notifier.state is ScannerPermissionDenied ||
+          _notifier.state is ScannerPermissionRationale) {
         unawaited(_recheckPermissionOnResume());
       } else if (_notifier.state is ScannerScanning &&
           _cameraStoppedByLifecycle) {
@@ -167,10 +169,40 @@ class _ScannerScreenState extends State<ScannerScreen>
       if (!mounted || _isClosing || _notifier.state is! ScannerInitial) return;
 
       if (status == CameraPermissionStatus.denied) {
+        final hasRequestedBefore =
+            await _cameraPermissionService.hasRequestedPermissionBefore();
+        if (!mounted || _isClosing || _notifier.state is! ScannerInitial) {
+          return;
+        }
+        if (!hasRequestedBefore) {
+          _lastKnownPermissionStatus = status;
+          _notifier.onPermissionRationaleRequired();
+          return;
+        }
         status = await _cameraPermissionService.requestPermission();
         if (!mounted || _isClosing || _notifier.state is! ScannerInitial) {
           return;
         }
+      }
+
+      _applyPermissionResolution(status);
+    } finally {
+      _isPermissionFlowInProgress = false;
+    }
+  }
+
+  Future<void> _onContinueFromRationalePressed() async {
+    if (!mounted || _isClosing || _isPermissionFlowInProgress) return;
+    if (_notifier.state is! ScannerPermissionRationale) return;
+
+    _isPermissionFlowInProgress = true;
+    try {
+      var status = await _cameraPermissionService.checkPermissionStatus();
+      if (!mounted || _isClosing) return;
+
+      if (status == CameraPermissionStatus.denied) {
+        status = await _cameraPermissionService.requestPermission();
+        if (!mounted || _isClosing) return;
       }
 
       _applyPermissionResolution(status);
@@ -225,7 +257,11 @@ class _ScannerScreenState extends State<ScannerScreen>
     try {
       final status = await _cameraPermissionService.checkPermissionStatus();
       if (!mounted || _isClosing) return;
-      if (_notifier.state is! ScannerPermissionDenied) return;
+      final currentState = _notifier.state;
+      if (currentState is! ScannerPermissionDenied &&
+          currentState is! ScannerPermissionRationale) {
+        return;
+      }
 
       _lastKnownPermissionStatus = status;
 
@@ -233,11 +269,18 @@ class _ScannerScreenState extends State<ScannerScreen>
         _cameraStoppedByLifecycle = false;
         _ensureCleanCameraController();
         _startScanning();
-      } else if (status == CameraPermissionStatus.denied ||
-          status == CameraPermissionStatus.permanentlyDenied) {
-        _setPermissionDeniedState(
-          permanentlyDenied: status == CameraPermissionStatus.permanentlyDenied,
-        );
+      } else if (status == CameraPermissionStatus.permanentlyDenied) {
+        _setPermissionDeniedState(permanentlyDenied: true);
+      } else if (status == CameraPermissionStatus.denied) {
+        if (currentState is ScannerPermissionRationale) {
+          final hasRequestedBefore =
+              await _cameraPermissionService.hasRequestedPermissionBefore();
+          if (!mounted || _isClosing) return;
+          if (!hasRequestedBefore) {
+            return;
+          }
+        }
+        _setPermissionDeniedState(permanentlyDenied: false);
       }
     } finally {
       _isPermissionFlowInProgress = false;
@@ -538,6 +581,17 @@ class _ScannerScreenState extends State<ScannerScreen>
           title: const Text('Escanear Código'),
           backgroundColor: semantic.mediaScrim,
           foregroundColor: semantic.onMediaScrim,
+          systemOverlayStyle: SystemUiOverlayStyle.light,
+          iconTheme: IconThemeData(color: semantic.onMediaScrim),
+          actionsIconTheme: IconThemeData(color: semantic.onMediaScrim),
+          titleTextStyle: Theme.of(context).appBarTheme.titleTextStyle?.copyWith(
+                color: semantic.onMediaScrim,
+              ) ??
+              TextStyle(
+                color: semantic.onMediaScrim,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
           automaticallyImplyLeading: false,
           leading: canDismiss
               ? (isFullscreenDialog
@@ -561,6 +615,10 @@ class _ScannerScreenState extends State<ScannerScreen>
           listenable: _notifier,
           builder: (context, _) {
             final state = _notifier.state;
+
+            if (state is ScannerPermissionRationale) {
+              return _buildPermissionRationaleView(context);
+            }
 
             if (state is ScannerPermissionDenied) {
               return _buildPermissionDeniedView(context, state);
@@ -1239,6 +1297,67 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
 
     return const SizedBox.shrink();
+  }
+
+  Widget _buildPermissionRationaleView(BuildContext context) {
+    final semantic = RewitSemanticColors.of(context);
+    final foregroundMuted = semantic.onMediaScrim.withAlpha(200);
+
+    return Center(
+      key: const Key('scanner_permission_rationale_view'),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.qr_code_scanner,
+              size: 64,
+              color: semantic.onMediaScrim,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Usar a câmera para escanear',
+              style: TextStyle(
+                color: semantic.onMediaScrim,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'O Rewit precisa da câmera para ler códigos de barras de produtos e QR Codes de locais, produtos e avaliações.',
+              style: TextStyle(color: foregroundMuted, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'A câmera só fica ativa enquanto o scanner estiver aberto.',
+              style: TextStyle(color: foregroundMuted, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              key: const Key('scanner_rationale_continue_button'),
+              onPressed: () {
+                unawaited(_onContinueFromRationalePressed());
+              },
+              child: const Text('Continuar'),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              key: const Key('scanner_rationale_cancel_button'),
+              onPressed: () => _closeRoute(),
+              child: Text(
+                'Agora não',
+                style: TextStyle(color: semantic.onMediaScrim),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildPermissionDeniedView(

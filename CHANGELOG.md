@@ -3,6 +3,20 @@
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/), e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.5.1] - 2026-11-14
+
+### Corrigido
+- **Decodificação UTF-8 por padrão em respostas HTTP (`apps/mobile`)**:
+  - Adicionados `ProblemDetail.decodeResponseBytes` e `ProblemDetail.fromResponseBytes` em `lib/core/error/api_exception.dart` e normalização em `RewitHttpClient` (`lib/core/network/http_client.dart`) para decodificar `application/json`, `application/problem+json` e respostas textuais sem `charset` explícito como UTF-8 por padrão, eliminando mojibake (ex.: `"Credenciais inválidas"` no login) e mantendo respeito a charsets declarados e bytes inválidos com `allowMalformed: true`.
+- **Contraste da AppBar do Scanner (`apps/mobile`)**:
+  - Configurados explicitamente `iconTheme`, `actionsIconTheme`, `titleTextStyle` e `systemOverlayStyle` na `AppBar` de `ScannerScreen` com `RewitSemanticColors.onMediaScrim` sobre `mediaScrim`, impedindo que `AppTheme.appBarTheme` sobrescrevesse os controles com tinta escura no tema claro.
+- **Descoberta de Locais Próximos sem Cache Recente (`apps/mobile`)**:
+  - `LocationCapturePolicy.discovery` em `GeolocatorLocationService` mantém captura primária leve (`LocationAccuracy.medium`, teto 5s, cache <= 5 min) e executa no máximo um fallback controlado em `LocationAccuracy.high` (até 4s adicionais, orçamento total de 9s) quando não houver cache válido e a tentativa inicial falhar ou expirar.
+- **Explicação Contextual Pré-Permissão da Câmera no Scanner (`apps/mobile`)**:
+  - Exposto `hasRequestedPermissionBefore` em `MainActivity.kt` e `CameraPermissionService` e adicionado o estado `ScannerPermissionRationale` em `ScannerNotifier` / `ScannerScreen`, exibindo justificativa clara (`"Continuar"` / `"Agora não"`) antes do primeiro prompt nativo sem disparar solicitação prematura nem repetir em loop após recusa prévia.
+- **Testes e Validação**:
+  - Suíte automatizada mobile expandida para **1.323 testes aprovados** (`flutter test`), 0 falhas e 0 issues no `dart analyze`.
+
 ## [0.5.0] - 2026-11-14
 
 ### Adicionado

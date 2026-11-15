@@ -64,6 +64,88 @@ class ProblemDetail {
     );
   }
 
+  /// Decodifica bytes de resposta HTTP usando UTF-8 por padrão quando `charset` não é especificado.
+  ///
+  /// Respostas `application/problem+json` e `application/json` frequentemente omitem
+  /// o parâmetro `charset=utf-8`; o `package:http` assume Latin-1 nessa ausência,
+  /// causando corrupção de acentuação (mojibake). Este helper respeita charsets
+  /// explícitos (`iso-8859-1`, `latin1`, `us-ascii`, `utf-8`) e aplica UTF-8 seguro
+  /// (`allowMalformed: true`) como padrão ou fallback para sequências inválidas.
+  static String decodeResponseBytes(
+    List<int> bodyBytes, {
+    String? contentType,
+  }) {
+    if (bodyBytes.isEmpty) {
+      return '';
+    }
+
+    final charset = _extractCharset(contentType);
+    if (charset != null) {
+      if (charset == 'utf-8' || charset == 'utf8') {
+        return utf8.decode(bodyBytes, allowMalformed: true);
+      }
+      if (charset == 'iso-8859-1' ||
+          charset == 'iso_8859_1' ||
+          charset == 'latin1' ||
+          charset == 'latin-1') {
+        return latin1.decode(bodyBytes);
+      }
+      if (charset == 'us-ascii' || charset == 'ascii') {
+        return ascii.decode(bodyBytes, allowInvalid: true);
+      }
+
+      final encoding = Encoding.getByName(charset);
+      if (encoding != null) {
+        try {
+          return encoding.decode(bodyBytes);
+        } on FormatException {
+          return utf8.decode(bodyBytes, allowMalformed: true);
+        }
+      }
+    }
+
+    return utf8.decode(bodyBytes, allowMalformed: true);
+  }
+
+  static String? _extractCharset(String? contentType) {
+    if (contentType == null || contentType.trim().isEmpty) {
+      return null;
+    }
+
+    final parts = contentType.split(';');
+    for (var i = 1; i < parts.length; i++) {
+      final param = parts[i].trim();
+      final eqIndex = param.indexOf('=');
+      if (eqIndex <= 0) continue;
+
+      final key = param.substring(0, eqIndex).trim().toLowerCase();
+      if (key != 'charset') continue;
+
+      var value = param.substring(eqIndex + 1).trim();
+      if (value.length >= 2 &&
+          ((value.startsWith('"') && value.endsWith('"')) ||
+              (value.startsWith("'") && value.endsWith("'")))) {
+        value = value.substring(1, value.length - 1).trim();
+      }
+      if (value.isNotEmpty) {
+        return value.toLowerCase();
+      }
+    }
+    return null;
+  }
+
+  factory ProblemDetail.fromResponseBytes(
+    List<int> bodyBytes,
+    int statusCode, {
+    String? contentType,
+  }) {
+    final decodedBody = decodeResponseBytes(
+      bodyBytes,
+      contentType: contentType,
+    );
+    return ProblemDetail.fromResponseBody(decodedBody, statusCode);
+  }
+
   factory ProblemDetail.fromResponseBody(String body, int statusCode) {
     if (body.trim().isEmpty) {
       return ProblemDetail(

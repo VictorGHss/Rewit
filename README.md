@@ -389,13 +389,16 @@ flutter run
 
 - **Permissões de Câmera e Máquina de Estados Nativa Android (API 36)**:
   - Máquina de estados determinística em Kotlin (`CameraPermissionStateMachine.kt`, `MainActivity.kt`), projetada especificamente para contornar peculiaridades de permissão no Android API 36 (onde um primeiro diálogo cancelado ou recusado poderia incorretamente reportar `shouldShowRequestPermissionRationale == false` e causar negação permanente prematura);
-  - Persistência das decisões do usuário em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`);
+  - Persistência das decisões do usuário em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`), exposta também via método `hasRequestedPermissionBefore` para decidir com segurança se é a primeira abertura;
   - Canal de plataforma nativo via `MethodChannel` (`app.rewit.mobile/camera_permission`) e serviço Flutter `AndroidCameraPermissionService`;
-  - Interface do Scanner com diálogo contextual de justificativa antes de pedir permissão, botão de repetição e redirecionamento assistido para as configurações do sistema operacional (`openAppSettings`) quando permanentemente negado.
+  - Interface do Scanner com tela contextual pré-permissão (`ScannerPermissionRationale`) antes da primeira solicitação nativa, AppBar de alto contraste (`semantic.onMediaScrim` sobre `semantic.mediaScrim` independente do `ThemeData`), botão de repetição e redirecionamento assistido para as configurações do sistema operacional (`openAppSettings`) quando permanentemente negado.
+
+- **Hardening HTTP UTF-8 (`RewitHttpClient` & `ProblemDetail`)**:
+  - Decodificação explícita como UTF-8 por padrão em respostas `application/json`, `application/problem+json` e textuais quando o servidor omite `; charset=utf-8` no header `Content-Type`, preservando acentuação e cedilha em mensagens de erro RFC 7807 e cargas JSON, mantendo respeito a charsets explícitos (ex.: `iso-8859-1`) e fallback seguro para sequências inválidas.
 
 - **Localização e Check-in Hardening**:
   - Implementação de `GeolocatorLocationService` com política explícita por finalidade (`LocationCapturePolicy`):
-    - **Política de Descoberta (`discovery`)**: utilizada na busca de locais próximos no raio de 10 km. Prioriza velocidade, aceita cache de até 5 minutos, precisão média e timeout estrito de até 5 segundos;
+    - **Política de Descoberta (`discovery`)**: utilizada na busca de locais próximos no raio de 10 km. Prioriza velocidade com cache recente (<= 5 min) e captura inicial em precisão média com timeout de até 5 segundos; caso não haja cache válido e a tentativa inicial falhe ou expire, executa no máximo um fallback controlado em alta precisão (<= 4 segundos, dentro de orçamento total de 9 segundos), sem polling contínuo;
     - **Política de Verificação de Presença (`presenceVerification`)**: utilizada na criação de avaliação e na aba de check-in. Rejeita cache antigo, exige leitura recente (<= 1 minuto), alta precisão horizontal do GPS, timeout ampliado (10s a 15s) para aquecimento de GPS frio e retry único caso a acurácia seja aproximada (> 100 metros);
   - **Localização Simulada em QA**: o cliente não bloqueia coordenadas simuladas/mock em emuladores ou dispositivos de teste, permitindo cenários completos de homologação e validação funcional sem adulterar código;
   - **Autoridade Estrita do Backend**: a validação da presença física permanece 100% autoritativa no backend (PostGIS `ST_DWithin`, teto de 250m de raio por local, acurácia horizontal <= 100m, trava transacional `pg_advisory_xact_lock` e teto de 1 check-in verificado por usuário e local em janela móvel de 24 horas).

@@ -69,6 +69,15 @@ class ScannerNotifier extends ChangeNotifier {
     _safeNotifyListeners();
   }
 
+  /// Exibe a explicação contextual antes da primeira solicitação nativa de câmera.
+  void onPermissionRationaleRequired() {
+    if (_isDisposed) return;
+    _lookupSequence++;
+    _isProcessing = false;
+    _state = const ScannerPermissionRationale();
+    _safeNotifyListeners();
+  }
+
   /// Registra que a permissão de câmera foi negada.
   void onPermissionDenied({bool permanentlyDenied = false}) {
     if (_isDisposed) return;

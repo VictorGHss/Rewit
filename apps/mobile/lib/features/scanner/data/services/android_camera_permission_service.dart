@@ -34,6 +34,20 @@ class AndroidCameraPermissionService implements CameraPermissionService {
   }
 
   @override
+  Future<bool> hasRequestedPermissionBefore() async {
+    try {
+      final hasRequested = await _channel.invokeMethod<bool>(
+        'hasRequestedPermissionBefore',
+      );
+      return hasRequested ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  @override
   Future<CameraPermissionStatus> requestPermission() async {
     try {
       final rawStatus = await _channel.invokeMethod<String>(

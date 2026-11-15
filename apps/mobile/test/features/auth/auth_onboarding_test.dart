@@ -31,8 +31,8 @@ Map<String, dynamic> _authPayload({String access = 'access-1', String refresh = 
       },
     };
 
-http.Response _json(Object body, int status) => http.Response(
-      jsonEncode(body),
+http.Response _json(Object body, int status) => http.Response.bytes(
+      utf8.encode(jsonEncode(body)),
       status,
       headers: {'content-type': status >= 400 ? 'application/problem+json' : 'application/json'},
     );
