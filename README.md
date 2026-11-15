@@ -384,7 +384,7 @@ flutter run
   - **Target Selection Mode (`ScannerRouteArgs(selectionMode: true)`)**:
     - Modo acionado diretamente a partir da criação de avaliação (`ReviewCreateScreen` / `TargetSearchSelectorWidget` / `TargetItemInputWidget`);
     - Ao identificar um código ou produto existente, retorna o alvo selecionado tipado diretamente para o formulário de avaliação;
-  - Hardening completo do ciclo de vida: pausa automática da câmera quando o app entra em `inactive` ou `paused`, e restauração limpa e revalidação de permissões ao retornar a `resumed`;
+  - Hardening completo do ciclo de vida: pausa automática da câmera quando o app entra em `inactive` ou `paused`, restauração limpa e revalidação de permissões ao retornar a `resumed` e sincronização do botão de lanterna/flash exclusivamente pelo estado real reportado por `MobileScannerController` (`TorchState`), exibindo indisponibilidade quando a câmera não possui unidade de flash ou durante alternância entre lentes;
   - Debounce de detecção ótica e prevenção de requisições concorrentes ou duplicadas.
 
 - **Permissões de Câmera e Máquina de Estados Nativa Android (API 36)**:

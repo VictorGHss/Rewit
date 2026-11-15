@@ -3,6 +3,14 @@
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/), e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [Unreleased]
+
+### Corrigido
+- **Sincronização do flash/lanterna do Scanner (`apps/mobile`)**:
+  - Removido o estado booleano local (`_isTorchOn`) em `ScannerScreen`, passando a observar diretamente `MobileScannerController.value.torchState` (`TorchState.unavailable`, `off`, `on`, `auto`), `isInitialized`, `isRunning` e `error`.
+  - Câmeras sem unidade de flash (ou com câmera parada/em erro/controller descartado) mantêm o botão desabilitado (`Icons.no_flash`, tooltip `"Flash indisponível"`) sem falsa ativação visual; alternar de câmera com flash ativo reinicia o controle de acordo com o hardware real da nova lente.
+  - Adicionados testes de widget cobrindo câmeras com/sem flash, erro de hardware ao acionar lanterna, alternância entre lentes, falha ao trocar câmera, background/resume e descarte do controller.
+
 ## [0.5.1] - 2026-11-14
 
 ### Corrigido
