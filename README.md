@@ -351,8 +351,8 @@ flutter run
       - Assegure contraste mínimo WCAG AA em ambos os temas testando a legibilidade de textos e ícones contra seus respectivos containers.
   - **Acessibilidade e Garantia de Qualidade**:
     - Verificação estrita de contraste WCAG AA: relação `>= 4.5:1` para tipografia de leitura regular e `>= 3:1` para divisores estruturais, bordas e ícones gráficos;
-    - Bateria de testes automatizados: **1.297 testes aprovados** (`All tests passed!`), 0 falhas, 0 erros e 0 alertas no `dart analyze`;
-    - Testes unitários nativos Android aprovados (`:app:testDebugUnitTest`) cobrindo a máquina de estados de permissão;
+    - Bateria de testes automatizados Flutter: **1.323 testes aprovados** (`flutter test`, `All tests passed!`), 0 falhas, 0 erros e 0 alertas no `dart analyze`;
+    - Testes unitários nativos Android: **9 testes aprovados** (`:app:testDebugUnitTest` em `CameraPermissionStateMachineTest`) cobrindo a máquina de estados de permissão;
     - **Status de Homologação**: A suíte de testes automatizados e regressões estruturais de widget foi 100% validada no ambiente de desenvolvimento e CI/CD. A inspeção visual interativa em hardware físico real (dispositivos Android e iOS) permanece como pendência formal para validação prática pela equipe/mantenedor.
 
 - **Navegação & Home V2 Mobile (`apps/mobile`)**:

@@ -16,6 +16,7 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
   - Exposto `hasRequestedPermissionBefore` em `MainActivity.kt` e `CameraPermissionService` e adicionado o estado `ScannerPermissionRationale` em `ScannerNotifier` / `ScannerScreen`, exibindo justificativa clara (`"Continuar"` / `"Agora não"`) antes do primeiro prompt nativo sem disparar solicitação prematura nem repetir em loop após recusa prévia.
 - **Testes e Validação**:
   - Suíte automatizada mobile expandida para **1.323 testes aprovados** (`flutter test`), 0 falhas e 0 issues no `dart analyze`.
+  - Testes unitários nativos Android mantidos verdes: **9 testes aprovados** (`./gradlew :app:testDebugUnitTest` em `CameraPermissionStateMachineTest`).
 
 ## [0.5.0] - 2026-11-14
 
@@ -47,7 +48,7 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
   - Validação de presença estritamente autoritativa no backend via PostGIS (`ST_DWithin`, raio de até 250m, acurácia <= 100m, trava `pg_advisory_xact_lock` e teto de 1 check-in por usuário/local em 24h).
 - **Testes e Validação**:
   - Suíte de testes automatizados mobile expandida para **1.297 testes aprovados** (`flutter test`), 0 falhas, 0 issues no `dart analyze`.
-  - Testes unitários nativos Android aprovados (`CameraPermissionStateMachineTest`).
+  - **9 testes unitários nativos Android aprovados** (`CameraPermissionStateMachineTest`).
 
 ## [0.4.0] - 2026-11-04
 
