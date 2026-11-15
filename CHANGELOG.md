@@ -3,6 +3,38 @@
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/), e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.5.0] - 2026-11-14
+
+### Adicionado
+- **Navegação & Home V2 Mobile (`apps/mobile`)**:
+  - Nova barra de navegação inferior (`NavigationBar`) com 5 destinos canônicos: Início (feed dual), Explorar (busca e cadastro de locais), Rankings (classificações dimensionais), Check-in (presença e proximidade) e Coleção (estado vazio honesto aguardando backend de coleções/listas).
+  - AppBar integrada com avatar do usuário com inicial de fallback e navegação para Meu Perfil (`/profile`), título centralizado, indicador de mensagens em breve e botão de notificações com badge reativo de não lidas.
+  - Floating Action Button (FAB) com folha modal de ações rápidas: "Nova Avaliação" (`/review/create`) e "Fazer Check-in".
+  - Navegação defensiva com `PopScope`: voltar fora da aba Início retorna à Home antes de fechar a aplicação.
+- **Feed Duplo (Para Você / Seguindo) e Sincronização Reativa**:
+  - Integração com os contratos `/api/v2/feed` ("Para você") e `/api/v1/feed` ("Seguindo").
+  - `FeedNotifier` com canais de estado isolados para cada feed, rollback granular imediato de votos úteis (`helpfulCount` e `isHelpfulByMe`) em caso de falha de rede e preservação de IDs removidos durante recargas de recuperação.
+  - Sincronização reativa de feed após criar avaliações ou salvar novos interesses em `AppRouter.editInterests`.
+- **Scanner Inteligente, Target Selection Mode e Hardening de Ciclo de Vida**:
+  - Suporte a leitura óptica de códigos de barras (EAN-13, EAN-8, UPC-A, ITF-14) e QR Codes, além de fallback manual normalizado.
+  - Modo de seleção de alvo (`ScannerRouteArgs(selectionMode: true)`) integrado diretamente à tela de criação de avaliações (`ReviewCreateScreen` / `TargetSearchSelectorWidget` / `TargetItemInputWidget`), retornando o alvo selecionado tipado para o formulário.
+  - Hardening do ciclo de vida: pausa automática da câmera quando o app entra em `inactive` ou `paused`, e religamento com rechecagem limpa de permissões em `resumed`.
+  - Debounce ótico prevenindo múltiplas leituras em rajada.
+- **Permissões de Câmera e Máquina de Estados Nativa Android (API 36)**:
+  - Máquina de estados determinística nativa em Kotlin (`CameraPermissionStateMachine.kt`, `MainActivity.kt`), tratando as especificidades do Android API 36 para evitar que recusas iniciais ou cancelamentos de diálogo causem negação permanente prematura.
+  - Persistência das decisões do usuário em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`).
+  - Canal nativo `MethodChannel` (`app.rewit.mobile/camera_permission`) e serviço Flutter `AndroidCameraPermissionService`.
+  - Diálogo de justificativa contextual, botão de repetição e redirecionamento assistido para configurações do sistema (`openAppSettings`).
+- **Localização e Check-in Hardening**:
+  - Implementação de `GeolocatorLocationService` com política explícita por finalidade (`LocationCapturePolicy`):
+    - `discovery`: raio de até 10 km, aceita cache de até 5 minutos, precisão média e timeout estrito de até 5 segundos;
+    - `presenceVerification`: para check-in e avaliações no local, rejeita cache antigo, exige leitura fresca (<= 1 min), alta precisão GPS, timeout ampliado (10s a 15s) e retry único em caso de acurácia aproximada (> 100m).
+  - Suporte a localização simulada/mock preservado no cliente para viabilizar testes ponta a ponta e auditorias em emuladores e QA.
+  - Validação de presença estritamente autoritativa no backend via PostGIS (`ST_DWithin`, raio de até 250m, acurácia <= 100m, trava `pg_advisory_xact_lock` e teto de 1 check-in por usuário/local em 24h).
+- **Testes e Validação**:
+  - Suíte de testes automatizados mobile expandida para **1.297 testes aprovados** (`flutter test`), 0 falhas, 0 issues no `dart analyze`.
+  - Testes unitários nativos Android aprovados (`CameraPermissionStateMachineTest`).
+
 ## [0.4.0] - 2026-11-04
 
 ### Adicionado

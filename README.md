@@ -351,8 +351,54 @@ flutter run
       - Assegure contraste mínimo WCAG AA em ambos os temas testando a legibilidade de textos e ícones contra seus respectivos containers.
   - **Acessibilidade e Garantia de Qualidade**:
     - Verificação estrita de contraste WCAG AA: relação `>= 4.5:1` para tipografia de leitura regular e `>= 3:1` para divisores estruturais, bordas e ícones gráficos;
-    - Bateria de testes automatizados: **1.172 testes aprovados** (`All tests passed!`), 0 falhas, 0 erros e 0 alertas no `flutter analyze`;
-    - **Status de Homologação**: A suíte de testes automatizados e regressões estruturais de widget foi 100% validada no ambiente de CI/CD. A inspeção visual interativa em hardware físico real (dispositivos Android e iOS) permanece como pendência formal para validação prática pela equipe/mantenedor.
+    - Bateria de testes automatizados: **1.297 testes aprovados** (`All tests passed!`), 0 falhas, 0 erros e 0 alertas no `dart analyze`;
+    - Testes unitários nativos Android aprovados (`:app:testDebugUnitTest`) cobrindo a máquina de estados de permissão;
+    - **Status de Homologação**: A suíte de testes automatizados e regressões estruturais de widget foi 100% validada no ambiente de desenvolvimento e CI/CD. A inspeção visual interativa em hardware físico real (dispositivos Android e iOS) permanece como pendência formal para validação prática pela equipe/mantenedor.
+
+- **Navegação & Home V2 Mobile (`apps/mobile`)**:
+  - **Barra de Navegação Inferior (5 destinos canônicos)**:
+    - **Início** (índice 0): Feed de atividades dual (`FeedView`) com alternância fluida entre as abas "Para você" e "Seguindo";
+    - **Explorar** (índice 1): Busca unificada de locais e produtos (`SearchScreen(embedded: true)`) com suporte a cadastro manual de novos locais;
+    - **Rankings** (índice 2): Rankings da região (`RankingsScreen(embedded: true)`) com filtro por categorias e interesses;
+    - **Check-in** (índice 3): Área rápida de registro presencial (`CheckInScreen(embedded: true)`) com busca de locais próximos por geolocalização e histórico de check-ins;
+    - **Coleção** (índice 4): Área reservada para organização de listas salvas (`CollectionScreen(embedded: true)`). Exibe estado vazio honesto e informativo, sem subtabs cosméticas nem mocks de dados, enquanto o backend de coleções aguarda implementação.
+  - **Cabeçalho Unificado (AppBar)**:
+    - Avatar do usuário autenticado no canto esquerdo com inicial de fallback e navegação direta para Meu Perfil (`/profile`);
+    - Título centralizado "Rewit" com suporte a acessibilidade semântica;
+    - Botão de mensagens com aviso contextual de funcionalidade em desenvolvimento ("em breve");
+    - Botão de notificações com badge reativo de contagem de notificações não lidas (`NotificationsNotifier`).
+  - **Ações Rápidas Flutuantes (FAB)**:
+    - Botão flutuante central (`home_fab_button`) aciona bottom sheet modal com duas ações claras: "Nova Avaliação" (abre o fluxo multi-alvo em `/review/create`) e "Fazer Check-in" (alterna imediatamente para a aba de Check-in).
+  - **Gestão de Histórico e PopScope**:
+    - Navegação defensiva: pressionar o botão de retorno do dispositivo fora da aba Início redireciona para a aba Início antes de sinalizar o fechamento da aplicação.
+
+- **Feed Duplo (Para Você / Seguindo) e Sincronização Reativa**:
+  - Suporte completo aos dois contratos oficiais de timeline: `/api/v2/feed` (descoberta personalizada baseada em conexões, interesses e recência) e `/api/v1/feed` (feed cronológico estrito de contas seguidas);
+  - `FeedNotifier` com canais de estado isolados para cada tipo de feed (`forYou` e `following`), preservando scroll, paginação e itens de forma independente;
+  - Voto útil com atualização otimista imediata e rollback granular reversível em caso de falha de conexão;
+  - Preservação estrita dos identificadores de avaliações removidas ou ocultadas durante recargas de recuperação de rede;
+  - Sincronização automática entre telas: publicação de nova avaliação ou alteração de interesses (`AppRouter.editInterests`) aciona recarga imediata do canal `forYou`.
+
+- **Scanner Barcode/QR Code e Target Selection Mode**:
+  - Suporte a leitura óptica em tempo real via câmera (EAN-13, EAN-8, UPC-A, ITF-14 e QR Code) e fallback manual com sanitização e normalização de texto;
+  - **Target Selection Mode (`ScannerRouteArgs(selectionMode: true)`)**:
+    - Modo acionado diretamente a partir da criação de avaliação (`ReviewCreateScreen` / `TargetSearchSelectorWidget` / `TargetItemInputWidget`);
+    - Ao identificar um código ou produto existente, retorna o alvo selecionado tipado diretamente para o formulário de avaliação;
+  - Hardening completo do ciclo de vida: pausa automática da câmera quando o app entra em `inactive` ou `paused`, e restauração limpa e revalidação de permissões ao retornar a `resumed`;
+  - Debounce de detecção ótica e prevenção de requisições concorrentes ou duplicadas.
+
+- **Permissões de Câmera e Máquina de Estados Nativa Android (API 36)**:
+  - Máquina de estados determinística em Kotlin (`CameraPermissionStateMachine.kt`, `MainActivity.kt`), projetada especificamente para contornar peculiaridades de permissão no Android API 36 (onde um primeiro diálogo cancelado ou recusado poderia incorretamente reportar `shouldShowRequestPermissionRationale == false` e causar negação permanente prematura);
+  - Persistência das decisões do usuário em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`);
+  - Canal de plataforma nativo via `MethodChannel` (`app.rewit.mobile/camera_permission`) e serviço Flutter `AndroidCameraPermissionService`;
+  - Interface do Scanner com diálogo contextual de justificativa antes de pedir permissão, botão de repetição e redirecionamento assistido para as configurações do sistema operacional (`openAppSettings`) quando permanentemente negado.
+
+- **Localização e Check-in Hardening**:
+  - Implementação de `GeolocatorLocationService` com política explícita por finalidade (`LocationCapturePolicy`):
+    - **Política de Descoberta (`discovery`)**: utilizada na busca de locais próximos no raio de 10 km. Prioriza velocidade, aceita cache de até 5 minutos, precisão média e timeout estrito de até 5 segundos;
+    - **Política de Verificação de Presença (`presenceVerification`)**: utilizada na criação de avaliação e na aba de check-in. Rejeita cache antigo, exige leitura recente (<= 1 minuto), alta precisão horizontal do GPS, timeout ampliado (10s a 15s) para aquecimento de GPS frio e retry único caso a acurácia seja aproximada (> 100 metros);
+  - **Localização Simulada em QA**: o cliente não bloqueia coordenadas simuladas/mock em emuladores ou dispositivos de teste, permitindo cenários completos de homologação e validação funcional sem adulterar código;
+  - **Autoridade Estrita do Backend**: a validação da presença física permanece 100% autoritativa no backend (PostGIS `ST_DWithin`, teto de 250m de raio por local, acurácia horizontal <= 100m, trava transacional `pg_advisory_xact_lock` e teto de 1 check-in verificado por usuário e local em janela móvel de 24 horas).
 
 ### 7.2 Funcionalidades Planejadas (Fases Futuras)
 

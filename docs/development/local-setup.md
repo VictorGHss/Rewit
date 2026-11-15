@@ -12,7 +12,8 @@ Este guia orienta a preparação do ambiente de desenvolvimento local na máquin
 | **Maven** | 3.9+ (ou `./mvnw`) | Build e gerenciamento do Java |
 | **Docker Desktop** | 26+ (com Compose v2) | Orquestração da infraestrutura de banco e cache |
 | **Node.js** | 20 LTS (LTS Iron) | Execução e build do Admin React |
-| **Flutter SDK** | 3.24+ | Desenvolvimento do app mobile |
+| **Flutter SDK** | 3.47+ (Dart 3.13+) | Desenvolvimento do app mobile |
+| **Android SDK** | API 36 (`compileSdk = 36`) | Compilação e testes nativos Android |
 | **Git** | 2.40+ | Controle de versão |
 
 ---
@@ -54,12 +55,25 @@ npm run dev
 ```
 O painel estará acessível em: `http://localhost:5173`.
 
-### Passo 5: Execução do Aplicativo Mobile
-Conecte um dispositivo Android/iOS físico ou inicie um emulador:
-```powershell
+### Passo 5: Execução e Validação do Aplicativo Mobile
+Conecte um dispositivo Android/iOS físico ou inicie o emulador oficial (`Rewit_API_36` / Android API 36):
+```bash
 cd apps/mobile
 flutter pub get
 flutter run
+```
+
+Comandos de análise estática e testes automatizados:
+```bash
+# Análise estática do Dart (0 issues)
+dart analyze
+
+# Suíte completa de testes automatizados do Flutter (1.297 testes)
+flutter test
+
+# Testes unitários nativos Android (Kotlin / JUnit na máquina de estados de permissão)
+cd android
+./gradlew :app:testDebugUnitTest
 ```
 
 ---

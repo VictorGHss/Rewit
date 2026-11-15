@@ -252,3 +252,55 @@ Para prevenir vendor lock-in e manter o princípio de independência:
 - **Push Notifications**: Definida a interface `PushNotificationService`. Em ambiente local de desenvolvimento, utiliza uma implementação mock/log (`LoggingPushNotificationService`). Em produção, adaptadores especializados podem despachar via FCM, OneSignal ou APNs.
 - **E-mails Transacionais**: Definida a interface `EmailNotificationService`. Em ambiente local, imprime o e-mail no console ou utiliza um servidor SMTP mock (ex: MailHog).
 - **Proibição**: O Firebase **não** é o banco de dados principal, não é o backend e não é o motor primário da aplicação.
+
+---
+
+## 9. Arquitetura do Cliente Mobile (Flutter / Android / iOS)
+
+O aplicativo cliente móvel (`apps/mobile`) é desenvolvido em **Flutter** (Dart 3.13+ / Flutter 3.47+) com arquitetura modular desacoplada e foco em confiabilidade offline/resiliente e performance visual.
+
+### 9.1 Estrutura em Camadas e Organização por Features
+Cada funcionalidade de negócio do app é isolada em um módulo auto-contido sob `lib/features/<nome_da_feature>/`:
+* **`domain/`**: Entidades puras imutáveis, value objects, contratos de repositórios e serviços de hardware (`LocationService`, `CameraPermissionService`);
+* **`data/`**: Implementações de repositório, clientes HTTP REST (consumindo RFC 7807), persistência segura local via `FlutterSecureStorage` e adaptadores de sensores nativos;
+* **`presentation/`**: Gerenciamento de estado reativo via `ChangeNotifier` / `StateNotifier` (`FeedNotifier`, `ScannerNotifier`, `AuthNotifier`), telas (`HomeScreen`, `ReviewCreateScreen`, `ScannerScreen`, `CheckInScreen`, `SearchScreen`, `RankingsScreen`, `CollectionScreen`) e widgets especializados;
+* **`app/`**: Roteador central tipado (`AppRouter`), Design System e tokens visuais (`AppTheme`, `RewitTokens`, `RewitSemanticColors`, `ThemeController`).
+
+### 9.2 Navegação e Home V2
+A tela inicial autenticada (`HomeScreen`) adota o padrão de navegação com barra inferior (`NavigationBar`) indexada contendo 5 destinos canônicos:
+1. **Início (0)**: `FeedView` com abas dual ("Para você" e "Seguindo");
+2. **Explorar (1)**: `SearchScreen(embedded: true)` com busca textual e cadastro de novos locais;
+3. **Rankings (2)**: `RankingsScreen(embedded: true)` com ordenação regional por notas e dimensões;
+4. **Check-in (3)**: `CheckInScreen(embedded: true)` com busca por proximidade e histórico;
+5. **Coleção (4)**: `CollectionScreen(embedded: true)` com estado vazio honesto até implementação do backend de coleções.
+
+* **Navegação Defensiva com PopScope**: O toque no botão de retorno fora da aba Início transiciona o índice da Home de volta para Início (`_currentIndex = 0`), prevenindo saída acidental da aplicação.
+* **Ações Rápidas (FAB)**: O botão flutuante central disponibiliza folha de ação para iniciar "Nova Avaliação" (`/review/create`) ou "Fazer Check-in".
+
+### 9.3 Gerenciamento de Estado do Feed Duplo
+O `FeedNotifier` gerencia o estado da timeline com dois canais completamente isolados:
+* **Canal `FeedType.forYou`**: Consome `/api/v2/feed` (recomendações com diversificação e afinidade);
+* **Canal `FeedType.following`**: Consome `/api/v1/feed` (ordenação cronológica estrita de seguidos);
+* **Isolamento de Estado**: Cada canal possui controle independente de itens, página atual, estado de loading e scroll;
+* **Rollback Granular**: Reações de voto útil (`helpful`) aplicam mutação otimista com reversão imediata caso ocorra erro na chamada HTTP;
+* **Preservação de Removidos**: Durante recovery reloads, IDs de avaliações excluídas ou ocultadas são preservados para evitar o reaparecimento de itens obsoletos.
+
+### 9.4 Scanner e Target Selection Mode
+O subsistema de leitura óptica (`features/scanner/`) opera em dois modos:
+* **Modo Normal**: Navegação autônoma em `/scanner` para leitura de códigos de barras (EAN-13, EAN-8, UPC-A, ITF-14) ou QR Codes com consulta de catálogo;
+* **Target Selection Mode (`ScannerRouteArgs(selectionMode: true)`)**: Invocado pelo formulário de criação de avaliações (`ReviewCreateScreen` / `TargetSearchSelectorWidget`). Ao detectar e confirmar um produto ou local, retorna o identificador selecionado diretamente para preenchimento automático do formulário de avaliação;
+* **Ciclo de Vida Resiliente**: O controller óptico (`MobileScannerController`) interrompe a câmera em eventos de pausa (`AppLifecycleState.paused` / `inactive`) e reativa de forma limpa em `resumed`.
+
+### 9.5 Máquina de Estados Nativa de Permissão de Câmera (Android API 36)
+Para compatibilidade estrita com Android API 36 (onde diálogos cancelados ou recusados pela primeira vez poderiam reportar incorretamente `shouldShowRequestPermissionRationale == false`), foi implementada uma máquina de estados pura em Kotlin:
+* **Componente Nativo**: `app.rewit.mobile.CameraPermissionStateMachine` e `MainActivity.kt`;
+* **Persistência**: Armazenamento do histórico real em `SharedPreferences` (`hasRequestedBefore`, `permanentlyDenied`);
+* **Canal de Plataforma**: `MethodChannel('app.rewit.mobile/camera_permission')` consumido por `AndroidCameraPermissionService`;
+* **Resolução**: Classifica deterministicamente entre `granted`, `denied` (permitindo novas tentativas via aplicativo) e `permanentlyDenied` (acionando botão para abrir configurações do sistema).
+
+### 9.6 Política de Localização (Descoberta vs Verificação Presencial)
+A captura de coordenadas GPS no dispositivo é regida por `LocationCapturePolicy`:
+* **Descoberta Externa (`discovery`)**: Busca estabelecimentos em raio de até 10 km. Permite leitura em cache de até 5 minutos, precisão média e timeout de até 5s;
+* **Verificação de Presença (`presenceVerification`)**: Utilizada exclusivamente para validar check-in presencial em avaliações. Rejeita cache antigo, exige leitura fresca (idade <= 1 minuto), alta precisão GPS, timeout ampliado (10s a 15s) para aquecimento de satélites e retry único caso a acurácia retorne superior a 100 metros;
+* **Suporte a QA**: O aplicativo não bloqueia coordenadas simuladas no client, assegurando a realização de testes ponta a ponta e auditorias em emuladores;
+* **Autoridade do Backend**: A emissão do selo `isVerifiedOnSite` é 100% calculada no backend via PostGIS (`ST_DWithin`, teto de 250m de raio, acurácia horizontal <= 100m, trava transacional `pg_advisory_xact_lock` e teto de 1 check-in por usuário/local a cada 24h).
