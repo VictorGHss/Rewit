@@ -4,7 +4,10 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/core/network/session_expiration_details.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
+
+export 'package:rewit_mobile/core/network/session_expiration_details.dart';
 
 /// Cliente HTTP centralizado para a API Rewit.
 ///
@@ -22,6 +25,7 @@ class RewitHttpClient {
   final http.Client _client;
   final TokenStorage? _tokenStorage;
   final void Function()? onSessionExpired;
+  final SessionExpiredCallback? onSessionExpiredWithDetails;
 
   RewitHttpClient({
     required this.baseUrl,
@@ -29,6 +33,7 @@ class RewitHttpClient {
     http.Client? client,
     TokenStorage? tokenStorage,
     this.onSessionExpired,
+    this.onSessionExpiredWithDetails,
   })  : _client = client ?? http.Client(),
         _tokenStorage = tokenStorage;
 
@@ -881,11 +886,22 @@ class RewitHttpClient {
       ),
     );
 
-    // Se a sessão expirou em requisição autenticada (401 não autorizado)
+    // Se a sessão expirou ou a conta está desativada em requisição autenticada (401)
     if (statusCode == 401 && requiresAuth) {
-      final isLocalBusinessError = treatInvalidCredentialsAsBusinessError && problem.code == 'INVALID_CREDENTIALS';
+      final isLocalBusinessError =
+          treatInvalidCredentialsAsBusinessError && problem.code == 'INVALID_CREDENTIALS';
       if (!isLocalBusinessError) {
-        onSessionExpired?.call();
+        final callbackWithDetails = onSessionExpiredWithDetails;
+        if (callbackWithDetails != null) {
+          callbackWithDetails(
+            SessionExpirationDetails(
+              errorCode: problem.code,
+              statusCode: statusCode,
+            ),
+          );
+        } else {
+          onSessionExpired?.call();
+        }
       }
     }
 

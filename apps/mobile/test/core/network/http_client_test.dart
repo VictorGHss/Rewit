@@ -278,6 +278,164 @@ void main() {
       expect(sessionExpiredInvoked, isFalse);
     });
 
+    test('callback tipado recebe ACCOUNT_DISABLED e status 401 intactos', () async {
+      SessionExpirationDetails? capturedDetails;
+
+      final mockClient = MockBaseClient((request) async {
+        final body = jsonEncode({
+          'type': 'about:blank',
+          'title': 'Não autorizado',
+          'status': 401,
+          'detail': 'Detalhe interno do backend',
+          'code': 'ACCOUNT_DISABLED',
+        });
+        return http.StreamedResponse(Stream.value(utf8.encode(body)), 401);
+      });
+
+      final client = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+        onSessionExpiredWithDetails: (details) => capturedDetails = details,
+      );
+
+      await expectLater(
+        client.post('/api/v1/reports', body: {}, requiresAuth: true),
+        throwsA(isA<ApiException>().having((e) => e.errorCode, 'errorCode', 'ACCOUNT_DISABLED')),
+      );
+
+      expect(capturedDetails, isNotNull);
+      expect(capturedDetails!.statusCode, 401);
+      expect(capturedDetails!.errorCode, 'ACCOUNT_DISABLED');
+    });
+
+    test('callback tipado recebe AUTHENTICATION_REQUIRED com status 401', () async {
+      SessionExpirationDetails? capturedDetails;
+
+      final mockClient = MockBaseClient((request) async {
+        final body = jsonEncode({
+          'type': 'about:blank',
+          'title': 'Não autorizado',
+          'status': 401,
+          'detail': 'JWT expirado',
+          'code': 'AUTHENTICATION_REQUIRED',
+        });
+        return http.StreamedResponse(Stream.value(utf8.encode(body)), 401);
+      });
+
+      final client = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+        onSessionExpiredWithDetails: (details) => capturedDetails = details,
+      );
+
+      await expectLater(
+        client.get('/me'),
+        throwsA(isA<ApiException>().having((e) => e.errorCode, 'errorCode', 'AUTHENTICATION_REQUIRED')),
+      );
+
+      expect(
+        capturedDetails,
+        const SessionExpirationDetails(
+          errorCode: 'AUTHENTICATION_REQUIRED',
+          statusCode: 401,
+        ),
+      );
+    });
+
+    test('quando ambos callbacks estão configurados, apenas onSessionExpiredWithDetails é invocado', () async {
+      var legacyCalls = 0;
+      var typedCalls = 0;
+
+      final mockClient = MockBaseClient((request) async {
+        final body = jsonEncode({
+          'status': 401,
+          'detail': 'Conta desativada',
+          'code': 'ACCOUNT_DISABLED',
+        });
+        return http.StreamedResponse(Stream.value(utf8.encode(body)), 401);
+      });
+
+      final client = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+        onSessionExpired: () => legacyCalls++,
+        onSessionExpiredWithDetails: (_) => typedCalls++,
+      );
+
+      await expectLater(client.get('/me'), throwsA(isA<ApiException>()));
+
+      expect(typedCalls, 1);
+      expect(legacyCalls, 0);
+    });
+
+    test('NÃO invoca onSessionExpiredWithDetails quando treatInvalidCredentialsAsBusinessError=true e erro é INVALID_CREDENTIALS', () async {
+      var typedCalls = 0;
+      var legacyCalls = 0;
+
+      final mockClient = MockBaseClient((request) async {
+        final body = jsonEncode({
+          'status': 401,
+          'detail': 'Senha atual incorreta',
+          'code': 'INVALID_CREDENTIALS',
+        });
+        return http.StreamedResponse(Stream.value(utf8.encode(body)), 401);
+      });
+
+      final client = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+        onSessionExpired: () => legacyCalls++,
+        onSessionExpiredWithDetails: (_) => typedCalls++,
+      );
+
+      await expectLater(
+        client.post(
+          '/api/v1/me/password',
+          body: {},
+          requiresAuth: true,
+          treatInvalidCredentialsAsBusinessError: true,
+        ),
+        throwsA(isA<ApiException>()),
+      );
+
+      expect(typedCalls, 0);
+      expect(legacyCalls, 0);
+    });
+
+    test('não invoca callbacks de expiração em 401 ACCOUNT_DISABLED quando requiresAuth=false', () async {
+      var typedCalls = 0;
+      var legacyCalls = 0;
+
+      final mockClient = MockBaseClient((request) async {
+        final body = jsonEncode({
+          'status': 401,
+          'detail': 'Conta desativada',
+          'code': 'ACCOUNT_DISABLED',
+        });
+        return http.StreamedResponse(Stream.value(utf8.encode(body)), 401);
+      });
+
+      final client = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+        onSessionExpired: () => legacyCalls++,
+        onSessionExpiredWithDetails: (_) => typedCalls++,
+      );
+
+      await expectLater(
+        client.post('/api/v1/auth/login', body: {}, requiresAuth: false),
+        throwsA(isA<ApiException>()),
+      );
+
+      expect(typedCalls, 0);
+      expect(legacyCalls, 0);
+    });
+
     test('deve extrair cabeçalho Retry-After em HTTP 429 Too Many Requests', () async {
       final mockClient = MockBaseClient((request) async {
         final body = jsonEncode({
