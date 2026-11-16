@@ -68,7 +68,7 @@ Comandos de análise estática e testes automatizados:
 # Análise estática do Dart (0 issues)
 dart analyze
 
-# Suíte completa de testes automatizados do Flutter (1.323 testes)
+# Suíte completa de testes automatizados do Flutter (1.430 testes)
 flutter test
 
 # Testes unitários nativos Android (9 testes Kotlin / JUnit na máquina de estados de permissão)
