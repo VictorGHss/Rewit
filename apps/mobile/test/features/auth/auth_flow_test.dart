@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
+import 'package:rewit_mobile/core/storage/session_token_coordinator.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_tokens.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
@@ -322,6 +324,115 @@ void main() {
       expect(result.tokens.accessToken, 'new-access-token');
       expect(await tokenStorage.getAccessToken(), 'new-access-token');
       expect(await tokenStorage.getRefreshToken(), 'new-refresh-token');
+    });
+
+    test('requestTokenRefresh não persiste tokens e refreshTokens recusa sobrescrever sessão B após geração obsoleta', () async {
+      final coordinator = SessionTokenCoordinator(storage: tokenStorage);
+      await coordinator.saveNewSessionTokens(
+        accessToken: 'expired-access-a',
+        refreshToken: 'refresh-a',
+      );
+
+      final refreshStarted = Completer<void>();
+      final refreshRelease = Completer<void>();
+
+      final mockClient = MockHttpHandler((request) async {
+        if (request.url.path.endsWith('/refresh')) {
+          refreshStarted.complete();
+          await refreshRelease.future;
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode({
+              'user': {
+                'id': 'user-uuid-a',
+                'email': 'a@rewit.com',
+                'handle': 'usera',
+                'displayName': 'User A',
+              },
+              'accessToken': 'stale-access-a',
+              'refreshToken': 'stale-refresh-a',
+              'tokenType': 'Bearer',
+              'expiresIn': 900,
+            }))),
+            200,
+          );
+        }
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode({
+            'user': {
+              'id': 'user-uuid-b',
+              'email': 'b@rewit.com',
+              'handle': 'userb',
+              'displayName': 'User B',
+            },
+            'accessToken': 'access-b',
+            'refreshToken': 'refresh-b',
+            'tokenType': 'Bearer',
+            'expiresIn': 900,
+          }))),
+          200,
+        );
+      });
+
+      final httpClient = RewitHttpClient(
+        baseUrl: 'https://api.rewit.test',
+        client: mockClient,
+        tokenStorage: tokenStorage,
+      );
+
+      final repo = AuthRepositoryImpl(
+        httpClient: httpClient,
+        tokenStorage: tokenStorage,
+        tokenCoordinator: coordinator,
+      );
+
+      // requestTokenRefresh não altera TokenStorage
+      final pendingRefresh = repo.refreshTokens();
+      await refreshStarted.future;
+
+      await coordinator.invalidateAndClear();
+      await repo.login(email: 'b@rewit.com', password: 'Password@123');
+      expect(await tokenStorage.getAccessToken(), 'access-b');
+
+      refreshRelease.complete();
+      await expectLater(
+        pendingRefresh,
+        throwsA(isA<ApiException>()
+            .having((e) => e.statusCode, 'statusCode', 401)
+            .having((e) => e.errorCode, 'errorCode', 'SESSION_INVALIDATED')),
+      );
+
+      // Tokens da Conta B continuam intactos no armazenamento
+      expect(await tokenStorage.getAccessToken(), 'access-b');
+      expect(await tokenStorage.getRefreshToken(), 'refresh-b');
+
+      // requestTokenRefresh retorna credenciais sem tocar storage
+      final preview = await AuthRepositoryImpl(
+        httpClient: RewitHttpClient(
+          baseUrl: 'https://api.rewit.test',
+          client: MockHttpHandler((_) async => http.StreamedResponse(
+                Stream.value(utf8.encode(jsonEncode({
+                  'user': {
+                    'id': 'user-uuid-b',
+                    'email': 'b@rewit.com',
+                    'handle': 'userb',
+                    'displayName': 'User B',
+                  },
+                  'accessToken': 'preview-access-b',
+                  'refreshToken': 'preview-refresh-b',
+                  'tokenType': 'Bearer',
+                  'expiresIn': 900,
+                }))),
+                200,
+              )),
+          tokenStorage: tokenStorage,
+        ),
+        tokenStorage: tokenStorage,
+        tokenCoordinator: coordinator,
+      ).requestTokenRefresh();
+
+      expect(preview.tokens.accessToken, 'preview-access-b');
+      expect(await tokenStorage.getAccessToken(), 'access-b');
+      expect(await tokenStorage.getRefreshToken(), 'refresh-b');
     });
 
     test('refreshTokens sem token no storage lança ApiException 401', () async {

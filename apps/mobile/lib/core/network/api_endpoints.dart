@@ -90,6 +90,9 @@ class ApiEndpoints {
   static String discussionDetail(String discussionId) => '/api/v1/discussions/$discussionId';
   static String reportDiscussion(String discussionId) => '/api/v1/discussions/$discussionId/reports';
 
+  // Denúncias de Avaliações (Trust & Safety V1.A)
+  static const String reports = '/api/v1/reports';
+
   // Notificações In-App (C5.4)
   static const String notificationsPath = '/api/v1/me/notifications';
   static String notifications({int page = 0, int size = 20}) =>

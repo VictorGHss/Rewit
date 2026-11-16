@@ -1,3 +1,4 @@
+import 'package:rewit_mobile/core/storage/session_token_coordinator.dart';
 import 'package:rewit_mobile/features/auth/data/models/auth_user_dto.dart';
 import 'package:rewit_mobile/features/auth/domain/entities/auth_state.dart';
 import 'package:rewit_mobile/features/auth/domain/services/social_sign_in_service.dart';
@@ -62,4 +63,51 @@ abstract class AuthRepository {
 
   /// Verifica se há tokens de sessão armazenados localmente.
   Future<bool> hasStoredSession();
+}
+
+/// Extensão opcional de [AuthRepository] que propaga a identidade explícita da
+/// tentativa de autenticação iniciada pelo consumidor (ex.: [AuthNotifier])
+/// até a fila serializada de persistência.
+abstract class AttemptScopedAuthRepository implements AuthRepository {
+  /// Coordenador compartilhado que garante propriedade da tentativa na persistência.
+  SessionTokenCoordinator get tokenCoordinator;
+
+  /// Realiza login local vinculando a persistência à tentativa [authenticationAttemptId].
+  Future<Authenticated> loginWithAttempt({
+    required String email,
+    required String password,
+    int? authenticationAttemptId,
+  });
+
+  /// Cria conta local vinculando a persistência à tentativa [authenticationAttemptId].
+  Future<Authenticated> registerWithAttempt({
+    required String displayName,
+    required String handle,
+    required String email,
+    required String password,
+    int? authenticationAttemptId,
+  });
+
+  /// Realiza login social vinculando a persistência à tentativa [authenticationAttemptId].
+  Future<Authenticated> signInWithSocialAttempt({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+    int? authenticationAttemptId,
+  });
+
+  /// Reativa conta federada vinculando a persistência à tentativa [authenticationAttemptId].
+  Future<Authenticated> reactivateWithSocialAttempt({
+    required SocialAuthProvider provider,
+    required String idToken,
+    required String nonce,
+    int? authenticationAttemptId,
+  });
+
+  /// Reativa conta local vinculando a persistência à tentativa [authenticationAttemptId].
+  Future<Authenticated> reactivateWithAttempt({
+    required String email,
+    required String password,
+    int? authenticationAttemptId,
+  });
 }

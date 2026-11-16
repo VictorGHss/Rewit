@@ -201,7 +201,8 @@ flutter run
 
 - **Discussões e Notificações**:
   - Discussões encadeadas com suporte a respostas aninhadas e indicadores de autoria do proprietário;
-  - Notificações de resposta com metadados estruturados (`rootDiscussionId`) e navegação contextual direta.
+  - Notificações de resposta com metadados estruturados (`rootDiscussionId`) e navegação contextual direta;
+  - Denúncia comunitária de avaliações (`POST /api/v1/reports`) diretamente na tela de detalhes da avaliação (`ReviewDetailScreen` / `ReportReviewDialog` em `features/reports/`), com elegibilidade *fail-closed* contra sinais contraditórios de autoria, distinção entre nova denúncia (`201 Created`) e denúncia já existente (`200 OK`) por `ReportStatus`, validação de até 500 caracteres no detalhe e tratamento estruturado de erros RFC 7807, verificação de sessão via `AuthNotifier.sessionCheckSince`, indisponibilidade (`404`) e rate limiting (`Retry-After`).
 
 - **Scanner Inteligente Mobile (Flutter)**:
   - Leitura óptica em tempo real via câmera para códigos de barras (EAN/UPC) e QR Codes;
@@ -384,7 +385,7 @@ flutter run
   - **Target Selection Mode (`ScannerRouteArgs(selectionMode: true)`)**:
     - Modo acionado diretamente a partir da criação de avaliação (`ReviewCreateScreen` / `TargetSearchSelectorWidget` / `TargetItemInputWidget`);
     - Ao identificar um código ou produto existente, retorna o alvo selecionado tipado diretamente para o formulário de avaliação;
-  - Hardening completo do ciclo de vida: pausa automática da câmera quando o app entra em `inactive` ou `paused`, e restauração limpa e revalidação de permissões ao retornar a `resumed`;
+  - Hardening completo do ciclo de vida: pausa automática da câmera quando o app entra em `inactive` ou `paused`, restauração limpa e revalidação de permissões ao retornar a `resumed` e sincronização do botão de lanterna/flash exclusivamente pelo estado real reportado por `MobileScannerController` (`TorchState`), exibindo indisponibilidade quando a câmera não possui unidade de flash ou durante alternância entre lentes;
   - Debounce de detecção ótica e prevenção de requisições concorrentes ou duplicadas.
 
 - **Permissões de Câmera e Máquina de Estados Nativa Android (API 36)**:

@@ -7,6 +7,7 @@ import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/core/network/session_refresher.dart';
 import 'package:rewit_mobile/core/network/token_refreshing_client.dart';
+import 'package:rewit_mobile/core/storage/session_token_coordinator.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 
 class _RecordingClient extends http.BaseClient {
@@ -476,6 +477,105 @@ void main() {
       );
       expect(inner.requests, hasLength(1));
       expect(sessionChecks, 1);
+    });
+  });
+
+  group('SessionRefresher coordenado com SessionTokenCoordinator', () {
+    test('resposta HTTP 200 tardia de refresh obsoleto da conta A não grava sobre tokens da conta B', () async {
+      final storage = InMemoryTokenStorage();
+      final coordinator = SessionTokenCoordinator(storage: storage);
+      await coordinator.saveNewSessionTokens(
+        accessToken: 'access-a',
+        refreshToken: 'refresh-a',
+      );
+
+      final requestAStarted = Completer<void>();
+      final requestARelease = Completer<void>();
+      final refresher = SessionRefresher(
+        tokenCoordinator: coordinator,
+        requestRefresh: () async {
+          requestAStarted.complete();
+          await requestARelease.future;
+          return const RefreshedSessionCredentials(
+            accessToken: 'access-a-renewed',
+            refreshToken: 'refresh-a-renewed',
+          );
+        },
+      );
+
+      final refreshA = refresher.refresh();
+      await requestAStarted.future;
+
+      // Sessão A é invalidada e usuário entra na Conta B antes da resposta HTTP de A voltar
+      await coordinator.invalidateAndClear();
+      refresher.invalidate();
+      await coordinator.saveNewSessionTokens(
+        accessToken: 'access-b',
+        refreshToken: 'refresh-b',
+      );
+
+      requestARelease.complete();
+      final resultA = await refreshA;
+
+      expect(resultA.outcome, SessionRefreshOutcome.rejected);
+      expect(await storage.getAccessToken(), 'access-b');
+      expect(await storage.getRefreshToken(), 'refresh-b');
+    });
+
+    test('invalidate libera novo refresh para sessão B mesmo enquanto HTTP obsoleto de A ainda está em voo', () async {
+      final storage = InMemoryTokenStorage();
+      final coordinator = SessionTokenCoordinator(storage: storage);
+      await coordinator.saveNewSessionTokens(
+        accessToken: 'access-a',
+        refreshToken: 'refresh-a',
+      );
+
+      final refreshAStarted = Completer<void>();
+      final refreshARelease = Completer<void>();
+      var call = 0;
+      late final SessionRefresher refresher;
+      refresher = SessionRefresher(
+        tokenCoordinator: coordinator,
+        requestRefresh: () async {
+          call++;
+          if (call == 1) {
+            refreshAStarted.complete();
+            await refreshARelease.future;
+            return const RefreshedSessionCredentials(
+              accessToken: 'access-a2',
+              refreshToken: 'refresh-a2',
+            );
+          }
+          return const RefreshedSessionCredentials(
+            accessToken: 'access-b2',
+            refreshToken: 'refresh-b2',
+          );
+        },
+      );
+
+      final refreshA = refresher.refresh();
+      await refreshAStarted.future;
+
+      await coordinator.invalidateAndClear();
+      refresher.invalidate();
+      await coordinator.saveNewSessionTokens(
+        accessToken: 'access-b1',
+        refreshToken: 'refresh-b1',
+      );
+
+      // Enquanto A ainda está pendente, sessão B consegue executar seu próprio refresh normalmente
+      final resultB = await refresher.refresh();
+      expect(resultB.outcome, SessionRefreshOutcome.refreshed);
+      expect(resultB.accessToken, 'access-b2');
+      expect(await storage.getAccessToken(), 'access-b2');
+      expect(await storage.getRefreshToken(), 'refresh-b2');
+
+      // Quando A finalmente termina com 200, é rejeitado e não altera os tokens de B
+      refreshARelease.complete();
+      final resultA = await refreshA;
+      expect(resultA.outcome, SessionRefreshOutcome.rejected);
+      expect(await storage.getAccessToken(), 'access-b2');
+      expect(await storage.getRefreshToken(), 'refresh-b2');
     });
   });
 }

@@ -2717,6 +2717,361 @@ void main() {
       );
     }
   });
+
+  group('Hardening Flash 02 — Sincronização real do estado de lanterna', () {
+    Widget buildFlashTestApp({
+      MobileScannerController? cameraController,
+      CameraPermissionService? permissionService,
+    }) {
+      return MaterialApp(
+        theme: AppTheme.darkTheme,
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                key: const Key('btn_open_scanner'),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ScannerScreen(
+                        cameraController: cameraController,
+                        cameraPermissionService: permissionService ??
+                            _FakeCameraPermissionService(
+                              initialCheckStatus: CameraPermissionStatus.granted,
+                            ),
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Abrir Scanner'),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Future<void> openScanner(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('btn_open_scanner')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'câmera com flash desligado exibe flash_off e tooltip Ativar flash habilitado',
+      (tester) async {
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.off,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp());
+        await openScanner(tester);
+
+        expect(find.byIcon(Icons.flash_off), findsOneWidget);
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+        expect(find.byIcon(Icons.no_flash), findsNothing);
+
+        final flashButton = tester.widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.flash_off),
+        );
+        expect(flashButton.tooltip, equals('Ativar flash'));
+        expect(flashButton.onPressed, isNotNull);
+      },
+    );
+
+    testWidgets(
+      'câmera com flash ligado acompanha evento real de torchState e exibe flash_on',
+      (tester) async {
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.off,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp());
+        await openScanner(tester);
+
+        await tester.tap(find.byIcon(Icons.flash_off));
+        await tester.pumpAndSettle();
+
+        expect(spyPlatform.toggleTorchCalls, equals(1));
+        expect(find.byIcon(Icons.flash_on), findsOneWidget);
+        expect(find.byIcon(Icons.flash_off), findsNothing);
+
+        final flashOnButton = tester.widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.flash_on),
+        );
+        expect(flashOnButton.tooltip, equals('Desativar flash'));
+        expect(flashOnButton.onPressed, isNotNull);
+
+        // Desliga novamente via stream real
+        await tester.tap(find.byIcon(Icons.flash_on));
+        await tester.pumpAndSettle();
+
+        expect(spyPlatform.toggleTorchCalls, equals(2));
+        expect(find.byIcon(Icons.flash_off), findsOneWidget);
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'câmera sem flash apresenta controle indisponível sem anunciar Desativar flash',
+      (tester) async {
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.unavailable,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp());
+        await openScanner(tester);
+
+        expect(find.byIcon(Icons.no_flash), findsOneWidget);
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+        expect(find.byIcon(Icons.flash_off), findsNothing);
+        expect(find.byTooltip('Desativar flash'), findsNothing);
+
+        final unavailableButton = tester.widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.no_flash),
+        );
+        expect(unavailableButton.tooltip, equals('Flash indisponível'));
+        expect(unavailableButton.onPressed, isNull);
+      },
+    );
+
+    testWidgets(
+      'tentativa de ativar flash sem hardware ou com erro de hardware não cria falsa ativação visual',
+      (tester) async {
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.unavailable,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp());
+        await openScanner(tester);
+
+        await tester.tap(find.byIcon(Icons.no_flash), warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(spyPlatform.toggleTorchCalls, equals(0));
+        expect(find.byIcon(Icons.no_flash), findsOneWidget);
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+        expect(find.byTooltip('Desativar flash'), findsNothing);
+
+        // Retorna ao início antes de validar erro de hardware em outro controlador
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+
+        // Mesmo quando uma câmera com flash falha no toggleTorch do hardware,
+        // o botão não deve falsificar flash_on sem confirmação do controlador.
+        final failingPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.off,
+          nextToggleTorchError: Exception('Hardware torch error'),
+        );
+        MobileScannerPlatform.instance = failingPlatform;
+        addTearDown(failingPlatform.disposeStreams);
+
+        await tester.pumpWidget(KeyedSubtree(key: UniqueKey(), child: buildFlashTestApp()));
+        await openScanner(tester);
+
+        await tester.tap(find.byIcon(Icons.flash_off));
+        await tester.pumpAndSettle();
+
+        expect(failingPlatform.toggleTorchCalls, equals(1));
+        expect(find.byIcon(Icons.flash_off), findsOneWidget);
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'alternar câmera com flash ligado reflete estado desligado real da nova câmera',
+      (tester) async {
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.off,
+          frontTorchMode: TorchState.off,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp());
+        await openScanner(tester);
+
+        await tester.tap(find.byIcon(Icons.flash_off));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.flash_on), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.flip_camera_ios));
+        await tester.pumpAndSettle();
+
+        expect(spyPlatform.currentFacing, equals(CameraFacing.front));
+        expect(find.byIcon(Icons.flash_off), findsOneWidget);
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'alternar câmera com flash ligado para câmera sem flash exibe indisponível e desabilita controle',
+      (tester) async {
+        final controller = MobileScannerController(
+          facing: CameraFacing.front,
+          detectionSpeed: DetectionSpeed.normal,
+        );
+        addTearDown(controller.dispose);
+
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.unavailable,
+          frontTorchMode: TorchState.off,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp(cameraController: controller));
+        await openScanner(tester);
+
+        expect(spyPlatform.currentFacing, equals(CameraFacing.front));
+        await tester.tap(find.byIcon(Icons.flash_off));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.flash_on), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.flip_camera_ios));
+        await tester.pumpAndSettle();
+
+        expect(spyPlatform.currentFacing, equals(CameraFacing.back));
+        expect(find.byIcon(Icons.no_flash), findsOneWidget);
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+        expect(find.byTooltip('Desativar flash'), findsNothing);
+
+        final flashButton = tester.widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.no_flash),
+        );
+        expect(flashButton.onPressed, isNull);
+        expect(flashButton.tooltip, equals('Flash indisponível'));
+      },
+    );
+
+    testWidgets(
+      'alternar de câmera sem flash para câmera com flash habilita controle com flash_off',
+      (tester) async {
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.unavailable,
+          frontTorchMode: TorchState.off,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp());
+        await openScanner(tester);
+
+        expect(find.byIcon(Icons.no_flash), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.flip_camera_ios));
+        await tester.pumpAndSettle();
+
+        expect(spyPlatform.currentFacing, equals(CameraFacing.front));
+        expect(find.byIcon(Icons.flash_off), findsOneWidget);
+
+        final flashButton = tester.widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.flash_off),
+        );
+        expect(flashButton.onPressed, isNotNull);
+        expect(flashButton.tooltip, equals('Ativar flash'));
+
+        await tester.tap(find.byIcon(Icons.flash_off));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.flash_on), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'erro ao alternar câmera não deixa estado visual de flash preso',
+      (tester) async {
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.off,
+          frontTorchMode: TorchState.off,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp());
+        await openScanner(tester);
+
+        await tester.tap(find.byIcon(Icons.flash_off));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.flash_on), findsOneWidget);
+
+        spyPlatform.nextStartError = const MobileScannerException(
+          errorCode: MobileScannerErrorCode.genericError,
+          errorDetails: MobileScannerErrorDetails(
+            message: 'Falha ao alternar câmera',
+          ),
+        );
+
+        await tester.tap(find.byIcon(Icons.flip_camera_ios));
+        await tester.pumpAndSettle();
+
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+        expect(find.byIcon(Icons.no_flash), findsOneWidget);
+        final flashButton = tester.widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.no_flash),
+        );
+        expect(flashButton.onPressed, isNull);
+        expect(flashButton.tooltip, equals('Flash indisponível'));
+      },
+    );
+
+    testWidgets(
+      'controller descartado e pausa em background tratam controle de flash com segurança',
+      (tester) async {
+        final controller = MobileScannerController(
+          facing: CameraFacing.back,
+          detectionSpeed: DetectionSpeed.normal,
+        );
+        final spyPlatform = _SpyMobileScannerPlatform(
+          backTorchMode: TorchState.off,
+        );
+        MobileScannerPlatform.instance = spyPlatform;
+        addTearDown(spyPlatform.disposeStreams);
+
+        await tester.pumpWidget(buildFlashTestApp(cameraController: controller));
+        await openScanner(tester);
+
+        await tester.tap(find.byIcon(Icons.flash_off));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.flash_on), findsOneWidget);
+
+        // Simula transição real inactive -> paused -> resumed: lanterna desliga ao sair
+        // de foco e retorna no estado real (off) ao retomar.
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        await tester.pump();
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+        expect(find.byIcon(Icons.no_flash), findsOneWidget);
+
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+        expect(controller.value.isRunning, isFalse);
+        expect(controller.value.torchState, equals(TorchState.off));
+
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.flash_off), findsOneWidget);
+
+        // Descarta controller externamente e tenta operar flash sem crash
+        await controller.dispose();
+        await tester.tap(find.byIcon(Icons.flash_off), warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(find.byIcon(Icons.flash_on), findsNothing);
+        expect(find.byIcon(Icons.no_flash), findsOneWidget);
+
+        // Fecha a rota com segurança após descarte do controller
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('btn_open_scanner')), findsOneWidget);
+      },
+    );
+  });
 }
 
 class _FakeCameraPermissionService implements CameraPermissionService {
@@ -2787,8 +3142,23 @@ class _SpyMobileScannerPlatform extends MobileScannerPlatform {
   final StreamController<double> _zoomController =
       StreamController<double>.broadcast();
 
+  final TorchState backTorchMode;
+  final TorchState frontTorchMode;
+  int numberOfCameras = 2;
+  Object? nextStartError;
+  Object? nextToggleTorchError;
+
   int startCalls = 0;
   int stopCalls = 0;
+  int toggleTorchCalls = 0;
+  CameraFacing currentFacing = CameraFacing.back;
+  TorchState _activeTorchMode = TorchState.off;
+
+  _SpyMobileScannerPlatform({
+    this.backTorchMode = TorchState.off,
+    this.frontTorchMode = TorchState.off,
+    this.nextToggleTorchError,
+  });
 
   void emitBarcode(String rawValue, {BarcodeFormat format = BarcodeFormat.ean13}) {
     if (_barcodesController.isClosed) return;
@@ -2820,11 +3190,23 @@ class _SpyMobileScannerPlatform extends MobileScannerPlatform {
   @override
   Future<MobileScannerViewAttributes> start(StartOptions startOptions) async {
     startCalls++;
-    return const MobileScannerViewAttributes(
-      cameraDirection: CameraFacing.back,
-      currentTorchMode: TorchState.off,
-      size: Size(1080, 1920),
-      numberOfCameras: 2,
+    final pendingError = nextStartError;
+    if (pendingError != null) {
+      nextStartError = null;
+      throw pendingError;
+    }
+
+    currentFacing = startOptions.cameraDirection == CameraFacing.front
+        ? CameraFacing.front
+        : CameraFacing.back;
+    _activeTorchMode =
+        currentFacing == CameraFacing.front ? frontTorchMode : backTorchMode;
+
+    return MobileScannerViewAttributes(
+      cameraDirection: currentFacing,
+      currentTorchMode: _activeTorchMode,
+      size: const Size(1080, 1920),
+      numberOfCameras: numberOfCameras,
     );
   }
 
@@ -2837,7 +3219,22 @@ class _SpyMobileScannerPlatform extends MobileScannerPlatform {
   Future<void> pause() async {}
 
   @override
-  Future<void> toggleTorch() async {}
+  Future<void> toggleTorch() async {
+    toggleTorchCalls++;
+    final pendingError = nextToggleTorchError;
+    if (pendingError != null) {
+      nextToggleTorchError = null;
+      throw pendingError;
+    }
+    if (_activeTorchMode == TorchState.unavailable) {
+      return;
+    }
+    _activeTorchMode =
+        _activeTorchMode == TorchState.on ? TorchState.off : TorchState.on;
+    if (!_torchController.isClosed) {
+      _torchController.add(_activeTorchMode);
+    }
+  }
 
   @override
   Future<void> dispose() async {}

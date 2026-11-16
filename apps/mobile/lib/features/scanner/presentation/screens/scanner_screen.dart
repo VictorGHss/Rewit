@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
@@ -29,6 +30,7 @@ class ScannerScreen extends StatefulWidget {
   )? cameraBuilder;
   final bool autoStartCamera;
   final CameraPermissionService? cameraPermissionService;
+  final MobileScannerController? cameraController;
 
   const ScannerScreen({
     super.key,
@@ -39,6 +41,7 @@ class ScannerScreen extends StatefulWidget {
     this.cameraBuilder,
     this.autoStartCamera = true,
     this.cameraPermissionService,
+    this.cameraController,
   });
 
   @override
@@ -52,7 +55,10 @@ class _ScannerScreenState extends State<ScannerScreen>
   late final CameraPermissionService _cameraPermissionService;
 
   MobileScannerController? _cameraController;
-  bool _isTorchOn = false;
+  bool _ownsCameraController = false;
+  bool _isControllerDisposed = false;
+  bool _isTorchToggling = false;
+  bool _isSwitchingCamera = false;
   bool _isClosing = false;
   bool _isPermissionFlowInProgress = false;
   bool _cameraStoppedByLifecycle = false;
@@ -76,14 +82,80 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
+  (bool, bool, bool, TorchState)? _lastCameraTorchSnapshot;
+
+  (bool, bool, bool, TorchState) _readTorchSnapshot(
+    MobileScannerController controller,
+  ) {
+    final value = controller.value;
+    return (
+      value.isInitialized,
+      value.isRunning,
+      value.error != null,
+      value.torchState,
+    );
+  }
+
+  void _attachCameraControllerListener(MobileScannerController? controller) {
+    if (controller == null) return;
+    try {
+      controller.addListener(_onCameraControllerChanged);
+      _isControllerDisposed = false;
+      _lastCameraTorchSnapshot = _readTorchSnapshot(controller);
+    } catch (_) {
+      _isControllerDisposed = true;
+    }
+  }
+
+  void _detachCameraControllerListener(MobileScannerController? controller) {
+    if (controller == null) return;
+    try {
+      controller.removeListener(_onCameraControllerChanged);
+    } catch (_) {
+      // Ignora caso o controller externo já tenha sido descartado.
+    }
+  }
+
+  void _onCameraControllerChanged() {
+    final controller = _cameraController;
+    if (!mounted || _isClosing || _isControllerDisposed || controller == null) {
+      return;
+    }
+
+    final snapshot = _readTorchSnapshot(controller);
+    if (snapshot == _lastCameraTorchSnapshot) {
+      return;
+    }
+    _lastCameraTorchSnapshot = snapshot;
+
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_isClosing) {
+          setState(() {});
+        }
+      });
+      return;
+    }
+
+    setState(() {});
+  }
+
   void _ensureCleanCameraController() {
     final current = _cameraController;
-    if (widget.cameraBuilder != null || current == null) return;
+    if (widget.cameraBuilder != null ||
+        !_ownsCameraController ||
+        current == null) {
+      return;
+    }
     if (current.value.error == null) return;
 
     // Substitui o controller caso tenha falhado anteriormente (ex.: erro de permissão),
     // evitando que o erro obsoleto dispare errorBuilder ao remontar MobileScanner.
-    _cameraController = _createCameraController();
+    _detachCameraControllerListener(current);
+    final nextController = _createCameraController();
+    _cameraController = nextController;
+    _attachCameraControllerListener(nextController);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(current.dispose());
     });
@@ -111,8 +183,14 @@ class _ScannerScreenState extends State<ScannerScreen>
       _ownsNotifier = true;
     }
 
-    if (widget.cameraBuilder == null) {
+    if (widget.cameraController != null) {
+      _cameraController = widget.cameraController;
+      _ownsCameraController = false;
+      _attachCameraControllerListener(_cameraController);
+    } else if (widget.cameraBuilder == null) {
       _cameraController = _createCameraController();
+      _ownsCameraController = true;
+      _attachCameraControllerListener(_cameraController);
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -121,9 +199,39 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   @override
+  void didUpdateWidget(covariant ScannerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.cameraController != oldWidget.cameraController) {
+      final previous = _cameraController;
+      final ownedPrevious = _ownsCameraController;
+      _detachCameraControllerListener(previous);
+
+      if (widget.cameraController != null) {
+        _cameraController = widget.cameraController;
+        _ownsCameraController = false;
+      } else if (widget.cameraBuilder == null) {
+        _cameraController = _createCameraController();
+        _ownsCameraController = true;
+      } else {
+        _cameraController = null;
+        _ownsCameraController = false;
+      }
+
+      _attachCameraControllerListener(_cameraController);
+      if (ownedPrevious && previous != null) {
+        unawaited(previous.dispose());
+      }
+    }
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _cameraController?.dispose();
+    _isControllerDisposed = true;
+    _detachCameraControllerListener(_cameraController);
+    if (_ownsCameraController) {
+      _cameraController?.dispose();
+    }
     if (_ownsNotifier) {
       _notifier.dispose();
     }
@@ -394,24 +502,79 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   Future<void> _toggleTorch() async {
-    if (_cameraController == null || !mounted || _isClosing) return;
+    final controller = _cameraController;
+    if (controller == null ||
+        !mounted ||
+        _isClosing ||
+        _isControllerDisposed ||
+        _isTorchToggling ||
+        _isSwitchingCamera) {
+      return;
+    }
+
+    final currentState = controller.value;
+    if (!currentState.isInitialized ||
+        !currentState.isRunning ||
+        currentState.error != null ||
+        currentState.torchState == TorchState.unavailable) {
+      return;
+    }
+
+    setState(() {
+      _isTorchToggling = true;
+    });
+
     try {
-      await _cameraController!.toggleTorch();
-      if (!mounted || _isClosing) return;
-      setState(() {
-        _isTorchOn = !_isTorchOn;
-      });
+      await controller.toggleTorch();
+    } on MobileScannerException catch (error) {
+      if (mounted &&
+          error.errorCode == MobileScannerErrorCode.controllerDisposed) {
+        setState(() {
+          _isControllerDisposed = true;
+        });
+      }
     } catch (_) {
       // Ignora erro de hardware caso flash não esteja disponível
+    } finally {
+      if (mounted && _isTorchToggling) {
+        setState(() {
+          _isTorchToggling = false;
+        });
+      }
     }
   }
 
   Future<void> _switchCamera() async {
-    if (_cameraController == null || !mounted || _isClosing) return;
+    final controller = _cameraController;
+    if (controller == null ||
+        !mounted ||
+        _isClosing ||
+        _isControllerDisposed ||
+        _isSwitchingCamera) {
+      return;
+    }
+
+    setState(() {
+      _isSwitchingCamera = true;
+    });
+
     try {
-      await _cameraController!.switchCamera();
+      await controller.switchCamera();
+    } on MobileScannerException catch (error) {
+      if (mounted &&
+          error.errorCode == MobileScannerErrorCode.controllerDisposed) {
+        setState(() {
+          _isControllerDisposed = true;
+        });
+      }
     } catch (_) {
       // Ignora erro caso não haja câmera secundária
+    } finally {
+      if (mounted && _isSwitchingCamera) {
+        setState(() {
+          _isSwitchingCamera = false;
+        });
+      }
     }
   }
 
@@ -557,6 +720,60 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
+  Widget _buildTorchActionButton(RewitSemanticColors semantic) {
+    final controller = _cameraController;
+    final disabledColor = semantic.onMediaScrim.withValues(alpha: 0.45);
+
+    if (controller == null) {
+      return IconButton(
+        icon: const Icon(Icons.flash_off),
+        tooltip: 'Flash indisponível',
+        disabledColor: disabledColor,
+        onPressed: null,
+      );
+    }
+
+    if (_isControllerDisposed) {
+      return IconButton(
+        icon: const Icon(Icons.no_flash),
+        tooltip: 'Flash indisponível',
+        disabledColor: disabledColor,
+        onPressed: null,
+      );
+    }
+
+    final state = controller.value;
+    final canOperateTorch = state.isInitialized &&
+        state.isRunning &&
+        state.error == null &&
+        state.torchState != TorchState.unavailable &&
+        !_isSwitchingCamera &&
+        !_isClosing;
+
+    if (!canOperateTorch) {
+      return IconButton(
+        icon: const Icon(Icons.no_flash),
+        tooltip: 'Flash indisponível',
+        disabledColor: disabledColor,
+        onPressed: null,
+      );
+    }
+
+    final (iconData, tooltip) = switch (state.torchState) {
+      TorchState.on => (Icons.flash_on, 'Desativar flash'),
+      TorchState.auto => (Icons.flash_auto, 'Alternar flash'),
+      TorchState.off => (Icons.flash_off, 'Ativar flash'),
+      TorchState.unavailable => (Icons.no_flash, 'Flash indisponível'),
+    };
+
+    return IconButton(
+      icon: Icon(iconData),
+      tooltip: tooltip,
+      disabledColor: disabledColor,
+      onPressed: _isTorchToggling ? null : _toggleTorch,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -599,15 +816,11 @@ class _ScannerScreenState extends State<ScannerScreen>
                   : BackButton(onPressed: () => _closeRoute()))
               : null,
           actions: [
-            IconButton(
-              icon: Icon(_isTorchOn ? Icons.flash_on : Icons.flash_off),
-              tooltip: _isTorchOn ? 'Desativar flash' : 'Ativar flash',
-              onPressed: _toggleTorch,
-            ),
+            _buildTorchActionButton(semantic),
             IconButton(
               icon: const Icon(Icons.flip_camera_ios),
               tooltip: 'Alternar câmera',
-              onPressed: _switchCamera,
+              onPressed: _isSwitchingCamera ? null : _switchCamera,
             ),
           ],
         ),
@@ -632,7 +845,7 @@ class _ScannerScreenState extends State<ScannerScreen>
                   widget.cameraBuilder!(context, _onBarcodeDetected)
                 else if (state is ScannerInitial && widget.autoStartCamera)
                   const ColoredBox(color: Colors.black)
-                else if (_cameraController != null)
+                else if (_cameraController != null && !_isControllerDisposed)
                   MobileScanner(
                     controller: _cameraController,
                     onDetect: _onBarcodeDetected,

@@ -9,6 +9,7 @@ import 'package:rewit_mobile/app/theme/theme_controller.dart';
 import 'package:rewit_mobile/core/network/http_client.dart';
 import 'package:rewit_mobile/core/network/session_refresher.dart';
 import 'package:rewit_mobile/core/network/token_refreshing_client.dart';
+import 'package:rewit_mobile/core/storage/session_token_coordinator.dart';
 import 'package:rewit_mobile/core/storage/token_storage.dart';
 import 'package:rewit_mobile/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:rewit_mobile/features/auth/data/services/platform_social_sign_in_service.dart';
@@ -32,6 +33,7 @@ import 'package:rewit_mobile/features/notifications/data/repositories/notificati
 import 'package:rewit_mobile/features/review_creation/data/repositories/review_creation_repository_impl.dart';
 import 'package:rewit_mobile/features/review_creation/data/services/geolocator_location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
+import 'package:rewit_mobile/features/reports/data/repositories/report_repository_impl.dart';
 import 'package:rewit_mobile/features/review_detail/data/repositories/review_media_repository_impl.dart';
 import 'package:rewit_mobile/features/search/data/repositories/search_repository_impl.dart';
 
@@ -51,11 +53,18 @@ void main() async {
   // 3. Inicializar cliente HTTP e repositórios
   late final AuthNotifier authNotifier;
   late final AuthRepositoryImpl authRepository;
+  final tokenCoordinator = SessionTokenCoordinator(storage: tokenStorage);
 
   // Renovação única e compartilhada do access token (15 min): evita encerrar a sessão enquanto o refresh vale
   final sessionRefresher = SessionRefresher(
-    refreshAccessToken: () async =>
-        (await authRepository.refreshTokens()).tokens.accessToken,
+    tokenCoordinator: tokenCoordinator,
+    requestRefresh: () async {
+      final session = await authRepository.requestTokenRefresh();
+      return RefreshedSessionCredentials(
+        accessToken: session.tokens.accessToken,
+        refreshToken: session.tokens.refreshToken,
+      );
+    },
   );
 
   final httpClient = RewitHttpClient(
@@ -66,18 +75,20 @@ void main() async {
       sessionRefresher: sessionRefresher,
     ),
     tokenStorage: tokenStorage,
-    onSessionExpired: () {
-      unawaited(authNotifier.handleSessionExpired());
+    onSessionExpiredWithDetails: (details) {
+      unawaited(authNotifier.handleSessionExpired(details));
     },
   );
 
   authRepository = AuthRepositoryImpl(
     httpClient: httpClient,
     tokenStorage: tokenStorage,
+    tokenCoordinator: tokenCoordinator,
   );
 
   final feedRepository = FeedRepositoryImpl(httpClient: httpClient);
   final discussionRepository = DiscussionRepositoryImpl(httpClient: httpClient);
+  final reportRepository = ReportRepositoryImpl(httpClient: httpClient);
   final reviewCreationRepository =
       ReviewCreationRepositoryImpl(httpClient: httpClient);
   final searchRepository = SearchRepositoryImpl(httpClient: httpClient);
@@ -111,7 +122,8 @@ void main() async {
     socialSignInService:
         PlatformSocialSignInService(config: SocialAuthConfig.fromEnvironment()),
     sessionRefresher: sessionRefresher,
-    clearLocalSession: tokenStorage.clearTokens,
+    tokenCoordinator: tokenCoordinator,
+    clearLocalSession: tokenCoordinator.invalidateAndClear,
   );
   final feedNotifier = FeedNotifier(feedRepository: feedRepository);
 
@@ -127,6 +139,7 @@ void main() async {
     mediaPickerService: mediaPickerService,
     locationService: locationService,
     discussionRepository: discussionRepository,
+    reportRepository: reportRepository,
     reviewCreationRepository: reviewCreationRepository,
     searchRepository: searchRepository,
     userProfileRepository: userProfileRepository,

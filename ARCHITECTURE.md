@@ -261,9 +261,9 @@ O aplicativo cliente móvel (`apps/mobile`) é desenvolvido em **Flutter** (Dart
 
 ### 9.1 Estrutura em Camadas e Organização por Features
 Cada funcionalidade de negócio do app é isolada em um módulo auto-contido sob `lib/features/<nome_da_feature>/`:
-* **`domain/`**: Entidades puras imutáveis, value objects, contratos de repositórios e serviços de hardware (`LocationService`, `CameraPermissionService`);
-* **`data/`**: Implementações de repositório, clientes HTTP REST (consumindo RFC 7807), persistência segura local via `FlutterSecureStorage` e adaptadores de sensores nativos;
-* **`presentation/`**: Gerenciamento de estado reativo via `ChangeNotifier` / `StateNotifier` (`FeedNotifier`, `ScannerNotifier`, `AuthNotifier`), telas (`HomeScreen`, `ReviewCreateScreen`, `ScannerScreen`, `CheckInScreen`, `SearchScreen`, `RankingsScreen`, `CollectionScreen`) e widgets especializados;
+* **`domain/`**: Entidades puras imutáveis, value objects, contratos de repositórios (`FeedRepository`, `ReportRepository`, `DiscussionRepository`, etc.) e serviços de hardware (`LocationService`, `CameraPermissionService`);
+* **`data/`**: Implementações de repositório, clientes HTTP REST (consumindo RFC 7807 e distinguindo códigos de sucesso semânticos como `201 Created` vs `200 OK` em `ReportRepositoryImpl`), persistência segura local via `FlutterSecureStorage` e adaptadores de sensores nativos;
+* **`presentation/`**: Gerenciamento de estado reativo via `ChangeNotifier` / `StateNotifier` (`FeedNotifier`, `ScannerNotifier`, `AuthNotifier`), telas (`HomeScreen`, `ReviewCreateScreen`, `ReviewDetailScreen`, `ScannerScreen`, `CheckInScreen`, `SearchScreen`, `RankingsScreen`, `CollectionScreen`) e widgets especializados (como `ReportReviewDialog` em `features/reports/`);
 * **`app/`**: Roteador central tipado (`AppRouter`), Design System e tokens visuais (`AppTheme`, `RewitTokens`, `RewitSemanticColors`, `ThemeController`).
 
 ### 9.2 Navegação e Home V2
@@ -290,7 +290,7 @@ O subsistema de leitura óptica (`features/scanner/`) opera em dois modos:
 * **Modo Normal**: Navegação autônoma em `/scanner` para leitura de códigos de barras (EAN-13, EAN-8, UPC-A, ITF-14) ou QR Codes com consulta de catálogo;
 * **Target Selection Mode (`ScannerRouteArgs(selectionMode: true)`)**: Invocado pelo formulário de criação de avaliações (`ReviewCreateScreen` / `TargetSearchSelectorWidget`). Ao detectar e confirmar um produto ou local, retorna o identificador selecionado diretamente para preenchimento automático do formulário de avaliação;
 * **Explicação Pré-Permissão e Legibilidade**: Antes da primeira solicitação nativa de câmera, exibe o estado `ScannerPermissionRationale` com justificativa clara de uso (`Continuar` / `Agora não`) sem disparar prompt prematuro nem repetir em loop após recusa prévia; a `AppBar` fixa ícones e título em `RewitSemanticColors.onMediaScrim` sobre `mediaScrim` para garantir contraste sobre o preview da câmera tanto no tema claro quanto no escuro;
-* **Ciclo de Vida Resiliente**: O controller óptico (`MobileScannerController`) interrompe a câmera em eventos de pausa (`AppLifecycleState.paused` / `inactive`) e reativa de forma limpa em `resumed`.
+* **Ciclo de Vida Resiliente e Controle de Flash**: O controller óptico (`MobileScannerController`) interrompe a câmera em eventos de pausa (`AppLifecycleState.paused` / `inactive`) e reativa de forma limpa em `resumed`. O estado da lanterna/flash na interface é dirigido exclusivamente por `MobileScannerState.torchState` (`unavailable`, `off`, `on`, `auto`), desabilitando o controle sem estado local obsoleto em câmeras sem hardware de flash, trocas de câmera, erros ou descarte do controller.
 
 ### 9.5 Máquina de Estados Nativa de Permissão de Câmera (Android API 36)
 Para compatibilidade estrita com Android API 36 (onde diálogos cancelados ou recusados pela primeira vez poderiam reportar incorretamente `shouldShowRequestPermissionRationale == false`), foi implementada uma máquina de estados pura em Kotlin:

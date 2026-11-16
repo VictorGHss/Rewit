@@ -14,7 +14,7 @@ Adotar um roadmap em quatro fases para o subsistema de scanner e identificação
    - Suporte a leitura de QR Codes (representando produtos específicos, links de cardápios, mesas de restaurantes ou campanhas promocionais).
    - Consulta direta no catálogo local do Rewit ou busca em APIs abertas de GTIN.
    - **Target Selection Mode**: Capacidade de operar como seletor integrado (`ScannerRouteArgs(selectionMode: true)`) retornando o alvo diretamente ao formulário de avaliação (`ReviewCreateScreen`), eliminando a necessidade de redigitação.
-   - **Hardening de Ciclo de Vida e Permissões Nativas**: Máquina de estados em Kotlin no Android API 36 (`CameraPermissionStateMachine.kt`) para prevenção de negação prematura, canal de plataforma via `MethodChannel` e pausa/retomada automática da câmera conforme o ciclo de vida do app (`AppLifecycleState`).
+   - **Hardening de Ciclo de Vida, Flash e Permissões Nativas**: Máquina de estados em Kotlin no Android API 36 (`CameraPermissionStateMachine.kt`) para prevenção de negação prematura, canal de plataforma via `MethodChannel`, pausa/retomada automática da câmera conforme o ciclo de vida do app (`AppLifecycleState`) e sincronização estrita do estado de lanterna (`TorchState`) com o hardware real reportado pelo controlador.
 2. **Fase 2 (OCR Textual)**:
    - Extração ótica de texto de embalagens e rótulos de produtos diretamente no dispositivo via biblioteca de OCR leve no cliente (ML Kit / Tesseract local).
    - Busca de similaridade textual de marca e nome no catálogo do backend.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
+import 'package:rewit_mobile/features/auth/presentation/state/auth_notifier.dart';
 import 'package:rewit_mobile/features/business/domain/entities/business_response_entities.dart';
 import 'package:rewit_mobile/features/business/domain/repositories/business_repository.dart';
 import 'package:rewit_mobile/features/business/domain/repositories/business_response_repository.dart';
@@ -12,6 +13,8 @@ import 'package:rewit_mobile/features/discussions/presentation/widgets/discussio
 import 'package:rewit_mobile/features/feed/domain/entities/feed_entities.dart';
 import 'package:rewit_mobile/features/feed/domain/repositories/feed_repository.dart';
 import 'package:rewit_mobile/features/feed/presentation/state/feed_notifier.dart';
+import 'package:rewit_mobile/features/reports/domain/repositories/report_repository.dart';
+import 'package:rewit_mobile/features/reports/presentation/widgets/report_review_dialog.dart';
 import 'package:rewit_mobile/features/review_detail/domain/entities/review_media.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_edit_screen.dart';
@@ -48,10 +51,12 @@ class ReviewDetailScreen extends StatefulWidget {
   final DiscussionRepository? discussionRepository;
   final DiscussionNotifier? discussionNotifier;
   final FeedNotifier? feedNotifier;
+  final ReportRepository? reportRepository;
   final BusinessResponseRepository? businessResponseRepository;
   final BusinessRepository? businessRepository;
   final String? currentUserId;
   final bool? isAuthor;
+  final AuthNotifier? authNotifier;
   final DateTime Function()? nowProvider;
 
   const ReviewDetailScreen({
@@ -66,10 +71,12 @@ class ReviewDetailScreen extends StatefulWidget {
     this.discussionRepository,
     this.discussionNotifier,
     this.feedNotifier,
+    this.reportRepository,
     this.businessResponseRepository,
     this.businessRepository,
     this.currentUserId,
     this.isAuthor,
+    this.authNotifier,
     this.nowProvider,
   });
 
@@ -80,6 +87,8 @@ class ReviewDetailScreen extends StatefulWidget {
 class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   FeedReview? _review;
   bool _isLoading = false;
+  bool _isRefreshingReview = false;
+  bool _isUnavailable = false;
   String? _errorMessage;
 
   // Mídias da avaliação
@@ -135,16 +144,44 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
   }
 
   bool get _isAuthor {
-    if (widget.isAuthor != null) return widget.isAuthor!;
     // Fonte principal: posse contextual do backend, que também cobre a própria review anônima
     final isMine = _review?.isMine;
     if (isMine != null) return isMine;
+    if (widget.isAuthor != null) return widget.isAuthor!;
     // Fallback para payloads sem isMine (feed/listagens): comparação pelo id público do autor
     final authorId = _review?.author.id;
     if (authorId == null || authorId.isEmpty) return false;
     final currentUserId = widget.currentUserId;
     if (currentUserId == null || currentUserId.isEmpty) return false;
     return currentUserId == authorId;
+  }
+
+  /// Comprovação fail-closed de que a avaliação não pertence ao usuário autenticado.
+  bool _isConfirmedNonAuthor(FeedReview review) {
+    // 1. Qualquer indicação positiva de autoria bloqueia imediatamente.
+    if (widget.isAuthor == true) return false;
+    final isMine = review.isMine;
+    // 2. Backend confirma que a avaliação pertence ao usuário atual.
+    if (isMine == true) return false;
+
+    final authorId = review.author.id?.trim();
+    final currentUserId = widget.currentUserId?.trim();
+    final hasValidIds = authorId != null &&
+        authorId.isNotEmpty &&
+        currentUserId != null &&
+        currentUserId.isNotEmpty;
+
+    // Identidade pública igual ao usuário atual contradiz não-autoria -> bloqueia.
+    if (!review.isAnonymous && hasValidIds && authorId == currentUserId) {
+      return false;
+    }
+
+    // 3. Backend confirma não-autoria e não há indicação conflitante.
+    if (isMine == false) return true;
+
+    // 4. Fallback sem `isMine`: apenas avaliação pública com ambos UUIDs válidos e distintos.
+    if (review.isAnonymous) return false;
+    return hasValidIds && currentUserId != authorId;
   }
 
   DateTime get _now => widget.nowProvider?.call() ?? DateTime.now();
@@ -162,6 +199,15 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     final review = _review;
     if (review == null) return false;
     return review.status.toUpperCase() == 'ACTIVE';
+  }
+
+  bool get _canReport {
+    if (_isLoading || _isUnavailable || _errorMessage != null) return false;
+    if (widget.reportRepository == null) return false;
+    final review = _review;
+    if (review == null) return false;
+    if (review.status.trim().toUpperCase() != 'ACTIVE') return false;
+    return _isConfirmedNonAuthor(review);
   }
 
   @override
@@ -197,8 +243,30 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     super.dispose();
   }
 
+  void _markReviewUnavailable({bool showFeedback = false}) {
+    widget.feedNotifier?.removeReview(widget.reviewId);
+    if (!mounted) return;
+    setState(() {
+      _isUnavailable = true;
+      _isLoading = false;
+      _isRefreshingReview = false;
+      _review = null;
+      _errorMessage = 'Esta avaliação não está mais disponível.';
+    });
+    if (showFeedback) {
+      _showErrorSnackBar(
+        'Não foi possível denunciar: a avaliação não está mais disponível.',
+      );
+    }
+  }
+
   Future<void> _loadReview() async {
-    if (widget.feedRepository == null) return;
+    if (widget.feedRepository == null ||
+        _isRefreshingReview ||
+        _isUnavailable) {
+      return;
+    }
+    _isRefreshingReview = true;
     final hasInitialReview = _review != null;
     if (!hasInitialReview) {
       setState(() {
@@ -213,7 +281,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
     try {
       final review =
           await widget.feedRepository!.getReviewById(widget.reviewId);
-      if (mounted) {
+      if (mounted && !_isUnavailable) {
         setState(() {
           if (requestVersion != _mutationVersion) {
             // Uma mutação local ocorreu enquanto a requisição canônica estava em andamento.
@@ -242,6 +310,20 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           _loadMedia();
         }
       }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      final code = e.errorCode?.toUpperCase();
+      if (e.statusCode == 404 || code == 'REVIEW_NOT_FOUND') {
+        _markReviewUnavailable();
+      } else {
+        setState(() {
+          _isLoading = false;
+          if (_review == null) {
+            _errorMessage =
+                'Não foi possível carregar os detalhes da avaliação.';
+          }
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -252,6 +334,8 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
           }
         });
       }
+    } finally {
+      _isRefreshingReview = false;
     }
   }
 
@@ -585,7 +669,7 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
         });
         _showErrorSnackBar(e.message);
       }
-    } catch (_) {
+      } catch (_) {
       if (mounted) {
         setState(() {
           _isDeleting = false;
@@ -593,6 +677,29 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
         _showErrorSnackBar('Erro inesperado ao excluir avaliação.');
       }
     }
+  }
+
+  Future<void> _openReportDialog() async {
+    final review = _review;
+    if (review == null || !_canReport) return;
+
+    final repo = widget.reportRepository;
+    if (repo == null) {
+      _showErrorSnackBar('Serviço de denúncias indisponível no momento.');
+      return;
+    }
+
+    await ReportReviewDialog.show(
+      context,
+      reviewId: review.id,
+      onConfirm: (reason, detail) => repo.reportReview(
+        reviewId: review.id,
+        reason: reason,
+        detail: detail,
+      ),
+      onReviewNotFound: () => _markReviewUnavailable(showFeedback: true),
+      authNotifier: widget.authNotifier,
+    );
   }
 
   String _formatDate(DateTime date) {
@@ -614,14 +721,42 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
       );
     }
 
-    if (_errorMessage != null || _review == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Avaliação')),
-        body: Center(
-          child: ErrorView(
-            title: 'Erro ao carregar avaliação',
-            message: _errorMessage ?? 'Avaliação não encontrada.',
-            onRetry: widget.feedRepository != null ? _loadReview : null,
+    if (_isUnavailable || _errorMessage != null || _review == null) {
+      final popResult = _isUnavailable
+          ? <String, dynamic>{
+              'deleted': true,
+              'unavailable': true,
+              'reviewId': widget.reviewId,
+            }
+          : null;
+      return PopScope(
+        canPop: !_isUnavailable,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop || !_isUnavailable) return;
+          Navigator.of(context).pop(popResult);
+        },
+        child: Scaffold(
+          appBar: AppBar(
+            leading: _isUnavailable && Navigator.of(context).canPop()
+                ? BackButton(
+                    onPressed: () => Navigator.of(context).pop(popResult),
+                  )
+                : null,
+            title: const Text('Avaliação'),
+          ),
+          body: Center(
+            child: ErrorView(
+              title: _isUnavailable
+                  ? 'Avaliação indisponível'
+                  : 'Erro ao carregar avaliação',
+              message: _errorMessage ?? 'Avaliação não encontrada.',
+              icon: _isUnavailable
+                  ? Icons.visibility_off_outlined
+                  : Icons.error_outline,
+              onRetry: !_isUnavailable && widget.feedRepository != null
+                  ? _loadReview
+                  : null,
+            ),
           ),
         ),
       );
@@ -680,6 +815,42 @@ class _ReviewDetailScreenState extends State<ReviewDetailScreen> {
                 );
               },
             ),
+            if (_canReport)
+              PopupMenuButton<String>(
+                key: const Key('review_detail_more_menu_button'),
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'Mais opções da avaliação',
+                onSelected: (value) {
+                  if (value == 'report') {
+                    _openReportDialog();
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem<String>(
+                    key: const Key('review_detail_report_action'),
+                    value: 'report',
+                    child: Semantics(
+                      button: true,
+                      label: 'Denunciar avaliação',
+                      excludeSemantics: true,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.flag_outlined,
+                            size: 20,
+                            color: scheme.error,
+                          ),
+                          const SizedBox(width: 12),
+                          const Flexible(
+                            child: Text('Denunciar avaliação'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
           ],
         ),
         body: SingleChildScrollView(
