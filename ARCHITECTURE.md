@@ -261,9 +261,9 @@ O aplicativo cliente móvel (`apps/mobile`) é desenvolvido em **Flutter** (Dart
 
 ### 9.1 Estrutura em Camadas e Organização por Features
 Cada funcionalidade de negócio do app é isolada em um módulo auto-contido sob `lib/features/<nome_da_feature>/`:
-* **`domain/`**: Entidades puras imutáveis, value objects, contratos de repositórios e serviços de hardware (`LocationService`, `CameraPermissionService`);
-* **`data/`**: Implementações de repositório, clientes HTTP REST (consumindo RFC 7807), persistência segura local via `FlutterSecureStorage` e adaptadores de sensores nativos;
-* **`presentation/`**: Gerenciamento de estado reativo via `ChangeNotifier` / `StateNotifier` (`FeedNotifier`, `ScannerNotifier`, `AuthNotifier`), telas (`HomeScreen`, `ReviewCreateScreen`, `ScannerScreen`, `CheckInScreen`, `SearchScreen`, `RankingsScreen`, `CollectionScreen`) e widgets especializados;
+* **`domain/`**: Entidades puras imutáveis, value objects, contratos de repositórios (`FeedRepository`, `ReportRepository`, `DiscussionRepository`, etc.) e serviços de hardware (`LocationService`, `CameraPermissionService`);
+* **`data/`**: Implementações de repositório, clientes HTTP REST (consumindo RFC 7807 e distinguindo códigos de sucesso semânticos como `201 Created` vs `200 OK` em `ReportRepositoryImpl`), persistência segura local via `FlutterSecureStorage` e adaptadores de sensores nativos;
+* **`presentation/`**: Gerenciamento de estado reativo via `ChangeNotifier` / `StateNotifier` (`FeedNotifier`, `ScannerNotifier`, `AuthNotifier`), telas (`HomeScreen`, `ReviewCreateScreen`, `ReviewDetailScreen`, `ScannerScreen`, `CheckInScreen`, `SearchScreen`, `RankingsScreen`, `CollectionScreen`) e widgets especializados (como `ReportReviewDialog` em `features/reports/`);
 * **`app/`**: Roteador central tipado (`AppRouter`), Design System e tokens visuais (`AppTheme`, `RewitTokens`, `RewitSemanticColors`, `ThemeController`).
 
 ### 9.2 Navegação e Home V2

@@ -50,6 +50,7 @@ import 'package:rewit_mobile/features/review_creation/domain/repositories/review
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/media_picker_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/screens/review_create_screen.dart';
+import 'package:rewit_mobile/features/reports/domain/repositories/report_repository.dart';
 import 'package:rewit_mobile/features/review_detail/domain/repositories/review_media_repository.dart';
 import 'package:rewit_mobile/features/review_detail/presentation/screens/review_detail_screen.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -118,6 +119,7 @@ class AppRouter {
   final MediaPickerService? mediaPickerService;
   final LocationService? locationService;
   final DiscussionRepository? discussionRepository;
+  final ReportRepository? reportRepository;
   final ReviewCreationRepository? reviewCreationRepository;
   final SearchRepository? searchRepository;
   final UserProfileRepository? userProfileRepository;
@@ -162,6 +164,7 @@ class AppRouter {
     this.mediaPickerService,
     this.locationService,
     this.discussionRepository,
+    this.reportRepository,
     this.reviewCreationRepository,
     this.searchRepository,
     this.userProfileRepository,
@@ -302,9 +305,11 @@ class AppRouter {
               mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
               feedNotifier: feedNotifier,
+              reportRepository: reportRepository,
               businessResponseRepository: businessResponseRepository,
               businessRepository: businessRepository,
               currentUserId: currentUserId,
+              authNotifier: authNotifier,
             ),
             settings: settings,
           );
@@ -317,9 +322,11 @@ class AppRouter {
               mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
               feedNotifier: feedNotifier,
+              reportRepository: reportRepository,
               businessResponseRepository: businessResponseRepository,
               businessRepository: businessRepository,
               currentUserId: currentUserId,
+              authNotifier: authNotifier,
             ),
             settings: settings,
           );
@@ -331,9 +338,11 @@ class AppRouter {
               mediaRepository: reviewMediaRepository,
               discussionRepository: discussionRepository,
               feedNotifier: feedNotifier,
+              reportRepository: reportRepository,
               businessResponseRepository: businessResponseRepository,
               businessRepository: businessRepository,
               currentUserId: currentUserId,
+              authNotifier: authNotifier,
             ),
             settings: settings,
           );

@@ -201,7 +201,8 @@ flutter run
 
 - **Discussões e Notificações**:
   - Discussões encadeadas com suporte a respostas aninhadas e indicadores de autoria do proprietário;
-  - Notificações de resposta com metadados estruturados (`rootDiscussionId`) e navegação contextual direta.
+  - Notificações de resposta com metadados estruturados (`rootDiscussionId`) e navegação contextual direta;
+  - Denúncia comunitária de avaliações (`POST /api/v1/reports`) diretamente na tela de detalhes da avaliação (`ReviewDetailScreen` / `ReportReviewDialog` em `features/reports/`), com elegibilidade *fail-closed* contra sinais contraditórios de autoria, distinção entre nova denúncia (`201 Created`) e denúncia já existente (`200 OK`) por `ReportStatus`, validação de até 500 caracteres no detalhe e tratamento estruturado de erros RFC 7807, verificação de sessão via `AuthNotifier.sessionCheckSince`, indisponibilidade (`404`) e rate limiting (`Retry-After`).
 
 - **Scanner Inteligente Mobile (Flutter)**:
   - Leitura óptica em tempo real via câmera para códigos de barras (EAN/UPC) e QR Codes;
