@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rewit_mobile/app/theme/rewit_semantic_colors.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
@@ -45,7 +46,8 @@ class CheckInScreen extends StatefulWidget {
   State<CheckInScreen> createState() => _CheckInScreenState();
 }
 
-class _CheckInScreenState extends State<CheckInScreen> {
+class _CheckInScreenState extends State<CheckInScreen>
+    with WidgetsBindingObserver {
   ReviewCreateNotifier? _notifier;
   final TextEditingController _commentController = TextEditingController();
 
@@ -56,10 +58,12 @@ class _CheckInScreenState extends State<CheckInScreen> {
   NearbyPlace? _selected;
   bool _ratingChosen = false;
   String? _reportedReviewId;
+  bool _awaitingSettingsReturn = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final repository = widget.reviewCreationRepository;
     if (repository != null && widget.checkInRepository != null) {
       _notifier = ReviewCreateNotifier(repository: repository, locationService: widget.locationService)
@@ -69,10 +73,75 @@ class _CheckInScreenState extends State<CheckInScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _awaitingSettingsReturn = false;
+    _nearbyRequest++;
     _notifier?.removeListener(_onNotifierChanged);
     _notifier?.dispose();
     _commentController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(_handleResumedFromSettings());
+  }
+
+  Future<void> _handleResumedFromSettings() async {
+    if (!mounted || !_awaitingSettingsReturn) return;
+    _awaitingSettingsReturn = false;
+
+    final notifier = _notifier;
+    if (notifier == null ||
+        notifier.isDisposed ||
+        notifier.isSubmitting ||
+        notifier.state is ReviewCreateSuccess ||
+        notifier.isRequestingLocation ||
+        _loadingNearby ||
+        _selected != null) {
+      return;
+    }
+
+    final shouldCapture = await notifier.prepareLocationResumeFromSettings();
+    if (!mounted ||
+        notifier.isDisposed ||
+        notifier.isSubmitting ||
+        notifier.state is ReviewCreateSuccess ||
+        notifier.isRequestingLocation ||
+        _loadingNearby ||
+        _selected != null) {
+      return;
+    }
+
+    if (shouldCapture) {
+      await _locate();
+    } else if (notifier.locationStatus == LocationCaptureStatus.error &&
+        (_nearby != null || _nearbyError != null || _selected != null)) {
+      setState(() {
+        _nearbyRequest++;
+        _nearby = null;
+        _nearbyError = null;
+        _selected = null;
+      });
+    }
+  }
+
+  Future<void> _openSettings({required bool deviceLocationSettings}) async {
+    final notifier = _notifier;
+    if (notifier == null ||
+        notifier.isSubmitting ||
+        notifier.isRequestingLocation) {
+      return;
+    }
+    _awaitingSettingsReturn = true;
+    final opened = deviceLocationSettings
+        ? await notifier.openLocationSettings()
+        : await notifier.openAppSettings();
+    if (!mounted) return;
+    if (!opened) {
+      _awaitingSettingsReturn = false;
+    }
   }
 
   void _onNotifierChanged() {
@@ -87,6 +156,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
 
   Future<void> _locate() async {
     final notifier = _notifier!;
+    _awaitingSettingsReturn = false;
     setState(() {
       _nearby = null;
       _nearbyError = null;
@@ -157,6 +227,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
   }
 
   void _startOver() {
+    _awaitingSettingsReturn = false;
     _notifier!.reset();
     _commentController.clear();
     setState(() {
@@ -246,7 +317,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
             padding: const EdgeInsets.only(bottom: 8),
             child: OutlinedButton.icon(
               key: const Key('checkin_open_settings'),
-              onPressed: notifier.openAppSettings,
+              onPressed: () => _openSettings(deviceLocationSettings: false),
               icon: const Icon(Icons.settings_outlined),
               label: const Text('Abrir configurações'),
             ),
@@ -256,7 +327,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
             padding: const EdgeInsets.only(bottom: 8),
             child: OutlinedButton.icon(
               key: const Key('checkin_open_location_settings'),
-              onPressed: notifier.openLocationSettings,
+              onPressed: () => _openSettings(deviceLocationSettings: true),
               icon: const Icon(Icons.location_on_outlined),
               label: const Text('Ativar localização'),
             ),
@@ -483,7 +554,9 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 if (notifier.isPermissionApproximate)
                   TextButton.icon(
                     key: const Key('checkin_approximate_open_settings'),
-                    onPressed: notifier.openAppSettings,
+                    onPressed: notifier.isRequestingLocation || _loadingNearby
+                        ? null
+                        : () => _openSettings(deviceLocationSettings: false),
                     icon: const Icon(Icons.settings_outlined, size: 16),
                     label: const Text('Abrir configurações'),
                   ),

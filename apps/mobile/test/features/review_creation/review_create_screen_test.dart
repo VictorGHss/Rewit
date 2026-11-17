@@ -1,8 +1,10 @@
 import 'package:rewit_mobile/features/place/presentation/widgets/manual_place_registration_sheet.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
@@ -11,6 +13,7 @@ import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_reviews_page.dart';
 import 'package:rewit_mobile/features/place/domain/entities/target_stats.dart';
 import 'package:rewit_mobile/features/place/domain/repositories/place_repository.dart';
+import 'package:rewit_mobile/features/review_creation/data/services/geolocator_location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_privacy_rules.dart';
@@ -209,11 +212,47 @@ class MockLocationService implements LocationService {
       accuracyMeters: 12.0,
     ),
   );
+  LocationReadiness? readinessToReturn;
+  Completer<LocationResult>? pendingCompleter;
+  Completer<LocationReadiness>? pendingReadinessCompleter;
   int callCount = 0;
+  int readinessCallCount = 0;
   bool openSettingsCalled = false;
   bool openLocationSettingsCalled = false;
+  bool openSettingsResult = true;
+  bool openLocationSettingsResult = true;
   LocationPurpose? lastPurpose;
+  LocationPurpose? lastReadinessPurpose;
   Duration? simulatedDelay;
+
+  @override
+  Future<LocationReadiness> checkReadiness({
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
+    readinessCallCount++;
+    lastReadinessPurpose = purpose;
+    if (pendingReadinessCompleter != null) {
+      return pendingReadinessCompleter!.future;
+    }
+    if (readinessToReturn != null) {
+      return readinessToReturn!;
+    }
+    return switch (resultToReturn) {
+      LocationSuccess(:final location) => LocationReady(
+          isPermissionApproximate: purpose == LocationPurpose.presenceVerification &&
+              location.isPermissionApproximate,
+        ),
+      LocationFailure(:final reason, :final message) => switch (reason) {
+          LocationFailureReason.serviceDisabled ||
+          LocationFailureReason.permissionDenied ||
+          LocationFailureReason.permissionDeniedForever =>
+            LocationNotReady(reason: reason, message: message),
+          LocationFailureReason.timeout ||
+          LocationFailureReason.error =>
+            const LocationReady(),
+        },
+    };
+  }
 
   @override
   Future<LocationResult> getCurrentLocation({
@@ -222,6 +261,9 @@ class MockLocationService implements LocationService {
   }) async {
     callCount++;
     lastPurpose = purpose;
+    if (pendingCompleter != null) {
+      return pendingCompleter!.future;
+    }
     if (simulatedDelay != null) {
       await Future.delayed(simulatedDelay!);
     }
@@ -231,13 +273,13 @@ class MockLocationService implements LocationService {
   @override
   Future<bool> openAppSettings() async {
     openSettingsCalled = true;
-    return true;
+    return openSettingsResult;
   }
 
   @override
   Future<bool> openLocationSettings() async {
     openLocationSettingsCalled = true;
-    return true;
+    return openLocationSettingsResult;
   }
 }
 
@@ -1662,5 +1704,360 @@ void main() {
         expect(find.text('Espresso Duplo'), findsOneWidget);
       });
     });
+
+    group('Retomada automática da localização após Configurações (ReviewCreateScreen)', () {
+      void simulateResume(WidgetTester tester) {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      }
+
+      Future<void> triggerInitialLocationError(
+        WidgetTester tester,
+        MockLocationService locService,
+      ) async {
+        await tester.pumpWidget(buildSubject(
+          repository: repository,
+          locationService: locService,
+          initialTargetId: validTargetId,
+          initialTargetType: 'PLACE',
+        ));
+        await tester.tap(find.byKey(const Key('validate_presence_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('retorno de openAppSettings com permissão concedida retoma captura sem reabrir consentimento',
+          (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final locService = MockLocationService()
+          ..resultToReturn = const LocationFailure(
+            reason: LocationFailureReason.permissionDeniedForever,
+            message: 'Permissão de localização permanentemente negada.',
+          );
+
+        await triggerInitialLocationError(tester, locService);
+        expect(find.byKey(const Key('open_settings_button')), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('open_settings_button')));
+        await tester.pumpAndSettle();
+        expect(locService.openSettingsCalled, isTrue);
+
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(latitude: -23.5505, longitude: -46.6333, accuracyMeters: 14.0),
+        );
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(locService.readinessCallCount, 1);
+        expect(locService.lastReadinessPurpose, LocationPurpose.presenceVerification);
+        expect(locService.callCount, 2);
+        expect(find.byKey(const Key('review_location_verified_card')), findsOneWidget);
+        expect(find.text('Validação de Presença'), findsNothing);
+      });
+
+      testWidgets('retorno de openLocationSettings após ativar serviço retoma captura automaticamente',
+          (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final locService = MockLocationService()
+          ..resultToReturn = const LocationFailure(
+            reason: LocationFailureReason.serviceDisabled,
+            message: 'O serviço de localização está desativado no aparelho.',
+          );
+
+        await triggerInitialLocationError(tester, locService);
+        await tester.tap(find.byKey(const Key('open_location_settings_button')));
+        await tester.pumpAndSettle();
+        expect(locService.openLocationSettingsCalled, isTrue);
+
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(latitude: -23.5505, longitude: -46.6333, accuracyMeters: 16.0),
+        );
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(locService.readinessCallCount, 1);
+        expect(locService.callCount, 2);
+        expect(find.byKey(const Key('review_location_verified_card')), findsOneWidget);
+      });
+
+      testWidgets('retorno sem permissão ou sem serviço preserva erro contextual e botão Tentar novamente sem loop',
+          (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final locService = MockLocationService()
+          ..resultToReturn = const LocationFailure(
+            reason: LocationFailureReason.permissionDeniedForever,
+            message: 'Permissão bloqueada.',
+          );
+
+        await triggerInitialLocationError(tester, locService);
+        await tester.tap(find.byKey(const Key('open_settings_button')));
+        await tester.pumpAndSettle();
+
+        locService.readinessToReturn = const LocationNotReady(
+          reason: LocationFailureReason.permissionDenied,
+          message: 'Permissão de localização negada.',
+        );
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(locService.readinessCallCount, 1);
+        expect(locService.callCount, 1);
+        expect(find.text('Permissão de localização negada.'), findsOneWidget);
+        expect(find.byKey(const Key('retry_location_button')), findsOneWidget);
+
+        // Retorna também de serviço desativado sem ativar GPS
+        locService.readinessToReturn = null;
+        locService.resultToReturn = const LocationFailure(
+          reason: LocationFailureReason.serviceDisabled,
+          message: 'Serviço desligado.',
+        );
+        await tester.tap(find.byKey(const Key('retry_location_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('open_location_settings_button')));
+        await tester.pumpAndSettle();
+
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(locService.callCount, 2);
+        expect(find.byKey(const Key('open_location_settings_button')), findsOneWidget);
+        expect(find.byKey(const Key('retry_location_button')), findsOneWidget);
+      });
+
+      testWidgets('permissão aproximada: retorno ainda aproximado evita recaptura; liberar exata atualiza para verificado',
+          (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final locService = MockLocationService()
+          ..resultToReturn = const LocationFailure(
+            reason: LocationFailureReason.permissionDeniedForever,
+            message: 'Permissão bloqueada.',
+          );
+
+        await triggerInitialLocationError(tester, locService);
+        await tester.tap(find.byKey(const Key('open_settings_button')));
+        await tester.pumpAndSettle();
+
+        // Concede permissão aproximada
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(
+            latitude: -23.5505,
+            longitude: -46.6333,
+            accuracyMeters: 250.0,
+            isPermissionApproximate: true,
+          ),
+        );
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(locService.callCount, 2);
+        expect(find.byKey(const Key('review_location_approximate_card')), findsOneWidget);
+        expect(find.byKey(const Key('approximate_open_settings_button')), findsOneWidget);
+
+        // Abre configurações do aviso aproximado e volta sem mudar para exata
+        await tester.tap(find.byKey(const Key('approximate_open_settings_button')));
+        await tester.pumpAndSettle();
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(locService.readinessCallCount, 2);
+        expect(locService.callCount, 2);
+        expect(find.byKey(const Key('review_location_approximate_card')), findsOneWidget);
+
+        // Abre novamente e altera para permissão exata -> recaptura automaticamente
+        await tester.tap(find.byKey(const Key('approximate_open_settings_button')));
+        await tester.pumpAndSettle();
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(
+            latitude: -23.5505,
+            longitude: -46.6333,
+            accuracyMeters: 12.0,
+            isPermissionApproximate: false,
+          ),
+        );
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(locService.callCount, 3);
+        expect(find.byKey(const Key('review_location_verified_card')), findsOneWidget);
+      });
+
+      testWidgets('resumed sem abertura prévia, eventos repetidos, descarte e concorrência manual',
+          (tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final locService = MockLocationService()
+          ..resultToReturn = const LocationFailure(
+            reason: LocationFailureReason.permissionDeniedForever,
+            message: 'Permissão bloqueada.',
+          );
+
+        await triggerInitialLocationError(tester, locService);
+
+        // 1. resumed sem abertura prévia -> ignorado
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+        expect(locService.readinessCallCount, 0);
+        expect(locService.callCount, 1);
+
+        // 2. Eventos repetidos de resumed e concorrência com tentativa manual
+        await tester.tap(find.byKey(const Key('open_settings_button')));
+        await tester.pumpAndSettle();
+
+        final readinessCompleter = Completer<LocationReadiness>();
+        locService.pendingReadinessCompleter = readinessCompleter;
+
+        simulateResume(tester);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pump();
+        expect(locService.readinessCallCount, 1);
+
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(latitude: -23.5505, longitude: -46.6333, accuracyMeters: 15.0),
+        );
+        await tester.tap(find.byKey(const Key('retry_location_button')));
+        await tester.pumpAndSettle();
+
+        readinessCompleter.complete(const LocationReady());
+        await tester.pumpAndSettle();
+
+        expect(locService.callCount, 2, reason: '1 inicial + 1 manual; retomada vencida não duplica');
+        expect(find.byKey(const Key('review_location_verified_card')), findsOneWidget);
+
+        // 3. Descarte da tela durante revalidação assíncrona no resumed
+        locService.pendingReadinessCompleter = null;
+        locService.resultToReturn = const LocationFailure(
+          reason: LocationFailureReason.serviceDisabled,
+          message: 'Serviço desligado.',
+        );
+        await tester.tap(find.byKey(const Key('update_location_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('open_location_settings_button')));
+        await tester.pumpAndSettle();
+
+        final disposeCompleter = Completer<LocationReadiness>();
+        locService.pendingReadinessCompleter = disposeCompleter;
+        simulateResume(tester);
+        await tester.pump();
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        disposeCompleter.complete(const LocationReady());
+        await tester.pumpAndSettle();
+
+        expect(locService.callCount, 3);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('regressão Android 16: ReviewCreateScreen com GeolocatorLocationService preserva open_settings_button ao retornar sem conceder e retoma ao conceder',
+          (tester) async {
+        final originalPlatform = GeolocatorPlatform.instance;
+        final androidPlatform = _AndroidGeolocatorStub();
+        GeolocatorPlatform.instance = androidPlatform;
+        addTearDown(() => GeolocatorPlatform.instance = originalPlatform);
+
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final realService = GeolocatorLocationService();
+        await tester.pumpWidget(buildSubject(
+          repository: repository,
+          locationService: realService,
+          initialTargetId: validTargetId,
+          initialTargetType: 'PLACE',
+        ));
+        await tester.tap(find.byKey(const Key('validate_presence_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('location_consent_confirm_button')));
+        await tester.pumpAndSettle();
+
+        expect(androidPlatform.requestPermissionCalls, 1);
+        expect(find.byKey(const Key('open_settings_button')), findsOneWidget);
+
+        // Retorna sem conceder (Android checkPermission devolve denied): botão permanece disponível
+        for (var i = 0; i < 2; i++) {
+          await tester.tap(find.byKey(const Key('open_settings_button')));
+          await tester.pumpAndSettle();
+          simulateResume(tester);
+          await tester.pumpAndSettle();
+
+          expect(androidPlatform.requestPermissionCalls, 1);
+          expect(find.byKey(const Key('open_settings_button')), findsOneWidget);
+          expect(find.byKey(const Key('retry_location_button')), findsOneWidget);
+        }
+
+        // Concede nas configurações e retorna -> captura presença verificada
+        await tester.tap(find.byKey(const Key('open_settings_button')));
+        await tester.pumpAndSettle();
+        androidPlatform.checkPermissionResult = LocationPermission.whileInUse;
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('review_location_verified_card')), findsOneWidget);
+      });
+    });
   });
+}
+
+class _AndroidGeolocatorStub extends GeolocatorPlatform {
+  LocationPermission checkPermissionResult = LocationPermission.denied;
+  LocationPermission requestPermissionResult = LocationPermission.deniedForever;
+  int requestPermissionCalls = 0;
+
+  @override
+  Future<bool> isLocationServiceEnabled() async => true;
+
+  @override
+  Future<LocationPermission> checkPermission() async => checkPermissionResult;
+
+  @override
+  Future<LocationPermission> requestPermission() async {
+    requestPermissionCalls++;
+    return requestPermissionResult;
+  }
+
+  @override
+  Future<LocationAccuracyStatus> getLocationAccuracy() async => LocationAccuracyStatus.precise;
+
+  @override
+  Future<Position> getCurrentPosition({LocationSettings? locationSettings}) async => Position(
+        latitude: -23.5505,
+        longitude: -46.6333,
+        timestamp: DateTime.now(),
+        accuracy: 12.0,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+
+  @override
+  Future<bool> openAppSettings() async => true;
 }

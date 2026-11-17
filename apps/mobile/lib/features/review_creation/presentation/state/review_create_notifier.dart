@@ -40,6 +40,7 @@ class ReviewCreateNotifier extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    _locationCaptureSequence++;
     super.dispose();
   }
 
@@ -366,28 +367,91 @@ class ReviewCreateNotifier extends ChangeNotifier {
           return true;
 
         case LocationFailure(:final reason, :final message):
-          _userLatitude = null;
-          _userLongitude = null;
-          _locationAccuracyMeters = null;
-          _isPermissionApproximate = false;
-          _locationStatus = LocationCaptureStatus.error;
-          _locationFailureReason = reason;
-          _locationErrorMessage = message;
-          _safeNotifyListeners();
+          _applyLocationError(reason, message);
           return false;
       }
     } catch (_) {
       if (_isDisposed || seq != _locationCaptureSequence) {
         return false;
       }
-      _userLatitude = null;
-      _userLongitude = null;
-      _locationAccuracyMeters = null;
-      _isPermissionApproximate = false;
-      _locationStatus = LocationCaptureStatus.error;
-      _locationFailureReason = LocationFailureReason.error;
-      _locationErrorMessage = 'Não foi possível obter sua localização agora.';
-      _safeNotifyListeners();
+      _applyLocationError(
+        LocationFailureReason.error,
+        'Não foi possível obter sua localização agora.',
+      );
+      return false;
+    }
+  }
+
+  void _applyLocationError(LocationFailureReason reason, String message) {
+    _userLatitude = null;
+    _userLongitude = null;
+    _locationAccuracyMeters = null;
+    _isPermissionApproximate = false;
+    _locationStatus = LocationCaptureStatus.error;
+    _locationFailureReason = reason;
+    _locationErrorMessage = message;
+    _safeNotifyListeners();
+  }
+
+  /// Reavalia serviço de localização e permissões ao retornar das configurações, sem abrir prompt nativo.
+  ///
+  /// Retorna `true` apenas quando uma nova captura deve ser iniciada automaticamente
+  /// (erro anterior resolvido, ou permissão aproximada atualizada para exata).
+  Future<bool> prepareLocationResumeFromSettings() async {
+    if (_isDisposed ||
+        isSubmitting ||
+        _state is ReviewCreateSuccess ||
+        _locationStatus == LocationCaptureStatus.requesting ||
+        locationService == null) {
+      return false;
+    }
+
+    final wasError = _locationStatus == LocationCaptureStatus.error;
+    final wasApproximatePermission =
+        _locationStatus == LocationCaptureStatus.captured &&
+            _isPermissionApproximate;
+    if (!wasError && !wasApproximatePermission) {
+      return false;
+    }
+
+    final seq = ++_locationCaptureSequence;
+    try {
+      final readiness = await locationService!.checkReadiness(
+        purpose: LocationPurpose.presenceVerification,
+      );
+
+      if (_isDisposed ||
+          seq != _locationCaptureSequence ||
+          isSubmitting ||
+          _state is ReviewCreateSuccess ||
+          _locationStatus == LocationCaptureStatus.requesting) {
+        return false;
+      }
+
+      switch (readiness) {
+        case LocationReady(:final isPermissionApproximate):
+          if (wasApproximatePermission && isPermissionApproximate) {
+            // Permissão continua aproximada: preserva leitura e aviso atuais sem nova captura redundante.
+            return false;
+          }
+          return true;
+
+        case LocationNotReady(:final reason, :final message):
+          _applyLocationError(reason, message);
+          return false;
+      }
+    } catch (_) {
+      if (_isDisposed ||
+          seq != _locationCaptureSequence ||
+          isSubmitting ||
+          _state is ReviewCreateSuccess ||
+          _locationStatus == LocationCaptureStatus.requesting) {
+        return false;
+      }
+      _applyLocationError(
+        LocationFailureReason.error,
+        'Não foi possível verificar sua localização agora.',
+      );
       return false;
     }
   }

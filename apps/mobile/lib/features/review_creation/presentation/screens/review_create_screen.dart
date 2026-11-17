@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -78,9 +79,11 @@ class ReviewCreateScreen extends StatefulWidget {
   State<ReviewCreateScreen> createState() => _ReviewCreateScreenState();
 }
 
-class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
+class _ReviewCreateScreenState extends State<ReviewCreateScreen>
+    with WidgetsBindingObserver {
   late final ReviewCreateNotifier _notifier;
   bool _ownsNotifier = false;
+  bool _awaitingSettingsReturn = false;
 
   final TextEditingController _contextPlaceIdController =
       TextEditingController();
@@ -90,6 +93,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.notifier != null) {
       _notifier = widget.notifier!;
     } else {
@@ -190,6 +194,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
       }
 
       // Limpa os controladores e reinicia o estado do formulário para evitar reutilização no IndexedStack
+      _awaitingSettingsReturn = false;
       _contextPlaceIdController.clear();
       _experienceTextController.clear();
       _notifier.reset();
@@ -200,6 +205,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _awaitingSettingsReturn = false;
     _notifier.removeListener(_handleStateChange);
     if (_ownsNotifier) {
       _notifier.dispose();
@@ -207,6 +214,59 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
     _contextPlaceIdController.dispose();
     _experienceTextController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(_handleResumedFromSettings());
+  }
+
+  Future<void> _handleResumedFromSettings() async {
+    if (!mounted || !_awaitingSettingsReturn) return;
+    _awaitingSettingsReturn = false;
+
+    if (_notifier.isDisposed ||
+        _notifier.isSubmitting ||
+        _notifier.state is ReviewCreateSuccess ||
+        _notifier.isRequestingLocation) {
+      return;
+    }
+
+    final shouldCapture = await _notifier.prepareLocationResumeFromSettings();
+    if (!mounted ||
+        _notifier.isDisposed ||
+        _notifier.isSubmitting ||
+        _notifier.state is ReviewCreateSuccess ||
+        _notifier.isRequestingLocation) {
+      return;
+    }
+
+    if (shouldCapture) {
+      await _notifier.captureLocation();
+    }
+  }
+
+  Future<void> _openSettings({required bool deviceLocationSettings}) async {
+    if (_notifier.isSubmitting || _notifier.isRequestingLocation) return;
+    _awaitingSettingsReturn = true;
+    final opened = deviceLocationSettings
+        ? await _notifier.openLocationSettings()
+        : await _notifier.openAppSettings();
+    if (!mounted) return;
+    if (!opened) {
+      _awaitingSettingsReturn = false;
+    }
+  }
+
+  Future<void> _captureLocationManually() async {
+    _awaitingSettingsReturn = false;
+    await _notifier.captureLocation();
+  }
+
+  void _clearLocationManually() {
+    _awaitingSettingsReturn = false;
+    _notifier.clearCoordinates();
   }
 
   Future<void> _requestLocationConsent() async {
@@ -242,7 +302,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
     );
 
     if (confirmed == true && mounted) {
-      await _notifier.captureLocation();
+      await _captureLocationManually();
     }
   }
 
@@ -865,7 +925,9 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                                           'approximate_open_settings_button'),
                                       onPressed: isSubmitting
                                           ? null
-                                          : () => _notifier.openAppSettings(),
+                                          : () => _openSettings(
+                                                deviceLocationSettings: false,
+                                              ),
                                       icon: const Icon(Icons.settings_outlined,
                                           size: 16),
                                       label: const Text(
@@ -930,8 +992,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                   Expanded(
                     child: OutlinedButton.icon(
                       key: const Key('update_location_button'),
-                      onPressed:
-                          isSubmitting ? null : () => _notifier.captureLocation(),
+                      onPressed: isSubmitting ? null : _captureLocationManually,
                       icon: const Icon(Icons.refresh, size: 16),
                       label: Text(
                         _notifier.isApproximateLocation
@@ -945,9 +1006,7 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                   Expanded(
                     child: OutlinedButton.icon(
                       key: const Key('remove_checkin_button'),
-                      onPressed: isSubmitting
-                          ? null
-                          : () => _notifier.clearCoordinates(),
+                      onPressed: isSubmitting ? null : _clearLocationManually,
                       icon: const Icon(Icons.close, size: 16),
                       label: const Text(
                         'Remover check-in',
@@ -997,9 +1056,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                       children: [
                         OutlinedButton(
                           key: const Key('retry_location_button'),
-                          onPressed: isSubmitting
-                              ? null
-                              : () => _notifier.captureLocation(),
+                          onPressed:
+                              isSubmitting ? null : _captureLocationManually,
                           child: const Text(
                             'Tentar novamente',
                             style: TextStyle(fontSize: 12),
@@ -1011,7 +1069,9 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                             key: const Key('open_settings_button'),
                             onPressed: isSubmitting
                                 ? null
-                                : () => _notifier.openAppSettings(),
+                                : () => _openSettings(
+                                      deviceLocationSettings: false,
+                                    ),
                             icon: const Icon(Icons.settings_outlined, size: 16),
                             label: const Text(
                               'Abrir configurações',
@@ -1024,7 +1084,9 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                             key: const Key('open_location_settings_button'),
                             onPressed: isSubmitting
                                 ? null
-                                : () => _notifier.openLocationSettings(),
+                                : () => _openSettings(
+                                      deviceLocationSettings: true,
+                                    ),
                             icon:
                                 const Icon(Icons.location_on_outlined, size: 16),
                             label: const Text(
@@ -1033,9 +1095,8 @@ class _ReviewCreateScreenState extends State<ReviewCreateScreen> {
                             ),
                           ),
                         TextButton(
-                          onPressed: isSubmitting
-                              ? null
-                              : () => _notifier.clearCoordinates(),
+                          onPressed:
+                              isSubmitting ? null : _clearLocationManually,
                           child: const Text(
                             'Ignorar',
                             style: TextStyle(fontSize: 12),

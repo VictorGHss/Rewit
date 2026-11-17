@@ -352,7 +352,7 @@ flutter run
       - Assegure contraste mínimo WCAG AA em ambos os temas testando a legibilidade de textos e ícones contra seus respectivos containers.
   - **Acessibilidade e Garantia de Qualidade**:
     - Verificação estrita de contraste WCAG AA: relação `>= 4.5:1` para tipografia de leitura regular e `>= 3:1` para divisores estruturais, bordas e ícones gráficos;
-    - Bateria de testes automatizados Flutter: **1.430 testes aprovados** (`flutter test`, `All tests passed!`), 0 falhas, 0 erros e 0 alertas no `dart analyze`;
+    - Bateria de testes automatizados Flutter: **1.462 testes aprovados** (`flutter test`, `All tests passed!`), 0 falhas, 0 erros e 0 alertas no `dart analyze`;
     - Testes unitários nativos Android: **9 testes aprovados** (`:app:testDebugUnitTest` em `CameraPermissionStateMachineTest`) cobrindo a máquina de estados de permissão;
     - **Status de Homologação**: A suíte de testes automatizados e regressões estruturais de widget foi 100% validada no ambiente de desenvolvimento e CI/CD. A inspeção visual interativa em hardware físico real (dispositivos Android e iOS) permanece como pendência formal para validação prática pela equipe/mantenedor.
 
@@ -401,6 +401,7 @@ flutter run
   - Implementação de `GeolocatorLocationService` com política explícita por finalidade (`LocationCapturePolicy`):
     - **Política de Descoberta (`discovery`)**: utilizada na busca de locais próximos no raio de 10 km. Prioriza velocidade com cache recente (<= 5 min) e captura inicial em precisão média com timeout de até 5 segundos; caso não haja cache válido e a tentativa inicial falhe ou expire, executa no máximo um fallback controlado em alta precisão (<= 4 segundos, dentro de orçamento total de 9 segundos), sem polling contínuo;
     - **Política de Verificação de Presença (`presenceVerification`)**: utilizada na criação de avaliação e na aba de check-in. Rejeita cache antigo, exige leitura recente (<= 1 minuto), alta precisão horizontal do GPS, timeout ampliado (10s a 15s) para aquecimento de GPS frio e retry único caso a acurácia seja aproximada (> 100 metros);
+  - **Retomada Automática Após Configurações**: `ExternalPlaceResultsSection`, `CheckInScreen` e `ReviewCreateScreen` observam `AppLifecycleState.resumed` via `WidgetsBindingObserver` apenas após abertura explícita de `openAppSettings()` ou `openLocationSettings()`, revalidando serviço e permissão sem prompt nativo (`LocationService.checkReadiness`, preservando em `GeolocatorLocationService` o estado `permissionDeniedForever` no Android quando a permissão continua negada) antes de retomar a captura de acordo com `LocationCapturePolicy`;
   - **Localização Simulada em QA**: o cliente não bloqueia coordenadas simuladas/mock em emuladores ou dispositivos de teste, permitindo cenários completos de homologação e validação funcional sem adulterar código;
   - **Autoridade Estrita do Backend**: a validação da presença física permanece 100% autoritativa no backend (PostGIS `ST_DWithin`, teto de 250m de raio por local, acurácia horizontal <= 100m, trava transacional `pg_advisory_xact_lock` e teto de 1 check-in verificado por usuário e local em janela móvel de 24 horas).
 

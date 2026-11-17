@@ -102,7 +102,7 @@ void main() async {
       PlaceDiscoveryRepositoryImpl(httpClient: httpClient);
   final mediaRepository = ReviewMediaRepositoryImpl(client: httpClient);
   final mediaPickerService = ImagePickerMediaService();
-  const locationService = GeolocatorLocationService();
+  final locationService = GeolocatorLocationService();
   final notificationRepository =
       NotificationRepositoryImpl(httpClient: httpClient);
   final businessRepository = BusinessRepositoryImpl(httpClient: httpClient);

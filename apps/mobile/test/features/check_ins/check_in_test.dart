@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:rewit_mobile/app/router/app_router.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
@@ -26,6 +27,7 @@ import 'package:rewit_mobile/features/home/presentation/screens/home_screen.dart
 import 'package:rewit_mobile/features/profile/domain/entities/user_profile.dart';
 import 'package:rewit_mobile/features/profile/domain/repositories/user_profile_repository.dart';
 import 'package:rewit_mobile/features/profile/presentation/screens/user_profile_screen.dart';
+import 'package:rewit_mobile/features/review_creation/data/services/geolocator_location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/review_creation_input.dart';
 import 'package:rewit_mobile/features/review_creation/domain/repositories/review_creation_repository.dart';
@@ -40,15 +42,47 @@ const _bookstoreId = '22222222-2222-4222-8222-222222222222';
 
 class _FakeLocationService implements LocationService {
   LocationResult result;
+  LocationReadiness? readinessResult;
+  Completer<LocationResult>? locationCompleter;
+  Completer<LocationReadiness>? readinessCompleter;
   int requests = 0;
+  int readinessRequests = 0;
   int settingsOpened = 0;
   int locationSettingsOpened = 0;
+  bool openAppSettingsResult = true;
+  bool openLocationSettingsResult = true;
   LocationPurpose? lastPurpose;
+  LocationPurpose? lastReadinessPurpose;
 
   _FakeLocationService(this.result);
 
   _FakeLocationService.at({double accuracy = 8})
       : result = LocationSuccess(DeviceLocation(latitude: -25.4384, longitude: -49.2849, accuracyMeters: accuracy));
+
+  @override
+  Future<LocationReadiness> checkReadiness({
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
+    readinessRequests++;
+    lastReadinessPurpose = purpose;
+    if (readinessCompleter != null) return readinessCompleter!.future;
+    if (readinessResult != null) return readinessResult!;
+    return switch (result) {
+      LocationSuccess(:final location) => LocationReady(
+          isPermissionApproximate: purpose == LocationPurpose.presenceVerification &&
+              location.isPermissionApproximate,
+        ),
+      LocationFailure(:final reason, :final message) => switch (reason) {
+          LocationFailureReason.serviceDisabled ||
+          LocationFailureReason.permissionDenied ||
+          LocationFailureReason.permissionDeniedForever =>
+            LocationNotReady(reason: reason, message: message),
+          LocationFailureReason.timeout ||
+          LocationFailureReason.error =>
+            const LocationReady(),
+        },
+    };
+  }
 
   @override
   Future<LocationResult> getCurrentLocation({
@@ -57,19 +91,20 @@ class _FakeLocationService implements LocationService {
   }) async {
     requests++;
     lastPurpose = purpose;
+    if (locationCompleter != null) return locationCompleter!.future;
     return result;
   }
 
   @override
   Future<bool> openAppSettings() async {
     settingsOpened++;
-    return true;
+    return openAppSettingsResult;
   }
 
   @override
   Future<bool> openLocationSettings() async {
     locationSettingsOpened++;
-    return true;
+    return openLocationSettingsResult;
   }
 }
 
@@ -218,6 +253,15 @@ Future<void> _tap(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
   await tester.tap(finder);
   await tester.pumpAndSettle();
+}
+
+void _simulateResume(WidgetTester tester) {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
 }
 
 Future<void> _pumpCheckIn(
@@ -637,6 +681,333 @@ void main() {
       expect(find.byKey(const Key('checkin_result_not_requested')), findsOneWidget);
       expect(find.text('Avaliação publicada (check-in não solicitado)'), findsOneWidget);
     });
+
+    testWidgets('retorno de Settings com permissão concedida retoma captura e lista locais próximos', (tester) async {
+      final location = _FakeLocationService(const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão negada.',
+      ));
+      final checkIns = _FakeCheckInRepository();
+      await _pumpCheckIn(
+        tester,
+        location: location,
+        checkIns: checkIns,
+        reviews: _FakeReviewCreationRepository(),
+      );
+
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      await _tap(tester, find.byKey(const Key('checkin_open_settings')));
+      expect(location.settingsOpened, 1);
+
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.4384, longitude: -49.2849, accuracyMeters: 10),
+      );
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessRequests, 1);
+      expect(location.lastReadinessPurpose, LocationPurpose.presenceVerification);
+      expect(location.requests, 2);
+      expect(checkIns.nearbyRequests, hasLength(1));
+      expect(find.text('Café Central'), findsOneWidget);
+    });
+
+    testWidgets('retorno após ativar serviço de localização retoma captura e locais próximos', (tester) async {
+      final location = _FakeLocationService(const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'GPS desligado.',
+      ));
+      final checkIns = _FakeCheckInRepository();
+      await _pumpCheckIn(
+        tester,
+        location: location,
+        checkIns: checkIns,
+        reviews: _FakeReviewCreationRepository(),
+      );
+
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      await _tap(tester, find.byKey(const Key('checkin_open_location_settings')));
+      expect(location.locationSettingsOpened, 1);
+
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.4384, longitude: -49.2849, accuracyMeters: 12),
+      );
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessRequests, 1);
+      expect(location.requests, 2);
+      expect(find.text('Café Central'), findsOneWidget);
+    });
+
+    testWidgets('retorno sem conceder permissão ou sem ativar serviço não duplica captura nem entra em loop',
+        (tester) async {
+      final location = _FakeLocationService(const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      ));
+      await _pumpCheckIn(
+        tester,
+        location: location,
+        checkIns: _FakeCheckInRepository(),
+        reviews: _FakeReviewCreationRepository(),
+      );
+
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      await _tap(tester, find.byKey(const Key('checkin_open_settings')));
+
+      location.readinessResult = const LocationNotReady(
+        reason: LocationFailureReason.permissionDenied,
+        message: 'Permissão de localização negada.',
+      );
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessRequests, 1);
+      expect(location.requests, 1);
+      expect(location.settingsOpened, 1);
+      expect(find.textContaining('Sem permissão de localização'), findsOneWidget);
+      expect(find.byKey(const Key('checkin_locate_button')), findsOneWidget);
+
+      // Cenário sem ativar serviço de localização
+      location.readinessResult = null;
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'GPS desligado.',
+      );
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      await _tap(tester, find.byKey(const Key('checkin_open_location_settings')));
+
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.requests, 2);
+      expect(location.locationSettingsOpened, 1);
+      expect(find.byKey(const Key('checkin_open_location_settings')), findsOneWidget);
+      expect(find.text('Tentar novamente'), findsOneWidget);
+    });
+
+    testWidgets('permissão aproximada: retorno sem alterar mantém aviso; revogar volta ao erro; liberar exata recarrega locais',
+        (tester) async {
+      final location = _FakeLocationService(const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      ));
+      final checkIns = _FakeCheckInRepository();
+      await _pumpCheckIn(
+        tester,
+        location: location,
+        checkIns: checkIns,
+        reviews: _FakeReviewCreationRepository(),
+      );
+
+      // 1. Concede permissão aproximada ao voltar de Settings -> captura e exibe aviso
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      await _tap(tester, find.byKey(const Key('checkin_open_settings')));
+      location.result = const LocationSuccess(
+        DeviceLocation(
+          latitude: -25.4384,
+          longitude: -49.2849,
+          accuracyMeters: 350,
+          isPermissionApproximate: true,
+        ),
+      );
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.requests, 2);
+      expect(find.byKey(const Key('checkin_approximate_hint')), findsOneWidget);
+      expect(find.byKey(const Key('checkin_approximate_open_settings')), findsOneWidget);
+
+      // 2. Abre Settings a partir do aviso aproximado e retorna sem alterar para exata -> sem recaptura redundante
+      await _tap(tester, find.byKey(const Key('checkin_approximate_open_settings')));
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessRequests, 2);
+      expect(location.requests, 2);
+      expect(checkIns.nearbyRequests, hasLength(1));
+      expect(find.byKey(const Key('checkin_approximate_hint')), findsOneWidget);
+
+      // 3. Abre Settings novamente e muda para precisão exata -> recaptura automaticamente e remove aviso
+      await _tap(tester, find.byKey(const Key('checkin_approximate_open_settings')));
+      location.result = const LocationSuccess(
+        DeviceLocation(
+          latitude: -25.4384,
+          longitude: -49.2849,
+          accuracyMeters: 8,
+          isPermissionApproximate: false,
+        ),
+      );
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.requests, 3);
+      expect(checkIns.nearbyRequests, hasLength(2));
+      expect(find.byKey(const Key('checkin_approximate_hint')), findsNothing);
+
+      // 4. Novo ciclo com permissão aproximada e revogação em Settings -> volta ao erro sem lista obsoleta
+      location.result = const LocationSuccess(
+        DeviceLocation(
+          latitude: -25.4384,
+          longitude: -49.2849,
+          accuracyMeters: 350,
+          isPermissionApproximate: true,
+        ),
+      );
+      await _tap(tester, find.byKey(const Key('checkin_relocate_button')));
+      expect(find.byKey(const Key('checkin_approximate_open_settings')), findsOneWidget);
+      await _tap(tester, find.byKey(const Key('checkin_approximate_open_settings')));
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão revogada.',
+      );
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('checkin_location_error')), findsOneWidget);
+      expect(find.byKey(const Key('checkin_open_settings')), findsOneWidget);
+    });
+
+    testWidgets('resumed sem abertura prévia de Settings, eventos repetidos, descarte e concorrência manual',
+        (tester) async {
+      final location = _FakeLocationService(const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      ));
+      await _pumpCheckIn(
+        tester,
+        location: location,
+        checkIns: _FakeCheckInRepository(),
+        reviews: _FakeReviewCreationRepository(),
+      );
+
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+
+      // 1. resumed sem abrir Settings -> ignorado
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+      expect(location.readinessRequests, 0);
+      expect(location.requests, 1);
+
+      // 2. Eventos repetidos de resumed -> apenas 1 reavaliação, e concorrência com tentativa manual
+      await _tap(tester, find.byKey(const Key('checkin_open_settings')));
+      final readinessCompleter = Completer<LocationReadiness>();
+      location.readinessCompleter = readinessCompleter;
+
+      _simulateResume(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(location.readinessRequests, 1);
+
+      // Tentativa manual antes da reavaliação resolver
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.4384, longitude: -49.2849, accuracyMeters: 10),
+      );
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      readinessCompleter.complete(const LocationReady());
+      await tester.pumpAndSettle();
+
+      expect(location.requests, 2, reason: 'apenas inicial + manual; retomada vencida não duplica');
+      expect(find.text('Café Central'), findsOneWidget);
+
+      // 3. Descarte durante revalidação pendente não lança erro
+      location.readinessCompleter = null;
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'GPS desligado.',
+      );
+      await _tap(tester, find.byKey(const Key('checkin_relocate_button')));
+      await _tap(tester, find.byKey(const Key('checkin_open_location_settings')));
+      final disposeCompleter = Completer<LocationReadiness>();
+      location.readinessCompleter = disposeCompleter;
+      _simulateResume(tester);
+      await tester.pump();
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      disposeCompleter.complete(const LocationReady());
+      await tester.pumpAndSettle();
+
+      expect(location.requests, 3);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('IndexedStack na HomeScreen não aciona CheckInScreen em segundo plano no resumed', (tester) async {
+      tester.view.physicalSize = const Size(400, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final auth = AuthNotifier(authRepository: _FakeAuthRepository());
+      await auth.checkAuthStatus();
+      final location = _FakeLocationService(const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      ));
+
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: HomeScreen(
+          authNotifier: auth,
+          reviewCreationRepository: _FakeReviewCreationRepository(),
+          locationService: location,
+          checkInRepository: _FakeCheckInRepository(),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // CheckInScreen está montado no IndexedStack da Home, mas nunca abriu configurações
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessRequests, 0);
+      expect(location.requests, 0);
+    });
+
+    testWidgets('regressão Android 16: CheckInScreen com GeolocatorLocationService mantém Abrir configurações ao retornar sem conceder e retoma ao conceder',
+        (tester) async {
+      final originalPlatform = GeolocatorPlatform.instance;
+      final androidPlatform = _AndroidGeolocatorStub();
+      GeolocatorPlatform.instance = androidPlatform;
+      addTearDown(() => GeolocatorPlatform.instance = originalPlatform);
+
+      final realService = GeolocatorLocationService();
+      final checkIns = _FakeCheckInRepository();
+
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: CheckInScreen(
+          reviewCreationRepository: _FakeReviewCreationRepository(),
+          locationService: realService,
+          checkInRepository: checkIns,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      await _tap(tester, find.byKey(const Key('checkin_locate_button')));
+      expect(androidPlatform.requestPermissionCalls, 1);
+      expect(find.byKey(const Key('checkin_open_settings')), findsOneWidget);
+
+      // Retorna das configurações sem conceder (checkPermission do Android devolve denied)
+      for (var i = 0; i < 2; i++) {
+        await _tap(tester, find.byKey(const Key('checkin_open_settings')));
+        _simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(androidPlatform.requestPermissionCalls, 1);
+        expect(find.byKey(const Key('checkin_open_settings')), findsOneWidget);
+        expect(find.byKey(const Key('checkin_locate_button')), findsOneWidget);
+      }
+
+      // Concede permissão nas configurações e retorna
+      await _tap(tester, find.byKey(const Key('checkin_open_settings')));
+      androidPlatform.checkPermissionResult = LocationPermission.whileInUse;
+      _simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(checkIns.nearbyRequests, hasLength(1));
+      expect(find.text('Café Central'), findsOneWidget);
+    });
   });
 
   // -------------------------------------------------------------------------------------------------------------
@@ -740,4 +1111,42 @@ class _Handler extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) => handler(request);
+}
+
+class _AndroidGeolocatorStub extends GeolocatorPlatform {
+  LocationPermission checkPermissionResult = LocationPermission.denied;
+  LocationPermission requestPermissionResult = LocationPermission.deniedForever;
+  int requestPermissionCalls = 0;
+
+  @override
+  Future<bool> isLocationServiceEnabled() async => true;
+
+  @override
+  Future<LocationPermission> checkPermission() async => checkPermissionResult;
+
+  @override
+  Future<LocationPermission> requestPermission() async {
+    requestPermissionCalls++;
+    return requestPermissionResult;
+  }
+
+  @override
+  Future<LocationAccuracyStatus> getLocationAccuracy() async => LocationAccuracyStatus.precise;
+
+  @override
+  Future<Position> getCurrentPosition({LocationSettings? locationSettings}) async => Position(
+        latitude: -25.4384,
+        longitude: -49.2849,
+        timestamp: DateTime.now(),
+        accuracy: 10,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+
+  @override
+  Future<bool> openAppSettings() async => true;
 }

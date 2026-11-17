@@ -98,8 +98,9 @@ class LocationCapturePolicy {
 /// sem tracking contínuo em segundo plano nem bloqueio de coordenadas simuladas.
 class GeolocatorLocationService implements LocationService {
   final DateTime Function() _clock;
+  bool _lastPermissionDeniedForever = false;
 
-  const GeolocatorLocationService({
+  GeolocatorLocationService({
     DateTime Function() clock = _defaultClock,
   }) : _clock = clock;
 
@@ -114,6 +115,62 @@ class GeolocatorLocationService implements LocationService {
   /// Tolerância máxima para divergência de relógio (skew) no futuro (1 minuto).
   static const Duration maxFutureClockSkew = Duration(minutes: 1);
 
+  static const String _serviceDisabledMessage =
+      'O serviço de localização está desativado no aparelho.';
+  static const String _permissionDeniedMessage =
+      'Permissão de localização negada.';
+  static const String _permissionDeniedForeverMessage =
+      'Permissão de localização permanentemente negada. Ative nas configurações do dispositivo.';
+
+  @override
+  Future<LocationReadiness> checkReadiness({
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
+    try {
+      final isServiceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!isServiceEnabled) {
+        return const LocationNotReady(
+          reason: LocationFailureReason.serviceDisabled,
+          message: _serviceDisabledMessage,
+        );
+      }
+
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.deniedForever) {
+        _lastPermissionDeniedForever = true;
+        return const LocationNotReady(
+          reason: LocationFailureReason.permissionDeniedForever,
+          message: _permissionDeniedForeverMessage,
+        );
+      }
+
+      if (permission != LocationPermission.whileInUse &&
+          permission != LocationPermission.always) {
+        if (_lastPermissionDeniedForever) {
+          return const LocationNotReady(
+            reason: LocationFailureReason.permissionDeniedForever,
+            message: _permissionDeniedForeverMessage,
+          );
+        }
+        return const LocationNotReady(
+          reason: LocationFailureReason.permissionDenied,
+          message: _permissionDeniedMessage,
+        );
+      }
+
+      _lastPermissionDeniedForever = false;
+      final permissionReduced = purpose == LocationPurpose.presenceVerification
+          ? await _isPermissionReduced()
+          : false;
+      return LocationReady(isPermissionApproximate: permissionReduced);
+    } catch (_) {
+      return const LocationNotReady(
+        reason: LocationFailureReason.error,
+        message: 'Não foi possível verificar a localização do aparelho.',
+      );
+    }
+  }
+
   @override
   Future<LocationResult> getCurrentLocation({
     Duration? timeout,
@@ -127,7 +184,7 @@ class GeolocatorLocationService implements LocationService {
       if (!isServiceEnabled) {
         return const LocationFailure(
           reason: LocationFailureReason.serviceDisabled,
-          message: 'O serviço de localização está desativado no aparelho.',
+          message: _serviceDisabledMessage,
         );
       }
 
@@ -135,19 +192,25 @@ class GeolocatorLocationService implements LocationService {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
+          _lastPermissionDeniedForever = false;
           return const LocationFailure(
             reason: LocationFailureReason.permissionDenied,
-            message: 'Permissão de localização negada.',
+            message: _permissionDeniedMessage,
           );
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
+        _lastPermissionDeniedForever = true;
         return const LocationFailure(
           reason: LocationFailureReason.permissionDeniedForever,
-          message:
-              'Permissão de localização permanentemente negada. Ative nas configurações do dispositivo.',
+          message: _permissionDeniedForeverMessage,
         );
+      }
+
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        _lastPermissionDeniedForever = false;
       }
 
       final permissionReduced = policy.purpose == LocationPurpose.presenceVerification

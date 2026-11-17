@@ -23,6 +23,29 @@ sealed class LocationResult {
   const LocationResult();
 }
 
+/// Estado atual de prontidão do dispositivo para captura de localização, sem solicitar permissão nativa.
+sealed class LocationReadiness {
+  const LocationReadiness();
+}
+
+/// Serviço ativo e permissão concedida para iniciar uma captura de localização.
+class LocationReady extends LocationReadiness {
+  final bool isPermissionApproximate;
+
+  const LocationReady({this.isPermissionApproximate = false});
+}
+
+/// Serviço desativado ou permissão ausente/bloqueada no momento da revalidação.
+class LocationNotReady extends LocationReadiness {
+  final LocationFailureReason reason;
+  final String message;
+
+  const LocationNotReady({
+    required this.reason,
+    required this.message,
+  });
+}
+
 /// Captura bem-sucedida contendo a localização efêmera do dispositivo.
 class LocationSuccess extends LocationResult {
   final DeviceLocation location;
@@ -43,6 +66,11 @@ class LocationFailure extends LocationResult {
 
 /// Contrato de serviço para obtenção de localização única sob demanda (C5.10).
 abstract class LocationService {
+  /// Revalida serviço de localização e permissão atual sem abrir prompt nativo de permissão.
+  Future<LocationReadiness> checkReadiness({
+    LocationPurpose purpose = LocationPurpose.discovery,
+  });
+
   /// Captura a localização atual do dispositivo conforme a finalidade [purpose].
   Future<LocationResult> getCurrentLocation({
     Duration? timeout,
