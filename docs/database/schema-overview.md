@@ -125,7 +125,14 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 - `users`: Substituição do índice não-único `idx_users_provider` pelo índice único parcial `uq_users_provider_user_id ON users (auth_provider, provider_user_id) WHERE provider_user_id IS NOT NULL`. Permite múltiplos usuários `LOCAL` com `provider_user_id = NULL` sem colisão e assegura unicidade para identidades remotas (`GOOGLE`, `APPLE`).
 - `profiles`: Substituição da constraint `uq_profiles_handle` por índice único case-insensitive `uq_profiles_handle_lower ON profiles (LOWER(handle))`. Preserva o índice trigram GIN `idx_profiles_handle_trgm` para buscas textuais parciais.
 - `rateable_targets`: Trigger `trg_prevent_rateable_target_type_change` impedindo alteração de `target_type` de alvos já especializados.
-- CHECK constraints adicionadas: `chk_review_status`, `chk_review_visibility`, `chk_review_location_accuracy`, `chk_places_status`, `chk_products_status`, `chk_services_status`, `chk_events_status`, `chk_users_auth_provider`, `chk_business_verification_status`, `chk_business_plan_tier`, `chk_review_tags_source`.
+- **CHECK constraints adicionadas**: `chk_review_status`, `chk_review_visibility`, `chk_review_location_accuracy`, `chk_places_status`, `chk_products_status`, `chk_services_status`, `chk_events_status`, `chk_users_auth_provider`, `chk_business_verification_status`, `chk_business_plan_tier`, `chk_review_tags_source`.
+
+### `V43__checkin_coordinate_minimization.sql` (Minimização e Proteção de Coordenadas GPS)
+- `check_ins`: Remoção do índice espacial `idx_checkins_coordinates` (`DROP INDEX IF EXISTS`).
+- `check_ins`: Remoção de `NOT NULL` em `coordinates` e `distance_to_centroid_meters`.
+- `check_ins`: Adição da coluna anulável `rejection_reason VARCHAR(64)` com constraints `chk_checkin_rejection_reason` (`ACCURACY_UNAVAILABLE`, `ACCURACY_TOO_LOW`, `OUTSIDE_RADIUS`, `RECENT_CHECK_IN`), `chk_checkin_rejection_reason_consistency` (`status = 'REJECTED' OR rejection_reason IS NULL`), `chk_checkin_coordinates_null` (`coordinates IS NULL`) e `chk_checkin_distance_only_verified` (`status = 'VERIFIED' OR distance_to_centroid_meters IS NULL`).
+- Backfill imediato sem `DELETE`: `coordinates = NULL` em todos os registros históricos (`VERIFIED`, `REJECTED` e `PENDING`) e `distance_to_centroid_meters = NULL` nos registros históricos não verificados (`REJECTED` e `PENDING`), preservando integralmente as linhas, `reviews.is_verified_on_site` e os valores originais de `reviews.updated_at` (restaurados na mesma transação após o disparo da trigger `trg_sync_check_in_to_review_verified`).
+- Validação final de privilégios mínimos via `rewit_assert_runtime_privileges()`.
 
 ---
 
@@ -145,6 +152,10 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 | `check_ins` | `chk_checkin_status` | CHECK | `status IN ('PENDING', 'VERIFIED', 'REJECTED')` |
 | `check_ins` | `chk_checkin_verification_method` | CHECK | `verification_method IN ('GPS', 'QR_CODE', 'NFC', 'BEACON')` |
 | `check_ins` | `chk_checkin_verified_at_consistency` | CHECK | `(status = 'VERIFIED' AND verified_at IS NOT NULL) OR (status IN ('PENDING', 'REJECTED') AND verified_at IS NULL)` |
+| `check_ins` | `chk_checkin_coordinates_null` | CHECK | `coordinates IS NULL` (V43) |
+| `check_ins` | `chk_checkin_distance_only_verified` | CHECK | `status = 'VERIFIED' OR distance_to_centroid_meters IS NULL` (V43) |
+| `check_ins` | `chk_checkin_rejection_reason` | CHECK | `rejection_reason IS NULL OR rejection_reason IN ('ACCURACY_UNAVAILABLE', 'ACCURACY_TOO_LOW', 'OUTSIDE_RADIUS', 'RECENT_CHECK_IN')` (V43) |
+| `check_ins` | `chk_checkin_rejection_reason_consistency` | CHECK | `status = 'REJECTED' OR rejection_reason IS NULL` (V43) |
 | `places` | `chk_places_radius` | CHECK | `validation_radius_meters > 0` |
 | `places` | `chk_places_status` | CHECK | `status IN ('ACTIVE', 'INACTIVE', 'CLOSED')` |
 | `places` | `uq_places_slug` | UNIQUE | `(slug)` |
@@ -200,7 +211,10 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 ### Índices Espaciais GiST (Generalized Search Tree)
 - `idx_places_coordinates` em `places(coordinates)`: Acelera consultas de raio geodésico (`ST_DWithin`).
 - `idx_reviews_coordinates` em `reviews(user_coordinates)`: Acelera filtros geográficos em avaliações.
-- `idx_checkins_coordinates` em `check_ins(coordinates)`: Acelera auditorias de telemetria presencial.
+- *(Removido na V43)* `idx_checkins_coordinates` em `check_ins(coordinates)` foi removido porque coordenadas exatas de usuário não são mais retidas em `check_ins`.
+
+### Índices Parciais de Presença
+- `idx_checkins_verified_user_place` em `check_ins(user_id, place_id, verified_at DESC) WHERE status = 'VERIFIED'` (V41): Atende a regra de 1 check-in verificado por usuário/local em 24 horas e a listagem do histórico do usuário.
 
 ### Índices Trigram (GIN)
 - `idx_places_name_trgm` em `places USING GIN (name gin_trgm_ops)`: Acelera busca textual aproximada com tolerância a erros de digitação.

@@ -478,4 +478,45 @@ class ReviewDomainTest {
         assertThrows(BusinessException.class, () -> target.updateRating(new BigDecimal("5.1")));
         assertThrows(BusinessException.class, () -> target.updateRating(new BigDecimal("4.55")));
     }
+
+    @Test
+    @DisplayName("27. Review rejeita NaN, +Infinity e -Infinity em latitude, longitude e acurácia, preservando null")
+    void shouldRejectNonFiniteLocationValuesAndAllowAbsentLocation() {
+        UUID userId = UUID.randomUUID();
+        double[] nonFinite = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
+
+        for (double bad : nonFinite) {
+            BusinessException latCreation = assertThrows(BusinessException.class, () ->
+                    new Review(null, userId, null, "Texto", false, bad, -49.28, 10.0));
+            assertEquals("INVALID_LATITUDE", latCreation.getErrorCode());
+
+            BusinessException lonCreation = assertThrows(BusinessException.class, () ->
+                    new Review(null, userId, null, "Texto", false, -25.43, bad, 10.0));
+            assertEquals("INVALID_LONGITUDE", lonCreation.getErrorCode());
+
+            BusinessException accCreation = assertThrows(BusinessException.class, () ->
+                    new Review(null, userId, null, "Texto", false, -25.43, -49.28, bad));
+            assertEquals("INVALID_LOCATION_ACCURACY", accCreation.getErrorCode());
+
+            BusinessException latRehydrate = assertThrows(BusinessException.class, () ->
+                    new Review(UUID.randomUUID(), userId, null, "Texto", false, false,
+                            ReviewStatus.ACTIVE, "PUBLIC", bad, -49.28, 10.0, Instant.now(), Instant.now()));
+            assertEquals("INVALID_LATITUDE", latRehydrate.getErrorCode());
+
+            BusinessException lonRehydrate = assertThrows(BusinessException.class, () ->
+                    new Review(UUID.randomUUID(), userId, null, "Texto", false, false,
+                            ReviewStatus.ACTIVE, "PUBLIC", -25.43, bad, 10.0, Instant.now(), Instant.now()));
+            assertEquals("INVALID_LONGITUDE", lonRehydrate.getErrorCode());
+
+            BusinessException accRehydrate = assertThrows(BusinessException.class, () ->
+                    new Review(UUID.randomUUID(), userId, null, "Texto", false, false,
+                            ReviewStatus.ACTIVE, "PUBLIC", -25.43, -49.28, bad, Instant.now(), Instant.now()));
+            assertEquals("INVALID_LOCATION_ACCURACY", accRehydrate.getErrorCode());
+        }
+
+        Review withoutLocation = new Review(null, userId, null, "Sem GPS", false, null, null, null);
+        assertNull(withoutLocation.getUserLatitude());
+        assertNull(withoutLocation.getUserLongitude());
+        assertNull(withoutLocation.getLocationAccuracyMeters());
+    }
 }

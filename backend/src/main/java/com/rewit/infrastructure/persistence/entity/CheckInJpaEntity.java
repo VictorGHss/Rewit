@@ -1,16 +1,14 @@
 package com.rewit.infrastructure.persistence.entity;
 
 import com.rewit.domain.enums.CheckInStatus;
+import com.rewit.domain.enums.PresenceVerificationOutcome;
 import com.rewit.domain.enums.VerificationMethod;
 import com.rewit.domain.model.CheckIn;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import org.locationtech.jts.geom.Coordinate;
-import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
-import org.locationtech.jts.geom.PrecisionModel;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -20,13 +18,14 @@ import java.util.UUID;
 
 /**
  * Entidade JPA mapeando a tabela check_ins no PostgreSQL com suporte a PostGIS.
- * Valida com o schema gerado pelas migrations Flyway V1, V2 e V3 (Step 12.0).
+ * Valida com o schema gerado pelas migrations Flyway V1..V43.
+ *
+ * <p>Política estrutural de privacidade (V43): esta entidade nunca converte nem persiste coordenadas GPS
+ * em {@code check_ins.coordinates}, e persiste {@code distance_to_centroid_meters} somente para status {@code VERIFIED}.
  */
 @Entity
 @Table(name = "check_ins")
 public class CheckInJpaEntity {
-
-    private static final GeometryFactory GEOMETRY_FACTORY = new GeometryFactory(new PrecisionModel(), 4326);
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)
@@ -41,11 +40,11 @@ public class CheckInJpaEntity {
     @Column(name = "place_id", nullable = false)
     private UUID placeId;
 
-    @Column(name = "coordinates", columnDefinition = "geography(Point, 4326)", nullable = false)
+    @Column(name = "coordinates", columnDefinition = "geography(Point, 4326)")
     private Point coordinates;
 
-    // NUMERIC(7,2) em V1: mapeado como BigDecimal, como as demais colunas NUMERIC; o domínio mantém double
-    @Column(name = "distance_to_centroid_meters", nullable = false, precision = 7, scale = 2)
+    // NUMERIC(7,2) em V1 (anulável desde V43): mapeado como BigDecimal; o domínio mantém Double
+    @Column(name = "distance_to_centroid_meters", precision = 7, scale = 2)
     private BigDecimal distanceToCentroidMeters;
 
     @Column(name = "status", nullable = false, length = 32)
@@ -57,36 +56,42 @@ public class CheckInJpaEntity {
     @Column(name = "verified_at")
     private Instant verifiedAt;
 
-    public CheckInJpaEntity() {
-    }
+    @Column(name = "rejection_reason", length = 64)
+    private String rejectionReason;
 
-    public static Point toPoint(double latitude, double longitude) {
-        // WGS 84 / PostGIS: Coordinate(x, y) = Coordinate(longitude, latitude)
-        return GEOMETRY_FACTORY.createPoint(new Coordinate(longitude, latitude));
+    public CheckInJpaEntity() {
     }
 
     public static CheckInJpaEntity fromDomain(CheckIn domain) {
         if (domain == null) {
             return null;
         }
+        CheckInStatus resolvedStatus = domain.getStatus() != null ? domain.getStatus() : CheckInStatus.PENDING;
+        boolean verified = resolvedStatus == CheckInStatus.VERIFIED;
+        boolean rejected = resolvedStatus == CheckInStatus.REJECTED;
+
         CheckInJpaEntity entity = new CheckInJpaEntity();
         entity.setId(domain.getId());
         entity.setReviewId(domain.getReviewId());
         entity.setUserId(domain.getUserId());
         entity.setPlaceId(domain.getPlaceId());
-        entity.setCoordinates(toPoint(domain.getLatitude(), domain.getLongitude()));
-        // Mesmo arredondamento que o PostgreSQL aplicava ao receber o double na coluna NUMERIC(7,2)
-        entity.setDistanceToCentroidMeters(
-                BigDecimal.valueOf(domain.getDistanceToCentroidMeters()).setScale(2, RoundingMode.HALF_UP));
-        entity.setStatus(domain.getStatus() != null ? domain.getStatus().name() : "PENDING");
+        // Imposição estrutural (V43): coordenadas transitórias do domínio nunca são convertidas nem persistidas.
+        entity.coordinates = null;
+        // Apenas check-ins VERIFIED persistem distância até o centróide; PENDING e REJECTED persistem NULL.
+        entity.setDistanceToCentroidMeters(verified && domain.getDistanceToCentroidMeters() != null
+                ? BigDecimal.valueOf(domain.getDistanceToCentroidMeters()).setScale(2, RoundingMode.HALF_UP)
+                : null);
+        entity.setStatus(resolvedStatus.name());
         entity.setVerificationMethod(domain.getVerificationMethod() != null ? domain.getVerificationMethod().name() : "GPS");
         entity.setVerifiedAt(domain.getVerifiedAt());
+        entity.setRejectionReason(rejected && domain.getRejectionReason() != null ? domain.getRejectionReason().name() : null);
         return entity;
     }
 
     public CheckIn toDomain() {
-        double lat = coordinates != null ? coordinates.getY() : 0.0;
-        double lon = coordinates != null ? coordinates.getX() : 0.0;
+        Double lat = coordinates != null ? coordinates.getY() : null;
+        Double lon = coordinates != null ? coordinates.getX() : null;
+        Double distance = this.distanceToCentroidMeters != null ? this.distanceToCentroidMeters.doubleValue() : null;
 
         CheckInStatus checkInStatus = CheckInStatus.PENDING;
         if (this.status != null) {
@@ -104,6 +109,14 @@ public class CheckInJpaEntity {
             }
         }
 
+        PresenceVerificationOutcome reason = null;
+        if (this.rejectionReason != null) {
+            try {
+                reason = PresenceVerificationOutcome.valueOf(this.rejectionReason.toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
         return new CheckIn(
                 this.id,
                 this.reviewId,
@@ -111,10 +124,11 @@ public class CheckInJpaEntity {
                 this.placeId,
                 lat,
                 lon,
-                this.distanceToCentroidMeters.doubleValue(),
+                checkInStatus == CheckInStatus.VERIFIED ? distance : null,
                 checkInStatus,
                 method,
-                this.verifiedAt
+                this.verifiedAt,
+                checkInStatus == CheckInStatus.REJECTED ? reason : null
         );
     }
 
@@ -154,10 +168,6 @@ public class CheckInJpaEntity {
         return coordinates;
     }
 
-    public void setCoordinates(Point coordinates) {
-        this.coordinates = coordinates;
-    }
-
     public BigDecimal getDistanceToCentroidMeters() {
         return distanceToCentroidMeters;
     }
@@ -188,6 +198,14 @@ public class CheckInJpaEntity {
 
     public void setVerifiedAt(Instant verifiedAt) {
         this.verifiedAt = verifiedAt;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void setRejectionReason(String rejectionReason) {
+        this.rejectionReason = rejectionReason;
     }
 
     @Override

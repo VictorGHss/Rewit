@@ -540,6 +540,141 @@ class DatabaseUpgradeMigrationTest {
         }
     }
 
+    @Test
+    @DisplayName("V43: upgrade V42 -> V43 limpa coordenadas históricas (VERIFIED/REJECTED/PENDING), preserva reviews.updated_at e aplica constraints estruturais")
+    void upgradeFromV42MinimizesHistoricalCheckInCoordinatesAndPreservesVerifiedReviews() throws SQLException {
+        flyway("42").migrate();
+        UUID userId = UUID.randomUUID();
+        UUID placeId = UUID.randomUUID();
+        UUID verifiedReviewId = UUID.randomUUID();
+        UUID rejectedReviewId = UUID.randomUUID();
+        UUID pendingReviewId = UUID.randomUUID();
+        UUID verifiedCheckInId = UUID.randomUUID();
+        UUID rejectedCheckInId = UUID.randomUUID();
+        UUID pendingCheckInId = UUID.randomUUID();
+        Timestamp verifiedReviewUpdatedAt = Timestamp.from(Instant.parse("2026-01-01T12:00:00Z"));
+        Timestamp rejectedReviewUpdatedAt = Timestamp.from(Instant.parse("2026-01-02T12:00:00Z"));
+        Timestamp pendingReviewUpdatedAt = Timestamp.from(Instant.parse("2026-01-03T12:00:00Z"));
+
+        try (Connection conn = owner()) {
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'USER')",
+                    userId, "v42." + userId + "@rewit.test");
+            update(conn, "INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", placeId);
+            update(conn, "INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) "
+                            + "VALUES (?, 'Local V42', ?, 'CAFE', 'Rua V42, 10', 'Curitiba', 'PR', "
+                            + "ST_SetSRID(ST_MakePoint(-49.2850, -25.4385), 4326)::geography)",
+                    placeId, "local-v42-" + placeId);
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id, experience_text) VALUES (?, ?, ?, 'Review verificado')",
+                    verifiedReviewId, userId, placeId);
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id, experience_text) VALUES (?, ?, ?, 'Review rejeitado')",
+                    rejectedReviewId, userId, placeId);
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id, experience_text) VALUES (?, ?, ?, 'Review pendente')",
+                    pendingReviewId, userId, placeId);
+
+            update(conn, "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status, verified_at) "
+                            + "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.2849, -25.4384), 4326)::geography, 12.50, 'VERIFIED', NOW())",
+                    verifiedCheckInId, verifiedReviewId, userId, placeId);
+            update(conn, "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) "
+                            + "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.2733, -25.4284), 4326)::geography, 1540.00, 'REJECTED')",
+                    rejectedCheckInId, rejectedReviewId, userId, placeId);
+            update(conn, "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) "
+                            + "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.2800, -25.4350), 4326)::geography, 480.00, 'PENDING')",
+                    pendingCheckInId, pendingReviewId, userId, placeId);
+
+            // Fixa updated_at históricos após inserção dos check-ins para comprovar que o backfill não altera timestamps
+            update(conn, "UPDATE reviews SET updated_at = ? WHERE id = ?", verifiedReviewUpdatedAt, verifiedReviewId);
+            update(conn, "UPDATE reviews SET updated_at = ? WHERE id = ?", rejectedReviewUpdatedAt, rejectedReviewId);
+            update(conn, "UPDATE reviews SET updated_at = ? WHERE id = ?", pendingReviewUpdatedAt, pendingReviewId);
+
+            assertEquals("true", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", verifiedReviewId));
+            assertEquals("false", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", rejectedReviewId));
+            assertEquals("false", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", pendingReviewId));
+        }
+
+        assertTrue(flyway(null).migrate().success);
+
+        try (Connection conn = owner(); Statement st = conn.createStatement()) {
+            assertEquals(1, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE version = '43' AND success"));
+
+            // Todas as linhas permanecem; coordenadas históricas são descartadas em VERIFIED, REJECTED e PENDING
+            assertEquals(3, count(conn, "SELECT count(*) FROM check_ins WHERE id IN (?, ?, ?)",
+                    verifiedCheckInId, rejectedCheckInId, pendingCheckInId));
+            assertEquals(0, count(conn, "SELECT count(*) FROM check_ins WHERE coordinates IS NOT NULL"));
+            assertEquals("VERIFIED", string(conn, "SELECT status FROM check_ins WHERE id = ?", verifiedCheckInId));
+            assertEquals("REJECTED", string(conn, "SELECT status FROM check_ins WHERE id = ?", rejectedCheckInId));
+            assertEquals("PENDING", string(conn, "SELECT status FROM check_ins WHERE id = ?", pendingCheckInId));
+
+            // Distância preservada apenas em VERIFIED; minimizada em REJECTED e PENDING históricos
+            assertEquals("12.50", string(conn, "SELECT distance_to_centroid_meters::text FROM check_ins WHERE id = ?", verifiedCheckInId));
+            assertNull(string(conn, "SELECT distance_to_centroid_meters::text FROM check_ins WHERE id = ?", rejectedCheckInId));
+            assertNull(string(conn, "SELECT distance_to_centroid_meters::text FROM check_ins WHERE id = ?", pendingCheckInId));
+
+            // verified_at e rejection_reason coerentes em PENDING e REJECTED históricos
+            assertNotNull(string(conn, "SELECT verified_at::text FROM check_ins WHERE id = ?", verifiedCheckInId));
+            assertNull(string(conn, "SELECT verified_at::text FROM check_ins WHERE id = ?", rejectedCheckInId));
+            assertNull(string(conn, "SELECT verified_at::text FROM check_ins WHERE id = ?", pendingCheckInId));
+            assertNull(string(conn, "SELECT rejection_reason FROM check_ins WHERE id = ?", verifiedCheckInId));
+            assertNull(string(conn, "SELECT rejection_reason FROM check_ins WHERE id = ?", rejectedCheckInId));
+            assertNull(string(conn, "SELECT rejection_reason FROM check_ins WHERE id = ?", pendingCheckInId));
+
+            // Invariante de reviews.is_verified_on_site e updated_at preservados sem efeito colateral
+            assertEquals("true", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", verifiedReviewId));
+            assertEquals("false", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", rejectedReviewId));
+            assertEquals("false", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", pendingReviewId));
+            assertEquals(verifiedReviewUpdatedAt.toInstant(),
+                    timestamp(conn, "SELECT updated_at FROM reviews WHERE id = ?", verifiedReviewId).toInstant());
+            assertEquals(rejectedReviewUpdatedAt.toInstant(),
+                    timestamp(conn, "SELECT updated_at FROM reviews WHERE id = ?", rejectedReviewId).toInstant());
+            assertEquals(pendingReviewUpdatedAt.toInstant(),
+                    timestamp(conn, "SELECT updated_at FROM reviews WHERE id = ?", pendingReviewId).toInstant());
+
+            // Nulabilidade e coluna rejection_reason no catálogo
+            assertEquals("YES", string(conn, "SELECT is_nullable FROM information_schema.columns "
+                    + "WHERE table_schema = 'public' AND table_name = 'check_ins' AND column_name = 'coordinates'"));
+            assertEquals("YES", string(conn, "SELECT is_nullable FROM information_schema.columns "
+                    + "WHERE table_schema = 'public' AND table_name = 'check_ins' AND column_name = 'distance_to_centroid_meters'"));
+            assertEquals("YES", string(conn, "SELECT is_nullable FROM information_schema.columns "
+                    + "WHERE table_schema = 'public' AND table_name = 'check_ins' AND column_name = 'rejection_reason'"));
+            assertEquals(0, count(conn, "SELECT count(*) FROM pg_indexes WHERE tablename = 'check_ins' AND indexname = 'idx_checkins_coordinates'"));
+
+            // Constraints estruturais de coordenadas, distância em REJECTED e rejection_reason
+            UUID newReviewForValidReject = UUID.randomUUID();
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id) VALUES (?, ?, ?)",
+                    newReviewForValidReject, userId, placeId);
+            update(conn, "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status, rejection_reason) "
+                            + "VALUES (?, ?, ?, ?, NULL, NULL, 'REJECTED', 'OUTSIDE_RADIUS')",
+                    UUID.randomUUID(), newReviewForValidReject, userId, placeId);
+
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET rejection_reason = 'OUTSIDE_RADIUS' WHERE id = ?", verifiedCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET rejection_reason = 'OUTSIDE_RADIUS' WHERE id = ?", pendingCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET rejection_reason = 'INVENTED_REASON' WHERE id = ?", rejectedCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET coordinates = ST_SetSRID(ST_MakePoint(-49.28, -25.43), 4326)::geography WHERE id = ?",
+                    verifiedCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET distance_to_centroid_meters = 500.00 WHERE id = ?", rejectedCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET distance_to_centroid_meters = 50.00 WHERE id = ?", pendingCheckInId));
+
+            st.execute("SELECT rewit_assert_runtime_privileges()");
+        }
+    }
+
+    private static Timestamp timestamp(Connection conn, String sql, Object... args) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (int i = 0; i < args.length; i++) {
+                ps.setObject(i + 1, args[i]);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                return rs.getTimestamp(1);
+            }
+        }
+    }
+
     private static void update(Connection conn, String sql, Object... args) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (int i = 0; i < args.length; i++) {

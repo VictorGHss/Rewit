@@ -52,15 +52,7 @@ public class Review {
         if (userId == null) {
             throw new BusinessException("O autor da avaliação é obrigatório", "MISSING_USER_ID");
         }
-        if (userLatitude != null && (userLatitude < -90.0 || userLatitude > 90.0)) {
-            throw new BusinessException("Latitude inválida", "INVALID_LATITUDE");
-        }
-        if (userLongitude != null && (userLongitude < -180.0 || userLongitude > 180.0)) {
-            throw new BusinessException("Longitude inválida", "INVALID_LONGITUDE");
-        }
-        if (locationAccuracyMeters != null && locationAccuracyMeters < 0) {
-            throw new BusinessException("A precisão da localização não pode ser negativa", "INVALID_LOCATION_ACCURACY");
-        }
+        validateLocationFields(userLatitude, userLongitude, locationAccuracyMeters);
 
         this.id = id != null ? id : UUID.randomUUID();
         this.userId = userId;
@@ -109,6 +101,7 @@ public class Review {
         if (userId == null) {
             throw new BusinessException("O autor da avaliação é obrigatório", "MISSING_USER_ID");
         }
+        validateLocationFields(userLatitude, userLongitude, locationAccuracyMeters);
         this.id = id != null ? id : UUID.randomUUID();
         this.userId = userId;
         this.contextPlaceId = contextPlaceId;
@@ -122,6 +115,18 @@ public class Review {
         this.locationAccuracyMeters = locationAccuracyMeters;
         this.createdAt = createdAt != null ? createdAt : Instant.now();
         this.updatedAt = updatedAt != null ? updatedAt : Instant.now();
+    }
+
+    private static void validateLocationFields(Double userLatitude, Double userLongitude, Double locationAccuracyMeters) {
+        if (userLatitude != null && (!Double.isFinite(userLatitude) || userLatitude < -90.0 || userLatitude > 90.0)) {
+            throw new BusinessException("Latitude inválida", "INVALID_LATITUDE");
+        }
+        if (userLongitude != null && (!Double.isFinite(userLongitude) || userLongitude < -180.0 || userLongitude > 180.0)) {
+            throw new BusinessException("Longitude inválida", "INVALID_LONGITUDE");
+        }
+        if (locationAccuracyMeters != null && (!Double.isFinite(locationAccuracyMeters) || locationAccuracyMeters < 0)) {
+            throw new BusinessException("A precisão da localização não pode ser negativa", "INVALID_LOCATION_ACCURACY");
+        }
     }
 
     private static String normalizeAndValidateVisibility(String visibility) {

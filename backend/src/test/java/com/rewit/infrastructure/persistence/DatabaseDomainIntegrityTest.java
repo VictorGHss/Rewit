@@ -247,11 +247,11 @@ class DatabaseDomainIntegrityTest {
                 ps.executeUpdate();
             }
 
-            // 4. Inserção de CheckIn consistente deve suceder
+            // 4. Inserção de CheckIn consistente deve suceder (sem coordenadas nem distância em PENDING desde V43)
             UUID validCheckInId = UUID.randomUUID();
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                            "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 15.0, 'PENDING')")) {
+                            "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                 ps.setObject(1, validCheckInId);
                 ps.setObject(2, reviewId);
                 ps.setObject(3, userId);
@@ -273,7 +273,7 @@ class DatabaseDomainIntegrityTest {
             assertThrows(SQLException.class, () -> {
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                                "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 15.0, 'PENDING')")) {
+                                "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                     ps.setObject(1, wrongUserCheckInId);
                     ps.setObject(2, review2Id);
                     ps.setObject(3, anotherUserId); // Usuário diferente da review!
@@ -287,7 +287,7 @@ class DatabaseDomainIntegrityTest {
             assertThrows(SQLException.class, () -> {
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                                "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 15.0, 'PENDING')")) {
+                                "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                     ps.setObject(1, wrongPlaceCheckInId);
                     ps.setObject(2, review2Id);
                     ps.setObject(3, userId);
@@ -308,7 +308,7 @@ class DatabaseDomainIntegrityTest {
             assertThrows(SQLException.class, () -> {
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                                "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 15.0, 'PENDING')")) {
+                                "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                     ps.setObject(1, UUID.randomUUID());
                     ps.setObject(2, orphanReviewId);
                     ps.setObject(3, userId);
@@ -316,6 +316,46 @@ class DatabaseDomainIntegrityTest {
                     ps.executeUpdate();
                 }
             });
+
+            // 8. Banco rejeita coordenadas não nulas e distância em REJECTED ou PENDING (V43)
+            SQLException exCoords = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
+                                "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), NULL, 'PENDING')")) {
+                    ps.setObject(1, UUID.randomUUID());
+                    ps.setObject(2, review2Id);
+                    ps.setObject(3, userId);
+                    ps.setObject(4, placeTargetId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exCoords.getMessage().contains("chk_checkin_coordinates_null"), exCoords.getMessage());
+
+            SQLException exRejectedDist = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status, rejection_reason) " +
+                                "VALUES (?, ?, ?, ?, NULL, 150.0, 'REJECTED', 'OUTSIDE_RADIUS')")) {
+                    ps.setObject(1, UUID.randomUUID());
+                    ps.setObject(2, review2Id);
+                    ps.setObject(3, userId);
+                    ps.setObject(4, placeTargetId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exRejectedDist.getMessage().contains("chk_checkin_distance_only_verified"), exRejectedDist.getMessage());
+
+            SQLException exPendingDist = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
+                                "VALUES (?, ?, ?, ?, NULL, 15.0, 'PENDING')")) {
+                    ps.setObject(1, UUID.randomUUID());
+                    ps.setObject(2, review2Id);
+                    ps.setObject(3, userId);
+                    ps.setObject(4, placeTargetId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exPendingDist.getMessage().contains("chk_checkin_distance_only_verified"), exPendingDist.getMessage());
         }
     }
 
@@ -371,7 +411,7 @@ class DatabaseDomainIntegrityTest {
             // 2. Inserir CheckIn PENDING: Review deve continuar FALSE
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                            "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 10.0, 'PENDING')")) {
+                            "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                 ps.setObject(1, checkInId);
                 ps.setObject(2, reviewId);
                 ps.setObject(3, userId);
@@ -389,7 +429,7 @@ class DatabaseDomainIntegrityTest {
 
             // 3. Atualizar CheckIn para VERIFIED: Trigger deve sincronizar reviews.is_verified_on_site para TRUE
             try (PreparedStatement ps = conn.prepareStatement(
-                    "UPDATE check_ins SET status = 'VERIFIED', verified_at = NOW() WHERE id = ?")) {
+                    "UPDATE check_ins SET status = 'VERIFIED', verified_at = NOW(), distance_to_centroid_meters = 10.0 WHERE id = ?")) {
                 ps.setObject(1, checkInId);
                 ps.executeUpdate();
             }
@@ -404,7 +444,7 @@ class DatabaseDomainIntegrityTest {
 
             // 4. Atualizar CheckIn para REJECTED: Trigger deve sincronizar reviews.is_verified_on_site para FALSE
             try (PreparedStatement ps = conn.prepareStatement(
-                    "UPDATE check_ins SET status = 'REJECTED', verified_at = NULL WHERE id = ?")) {
+                    "UPDATE check_ins SET status = 'REJECTED', verified_at = NULL, distance_to_centroid_meters = NULL WHERE id = ?")) {
                 ps.setObject(1, checkInId);
                 ps.executeUpdate();
             }

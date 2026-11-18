@@ -73,8 +73,20 @@ public class AccountPurgeRepositoryAdapter implements AccountPurgeRepository {
                   AND (user_coordinates IS NOT NULL OR location_accuracy_meters IS NOT NULL)
                 """, userId);
 
+        // Coordenadas residuais em check-ins históricos (linhas VERIFIED e REJECTED permanecem para integridade)
+        int checkInLocations = update("""
+                UPDATE check_ins
+                SET coordinates = NULL,
+                    distance_to_centroid_meters = CASE
+                        WHEN status = 'REJECTED' THEN NULL
+                        ELSE distance_to_centroid_meters
+                    END
+                WHERE user_id = :userId
+                  AND (coordinates IS NOT NULL OR (status = 'REJECTED' AND distance_to_centroid_meters IS NOT NULL))
+                """, userId);
+
         return new PurgeCounts(sessions, follows, savedItems, interests, activities, ownNotifications,
-                othersNotifications, reputationSnapshots, productPresences, reviewLocations);
+                othersNotifications, reputationSnapshots, productPresences, reviewLocations, checkInLocations);
     }
 
     private int update(String sql, UUID userId) {
