@@ -287,9 +287,18 @@ class AuditTrailRuntimeRoleIntegrityTest {
                 assertTrue(unpinned.isEmpty(), "Funções de trigger sem search_path fixo: " + unpinned);
             }
             assertEquals(0, count(conn, "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-                    + "WHERE n.nspname = 'public' AND p.prosecdef"), "Nenhuma função SECURITY DEFINER no schema");
-            // P2-2 / P3-1: sem DELETE direto para o runtime
-            for (String table : List.of("place_media_reports", "reviews", "review_discussions", "business_responses")) {
+                    + "WHERE n.nspname = 'public' AND p.prosecdef "
+                    + "AND p.proname NOT IN ('rewit_purge_expired_auth_sessions', 'rewit_purge_deleted_user_auth_sessions')"),
+                    "Nenhuma função SECURITY DEFINER não autorizada no schema");
+            assertEquals(2, count(conn, "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                    + "WHERE n.nspname = 'public' AND p.prosecdef "
+                    + "AND p.proname IN ('rewit_purge_expired_auth_sessions', 'rewit_purge_deleted_user_auth_sessions') "
+                    + "AND COALESCE(p.proconfig, ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog, public, pg_temp'] "
+                    + "AND NOT has_function_privilege('public', p.oid, 'EXECUTE') "
+                    + "AND has_function_privilege(?, p.oid, 'EXECUTE')", INFRASTRUCTURE.appDbUser()),
+                    "Apenas as duas funções restritas de cleanup/purge de auth_sessions devem ser SECURITY DEFINER");
+            // P2-2 / P3-1 / F1-AUD-02: sem DELETE direto para o runtime
+            for (String table : List.of("place_media_reports", "reviews", "review_discussions", "business_responses", "auth_sessions")) {
                 assertFalse(bool(conn, "SELECT has_table_privilege(?, ?, 'DELETE')", INFRASTRUCTURE.appDbUser(), table),
                         INFRASTRUCTURE.appDbUser() + " não pode ter DELETE em " + table);
             }
@@ -699,13 +708,14 @@ class AuditTrailRuntimeRoleIntegrityTest {
         }
         Map<String, String> violations = Map.of(
                 "GRANT DELETE ON users TO rewit_app", "DELETE em users",
+                "GRANT DELETE ON auth_sessions TO rewit_app", "DELETE em auth_sessions",
                 "GRANT UPDATE ON spatial_ref_sys TO rewit_app", "UPDATE em spatial_ref_sys",
                 "GRANT UPDATE ON place_media_moderation_audit_logs TO rewit_app", "UPDATE em place_media_moderation_audit_logs",
                 "GRANT INSERT ON place_media_reports TO rewit_app", "INSERT em place_media_reports",
                 "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT ON TABLES TO rewit_app", "privilégios padrão de escrita",
                 "ALTER TABLE place_media_moderation_audit_logs DISABLE TRIGGER trg_bind_place_media_audit_reference",
                 "trg_bind_place_media_audit_reference",
-                "CREATE TABLE rewit_probe_cascade (id UUID REFERENCES auth_sessions(id) ON DELETE CASCADE)", "cascatas acionáveis");
+                "CREATE TABLE rewit_probe_cascade (id UUID REFERENCES notifications(id) ON DELETE CASCADE)", "cascatas acionáveis");
         try (Connection owner = owner()) {
             try (Statement st = owner.createStatement()) {
                 st.execute("SELECT rewit_assert_runtime_privileges()");

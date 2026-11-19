@@ -44,6 +44,8 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
         REQUIRED.put("rewit.minio.secret-key", "OBJECT_STORAGE_SECRET_KEY");
         REQUIRED.put("rewit.minio.bucket-name", "OBJECT_STORAGE_BUCKET");
         REQUIRED.put("rewit.security.jwt-secret", "JWT_SECRET");
+        REQUIRED.put("rewit.security.password-pepper", "PASSWORD_PEPPER_SECRET");
+        REQUIRED.put("rewit.security.refresh-token-secret", "REFRESH_TOKEN_SECRET");
         REQUIRED.put("rewit.rate-limit.key-secret", "RATE_LIMIT_KEY_SECRET");
     }
 
@@ -54,6 +56,8 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
             "rewit.minio.access-key",
             "rewit.minio.secret-key",
             "rewit.security.jwt-secret",
+            "rewit.security.password-pepper",
+            "rewit.security.refresh-token-secret",
             "rewit.rate-limit.key-secret"
     );
 

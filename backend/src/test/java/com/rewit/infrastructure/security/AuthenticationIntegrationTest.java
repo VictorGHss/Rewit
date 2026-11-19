@@ -99,7 +99,7 @@ class AuthenticationIntegrationTest {
         assertTrue(savedUserOpt.isPresent());
         User savedUser = savedUserOpt.get();
         assertNotEquals(password, savedUser.getPasswordHash(), "A senha no banco nunca pode ser texto puro");
-        assertTrue(savedUser.getPasswordHash().startsWith("$argon2id$"));
+        assertTrue(savedUser.getPasswordHash().startsWith("pw2$v1$") && savedUser.getPasswordHash().contains("$argon2id$"));
         assertTrue(profileRepository.existsByHandle(handle));
 
         String initialTokenHash = tokenService.hashRefreshToken(initialRefreshToken);

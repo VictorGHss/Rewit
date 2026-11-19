@@ -134,6 +134,16 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 - Backfill imediato sem `DELETE`: `coordinates = NULL` em todos os registros históricos (`VERIFIED`, `REJECTED` e `PENDING`) e `distance_to_centroid_meters = NULL` nos registros históricos não verificados (`REJECTED` e `PENDING`), preservando integralmente as linhas, `reviews.is_verified_on_site` e os valores originais de `reviews.updated_at` (restaurados na mesma transação após o disparo da trigger `trg_sync_check_in_to_review_verified`).
 - Validação final de privilégios mínimos via `rewit_assert_runtime_privileges()`.
 
+### `V44__auth_identity_and_session_immutability_guards.sql` (Hardening de Autenticação F1)
+- `users`: `trg_guard_user_role_assignment` (`fn_guard_user_role_assignment()`) impede o runtime `rewit_app` de alterar `role`, `id`, `created_at`, `auth_provider`, de definir/alterar `provider_user_id` (exceto `NULL` em conta já `DELETED`, para o purge LGPD) e de tirar uma conta de `DELETED`.
+- `auth_sessions`: `trg_guard_auth_session_integrity` (`BEFORE UPDATE`) impede alterar `id`, `user_id`, `token_hash`, `issued_at`, `expires_at`, `created_at` e desrevogar (`revoked_at`).
+- `auth_sessions`: **`DELETE` revogado de `rewit_app` e de `PUBLIC`** (um trigger `BEFORE UPDATE` não impede `DELETE` + `INSERT`). Removido de `deletable` em `rewit_assert_runtime_privileges()`; o cascade `users -> auth_sessions` continua restrito ao owner (o runtime não tem `DELETE` em `users`).
+- Funções `SECURITY DEFINER` restritas (owner da migração; `search_path = pg_catalog, public, pg_temp`; `EXECUTE` revogado de `PUBLIC` e concedido só a `rewit_app`):
+  - `rewit_purge_expired_auth_sessions(p_now TIMESTAMPTZ, p_limit INT)`: lotes `FOR UPDATE SKIP LOCKED` (1 a 10000) de sessões com `expires_at < LEAST(p_now, clock_timestamp())` e `replaced_by_session_id IS NULL`.
+  - `rewit_purge_deleted_user_auth_sessions(p_user_id UUID)`: remove as sessões somente se `users.account_status = 'DELETED'` e `deleted_at IS NOT NULL`; senão `insufficient_privilege`.
+- `rewit_assert_runtime_privileges()`: preserva a V37 e acrescenta: sem `DELETE` em `auth_sessions`, trigger `trg_guard_auth_session_integrity` ativo, as duas funções presentes com owner administrado pela role de migração (nunca `rewit_app`), `SECURITY DEFINER`, `search_path` fixo, `EXECUTE` só para `rewit_app`, nenhuma outra função `SECURITY DEFINER`, sem memberships de `rewit_app`.
+- A V44 existe só na branch não integrada e foi corrigida no próprio arquivo (nenhum banco persistente a aplicou); ver ADR-017 §6.
+
 ---
 
 ## 5. Constraints do Banco de Dados
@@ -191,7 +201,7 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 
 ---
 
-## 6. Triggers de Integridade Relacional
+## 6. Triggers de Integridade Relacional e Segurança
 
 1. **`trg_check_in_review_consistency`** (em `check_ins`):
    Garante antes de INSERT ou UPDATE que a Review existe, possui `context_place_id` preenchido e que `user_id` e `place_id` do check-in coincidem exatamente com o autor e local da review.
@@ -203,6 +213,10 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
    Impede que um `RateableTarget` de um tipo seja inserido na tabela de outro tipo.
 5. **`trg_prevent_rateable_target_type_change`** (em `rateable_targets`):
    Impede que a coluna `target_type` seja modificada caso o alvo já possua especialização cadastrada.
+6. **`trg_guard_user_role_assignment`** (em `users`, V44):
+   Impede que a role de runtime `rewit_app` modifique `role`, `id`, `created_at` e `auth_provider`, previne a alteração de `provider_user_id` (salvo anulação para `NULL` no expurgo de contas `DELETED`) e bloqueia transições de saída do estado `DELETED`.
+7. **`trg_guard_auth_session_integrity`** (em `auth_sessions`, V44):
+   Impede que a role de runtime `rewit_app` modifique `id`, `user_id`, `token_hash`, `issued_at`, `expires_at`, `created_at` e bloqueia a desrevogação de sessões já revogadas (`revoked_at`). Não cobre `DELETE`, por isso o privilégio `DELETE` foi retirado do runtime.
 
 ---
 
@@ -232,20 +246,20 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 
 ---
 
-## 8. Tabela de Sessões de Autenticação (`auth_sessions` - V5)
+## 8. Tabela de Sessões de Autenticação (`auth_sessions` - V5, V44)
 
-Armazena as sessões e hashes de Refresh Tokens (Step 4):
+Armazena as sessões e hashes de Refresh Tokens (Step 4, hardening F1 na V44):
 
 | Coluna | Tipo | Modificador | Descrição |
 |---|---|---|---|
-| `id` | `UUID` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Identificador único da sessão |
-| `user_id` | `UUID` | `NOT NULL REFERENCES users(id) ON DELETE CASCADE` | Usuário proprietário |
-| `token_hash` | `VARCHAR(64)` | `NOT NULL UNIQUE` | Hash SHA-256 hexadecimal do Refresh Token |
-| `issued_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Data/hora de emissão |
-| `expires_at` | `TIMESTAMPTZ` | `NOT NULL` | Expiração da sessão |
-| `revoked_at` | `TIMESTAMPTZ` | `NULL` | Data de revogação/logout |
+| `id` | `UUID` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Identificador único da sessão (imutável via trigger V44) |
+| `user_id` | `UUID` | `NOT NULL REFERENCES users(id) ON DELETE CASCADE` | Usuário proprietário (imutável via trigger V44; previne transplante direto) |
+| `token_hash` | `VARCHAR(64)` | `NOT NULL UNIQUE` | HMAC-SHA256 (64 hex) do refresh token de 75 caracteres (UUID + `expires_at` + 32 bytes aleatórios) com `REFRESH_TOKEN_SECRET` (imutável via V44) |
+| `issued_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Data/hora de emissão (imutável via trigger V44) |
+| `expires_at` | `TIMESTAMPTZ` | `NOT NULL` | Expiração da sessão, igual ao instante (epoch seconds) embutido no refresh token (imutável via trigger V44) |
+| `revoked_at` | `TIMESTAMPTZ` | `NULL` | Data de revogação/logout (desrevogação bloqueada via trigger V44 se já preenchida) |
 | `replaced_by_session_id` | `UUID` | `NULL REFERENCES auth_sessions(id) ON DELETE SET NULL` | Sessão sucessora após rotação |
-| `created_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Criação do registro |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Criação do registro (imutável via trigger V44) |
 | `last_used_at` | `TIMESTAMPTZ` | `NULL` | Último uso da sessão |
 | `user_agent` | `TEXT` | `NULL` | Cabeçalho User-Agent para telemetria |
 | `ip_address` | `INET` | `NULL` | Endereço IP do cliente no momento da emissão |

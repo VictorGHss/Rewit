@@ -35,6 +35,8 @@ class ExternalTestEnvironmentValidatorTest {
         env.setProperty("rewit.minio.secret-key", STORAGE_SECRET);
         env.setProperty("rewit.minio.bucket-name", "rewit-local");
         env.setProperty("rewit.security.jwt-secret", "jwt-externo-com-entropia-suficiente-Zp4!Qw8@Lk2#");
+        env.setProperty("rewit.security.password-pepper", "pepper-externo-com-entropia-suficiente-Rm7!Vx2@Np9#");
+        env.setProperty("rewit.security.refresh-token-secret", "refresh-externo-com-entropia-suficiente-Tk5!Bj8@Wd3#");
         env.setProperty("rewit.rate-limit.key-secret", "rate-limit-externo-com-entropia-Hy6$Vb3%Nm1&");
         return env;
     }
@@ -78,7 +80,7 @@ class ExternalTestEnvironmentValidatorTest {
             }
         }
         for (String variable : new String[]{"APP_DB_PASSWORD", "OBJECT_STORAGE_SECRET_KEY", "JWT_SECRET",
-                "RATE_LIMIT_KEY_SECRET"}) {
+                "PASSWORD_PEPPER_SECRET", "REFRESH_TOKEN_SECRET", "RATE_LIMIT_KEY_SECRET"}) {
             assertTrue(all.getMessage().contains(variable), "a mensagem deve citar " + variable);
         }
 

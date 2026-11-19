@@ -6,7 +6,7 @@ Proposto
 Pendente: decisão de produto/jurídico sobre a coleta e a retenção de `ip_address` e `user_agent` enquanto a sessão está ativa. As decisões técnicas abaixo já estão implementadas (Step 29.3).
 
 ## Contexto
-A tabela `auth_sessions` guarda um registro por refresh token emitido: o hash SHA-256 do token, a expiração, a revogação, a sessão que a substituiu na rotação (`replaced_by_session_id`, FK com `ON DELETE SET NULL`), e os metadados `ip_address` e `user_agent`. Até o Step 29.3 nenhuma linha era removida.
+A tabela `auth_sessions` guarda um registro por refresh token emitido: o hash do token (SHA-256 na época; HMAC-SHA256 desde o ADR-017), a expiração, a revogação, a sessão que a substituiu na rotação (`replaced_by_session_id`, FK com `ON DELETE SET NULL`), e os metadados `ip_address` e `user_agent`. Até o Step 29.3 nenhuma linha era removida.
 
 A detecção de reúso de refresh token (corrigida no Step 29.1) depende de a sessão revogada continuar no banco: reapresentar um token revogado fora da janela de 10 segundos revoga todas as sessões do usuário. Se um atacante rotacionar um token roubado antes do cliente legítimo, sua cadeia de rotação pode ser renovada indefinidamente, e só é derrubada quando o cliente legítimo reapresenta o token original. Apagar a sessão revogada por prazo fixo eliminaria essa detecção para cadeias ainda vivas. `ip_address` e `user_agent` são gravados, mas não são lidos por nenhum código.
 
@@ -31,6 +31,11 @@ A detecção de reúso de refresh token (corrigida no Step 29.1) depende de a se
 - Cadeias mortas são desmontadas linearmente, um elo por lote.
 - Após o purge, o refresh token removido recebe `INVALID_REFRESH_TOKEN` em vez de `REFRESH_TOKEN_EXPIRED`/`REFRESH_TOKEN_REVOKED`, e seu reúso deixa de revogar as demais sessões.
 - Risco raro de deadlock entre um lote do purge e uma revogação em massa do mesmo usuário; o PostgreSQL aborta uma das transações.
+
+## Atualização S3-A13-F1 (ADR-017)
+- O `DELETE` do purge deixou de ser SQL direto do runtime: `rewit_app` não tem mais `DELETE` em `auth_sessions` e o cleanup chama `rewit_purge_expired_auth_sessions(now, limit)`, função `SECURITY DEFINER` com os mesmos critérios (expirada, sem sucessora, `FOR UPDATE SKIP LOCKED`) e corte limitado a `LEAST(now, clock_timestamp())`.
+- O hash persistido passou a ser HMAC-SHA256 (não mais SHA-256 puro) e o refresh token carrega UUID e expiração. O purge LGPD usa `rewit_purge_deleted_user_auth_sessions`.
+- A limpeza de metadados (`UPDATE` de `ip_address` e `user_agent`) segue direta, pois não toca campos de segurança.
 
 ## Alternativas Rejeitadas
 - **Remover sessões apenas por `expires_at`** (com ou sem retenção extra) **ou por prazo desde `revoked_at`**: deixam de detectar o reúso que derrubaria uma cadeia ainda viva, ou dependem de um número sem evidência.

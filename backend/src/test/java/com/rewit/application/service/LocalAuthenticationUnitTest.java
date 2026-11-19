@@ -64,23 +64,26 @@ class LocalAuthenticationUnitTest {
     @Test
     @DisplayName("1. Senha nunca deve ser armazenada em texto puro")
     void shouldNeverStorePasswordInPlaintext() {
+        UUID userId = UUID.randomUUID();
         String rawPassword = "MinhaSenhaSuperSecreta@123";
-        String hash = passwordHasher.hash(rawPassword);
+        String hash = passwordHasher.hash(userId, rawPassword);
 
         assertNotEquals(rawPassword, hash);
-        assertTrue(hash.startsWith("$argon2id$"), "Hash deve iniciar com o identificador do algoritmo Argon2id");
+        assertTrue(hash.startsWith("pw2$v1$"), "Hash deve iniciar com o identificador de esquema pw2$v1$");
     }
 
     @Test
     @DisplayName("2 e 3. Senha correta deve ser aceita e senha incorreta deve ser rejeitada")
     void shouldValidateCorrectAndIncorrectPassword() {
+        UUID userId = UUID.randomUUID();
         String rawPassword = "SenhaValida123";
-        String hash = passwordHasher.hash(rawPassword);
+        String hash = passwordHasher.hash(userId, rawPassword);
 
-        assertTrue(passwordHasher.matches("SenhaValida123", hash), "Senha correta deve casar");
-        assertFalse(passwordHasher.matches("SenhaErrada456", hash), "Senha incorreta deve ser rejeitada");
-        assertFalse(passwordHasher.matches("", hash));
-        assertFalse(passwordHasher.matches(null, hash));
+        assertTrue(passwordHasher.matches(userId, "SenhaValida123", hash), "Senha correta deve casar");
+        assertFalse(passwordHasher.matches(userId, "SenhaErrada456", hash), "Senha incorreta deve ser rejeitada");
+        assertFalse(passwordHasher.matches(userId, "", hash));
+        assertFalse(passwordHasher.matches(userId, null, hash));
+        assertFalse(passwordHasher.matches(UUID.randomUUID(), "SenhaValida123", hash), "Hash transplantado para outro usuário deve falhar");
     }
 
     @Test
@@ -115,7 +118,7 @@ class LocalAuthenticationUnitTest {
         verify(userRepository).save(userCaptor.capture());
         User capturedUser = userCaptor.getValue();
         assertNotEquals("senhaForte123", capturedUser.getPasswordHash());
-        assertTrue(capturedUser.getPasswordHash().startsWith("$argon2id$"));
+        assertTrue(capturedUser.getPasswordHash().startsWith("pw2$v1$"));
     }
 
     @Test
@@ -133,7 +136,8 @@ class LocalAuthenticationUnitTest {
     @Test
     @DisplayName("6. Usuário soft-deleted ou desativado não pode autenticar")
     void shouldRejectLoginForSoftDeletedUser() {
-        User user = new User(UUID.randomUUID(), "deleted@rewit.com", passwordHasher.hash("senha12345"), AuthProvider.LOCAL, null);
+        UUID userId = UUID.randomUUID();
+        User user = new User(userId, "deleted@rewit.com", passwordHasher.hash(userId, "senha12345"), AuthProvider.LOCAL, null);
         user.softDelete();
 
         when(userRepository.findByEmail("deleted@rewit.com")).thenReturn(Optional.of(user));
@@ -189,14 +193,15 @@ class LocalAuthenticationUnitTest {
     @DisplayName("11 e 12. Refresh token deve ser rotacionado e o token antigo deve ser invalidado")
     void shouldRotateRefreshTokenAndInvalidateOldOne() {
         UUID userId = UUID.randomUUID();
-        String oldRawToken = "valid-old-refresh-token-1234567890123456";
+        Instant expiresAt = Instant.now().plusSeconds(3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String oldRawToken = tokenService.generateRefreshToken(userId, expiresAt);
         String oldHash = tokenService.hashRefreshToken(oldRawToken);
 
         AuthSession oldSession = new AuthSession(
                 UUID.randomUUID(),
                 userId,
                 oldHash,
-                Instant.now().plusSeconds(3600),
+                expiresAt,
                 "agent",
                 "127.0.0.1"
         );
@@ -222,29 +227,33 @@ class LocalAuthenticationUnitTest {
     @DisplayName("13 e 14. Refresh token expirado ou revogado deve ser rejeitado")
     void shouldRejectExpiredOrRevokedRefreshToken() {
         UUID userId = UUID.randomUUID();
-        String rawToken = "my-token-12345678901234567890";
-        String tokenHash = tokenService.hashRefreshToken(rawToken);
 
         // Caso 1: Expirado
+        Instant pastExpiry = Instant.now().minusSeconds(3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String expiredRawToken = tokenService.generateRefreshToken(userId, pastExpiry);
+        String expiredHash = tokenService.hashRefreshToken(expiredRawToken);
         AuthSession expiredSession = AuthSession.rehydrate(
-                UUID.randomUUID(), userId, tokenHash, Instant.now().minusSeconds(7200),
-                Instant.now().minusSeconds(3600), null, null, Instant.now().minusSeconds(7200), null, null, null
+                UUID.randomUUID(), userId, expiredHash, Instant.now().minusSeconds(7200),
+                pastExpiry, null, null, Instant.now().minusSeconds(7200), null, null, null
         );
-        when(authSessionRepository.findByTokenHashForUpdate(tokenHash)).thenReturn(Optional.of(expiredSession));
+        when(authSessionRepository.findByTokenHashForUpdate(expiredHash)).thenReturn(Optional.of(expiredSession));
 
         BusinessException exExp = assertThrows(BusinessException.class, () ->
-                authService.refresh(new RefreshCommand(rawToken, "agent", "127.0.0.1")));
+                authService.refresh(new RefreshCommand(expiredRawToken, "agent", "127.0.0.1")));
         assertEquals("REFRESH_TOKEN_EXPIRED", exExp.getErrorCode());
 
         // Caso 2: Revogado (Token reuse detection)
+        Instant futureExpiry = Instant.now().plusSeconds(3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String revokedRawToken = tokenService.generateRefreshToken(userId, futureExpiry);
+        String revokedHash = tokenService.hashRefreshToken(revokedRawToken);
         AuthSession revokedSession = AuthSession.rehydrate(
-                UUID.randomUUID(), userId, tokenHash, Instant.now().minusSeconds(7200),
-                Instant.now().plusSeconds(3600), Instant.now().minusSeconds(100), null, Instant.now().minusSeconds(7200), null, null, null
+                UUID.randomUUID(), userId, revokedHash, Instant.now().minusSeconds(7200),
+                futureExpiry, Instant.now().minusSeconds(100), null, Instant.now().minusSeconds(7200), null, null, null
         );
-        when(authSessionRepository.findByTokenHashForUpdate(tokenHash)).thenReturn(Optional.of(revokedSession));
+        when(authSessionRepository.findByTokenHashForUpdate(revokedHash)).thenReturn(Optional.of(revokedSession));
 
         BusinessException exRev = assertThrows(BusinessException.class, () ->
-                authService.refresh(new RefreshCommand(rawToken, "agent", "127.0.0.1")));
+                authService.refresh(new RefreshCommand(revokedRawToken, "agent", "127.0.0.1")));
         assertEquals("REFRESH_TOKEN_REVOKED", exRev.getErrorCode());
         // Exceção específica do reúso: a única que commita a revogação (persistência provada em RefreshTokenReuseIntegrationTest)
         assertInstanceOf(RefreshTokenReuseDetectedException.class, exRev);
@@ -256,11 +265,12 @@ class LocalAuthenticationUnitTest {
     @DisplayName("13.1 Rotação concorrente recente (janela de 10 s) é rejeitada sem revogação em massa nem exceção de reúso")
     void recentConcurrentRotationIsNotTreatedAsReuse() {
         UUID userId = UUID.randomUUID();
-        String rawToken = "my-token-12345678901234567890";
+        Instant futureExpiry = Instant.now().plusSeconds(3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String rawToken = tokenService.generateRefreshToken(userId, futureExpiry);
         String tokenHash = tokenService.hashRefreshToken(rawToken);
         AuthSession rotatedNow = AuthSession.rehydrate(
                 UUID.randomUUID(), userId, tokenHash, Instant.now().minusSeconds(60),
-                Instant.now().plusSeconds(3600), Instant.now().minusSeconds(1), UUID.randomUUID(),
+                futureExpiry, Instant.now().minusSeconds(1), UUID.randomUUID(),
                 Instant.now().minusSeconds(60), null, null, null
         );
         when(authSessionRepository.findByTokenHashForUpdate(tokenHash)).thenReturn(Optional.of(rotatedNow));
@@ -287,11 +297,13 @@ class LocalAuthenticationUnitTest {
     @Test
     @DisplayName("15. Logout deve revogar a sessão correspondente")
     void shouldRevokeSessionOnLogout() {
-        String rawToken = "token-to-logout-1234567890";
+        UUID userId = UUID.randomUUID();
+        Instant expiresAt = Instant.now().plusSeconds(3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String rawToken = tokenService.generateRefreshToken(userId, expiresAt);
         String tokenHash = tokenService.hashRefreshToken(rawToken);
 
         AuthSession session = new AuthSession(
-                UUID.randomUUID(), UUID.randomUUID(), tokenHash, Instant.now().plusSeconds(3600), "agent", "127.0.0.1"
+                UUID.randomUUID(), userId, tokenHash, expiresAt, "agent", "127.0.0.1"
         );
         when(authSessionRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(session));
 

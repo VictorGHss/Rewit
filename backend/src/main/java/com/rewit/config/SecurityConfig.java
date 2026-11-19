@@ -1,7 +1,8 @@
 package com.rewit.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rewit.infrastructure.security.Argon2PasswordHasher;
+import com.rewit.domain.enums.Role;
+import com.rewit.infrastructure.security.SecuritySecretValidator;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
@@ -9,15 +10,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
 import org.springframework.security.config.annotation.web.configurers.FormLoginConfigurer;
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -28,9 +28,6 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import com.rewit.domain.enums.Role;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -38,31 +35,67 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Configuração central do Spring Security 7.x para autenticação stateless via JWT e Argon2.
+ * Configuração central do Spring Security 7.x para autenticação stateless via JWT.
+ * Valida de forma fail-closed todos os segredos criptográficos de autenticação no startup
+ * e compartilha o mesmo material binário decodificado de {@code JWT_SECRET} com o emissor.
  */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    private final String jwtSecret;
+    private final byte[] jwtSecretBytes;
     private final String jwtIssuer;
     private final String jwtAudience;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public SecurityConfig(
             @Value("${rewit.security.jwt-secret}") String jwtSecret,
+            @Value("${rewit.security.password-pepper}") String passwordPepper,
+            @Value("${rewit.security.password-pepper-previous:}") String passwordPepperPrevious,
+            @Value("${rewit.security.refresh-token-secret}") String refreshTokenSecret,
+            @Value("${rewit.security.refresh-token-secret-previous:}") String refreshTokenSecretPrevious,
             @Value("${rewit.security.jwt-issuer:rewit-api}") String jwtIssuer,
             @Value("${rewit.security.jwt-audience:rewit-clients}") String jwtAudience
     ) {
-        com.rewit.infrastructure.security.JwtSecretValidator.validate(jwtSecret);
-        this.jwtSecret = jwtSecret;
+        this.jwtSecretBytes = SecuritySecretValidator.decodeSecret("JWT_SECRET", jwtSecret);
+        SecuritySecretValidator.validateSecret("PASSWORD_PEPPER_SECRET", passwordPepper);
+        SecuritySecretValidator.validateSecret("REFRESH_TOKEN_SECRET", refreshTokenSecret);
+
+        Map<String, String> configuredSecrets = new LinkedHashMap<>();
+        configuredSecrets.put("JWT_SECRET", jwtSecret);
+        configuredSecrets.put("PASSWORD_PEPPER_SECRET", passwordPepper);
+        if (passwordPepperPrevious != null && !passwordPepperPrevious.isBlank()) {
+            SecuritySecretValidator.validateSecret("PASSWORD_PEPPER_SECRET_PREVIOUS", passwordPepperPrevious);
+            configuredSecrets.put("PASSWORD_PEPPER_SECRET_PREVIOUS", passwordPepperPrevious);
+        }
+        configuredSecrets.put("REFRESH_TOKEN_SECRET", refreshTokenSecret);
+        if (refreshTokenSecretPrevious != null && !refreshTokenSecretPrevious.isBlank()) {
+            SecuritySecretValidator.validateSecret("REFRESH_TOKEN_SECRET_PREVIOUS", refreshTokenSecretPrevious);
+            configuredSecrets.put("REFRESH_TOKEN_SECRET_PREVIOUS", refreshTokenSecretPrevious);
+        }
+        SecuritySecretValidator.validateDistinct(configuredSecrets);
+
         this.jwtIssuer = jwtIssuer;
         this.jwtAudience = jwtAudience;
+    }
+
+    public SecurityConfig(String jwtSecret, String jwtIssuer, String jwtAudience) {
+        this(
+                jwtSecret,
+                "test_password_pepper_secret_with_sufficient_entropy_and_at_least_32_bytes_12345!",
+                "",
+                "test_refresh_token_secret_with_sufficient_entropy_and_at_least_32_bytes_12345!",
+                "",
+                jwtIssuer,
+                jwtAudience
+        );
     }
 
     @Bean
@@ -104,8 +137,7 @@ public class SecurityConfig {
 
     @Bean
     public JwtDecoder jwtDecoder() {
-        byte[] secretBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
-        SecretKeySpec secretKey = new SecretKeySpec(secretBytes, "HmacSHA256");
+        SecretKeySpec secretKey = new SecretKeySpec(jwtSecretBytes, "HmacSHA256");
 
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(secretKey)
                 .macAlgorithm(MacAlgorithm.HS256)
@@ -159,16 +191,6 @@ public class SecurityConfig {
 
             response.getWriter().write(objectMapper.writeValueAsString(errorBody));
         };
-    }
-
-    @Bean
-    public PasswordEncoder passwordEncoder(Argon2PasswordHasher argon2PasswordHasher) {
-        return argon2PasswordHasher.getDelegate();
-    }
-
-    @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
-        return authenticationConfiguration.getAuthenticationManager();
     }
 
     private static void disableCsrf(CsrfConfigurer<HttpSecurity> configurer) {

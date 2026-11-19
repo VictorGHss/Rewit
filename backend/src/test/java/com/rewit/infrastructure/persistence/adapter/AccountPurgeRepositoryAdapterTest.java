@@ -30,7 +30,8 @@ class AccountPurgeRepositoryAdapterTest {
         Query query = mock(Query.class);
         when(entityManager.createNativeQuery(anyString())).thenReturn(query);
         when(query.setParameter(anyString(), any())).thenReturn(query);
-        when(query.executeUpdate()).thenReturn(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
+        when(query.getSingleResult()).thenReturn(1);
+        when(query.executeUpdate()).thenReturn(0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
 
         AccountPurgeRepositoryAdapter adapter = new AccountPurgeRepositoryAdapter(entityManager);
         UUID userId = UUID.randomUUID();

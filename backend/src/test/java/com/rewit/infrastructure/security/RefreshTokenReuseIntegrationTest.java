@@ -3,6 +3,7 @@ package com.rewit.infrastructure.security;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rewit.application.port.TokenService;
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.presentation.dto.auth.LoginRequest;
 import com.rewit.presentation.dto.auth.LogoutRequest;
 import com.rewit.presentation.dto.auth.RefreshRequest;
@@ -140,12 +141,18 @@ class RefreshTokenReuseIntegrationTest {
     @DisplayName("Token inexistente e token expirado mantêm seus erros e não revogam as demais sessões")
     void unknownAndExpiredTokensDoNotRevokeSessions() throws Exception {
         String email = uniqueEmail();
-        String expiring = register(email).get("refreshToken").asText();
+        String registered = register(email).get("refreshToken").asText();
         String other = login(email);
-        jdbcTemplate.update("UPDATE auth_sessions SET expires_at = NOW() - INTERVAL '1 minute' WHERE token_hash = ?",
-                tokenService.hashRefreshToken(expiring));
+        // Sessão legitimamente expirada: o instante de expiração vai no token e é o mesmo persistido
+        java.util.UUID owner = tokenService.parseRefreshToken(registered).userId();
+        java.time.Instant past = java.time.Instant.now().minusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String expiring = tokenService.generateRefreshToken(owner, past);
+        PrivilegedTestDatabase.jdbc().update(
+                "INSERT INTO auth_sessions (id, user_id, token_hash, issued_at, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                java.util.UUID.randomUUID(), owner, tokenService.hashRefreshToken(expiring),
+                java.sql.Timestamp.from(past.minusSeconds(3600)), java.sql.Timestamp.from(past), java.sql.Timestamp.from(past.minusSeconds(3600)));
 
-        MvcResult unknown = refresh("token-que-nunca-existiu-" + UUID.randomUUID());
+        MvcResult unknown = refresh(tokenService.generateRefreshToken(owner, java.time.Instant.now().plusSeconds(3600)));
         MvcResult expired = refresh(expiring);
 
         assertEquals(401, unknown.getResponse().getStatus());
@@ -158,7 +165,7 @@ class RefreshTokenReuseIntegrationTest {
 
     // Leva a revogação para fora da janela de rotação concorrente sem esperar em tempo real
     private void ageRevocation(String refreshToken) {
-        int updated = jdbcTemplate.update(
+        int updated = PrivilegedTestDatabase.jdbc().update(
                 "UPDATE auth_sessions SET revoked_at = NOW() - INTERVAL '1 hour' WHERE token_hash = ? AND revoked_at IS NOT NULL",
                 tokenService.hashRefreshToken(refreshToken));
         assertEquals(1, updated);

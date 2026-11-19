@@ -66,6 +66,18 @@ logging:
         max-throwable-depth: 30
 
 rewit:
+  security:
+    jwt-secret: ${JWT_SECRET:}
+    password-pepper: ${PASSWORD_PEPPER_SECRET:}
+    password-pepper-previous: ${PASSWORD_PEPPER_SECRET_PREVIOUS:}
+    password-pepper-key-id: ${PASSWORD_PEPPER_KEY_ID:v1}
+    password-pepper-previous-key-id: ${PASSWORD_PEPPER_PREVIOUS_KEY_ID:}
+    refresh-token-secret: ${REFRESH_TOKEN_SECRET:}
+    refresh-token-secret-previous: ${REFRESH_TOKEN_SECRET_PREVIOUS:}
+    jwt-issuer: ${JWT_ISSUER:rewit-api}
+    jwt-audience: ${JWT_AUDIENCE:rewit-clients}
+    access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}
+    refresh-token-ttl-seconds: ${JWT_REFRESH_TOKEN_TTL_SECONDS:2592000}
   outbox:
     poller-enabled: ${OUTBOX_POLLER_ENABLED:true}
     poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:5000}

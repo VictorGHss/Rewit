@@ -58,10 +58,15 @@ Toda foto capturada por smartphones modernos embute metadados EXIF detalhados no
 
 ## 5. Proteção de Credenciais e Tratamento de Logs
 
-1. **Hashing de Senhas**: Utilização obrigatória de algoritmo moderno de derivação de chaves: **BCrypt** com fator de trabalho (cost) 12 ou **Argon2id**.
-2. **Tokens JWT de Sessão**:
-   - Assinatura com algoritmo assimétrico ou chave secreta forte (mínimo 256 bits via variável `JWT_SECRET`).
-   - Tempo de expiração curto para access tokens (ex: 15 a 60 minutos) com refresh token opaco, rotacionado a cada uso e persistido no PostgreSQL apenas como hash SHA-256 (tabela `auth_sessions`), com detecção de reúso. Não há estado de sessão em Redis.
+1. **Hashing de Senhas com Password Pepper Vinculado à Identidade (Argon2id + HMAC)**:
+   - Utilização obrigatória de **Argon2id** precedido por derivação HMAC-SHA256 (`PASSWORD_PEPPER_SECRET`) vinculada aos 16 bytes do UUID estável da conta (envelope canônico `pw2`).
+   - Mitigação contra comprometimento de credencial SQL de runtime (S3-A13-F1): sem a chave externa, hashes não podem ser forjados nem transplantados entre usuários. Hashes crus sem autenticação são estritamente rejeitados.
+2. **Tokens JWT e Refresh Tokens com Vínculo Criptográfico**:
+   - Assinatura JWT com algoritmo simétrico forte (mínimo 256 bits via variável `JWT_SECRET`).
+   - Tempo de expiração curto para access tokens (15 minutos).
+   - Refresh token opaco de 56 bytes (16 do UUID do usuário, 8 da expiração em epoch seconds e 32 de CSPRNG), em Base64URL canônico de 75 caracteres; para os clientes é só uma string.
+   - Hash persistido exclusivamente como HMAC-SHA256 via segredo dedicado `REFRESH_TOKEN_SECRET` (tabela `auth_sessions`), rotacionado a cada uso, com detecção de reúso e lock pessimista.
+   - Integridade das sessões no banco: trigger `trg_guard_auth_session_integrity` (V44) e `rewit_app` sem `DELETE` em `auth_sessions`; a remoção legítima (cleanup e purge LGPD) ocorre por funções `SECURITY DEFINER` restritas.
 3. **Prevenção de Vazamento em Logs**:
    - É terminantemente proibido registrar em logs de aplicação (SLF4J/Logback):
      - Senhas ou hashes;
@@ -90,7 +95,8 @@ Registro técnico do que o código faz; não é parecer jurídico.
 - **Leitura pública (C2.2)**: a identidade de uma conta excluída não aparece em nenhuma projeção pública; perfil, follows e reputação respondem como um identificador inexistente.
 - **Purge (`PurgeDeletedAccountUseCase`)**, idempotente e restrito a contas `DELETED` elegíveis:
   - **Removido**: sessões, follows (nos dois sentidos), itens salvos, interesses, atividades, notificações da conta e snapshot de reputação.
-  - **Minimizado**: e-mail (HMAC-SHA256 com o segredo `ACCOUNT_EMAIL_RESERVATION_SECRET` no domínio `deleted.invalid`: a reserva contra novo cadastro continua sem guardar o endereço; ver `architecture/persistence.md`), senha e id do provedor externo; perfil (handle reservado, nome "Usuário excluído", sem bio, avatar e reputação); coordenadas informadas nas avaliações (`reviews.user_coordinates`, `location_accuracy_meters`) e eventuais coordenadas residuais em `check_ins` (além de `distance_to_centroid_meters` em linhas `REJECTED`), sem excluir registros de check-in; o ator excluído nas notificações de outros usuários e o autor de presenças de produto.
+  - **Minimizado**: e-mail (HMAC-SHA256 com o segredo `ACCOUNT_EMAIL_RESERVATION_SECRET` no domínio `deleted.invalid`: a reserva contra novo cadastro continua sem guardar o endereço; ver `architecture/persistence.md`), senha e id do provedor externo (`provider_user_id = NULL`); perfil (handle reservado, nome "Usuário excluído", sem bio, avatar e reputação); coordenadas informadas nas avaliações (`reviews.user_coordinates`, `location_accuracy_meters`) e eventuais coordenadas residuais em `check_ins` (além de `distance_to_centroid_meters` em linhas `REJECTED`), sem excluir registros de check-in; o ator excluído nas notificações de outros usuários e o autor de presenças de produto.
+    - *Compatibilidade com guards de integridade (V44)*: A trigger `trg_guard_user_role_assignment` (`fn_guard_user_role_assignment`) restringe alterações em `provider_user_id` pela credencial de runtime, mas contempla explicitamente a exceção para quando o novo valor é `NULL` e a conta já se encontra no estado `DELETED` (`NEW.provider_user_id IS NULL AND OLD.account_status = 'DELETED'`), compatível com a minimização de identidade do expurgo LGPD. O purge de sessões da conta passou a usar `rewit_purge_deleted_user_auth_sessions`, que só age sobre conta `DELETED` com `deleted_at` preenchido; o runtime não apaga sessões livremente.
   - **Preservado**: a linha de `users` (com `account_status = DELETED` e `deleted_at`), avaliações, notas, helpful, comentários, mídia, denúncias, auditoria de moderação e os registros de check-in (sem coordenadas, mantendo a invariante `reviews.is_verified_on_site`). A linha de `user_interest_profiles` (V40) também permanece: guarda só as datas do questionário inicial, sem interesses, e o runtime não tem `DELETE` nela.
 - **Preservado nesta etapa (decisão; pendência futura de retenção/minimização)**:
   - **Contas empresariais** (`business_accounts`: razão social e documento fiscal): preservadas integralmente; exigem política e fluxo próprios (transferência, encerramento) antes de qualquer purge adicional.

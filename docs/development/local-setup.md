@@ -190,11 +190,30 @@ O banco nasce vazio e o schema é criado pelas migrations Flyway na primeira ini
 
 Use sempre `SPRING_PROFILES_ACTIVE=external-test`, sem o perfil `local`:
 
-- toda credencial vem do ambiente, sem valor padrão (`DATABASE_URL`, `APP_DB_PASSWORD`, `POSTGRES_USER`/`POSTGRES_PASSWORD` ou `FLYWAY_DB_*`, `REDIS_HOST`, `REDIS_PORT`, `OBJECT_STORAGE_*`, `JWT_SECRET`, `RATE_LIMIT_KEY_SECRET`); variável ausente, vazia ou com valor de exemplo (`change-me`, fallbacks `rewit_local_*`) impede a inicialização com mensagem que cita a variável, nunca o valor;
-- API em `127.0.0.1:8080` (`SERVER_ADDRESS` sobrescreve) e Actuator em `127.0.0.1:8081`; o túnel encaminha somente a 8080;
-- IP do cliente gravado na sessão vem de `CF-Connecting-IP` e só quando a conexão chega de `127.0.0.1` (o `cloudflared`); `X-Forwarded-For` não é lido em nenhum perfil;
-- Swagger UI e OpenAPI desligados;
-- as portas dos serviços compartilhados (PostgreSQL 5432/5433, Redis 6379, storage 8333) são recusadas: as migrations Flyway nunca rodam no banco de desenvolvimento.
+- toda credencial vem do ambiente, sem valor padrão (`DATABASE_URL`, `APP_DB_PASSWORD`, `POSTGRES_USER`/`POSTGRES_PASSWORD` ou `FLYWAY_DB_*`, `REDIS_HOST`, `REDIS_PORT`, `OBJECT_STORAGE_*`, `JWT_SECRET`, `PASSWORD_PEPPER_SECRET`, `REFRESH_TOKEN_SECRET`, `RATE_LIMIT_KEY_SECRET`); variável ausente, vazia ou com valor de exemplo (`change-me`, fallbacks `rewit_local_*`) impede a inicialização com mensagem que cita a variável, nunca o valor;
+
+### Segredos Criptográficos Obrigatórios (Hardening de Autenticação F1)
+
+Além de `JWT_SECRET`, a aplicação exige dois segredos dedicados e independentes (`.env.example` traz os nomes; valores reais nunca vão para o Git):
+
+| Variável | Finalidade |
+| :--- | :--- |
+| `JWT_SECRET` | Assinatura HS256 dos access tokens |
+| `PASSWORD_PEPPER_SECRET` | HMAC do pepper de senhas (`pw2`) vinculado ao UUID da conta |
+| `REFRESH_TOKEN_SECRET` | HMAC-SHA256 do `token_hash` de `auth_sessions` |
+
+**Formato aceito** (todos os segredos, ativos e anteriores): Base64 padrão ou Base64URL que decodifique para **pelo menos 32 bytes**, ou texto UTF-8 (com algum caractere fora do alfabeto Base64) de pelo menos 32 bytes. Uma Base64 válida porém curta (ex.: 32 caracteres = 24 bytes) é rejeitada, sem reinterpretar como texto. Gere por CSPRNG, por exemplo `openssl rand -base64 32`. Os segredos não podem coincidir entre si (inclusive com as chaves anteriores) nem conter placeholders.
+
+**Rotação (opcional, janela transitória):**
+- `PASSWORD_PEPPER_KEY_ID`: id da chave ativa, `[A-Za-z0-9_-]{1,32}`, padrão `v1`, nunca vazio.
+- `PASSWORD_PEPPER_SECRET_PREVIOUS` + `PASSWORD_PEPPER_PREVIOUS_KEY_ID` (obrigatório se houver anterior; diferente do ativo). O hash antigo autentica uma vez e é regravado com a chave ativa.
+- `REFRESH_TOKEN_SECRET_PREVIOUS`: manter por pelo menos o TTL máximo do refresh token (`JWT_REFRESH_TOKEN_TTL_SECONDS`, 30 dias por padrão).
+
+Validação fail-closed no startup: valor ausente, curto, malformado, repetido ou com placeholder aborta a inicialização citando só o nome da variável.
+
+**Bancos de dev/teste com hashes antigos:** hashes sem o formato `pw2` e sessões anteriores deixam de valer (não há produção ativa nem selamento). Recrie as contas pelo registro ou redefina senhas com um operador privilegiado. Tokens de refresh antigos (64 caracteres) são rejeitados e exigem novo login.
+
+**Ambientes:** `docker-compose.yml` repassa os segredos ao serviço `backend`; `.env.example` os lista; `scripts/new-external-test-env.ps1` gera `JWT_SECRET`, `PASSWORD_PEPPER_SECRET` e `REFRESH_TOKEN_SECRET` em Base64URL de 48 bytes por CSPRNG e `PASSWORD_PEPPER_KEY_ID=v1`; `docker-compose.external-test.yml` só sobe a infraestrutura de dados (a API roda no host com `start-external-test.ps1`, que carrega o `.env.external-test`), e `scripts/verify-env.ps1` só procura segredos reais versionados; nenhum dos dois precisou mudar. Os testes automatizados usam segredos fixos de teste em `backend/src/test/resources/application.yml`.
 
 ### Inicialização
 

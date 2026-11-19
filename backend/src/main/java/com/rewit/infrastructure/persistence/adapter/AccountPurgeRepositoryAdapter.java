@@ -28,7 +28,10 @@ public class AccountPurgeRepositoryAdapter implements AccountPurgeRepository {
     public PurgeCounts purgePersonalRelations(UUID userId) {
         Objects.requireNonNull(userId, "userId must not be null");
 
-        int sessions = update("DELETE FROM auth_sessions WHERE user_id = :userId", userId);
+        int sessions = ((Number) entityManager
+                .createNativeQuery("SELECT public.rewit_purge_deleted_user_auth_sessions(:userId)")
+                .setParameter("userId", userId)
+                .getSingleResult()).intValue();
         int follows = update("DELETE FROM user_follows WHERE follower_user_id = :userId OR followed_user_id = :userId", userId);
         int savedItems = update("DELETE FROM saved_items WHERE user_id = :userId", userId);
         int interests = update("DELETE FROM user_interests WHERE user_id = :userId", userId);

@@ -526,6 +526,12 @@ class BusinessResponsePersistenceIntegrationTest {
         }
         Runnable approve = () -> setVerification(f.business(), "APPROVED");
         Runnable reactivate = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
+        Runnable deleteWithSavepoint = () -> {
+            jdbcTemplate.execute("SAVEPOINT sp_admin_deleted");
+            setAccountStatus(f.businessAdmin(), AccountStatus.DELETED);
+        };
+        Runnable rollbackDeletedSavepoint = () ->
+                jdbcTemplate.execute("ROLLBACK TO SAVEPOINT sp_admin_deleted; RELEASE SAVEPOINT sp_admin_deleted");
         Runnable reopen = () -> jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
         Runnable reclaim = () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
                 f.business(), f.place());
@@ -536,8 +542,7 @@ class BusinessResponsePersistenceIntegrationTest {
                         () -> setAccountStatus(f.businessAdmin(), AccountStatus.DEACTIVATED), reactivate),
                 new StateChange("administrador SUSPENDED",
                         () -> setAccountStatus(f.businessAdmin(), AccountStatus.SUSPENDED), reactivate),
-                new StateChange("administrador DELETED",
-                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.DELETED), reactivate),
+                new StateChange("administrador DELETED", deleteWithSavepoint, rollbackDeletedSavepoint),
                 new StateChange("local INACTIVE",
                         () -> jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
                 new StateChange("local CLOSED",
@@ -677,6 +682,12 @@ class BusinessResponsePersistenceIntegrationTest {
         }
         Runnable approve = () -> setVerification(f.business(), "APPROVED");
         Runnable reactivate = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
+        Runnable deleteWithSavepoint = () -> {
+            jdbcTemplate.execute("SAVEPOINT sp_admin_deleted");
+            setAccountStatus(f.businessAdmin(), AccountStatus.DELETED);
+        };
+        Runnable rollbackDeletedSavepoint = () ->
+                jdbcTemplate.execute("ROLLBACK TO SAVEPOINT sp_admin_deleted; RELEASE SAVEPOINT sp_admin_deleted");
         Runnable reopen = () -> jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
         List<Blocked> cases = List.of(
                 new Blocked(BusinessResponseRestorationBlocker.ACCOUNT_NOT_APPROVED,
@@ -684,7 +695,7 @@ class BusinessResponsePersistenceIntegrationTest {
                 new Blocked(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
                         () -> setAccountStatus(f.businessAdmin(), AccountStatus.SUSPENDED), reactivate),
                 new Blocked(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
-                        () -> setAccountStatus(f.businessAdmin(), AccountStatus.DELETED), reactivate),
+                        deleteWithSavepoint, rollbackDeletedSavepoint),
                 new Blocked(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED,
                         () -> jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
                 new Blocked(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED,

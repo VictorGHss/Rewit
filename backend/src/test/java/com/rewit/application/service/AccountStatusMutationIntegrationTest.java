@@ -188,13 +188,22 @@ class AccountStatusMutationIntegrationTest {
                 jdbcTemplate.update("UPDATE users SET is_active = TRUE WHERE id = ?", deleted.getId()));
         assertTrue(update.getMessage().contains("chk_users_active_not_deleted"));
 
-        // Todo estado do ciclo de vida (V21) com is_active/deleted_at coerentes é aceito
+        // Todo estado do ciclo de vida (V21) com is_active/deleted_at coerentes é aceito (ACTIVE -> DEACTIVATED -> SUSPENDED -> ACTIVE -> DELETED)
         User valid = createUser("schema_validos");
         jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", valid.getId());
         jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED' WHERE id = ?", valid.getId());
-        jdbcTemplate.update("UPDATE users SET account_status = 'DELETED', deleted_at = now() WHERE id = ?", valid.getId());
-        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', deleted_at = NULL, is_active = TRUE WHERE id = ?",
-                valid.getId());
+        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', is_active = TRUE WHERE id = ?", valid.getId());
+        jdbcTemplate.update("UPDATE users SET account_status = 'DELETED', is_active = FALSE, deleted_at = now() WHERE id = ?", valid.getId());
+
+        // Guard V44: a role de runtime não pode reativar uma conta que já atingiu o estado definitivo DELETED
+        org.springframework.dao.DataAccessException reactivateDeleted = assertThrows(
+                org.springframework.dao.DataAccessException.class,
+                () -> jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', deleted_at = NULL, is_active = TRUE WHERE id = ?",
+                        valid.getId())
+        );
+        assertTrue(reactivateDeleted.getMostSpecificCause().getMessage().contains("users.account_status"),
+                reactivateDeleted.getMostSpecificCause().getMessage());
+        assertEquals("DELETED", jdbcTemplate.queryForObject("SELECT account_status FROM users WHERE id = ?", String.class, valid.getId()));
         assertEquals(1, count("SELECT count(*) FROM pg_constraint WHERE conname = 'chk_users_active_not_deleted' "
                 + "AND conrelid = 'users'::regclass AND convalidated"));
     }

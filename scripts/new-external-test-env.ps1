@@ -37,6 +37,12 @@ function New-Secret([int]$bytes) {
     # Somente [A-Za-z0-9]: seguro em URL, shell e arquivos de ambiente
     return ([Convert]::ToBase64String($buffer) -replace '[^A-Za-z0-9]', '')
 }
+function New-Base64UrlSecret([int]$bytes) {
+    $buffer = New-Object byte[] $bytes
+    $rng.GetBytes($buffer)
+    # Base64URL sem padding gerado por CSPRNG (ex.: 48 bytes => 64 caracteres, decodifica exatamente 48 bytes)
+    return ([Convert]::ToBase64String($buffer).TrimEnd('=') -replace '\+', '-' -replace '/', '_')
+}
 
 $content = @"
 # REWIT - ambiente isolado do perfil external-test (gerado por scripts/new-external-test-env.ps1)
@@ -61,9 +67,12 @@ OBJECT_STORAGE_ACCESS_KEY=rewitext$(New-Secret 9)
 OBJECT_STORAGE_SECRET_KEY=$(New-Secret 30)
 OBJECT_STORAGE_BUCKET=rewit-ext
 
-JWT_SECRET=$(New-Secret 48)
-RATE_LIMIT_KEY_SECRET=$(New-Secret 48)
-ACCOUNT_EMAIL_RESERVATION_SECRET=$(New-Secret 48)
+JWT_SECRET=$(New-Base64UrlSecret 48)
+PASSWORD_PEPPER_SECRET=$(New-Base64UrlSecret 48)
+PASSWORD_PEPPER_KEY_ID=v1
+REFRESH_TOKEN_SECRET=$(New-Base64UrlSecret 48)
+RATE_LIMIT_KEY_SECRET=$(New-Base64UrlSecret 48)
+ACCOUNT_EMAIL_RESERVATION_SECRET=$(New-Base64UrlSecret 48)
 
 SERVER_PORT=8080
 

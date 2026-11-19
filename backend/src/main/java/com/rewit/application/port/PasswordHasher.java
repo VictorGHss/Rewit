@@ -1,19 +1,31 @@
 package com.rewit.application.port;
 
+import java.util.UUID;
+
 /**
- * Porta de saída da aplicação para hashing e verificação segura de senhas.
- * Mantém os casos de uso independentes do algoritmo criptográfico específico (Argon2, etc).
+ * Porta de saída da aplicação para hashing e verificação segura de senhas vinculadas à conta (UUID).
+ * Utiliza derivação com HMAC (pepper externo) e Argon2id.
  */
 public interface PasswordHasher {
 
-    String hash(String rawPassword);
-
-    boolean matches(String rawPassword, String encodedPassword);
+    /**
+     * Calcula o hash da senha vinculando-a criptograficamente ao identificador único do usuário (UUID).
+     */
+    String hash(UUID userId, String rawPassword);
 
     /**
-     * Executa uma verificação com o mesmo custo de {@link #matches} contra um hash descartável, sem resultado.
-     * Usada quando não há hash a verificar (conta inexistente, desativada ou federada), para que o tempo de
-     * resposta não revele se a conta existe.
+     * Verifica a senha contra o hash codificado, assegurando o contexto do usuário.
+     */
+    boolean matches(UUID userId, String rawPassword, String encodedPassword);
+
+    /**
+     * Indica se o hash fornecido necessita de atualização (ex.: formato legado selado ou chave rotacionada).
+     */
+    boolean needsUpgrade(String encodedPassword);
+
+    /**
+     * Executa uma verificação simulada com custo temporal e computacional idêntico a {@link #matches},
+     * sem expor se a conta existe.
      */
     void simulateVerification(String rawPassword);
 }

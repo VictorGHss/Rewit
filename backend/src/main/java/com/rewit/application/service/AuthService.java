@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -104,10 +105,11 @@ public class AuthService {
             throw new BusinessException("Nome de usuário (@handle) já está em uso", "HANDLE_ALREADY_EXISTS");
         }
 
-        String passwordHash = passwordHasher.hash(cmd.password());
+        UUID userId = UUID.randomUUID();
+        String passwordHash = passwordHasher.hash(userId, cmd.password());
 
         // 1. Criar e persistir User
-        User user = new User(null, normalizedEmail, passwordHash, AuthProvider.LOCAL, null);
+        User user = new User(userId, normalizedEmail, passwordHash, AuthProvider.LOCAL, null);
         User savedUser = userRepository.save(user);
 
         // 2. Criar e persistir Profile vinculado
@@ -139,11 +141,17 @@ public class AuthService {
             throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
         }
 
-        if (!passwordHasher.matches(cmd.password(), user.getPasswordHash())) {
+        if (!passwordHasher.matches(user.getId(), cmd.password(), user.getPasswordHash())) {
             throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
         }
 
         rateLimiter.release(attempt);
+
+        if (passwordHasher.needsUpgrade(user.getPasswordHash())) {
+            String upgradedHash = passwordHasher.hash(user.getId(), cmd.password());
+            user.changePassword(upgradedHash);
+            userRepository.save(user);
+        }
 
         Profile profile = profileRepository.findByUserId(user.getId())
                 .orElseThrow(() -> new BusinessException("Perfil não encontrado para o usuário", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
@@ -183,7 +191,7 @@ public class AuthService {
             throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
         }
 
-        if (!passwordHasher.matches(cmd.password(), user.getPasswordHash())) {
+        if (!passwordHasher.matches(user.getId(), cmd.password(), user.getPasswordHash())) {
             throw new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
         }
 
@@ -191,9 +199,16 @@ public class AuthService {
                 .filter(u -> isSelfRecoverable(u.getStatus()))
                 .orElseThrow(() -> new BusinessException("Credenciais inválidas", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS"));
 
+        if (passwordHasher.needsUpgrade(locked.getPasswordHash())) {
+            String upgradedHash = passwordHasher.hash(locked.getId(), cmd.password());
+            locked.changePassword(upgradedHash);
+        }
+
         if (locked.reactivate()) {
             userRepository.save(locked);
             authSessionRepository.revokeAllByUserId(locked.getId());
+        } else if (passwordHasher.needsUpgrade(user.getPasswordHash())) {
+            userRepository.save(locked);
         }
 
         rateLimiter.release(attempt);
@@ -339,10 +354,25 @@ public class AuthService {
             throw new BusinessException("Refresh token inválido ou ausente", HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN");
         }
 
+        TokenService.RefreshTokenMetadata tokenMeta = tokenService.parseRefreshToken(cmd.refreshToken());
         String tokenHash = tokenService.hashRefreshToken(cmd.refreshToken());
 
-        AuthSession currentSession = authSessionRepository.findByTokenHashForUpdate(tokenHash)
+        java.util.Optional<AuthSession> sessionOpt = authSessionRepository.findByTokenHashForUpdate(tokenHash);
+        if (sessionOpt.isEmpty() && tokenService.hasPreviousRefreshTokenSecret()) {
+            String prevHash = tokenService.hashRefreshTokenWithPreviousKey(cmd.refreshToken()).orElse(null);
+            if (prevHash != null) {
+                sessionOpt = authSessionRepository.findByTokenHashForUpdate(prevHash);
+            }
+        }
+
+        AuthSession currentSession = sessionOpt
                 .orElseThrow(() -> new BusinessException("Refresh token inválido", HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN"));
+
+        // Verificação estrita de vínculo de identidade e de expiração entre o refresh token e a sessão persistida
+        if (!currentSession.getUserId().equals(tokenMeta.userId())
+                || currentSession.getExpiresAt().getEpochSecond() != tokenMeta.expiresAt().getEpochSecond()) {
+            throw new BusinessException("Refresh token inválido", HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN");
+        }
 
         // Detecção de reúso de refresh token revogado (Token Reuse Detection)
         if (currentSession.isRevoked()) {
@@ -357,7 +387,7 @@ public class AuthService {
             throw new BusinessException("Refresh token revogado ou já reutilizado. Todas as sessões foram invalidadas.", HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED");
         }
 
-        if (currentSession.isExpired()) {
+        if (!tokenMeta.expiresAt().isAfter(Instant.now()) || currentSession.isExpired()) {
             throw new BusinessException("Refresh token expirado", HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_EXPIRED");
         }
 
@@ -374,10 +404,10 @@ public class AuthService {
         Profile profile = profileRepository.findByUserId(user.getId())
                 .orElseThrow(() -> new BusinessException("Perfil não encontrado", HttpStatus.NOT_FOUND, "PROFILE_NOT_FOUND"));
 
-        // Rotação do refresh token
-        String newRawRefreshToken = tokenService.generateRefreshToken();
+        // Rotação do refresh token - emitido sempre com a chave ativa e vinculado ao usuário e à expiração exata
+        Instant newExpiry = Instant.now().plusSeconds(tokenService.getRefreshTokenTtlSeconds()).truncatedTo(ChronoUnit.SECONDS);
+        String newRawRefreshToken = tokenService.generateRefreshToken(user.getId(), newExpiry);
         String newTokenHash = tokenService.hashRefreshToken(newRawRefreshToken);
-        Instant newExpiry = Instant.now().plusSeconds(tokenService.getRefreshTokenTtlSeconds());
 
         AuthSession newSession = new AuthSession(null, user.getId(), newTokenHash, newExpiry, cmd.userAgent(), cmd.ipAddress());
         AuthSession savedNewSession = authSessionRepository.save(newSession);
@@ -395,11 +425,26 @@ public class AuthService {
         Objects.requireNonNull(cmd, "LogoutCommand cannot be null");
 
         if (cmd.refreshToken() != null && !cmd.refreshToken().isBlank()) {
-            String tokenHash = tokenService.hashRefreshToken(cmd.refreshToken());
-            authSessionRepository.findByTokenHash(tokenHash).ifPresent(session -> {
-                session.revoke();
-                authSessionRepository.save(session);
-            });
+            try {
+                TokenService.RefreshTokenMetadata tokenMeta = tokenService.parseRefreshToken(cmd.refreshToken());
+                String tokenHash = tokenService.hashRefreshToken(cmd.refreshToken());
+                java.util.Optional<AuthSession> sessionOpt = authSessionRepository.findByTokenHash(tokenHash);
+                if (sessionOpt.isEmpty() && tokenService.hasPreviousRefreshTokenSecret()) {
+                    String prevHash = tokenService.hashRefreshTokenWithPreviousKey(cmd.refreshToken()).orElse(null);
+                    if (prevHash != null) {
+                        sessionOpt = authSessionRepository.findByTokenHash(prevHash);
+                    }
+                }
+                sessionOpt.ifPresent(session -> {
+                    if (session.getUserId().equals(tokenMeta.userId())
+                            && session.getExpiresAt().getEpochSecond() == tokenMeta.expiresAt().getEpochSecond()) {
+                        session.revoke();
+                        authSessionRepository.save(session);
+                    }
+                });
+            } catch (BusinessException | IllegalArgumentException ignored) {
+                // Logout fail-safe se o token for malformado
+            }
         } else if (cmd.userId() != null) {
             authSessionRepository.revokeAllByUserId(cmd.userId());
         }
@@ -424,9 +469,9 @@ public class AuthService {
 
     private AuthResult createSessionAndGenerateResult(User user, Profile profile, String userAgent, String ipAddress) {
         String accessToken = tokenService.generateAccessToken(user.getId(), user.getRole());
-        String rawRefreshToken = tokenService.generateRefreshToken();
+        Instant expiresAt = Instant.now().plusSeconds(tokenService.getRefreshTokenTtlSeconds()).truncatedTo(ChronoUnit.SECONDS);
+        String rawRefreshToken = tokenService.generateRefreshToken(user.getId(), expiresAt);
         String tokenHash = tokenService.hashRefreshToken(rawRefreshToken);
-        Instant expiresAt = Instant.now().plusSeconds(tokenService.getRefreshTokenTtlSeconds());
 
         AuthSession session = new AuthSession(null, user.getId(), tokenHash, expiresAt, userAgent, ipAddress);
         authSessionRepository.save(session);

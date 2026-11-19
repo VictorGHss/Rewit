@@ -87,18 +87,18 @@ class AuthServiceAbuseProtectionTest {
 
         assertInvalidCredentials(ex);
         verify(passwordHasher).simulateVerification(PASSWORD);
-        verify(passwordHasher, never()).matches(anyString(), anyString());
+        verify(passwordHasher, never()).matches(any(), anyString(), anyString());
     }
 
     @Test
     @DisplayName("Login com senha incorreta verifica o hash real e responde exatamente como o e-mail inexistente")
     void loginWithWrongPasswordVerifiesRealHash() {
-        localUser();
+        User user = localUser();
 
         BusinessException ex = assertThrows(BusinessException.class, () -> authService.login(login(EMAIL, "Senha-Errada-1")));
 
         assertInvalidCredentials(ex);
-        verify(passwordHasher).matches("Senha-Errada-1", STORED_HASH);
+        verify(passwordHasher).matches(user.getId(), "Senha-Errada-1", STORED_HASH);
         verify(passwordHasher, never()).simulateVerification(anyString());
     }
 
@@ -116,7 +116,7 @@ class AuthServiceAbuseProtectionTest {
                 () -> authService.login(login("google@rewit.com", PASSWORD))));
 
         verify(passwordHasher, times(2)).simulateVerification(PASSWORD);
-        verify(passwordHasher, never()).matches(anyString(), anyString());
+        verify(passwordHasher, never()).matches(any(), anyString(), anyString());
     }
 
     @Test
@@ -188,7 +188,8 @@ class AuthServiceAbuseProtectionTest {
         passwordHasher = argon2;
         rateLimitProperties.getAuth().getLogin().setEnabled(false);
         rebuildService();
-        User user = new User(UUID.randomUUID(), EMAIL, argon2.hash(PASSWORD), AuthProvider.LOCAL, null);
+        UUID userId = UUID.randomUUID();
+        User user = new User(userId, EMAIL, argon2.hash(userId, PASSWORD), AuthProvider.LOCAL, null);
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
 
         long unknown = medianLoginNanos("ninguem@rewit.com");
@@ -241,11 +242,13 @@ class AuthServiceAbuseProtectionTest {
     @DisplayName("Refresh válido dentro do limite rotaciona a sessão normalmente")
     void validRefreshRotatesSession() {
         User user = localUser();
-        AuthSession current = activeSession(user, "token-atual");
+        Instant expiresAt = Instant.now().plus(Duration.ofDays(30)).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String rawToken = tokenService.generateRefreshToken(user.getId(), expiresAt);
+        AuthSession current = activeSession(user, rawToken, expiresAt);
 
-        AuthResult result = authService.refresh(new RefreshCommand("token-atual", null, null));
+        AuthResult result = authService.refresh(new RefreshCommand(rawToken, null, null));
 
-        assertNotEquals("token-atual", result.refreshToken());
+        assertNotEquals(rawToken, result.refreshToken());
         assertTrue(current.isRevoked());
         assertNotNull(current.getReplacedBySessionId());
     }
@@ -256,22 +259,26 @@ class AuthServiceAbuseProtectionTest {
         rateLimitProperties.getAuth().getRefresh().setLimit(2);
         rebuildService();
         User user = localUser();
-        activeSession(user, "token-1");
-        activeSession(user, "token-2");
-        authService.refresh(new RefreshCommand("token-1", null, null));
-        authService.refresh(new RefreshCommand("token-2", null, null));
-        AuthSession third = activeSession(user, "token-3");
+        Instant expiresAt = Instant.now().plus(Duration.ofDays(30)).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String token1 = tokenService.generateRefreshToken(user.getId(), expiresAt);
+        String token2 = tokenService.generateRefreshToken(user.getId(), expiresAt);
+        activeSession(user, token1, expiresAt);
+        activeSession(user, token2, expiresAt);
+        authService.refresh(new RefreshCommand(token1, null, null));
+        authService.refresh(new RefreshCommand(token2, null, null));
+        String token3 = tokenService.generateRefreshToken(user.getId(), expiresAt);
+        AuthSession third = activeSession(user, token3, expiresAt);
         clearInvocations(authSessionRepository);
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.refresh(new RefreshCommand("token-3", null, null)));
+                () -> authService.refresh(new RefreshCommand(token3, null, null)));
 
         assertTooManyRequests(ex, "Muitas renovações de sessão. Tente novamente mais tarde.");
         verify(authSessionRepository, never()).save(any(AuthSession.class));
         assertTrue(third.isValid(), "o token não foi consumido");
 
         clock.advance(Duration.ofMinutes(5).plusMillis(1));
-        authService.refresh(new RefreshCommand("token-3", null, null));
+        authService.refresh(new RefreshCommand(token3, null, null));
         assertTrue(third.isRevoked());
     }
 
@@ -281,13 +288,16 @@ class AuthServiceAbuseProtectionTest {
         rateLimitProperties.getAuth().getRefresh().setLimit(1);
         rebuildService();
         User user = localUser();
-        activeSession(user, "token-1");
-        authService.refresh(new RefreshCommand("token-1", null, null));
-        AuthSession revoked = activeSession(user, "token-revogado");
+        Instant expiresAt = Instant.now().plus(Duration.ofDays(30)).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String token1 = tokenService.generateRefreshToken(user.getId(), expiresAt);
+        activeSession(user, token1, expiresAt);
+        authService.refresh(new RefreshCommand(token1, null, null));
+        String tokenRevogado = tokenService.generateRefreshToken(user.getId(), expiresAt);
+        AuthSession revoked = activeSession(user, tokenRevogado, expiresAt);
         revoked.revoke();
 
         assertThrows(RefreshTokenReuseDetectedException.class,
-                () -> authService.refresh(new RefreshCommand("token-revogado", null, null)));
+                () -> authService.refresh(new RefreshCommand(tokenRevogado, null, null)));
 
         verify(authSessionRepository).revokeAllByUserId(user.getId());
     }
@@ -304,22 +314,22 @@ class AuthServiceAbuseProtectionTest {
         User user = new User(UUID.randomUUID(), EMAIL, STORED_HASH, AuthProvider.LOCAL, null);
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
-        when(passwordHasher.matches(PASSWORD, STORED_HASH)).thenReturn(true);
+        when(passwordHasher.matches(user.getId(), PASSWORD, STORED_HASH)).thenReturn(true);
         when(profileRepository.findByUserId(user.getId()))
                 .thenReturn(Optional.of(new Profile(UUID.randomUUID(), user.getId(), "alvo", "Alvo", null, null)));
         return user;
     }
 
-    private AuthSession activeSession(User user, String rawToken) {
+    private AuthSession activeSession(User user, String rawToken, Instant expiresAt) {
         String hash = tokenService.hashRefreshToken(rawToken);
         AuthSession session = new AuthSession(UUID.randomUUID(), user.getId(), hash,
-                Instant.now().plus(Duration.ofDays(30)), null, null);
+                expiresAt, null, null);
         when(authSessionRepository.findByTokenHashForUpdate(hash)).thenReturn(Optional.of(session));
         return session;
     }
 
     private void stubRegistrationPersistence() {
-        when(passwordHasher.hash(anyString())).thenReturn(STORED_HASH);
+        when(passwordHasher.hash(any(UUID.class), anyString())).thenReturn(STORED_HASH);
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(profileRepository.save(any(Profile.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
