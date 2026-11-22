@@ -9,6 +9,7 @@ Este documento registra formalmente as versões estáveis homologadas e suportad
 | Componente | Linha / Versão | Status Oficial | Data de Lançamento / Suporte | Finalidade no Projeto |
 | :--- | :--- | :--- | :--- | :--- |
 | **Java** | **Java 25 LTS** | Versão LTS Estável | Suporte oficial ativo | Linguagem principal do Backend central |
+| **Imagem Backend Docker** | `eclipse-temurin:25-jdk-noble` / `25-jre-noble` (com digest fixado) | Imagem Oficial Multi-arch | Ubuntu 24.04 Noble + Temurin 25 LTS | Builder (Maven Wrapper `3.9.12`) e Runtime não-root do Backend |
 | **Spring Boot** | **4.1.1** (Linha 4.1.x) | Versão Estável Atual | Versão estável suportada | Framework central de microsserviços e DI |
 | **Spring Framework** | **7.1.x** | Versão Estável Atual | Base do Spring Boot 4.1.x | Concorrência Virtual Threads e Java 25 |
 | **PostgreSQL** | **PostgreSQL 18.x** | Versão Estável | Versão estável atual | SGBD primário e fonte canônica da verdade |

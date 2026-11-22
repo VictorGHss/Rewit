@@ -50,3 +50,20 @@ Detalhes em [observability.md](../architecture/observability.md).
 - **Métricas**: scrape Prometheus em `/actuator/prometheus`, sem credencial e sem fornecedor obrigatório.
 - **Traces**: OTLP/HTTP, desligado até `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` ser definido; sampling por `TRACING_SAMPLING_PROBABILITY` (padrão `0.1`; `1.0` no perfil `local`).
 - **Logs**: stdout, em JSON por padrão (`LOG_STRUCTURED_FORMAT=logstash`); o perfil `local` usa texto. O compose sobe o backend com o perfil `local`.
+
+---
+
+## 4. Empacotamento e Runtime do Container do Backend (`infrastructure/docker/backend.Dockerfile`)
+
+- **Contexto de build**: `./backend` (protegido por `backend/.dockerignore`, que exclui `target/`, IDEs, logs e arquivos `.env`/segredos sem excluir `mvnw`, `.mvn/`, `pom.xml` ou `src/`).
+  ```bash
+  docker build -f infrastructure/docker/backend.Dockerfile -t rewit-backend:local ./backend
+  ```
+- **Multi-stage reproduzível (Java 25 LTS)**:
+  - **Builder**: `eclipse-temurin:25-jdk-noble` (digest fixado), compilando exclusivamente via Maven Wrapper (`./mvnw`, Maven `3.9.12`) com camada dedicada de `dependency:go-offline`.
+  - **Runner**: `eclipse-temurin:25-jre-noble` (digest fixado), sem JDK, Maven, fontes ou ferramentas de build.
+- **Execução segura**:
+  - Usuário não-root dedicado (`rewit`, UID/GID `10001`), JAR em modo somente leitura (`0444`).
+  - Memória orientada por cgroup via `JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError"`.
+  - `ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]` e `STOPSIGNAL SIGTERM`: o `exec` promove a JVM para PID 1, garantindo entrega direta de `SIGTERM` para shutdown gracioso.
+- **Healthcheck interno**: consulta `http://127.0.0.1:${MANAGEMENT_SERVER_PORT:-8081}/actuator/health` sem expor a porta `8081` externamente (`EXPOSE 8080` apenas). A separação dedicada de probes `/actuator/health/liveness` e `/actuator/health/readiness` e o desacoplamento do indicador de saúde do Redis pertencem às etapas F2-DEPLOY-03.3/03.4.
