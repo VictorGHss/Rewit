@@ -51,10 +51,7 @@ class ConcurrentRefreshIntegrationTest {
     void tearDown() {
         if (createdUserId != null) {
             authSessionRepository.revokeAllByUserId(createdUserId);
-            userRepository.findById(createdUserId).ifPresent(user -> {
-                user.softDelete();
-                userRepository.save(user);
-            });
+            com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(createdUserId, "DELETED");
         }
     }
 

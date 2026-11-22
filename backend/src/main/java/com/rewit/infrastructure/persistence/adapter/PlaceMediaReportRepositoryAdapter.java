@@ -152,6 +152,30 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
         return PageResult.of(content, jpaPage.getNumber(), jpaPage.getSize(), jpaPage.getTotalElements());
     }
 
+    @Override
+    public boolean supportsDatabaseAutoResolve() {
+        return true;
+    }
+
+    @Override
+    @Transactional
+    public List<AutoResolvedReport> autoResolvePendingForRemovedMedia(UUID placeMediaId, String decisionNotes) {
+        if (placeMediaId == null) {
+            return List.of();
+        }
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = entityManager.createNativeQuery(
+                        "SELECT report_id, reason FROM public.rewit_auto_resolve_removed_place_media_reports(:placeMediaId, :decisionNotes)")
+                .setParameter("placeMediaId", placeMediaId)
+                .setParameter("decisionNotes", decisionNotes)
+                .getResultList();
+        return rows.stream()
+                .map(row -> new AutoResolvedReport(
+                        row[0] instanceof UUID u ? u : UUID.fromString(row[0].toString()),
+                        row[1] != null ? row[1].toString() : null))
+                .toList();
+    }
+
     private static String normalizeStatusFilter(String status) {
         if (status == null || status.isBlank()) {
             return null;

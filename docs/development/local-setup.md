@@ -92,17 +92,22 @@ cd android
 
 ---
 
-## 4. Role de Runtime do PostgreSQL (`rewit_app`)
+## 4. Roles de Runtime do PostgreSQL (`rewit_app`, `rewit_media` e `rewit_mod`)
 
-O backend conecta como `rewit_app` (sem DDL, sem superuser). O nome é fixo: as migrations concedem os privilégios de runtime somente a ela, e o init recusa outro `APP_DB_USER`. Os privilégios são explícitos (ADR-015): `DELETE` só nas tabelas com exclusão física legítima, PostGIS somente leitura, e uma tabela nova não nasce gravável pelo runtime; a migration que a cria concede o necessário e termina com `PERFORM rewit_assert_runtime_privileges();`. Na criação do volume, o init do container a provisiona com a senha de `APP_DB_PASSWORD` — **obrigatória e sem valor padrão**: com ela vazia, ausente ou igual ao exemplo, o init falha com mensagem explícita.
+O backend opera com três roles PostgreSQL separadas sem DDL e sem superuser (ADR-015, ADR-018):
+- **`rewit_app`** (`APP_DB_USER` / `APP_DB_PASSWORD`): identidade pública e comum para fluxos de usuário, catálogo, leitura e criação de denúncias de avaliação/discussão e reivindicações `PENDING` (sem escrita em trilhas de auditoria nem `UPDATE` em `place_media`).
+- **`rewit_media`** (`MEDIA_DB_USER` / `MEDIA_DB_PASSWORD`): identidade dedicada exclusivamente ao ciclo de vida público/automático de mídias de locais (remoção por autor/gerente/proprietário, denúncias/auto-quarentena, capa e expurgo `purged_at` > 24h), roteada transacionalmente por `@MediaLifecycleTransactional` (SEC-F2-03).
+- **`rewit_mod`** (`MOD_DB_USER` / `MOD_DB_PASSWORD`): identidade restrita exclusivamente aos 6 módulos administrativos de moderação, reivindicações comerciais e ciclo de vida de contas, roteada transacionalmente por `@ModerationTransactional`.
 
-Para provisionar de novo ou rotacionar a senha num banco existente, altere `APP_DB_PASSWORD` no `.env`, recrie o container (`docker compose up -d postgres`; o volume é preservado) e execute:
+Os nomes são fixos (`rewit_app`, `rewit_media` e `rewit_mod`): as migrations concedem privilégios somente a essas roles, não há membership nem `SET ROLE` cruzado entre elas, e o init recusa outros nomes ou senhas iguais/vazias. Os privilégios são explícitos: `DELETE` só nas tabelas com exclusão física legítima, PostGIS somente leitura, e uma tabela nova não nasce gravável; a migration que a cria concede o necessário e termina com `PERFORM rewit_assert_runtime_privileges();`. Além disso, a aplicação exige `MODERATION_AUDIT_SECRET` (>= 32 bytes, independente de todos os demais segredos e senhas de banco) e `MODERATION_AUDIT_KEY_ID` (padrão `v1`) para autenticação criptográfica `HMAC-SHA256` das trilhas de auditoria e decisões administrativas.
+
+Para provisionar de novo ou rotacionar senhas num banco existente, altere `APP_DB_PASSWORD`, `MEDIA_DB_PASSWORD` e/ou `MOD_DB_PASSWORD` no `.env`, recrie o container (`docker compose up -d postgres`; o volume é preservado) e execute:
 ```powershell
 docker compose exec postgres /docker-entrypoint-initdb.d/02-create-app-role.sh
 ```
-A senha chega ao `psql` pela entrada padrão e o servidor recebe apenas o verificador SCRAM. Fora do Docker, use `psql -U rewit_user -d rewit_db -v app_user=rewit_app -f infrastructure/postgres/provision-runtime-role.sql` (a senha é pedida sem eco).
+As senhas chegam ao `psql` pela entrada padrão e o servidor recebe apenas os verificadores SCRAM. Fora do Docker, use `psql -U rewit_user -d rewit_db -v app_user=rewit_app -f infrastructure/postgres/provision-runtime-role.sql` (ou `-v app_user=rewit_media` / `-v app_user=rewit_mod`; a senha é pedida sem eco).
 
-O teste `bash infrastructure/postgres/tests/provisioning-test.sh [commit]` valida o provisionamento a partir de um clone limpo, em containers descartáveis.
+O teste `bash infrastructure/postgres/tests/provisioning-test.sh [--working-tree|commit]` valida o provisionamento das três roles e o isolamento `SET ROLE` a partir de um clone limpo (ou do working tree local), em containers descartáveis.
 
 ---
 
@@ -113,7 +118,9 @@ Os testes de integração usam **somente** infraestrutura descartável declarada
 | Variável | Conteúdo |
 | :--- | :--- |
 | `TEST_DATASOURCE_URL` | `jdbc:postgresql://127.0.0.1:<porta>/<database>` do PostgreSQL descartável |
-| `TEST_APP_DB_USER` / `TEST_APP_DB_PASSWORD` | Role de runtime (`rewit_app`) provisionada no banco de teste |
+| `TEST_APP_DB_USER` / `TEST_APP_DB_PASSWORD` | Role de runtime pública (`rewit_app`) provisionada no banco de teste |
+| `TEST_MEDIA_DB_USER` / `TEST_MEDIA_DB_PASSWORD` | Role dedicada ao ciclo de vida público de mídias (`rewit_media`) provisionada no banco de teste, com senha independente |
+| `TEST_MOD_DB_USER` / `TEST_MOD_DB_PASSWORD` | Role restrita de moderação (`rewit_mod`) provisionada no banco de teste, com senha independente de `TEST_APP_DB_PASSWORD` e `TEST_MEDIA_DB_PASSWORD` |
 | `TEST_MIGRATION_DB_USER` / `TEST_MIGRATION_DB_PASSWORD` | Role de migração (owner do schema; precisa de `CREATEDB` e `CREATEROLE` para o teste de upgrade, que cria databases e roles descartáveis); é também a conexão administrativa das limpezas físicas de fixtures, que o runtime não pode fazer |
 | `TEST_REDIS_HOST` / `TEST_REDIS_PORT` | Redis descartável (`TEST_REDIS_PASSWORD` opcional) |
 | `TEST_STORAGE_ENDPOINT` | `http://127.0.0.1:<porta>` do S3 descartável (porta explícita) |

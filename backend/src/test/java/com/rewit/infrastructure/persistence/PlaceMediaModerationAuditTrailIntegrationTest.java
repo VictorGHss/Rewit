@@ -36,6 +36,9 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
     private PlaceMediaModerationAuditLogRepository auditLogRepository;
 
     @Autowired
+    private com.rewit.application.port.MediaLifecycleTransactionPort mediaLifecycleTransactionPort;
+
+    @Autowired
     private PlaceMediaRepositoryAdapter placeMediaRepository;
 
     @Autowired
@@ -75,27 +78,33 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
 
     @Test
     @DisplayName("Deve persistir auditoria de AUTHOR_REMOVE com sucesso")
-    @Transactional
     void shouldPersistAuthorRemoveAuditLog() {
         User user = createModerator();
         Place place = createPlace();
         PlaceMedia media = createMedia(place, user);
-
+        media.markRemovedByAuthor();
+        String mac = "aud1$v1$" + "c".repeat(64);
         PlaceMediaModerationAuditLog log = new PlaceMediaModerationAuditLog(
                 UUID.randomUUID(),
                 media.getId(),
                 place.getId(),
                 user.getId(),
+                PlaceMediaModerationAuditLog.ActorType.USER,
                 PlaceMediaModerationAction.AUTHOR_REMOVE,
                 "Remoção pelo próprio autor",
                 "Exclusão voluntária",
-                Instant.now()
+                null,
+                Instant.now(),
+                mac
         );
 
-        PlaceMediaModerationAuditLog saved = auditLogRepository.save(log);
+        PlaceMediaModerationAuditLog saved = mediaLifecycleTransactionPort.execute(() -> {
+            placeMediaRepository.save(media);
+            placeMediaRepository.flush();
+            return auditLogRepository.save(log);
+        });
         assertNotNull(saved);
         assertEquals(PlaceMediaModerationAction.AUTHOR_REMOVE, saved.getAction());
-        entityManager.flush();
 
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM place_media_moderation_audit_logs WHERE id = ? AND action = 'AUTHOR_REMOVE'",
@@ -107,29 +116,21 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
 
     @Test
     @DisplayName("Trigger no banco deve rejeitar UPDATE em place_media_moderation_audit_logs (append-only)")
-    @Transactional
     void shouldRejectUpdateOnAuditLog() {
         User user = createModerator();
         Place place = createPlace();
         PlaceMedia media = createMedia(place, user);
 
-        PlaceMediaModerationAuditLog log = new PlaceMediaModerationAuditLog(
-                UUID.randomUUID(),
-                media.getId(),
-                place.getId(),
-                user.getId(),
-                PlaceMediaModerationAction.REMOVE,
-                "Conteúdo impróprio",
-                "Notas",
-                Instant.now()
-        );
-        auditLogRepository.save(log);
-        entityManager.flush();
+        UUID logId = UUID.randomUUID();
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update(
+                "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at, authenticity_mac) "
+                        + "VALUES (?, ?, ?, ?, 'USER', 'REMOVE', 'Conteúdo impróprio', 'Notas', NOW(), ?)",
+                logId, media.getId(), place.getId(), user.getId(), "aud1$v1$" + "c".repeat(64));
 
         org.springframework.dao.DataAccessException ex = assertThrows(org.springframework.dao.DataAccessException.class, () ->
                 jdbcTemplate.update(
                         "UPDATE place_media_moderation_audit_logs SET reason = 'Alterado' WHERE id = ?",
-                        log.getId()
+                        logId
                 )
         );
         String err = (ex.getMessage() + " " + ex.getMostSpecificCause().getMessage()).toLowerCase();
@@ -142,29 +143,21 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
 
     @Test
     @DisplayName("Trigger no banco deve rejeitar DELETE em place_media_moderation_audit_logs (append-only)")
-    @Transactional
     void shouldRejectDeleteOnAuditLog() {
         User user = createModerator();
         Place place = createPlace();
         PlaceMedia media = createMedia(place, user);
 
-        PlaceMediaModerationAuditLog log = new PlaceMediaModerationAuditLog(
-                UUID.randomUUID(),
-                media.getId(),
-                place.getId(),
-                user.getId(),
-                PlaceMediaModerationAction.RESTORE,
-                null,
-                "Restaurada",
-                Instant.now()
-        );
-        auditLogRepository.save(log);
-        entityManager.flush();
+        UUID logId = UUID.randomUUID();
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update(
+                "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, actor_type, action, notes, created_at, authenticity_mac) "
+                        + "VALUES (?, ?, ?, ?, 'USER', 'RESTORE', 'Restaurada', NOW(), ?)",
+                logId, media.getId(), place.getId(), user.getId(), "aud1$v1$" + "c".repeat(64));
 
         org.springframework.dao.DataAccessException ex = assertThrows(org.springframework.dao.DataAccessException.class, () ->
                 jdbcTemplate.update(
                         "DELETE FROM place_media_moderation_audit_logs WHERE id = ?",
-                        log.getId()
+                        logId
                 )
         );
         String err = (ex.getMessage() + " " + ex.getMostSpecificCause().getMessage()).toLowerCase();
@@ -177,7 +170,6 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
 
     @Test
     @DisplayName("CHECK constraint deve rejeitar ação inválida na auditoria")
-    @Transactional
     void shouldRejectInvalidAuditAction() {
         User user = createModerator();
         Place place = createPlace();
@@ -185,7 +177,7 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
 
         UUID logId = UUID.randomUUID();
         assertThrows(DataIntegrityViolationException.class, () ->
-                jdbcTemplate.update(
+                com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                         "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, action, created_at) " +
                                 "VALUES (?, ?, ?, ?, 'INVALID_ACTION', NOW())",
                         logId, media.getId(), place.getId(), user.getId()
@@ -195,36 +187,26 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
 
     @Test
     @DisplayName("CHECK constraint em place_media deve aceitar AUTHOR, MODERATOR e NULL, rejeitando inválido")
-    @Transactional
     void shouldValidateRemovalSourceConstraint() {
         User user = createModerator();
         Place place = createPlace();
         PlaceMedia media = createMedia(place, user);
 
-        // Deve aceitar MODERATOR
-        media.markRemovedByModerator();
-        PlaceMedia savedMod = placeMediaRepository.save(media);
-        assertEquals(RemovalSource.MODERATOR, savedMod.getRemovalSource());
+        // Deve aceitar MODERATOR, AUTHOR, BUSINESS_OWNER e NULL (verificado no schema via owner)
+        for (String src : java.util.List.of("MODERATOR", "AUTHOR", "BUSINESS_OWNER")) {
+            com.rewit.config.PrivilegedTestDatabase.jdbc().update(
+                    "UPDATE place_media SET status = 'REMOVED', removal_source = ?, removed_at = NOW() WHERE id = ?",
+                    src, media.getId());
+            assertEquals(RemovalSource.valueOf(src), placeMediaRepository.findById(media.getId()).orElseThrow().getRemovalSource());
+        }
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update(
+                "UPDATE place_media SET status = 'ACTIVE', removal_source = NULL, removed_at = NULL WHERE id = ?",
+                media.getId());
+        assertNull(placeMediaRepository.findById(media.getId()).orElseThrow().getRemovalSource());
 
-        // Deve aceitar AUTHOR
-        media.markRemovedByAuthor();
-        PlaceMedia savedAuth = placeMediaRepository.save(media);
-        assertEquals(RemovalSource.AUTHOR, savedAuth.getRemovalSource());
-
-        // Deve aceitar BUSINESS_OWNER
-        media.markRemovedByBusinessOwner();
-        PlaceMedia savedOwner = placeMediaRepository.save(media);
-        assertEquals(RemovalSource.BUSINESS_OWNER, savedOwner.getRemovalSource());
-
-        // Deve aceitar NULL (quando restaurado/ativo)
-        media.markActive();
-        PlaceMedia savedActive = placeMediaRepository.save(media);
-        assertNull(savedActive.getRemovalSource());
-        entityManager.flush();
-
-        // Deve rejeitar valor inválido via SQL
+        // Deve rejeitar valor inválido via CHECK constraint do PostgreSQL
         assertThrows(DataIntegrityViolationException.class, () ->
-                jdbcTemplate.update(
+                com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                         "UPDATE place_media SET removal_source = 'INVALID_SOURCE' WHERE id = ?",
                         media.getId()
                 )
@@ -233,7 +215,6 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
 
     @Test
     @DisplayName("Trigger no banco deve rejeitar TRUNCATE em place_media_moderation_audit_logs (append-only V34)")
-    @Transactional
     void shouldRejectTruncateOnAuditLog() {
         org.springframework.dao.DataAccessException ex = assertThrows(org.springframework.dao.DataAccessException.class, () ->
                 jdbcTemplate.execute("TRUNCATE TABLE place_media_moderation_audit_logs")
@@ -248,36 +229,63 @@ class PlaceMediaModerationAuditTrailIntegrationTest {
 
     @Test
     @DisplayName("Deve persistir auditoria de AUTO_QUARANTINE e BUSINESS_OWNER_REMOVE com sucesso")
-    @Transactional
     void shouldPersistAutoQuarantineAndBusinessOwnerRemoveAuditLogs() {
         User user = createModerator();
         Place place = createPlace();
         PlaceMedia media = createMedia(place, user);
 
+        // 3 denúncias pendentes + estado UNDER_REVIEW para AUTO_QUARANTINE legítimo sob rewit_media
+        String mac = "aud1$v1$" + "d".repeat(64);
         PlaceMediaModerationAuditLog autoQuarantineLog = new PlaceMediaModerationAuditLog(
                 UUID.randomUUID(),
                 media.getId(),
                 place.getId(),
-                user.getId(),
+                null,
+                PlaceMediaModerationAuditLog.ActorType.SYSTEM,
                 PlaceMediaModerationAction.AUTO_QUARANTINE,
                 "Quarentena automática por excesso de denúncias",
                 "Limiar atingido",
-                Instant.now()
+                null,
+                Instant.now(),
+                mac
         );
-        auditLogRepository.save(autoQuarantineLog);
+        mediaLifecycleTransactionPort.run(() -> {
+            for (int i = 0; i < 3; i++) {
+                UUID repUser = com.rewit.config.PrivilegedTestDatabase.createUser("pm_rep_" + i, "USER");
+                jdbcTemplate.update("INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason) VALUES (?, ?, ?, 'SPAM')",
+                        UUID.randomUUID(), media.getId(), repUser);
+            }
+            media.markUnderReview();
+            placeMediaRepository.save(media);
+            placeMediaRepository.flush();
+            auditLogRepository.save(autoQuarantineLog);
+        });
+
+        // Conta comercial aprovada vinculada ao local para BUSINESS_OWNER_REMOVE legítimo sob rewit_media
+        UUID bizId = com.rewit.config.PrivilegedTestDatabase.jdbc().queryForObject(
+                "INSERT INTO business_accounts (user_id, corporate_name, tax_id, verification_status) VALUES (?, 'Empresa PM', ?, 'APPROVED') RETURNING id",
+                UUID.class, user.getId(), UUID.randomUUID().toString().replace("-", "").substring(0, 14));
+        com.rewit.config.PrivilegedTestDatabase.setPlaceClaimedBy(place.getId(), bizId);
 
         PlaceMediaModerationAuditLog ownerRemoveLog = new PlaceMediaModerationAuditLog(
                 UUID.randomUUID(),
                 media.getId(),
                 place.getId(),
                 user.getId(),
+                PlaceMediaModerationAuditLog.ActorType.USER,
                 PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE,
                 "Remoção pelo proprietário do estabelecimento",
                 "Foto desatualizada",
-                Instant.now()
+                null,
+                Instant.now(),
+                mac
         );
-        auditLogRepository.save(ownerRemoveLog);
-        entityManager.flush();
+        mediaLifecycleTransactionPort.run(() -> {
+            media.markRemovedByBusinessOwner();
+            placeMediaRepository.save(media);
+            placeMediaRepository.flush();
+            auditLogRepository.save(ownerRemoveLog);
+        });
 
         Integer countAuto = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM place_media_moderation_audit_logs WHERE id = ? AND action = 'AUTO_QUARANTINE'",

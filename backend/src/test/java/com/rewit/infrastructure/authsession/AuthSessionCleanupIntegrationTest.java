@@ -13,6 +13,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -65,6 +66,7 @@ class AuthSessionCleanupIntegrationTest {
     private PlatformTransactionManager transactionManager;
 
     @Autowired
+    @Qualifier("appDataSource")
     private DataSource dataSource;
 
     @Test

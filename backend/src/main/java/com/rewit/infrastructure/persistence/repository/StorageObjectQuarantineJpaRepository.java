@@ -78,6 +78,29 @@ public interface StorageObjectQuarantineJpaRepository extends JpaRepository<Stor
             @Param("firstObservedAt") Instant firstObservedAt
     );
 
+    /**
+     * Validação temporal autoritativa no PostgreSQL (SEC-F2-04-ARCH-01): executada dentro da
+     * transação de expurgo, após a aquisição dos locks da entidade dona e da linha de quarentena,
+     * imediatamente antes da exclusão física no storage. Avalia elegibilidade exclusivamente com
+     * {@code clock_timestamp()} do banco de dados, sem depender do relógio da JVM e sem exigir
+     * nova função {@code SECURITY DEFINER} (usa privilégio normal de {@code SELECT} em ambos os
+     * namespaces, sob {@code rewit_app} ou {@code rewit_media}).
+     */
+    @Query(value = """
+        SELECT (
+            q.status = 'CONFIRMED_ORPHAN'
+            AND q.first_observed_at <= t.v_now
+            AND q.first_observed_at <= t.v_now - INTERVAL '24 hours'
+            AND q.confirmed_at IS NOT NULL
+            AND q.confirmed_at <= t.v_now
+            AND q.confirmed_at >= q.first_observed_at + INTERVAL '24 hours'
+        )
+        FROM public.storage_object_quarantine q
+        CROSS JOIN (SELECT clock_timestamp() AS v_now) t
+        WHERE q.id = :id
+        """, nativeQuery = true)
+    Boolean isLockedConfirmedEntryEligibleForPurge(@Param("id") UUID id);
+
     @Modifying(clearAutomatically = true)
     @Query(value = """
         UPDATE storage_object_quarantine
@@ -87,7 +110,24 @@ public interface StorageObjectQuarantineJpaRepository extends JpaRepository<Stor
         """, nativeQuery = true)
     int markConfirmedOrphan(@Param("id") UUID id, @Param("now") Instant now);
 
+    /**
+     * Confirmação autorizada via função SECURITY DEFINER (SEC-F2-04): valida session_user, adquire FOR UPDATE,
+     * exige estado OBSERVED e o transcurso do grace period de 24h a partir de first_observed_at pelo relógio
+     * do PostgreSQL. Transiciona atomicamente para CONFIRMED_ORPHAN com confirmed_at = clock_timestamp().
+     */
+    @Query(value = "SELECT public.rewit_confirm_storage_quarantine_entry(:id)", nativeQuery = true)
+    Boolean confirmEntryAsRuntime(@Param("id") UUID id);
+
     @Modifying(clearAutomatically = true)
     @Query(value = "DELETE FROM storage_object_quarantine WHERE id = :id", nativeQuery = true)
     int releaseEntry(@Param("id") UUID id);
+
+    /**
+     * Liberação restrita usada sob {@code rewit_media} (expurgo de {@code places/}): {@code rewit_media} não possui
+     * DELETE direto na tabela. A função SECURITY DEFINER remove somente a entrada {@code CONFIRMED_ORPHAN} do
+     * namespace {@code places/}; retorna {@code false} se a entrada não existir mais e aborta para outros
+     * namespaces ou estados.
+     */
+    @Query(value = "SELECT public.rewit_release_place_quarantine_entry(:id)", nativeQuery = true)
+    Boolean releasePlaceEntryAsMediaRole(@Param("id") UUID id);
 }

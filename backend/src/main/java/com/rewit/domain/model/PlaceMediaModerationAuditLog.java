@@ -26,23 +26,31 @@ public class PlaceMediaModerationAuditLog {
     private final String notes;
     private final UUID reportId;
     private final Instant createdAt;
+    private final String authenticityMac;
 
     public PlaceMediaModerationAuditLog(UUID id, UUID placeMediaId, UUID placeId, UUID actorUserId,
                                         PlaceMediaModerationAction action, String reason, String notes,
                                         Instant createdAt) {
-        this(id, placeMediaId, placeId, actorUserId, actorUserId != null ? ActorType.USER : ActorType.SYSTEM, action, reason, notes, null, createdAt);
+        this(id, placeMediaId, placeId, actorUserId, actorUserId != null ? ActorType.USER : ActorType.SYSTEM, action, reason, notes, null, createdAt, null);
     }
 
     public PlaceMediaModerationAuditLog(UUID id, UUID placeMediaId, UUID placeId, UUID actorUserId,
                                         PlaceMediaModerationAction action, String reason, String notes,
                                         UUID reportId, Instant createdAt) {
-        this(id, placeMediaId, placeId, actorUserId, actorUserId != null ? ActorType.USER : ActorType.SYSTEM, action, reason, notes, reportId, createdAt);
+        this(id, placeMediaId, placeId, actorUserId, actorUserId != null ? ActorType.USER : ActorType.SYSTEM, action, reason, notes, reportId, createdAt, null);
     }
 
     public PlaceMediaModerationAuditLog(UUID id, UUID placeMediaId, UUID placeId, UUID actorUserId,
                                         ActorType actorType,
                                         PlaceMediaModerationAction action, String reason, String notes,
                                         UUID reportId, Instant createdAt) {
+        this(id, placeMediaId, placeId, actorUserId, actorType, action, reason, notes, reportId, createdAt, null);
+    }
+
+    public PlaceMediaModerationAuditLog(UUID id, UUID placeMediaId, UUID placeId, UUID actorUserId,
+                                        ActorType actorType,
+                                        PlaceMediaModerationAction action, String reason, String notes,
+                                        UUID reportId, Instant createdAt, String authenticityMac) {
         this.id = id != null ? id : UUID.randomUUID();
         this.placeMediaId = Objects.requireNonNull(placeMediaId, "placeMediaId must not be null");
         this.placeId = Objects.requireNonNull(placeId, "placeId must not be null");
@@ -57,6 +65,7 @@ public class PlaceMediaModerationAuditLog {
         this.notes = notes != null && !notes.isBlank() ? notes.trim() : null;
         this.reportId = reportId;
         this.createdAt = createdAt != null ? createdAt : Instant.now();
+        this.authenticityMac = authenticityMac;
     }
 
     public UUID getId() {
@@ -101,5 +110,9 @@ public class PlaceMediaModerationAuditLog {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getAuthenticityMac() {
+        return authenticityMac;
     }
 }

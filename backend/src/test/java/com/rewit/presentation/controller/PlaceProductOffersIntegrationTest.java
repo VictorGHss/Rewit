@@ -221,7 +221,7 @@ class PlaceProductOffersIntegrationTest {
         UUID productId = product("ACTIVE");
         putOffer(admin, placeId, productId, body(accountId, "AVAILABLE", "3.00", null)).andExpect(status().isOk());
 
-        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
         for (UUID target : List.of(placeId, UUID.randomUUID())) {
             mockMvc.perform(withToken(get("/api/v1/places/{placeId}/offers", target), admin))
                     .andExpect(status().isNotFound())
@@ -257,14 +257,14 @@ class PlaceProductOffersIntegrationTest {
                 404, "BUSINESS_ACCOUNT_NOT_FOUND");
         expectCode(deleteOffer(intruder, placeId, productId, accountId), 404, "BUSINESS_ACCOUNT_NOT_FOUND");
 
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'PENDING' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'PENDING' WHERE id = ?", accountId);
         expectCode(putOffer(owner, placeId, productId, body(accountId, "OUT_OF_STOCK", null, null)),
                 409, "BUSINESS_ACCOUNT_NOT_APPROVED");
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
         expectCode(deleteOffer(owner, placeId, productId, accountId), 409, "BUSINESS_ACCOUNT_NOT_APPROVED");
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
 
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", owner.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", owner.id());
         expectCode(putOffer(owner, placeId, productId, body(accountId, "OUT_OF_STOCK", null, null)),
                 401, "ACCOUNT_DISABLED");
         expectCode(deleteOffer(owner, placeId, productId, accountId), 401, "ACCOUNT_DISABLED");
@@ -418,11 +418,11 @@ class PlaceProductOffersIntegrationTest {
         Map<String, Object> stored = offerRow(placeId, productId);
 
         List<Consumer<Boolean>> toggles = List.of(
-                hidden -> jdbcTemplate.update("UPDATE users SET account_status = ?, is_active = ? WHERE id = ?",
+                hidden -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = ?, is_active = ? WHERE id = ?",
                         hidden ? "SUSPENDED" : "ACTIVE", !hidden, admin.id()),
-                hidden -> jdbcTemplate.update("UPDATE business_accounts SET verification_status = ? WHERE id = ?",
+                hidden -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = ? WHERE id = ?",
                         hidden ? "REJECTED" : "APPROVED", accountId),
-                hidden -> jdbcTemplate.update("UPDATE business_accounts SET verification_status = ? WHERE id = ?",
+                hidden -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = ? WHERE id = ?",
                         hidden ? "PENDING" : "APPROVED", accountId));
         for (Consumer<Boolean> toggle : toggles) {
             toggle.accept(true);
@@ -435,9 +435,9 @@ class PlaceProductOffersIntegrationTest {
         }
 
         // Status do local e regravação do mesmo titular também não apagam nada.
-        jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", placeId);
-        jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", placeId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = claimed_by_business_id WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'CLOSED' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = claimed_by_business_id WHERE id = ?", placeId);
         assertEquals(List.of(productId.toString()), productIds(list(visitor, placeId, 0, 20)));
         assertEquals(stored, offerRow(placeId, productId));
     }
@@ -452,7 +452,7 @@ class PlaceProductOffersIntegrationTest {
         UUID accountA = createAccount(adminA);
         claimViaOfficialFlow(adminA, accountA, placeId);
         UUID accountB = createAccount(adminB);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountB);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountB);
         UUID productA1 = product("ACTIVE");
         UUID productA2 = product("ACTIVE");
         putOffer(adminA, placeId, productA1, body(accountA, "AVAILABLE", "15.00", null)).andExpect(status().isOk());
@@ -489,7 +489,7 @@ class PlaceProductOffersIntegrationTest {
         UUID accountA = approvedOwner(adminA, placeId);
         TestUser adminB = registerUser("t2_all_b");
         UUID accountB = createAccount(adminB);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountB);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountB);
         UUID productOfA = product("ACTIVE");
         putOffer(adminA, placeId, productOfA, body(accountA, "AVAILABLE", "10.00", null)).andExpect(status().isOk());
 
@@ -538,10 +538,11 @@ class PlaceProductOffersIntegrationTest {
         List<Map<String, Object>> before = jdbcTemplate.queryForList(
                 "SELECT * FROM place_product_offers WHERE place_id = ? ORDER BY id", placeId);
 
-        TransactionTemplate tx = new TransactionTemplate(transactionManager);
-        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> {
-            jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
-            assertEquals(0, offerCount(placeId), "dentro da transação a troca já apagou as ofertas");
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> com.rewit.config.PrivilegedTestDatabase.inOwnerTransaction(ownerJdbc -> {
+            ownerJdbc.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
+            Integer countInside = ownerJdbc.queryForObject(
+                    "SELECT count(*) FROM place_product_offers WHERE place_id = ?", Integer.class, placeId);
+            assertEquals(0, countInside, "dentro da transação a troca já apagou as ofertas");
             throw new IllegalStateException("falha depois da troca de titular");
         }));
         assertEquals("falha depois da troca de titular", failure.getMessage());
@@ -639,15 +640,14 @@ class PlaceProductOffersIntegrationTest {
         UUID accountB = createAccount(registerUser("t2_conc_b"));
         UUID productId = product("ACTIVE");
 
-        TransactionTemplate tx = new TransactionTemplate(transactionManager);
         CountDownLatch changed = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         AtomicInteger holderPid = new AtomicInteger();
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<?> holder = executor.submit(() -> tx.executeWithoutResult(status -> {
-                holderPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
-                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
+            Future<?> holder = executor.submit(() -> com.rewit.config.PrivilegedTestDatabase.inOwnerTransaction(ownerJdbc -> {
+                holderPid.set(ownerJdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                ownerJdbc.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
                 changed.countDown();
                 awaitRelease(release);
             }));
@@ -724,7 +724,7 @@ class PlaceProductOffersIntegrationTest {
                   AND query NOT ILIKE 'INSERT%'
                 """;
         while (System.nanoTime() < deadline) {
-            for (Map<String, Object> row : jdbcTemplate.queryForList(sql)) {
+            for (Map<String, Object> row : com.rewit.config.PrivilegedTestDatabase.jdbc().queryForList(sql)) {
                 int pid = ((Number) row.get("pid")).intValue();
                 if (excluded.contains(pid)) {
                     continue;
@@ -775,7 +775,7 @@ class PlaceProductOffersIntegrationTest {
     }
 
     private void transferOwnership(UUID placeId, UUID newAccountId) {
-        assertEquals(1, jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+        assertEquals(1, com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
                 newAccountId, placeId));
     }
 
@@ -905,7 +905,7 @@ class PlaceProductOffersIntegrationTest {
 
     private UUID approvedOwner(TestUser user, UUID placeId) throws Exception {
         UUID accountId = createAccount(user);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
         transferOwnership(placeId, accountId);
         return accountId;
     }

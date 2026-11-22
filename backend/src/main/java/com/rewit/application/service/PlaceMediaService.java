@@ -8,6 +8,8 @@ import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaModera
 import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaReportView;
 import com.rewit.application.dto.media.PlaceMediaModerationDtos.PlaceMediaUnderReviewView;
 import com.rewit.application.port.BusinessAccountRepository;
+import com.rewit.application.port.MediaLifecycleTransactionPort;
+import com.rewit.application.port.ModerationTransactionPort;
 import com.rewit.application.port.ObjectStoragePort;
 import com.rewit.application.port.PlaceMediaModerationAuditLogRepository;
 import com.rewit.application.port.PlaceMediaReportRepository;
@@ -27,6 +29,10 @@ import com.rewit.domain.model.Place;
 import com.rewit.domain.model.PlaceMedia;
 import com.rewit.domain.model.PlaceMediaModerationAuditLog;
 import com.rewit.domain.model.PlaceMediaReport;
+import com.rewit.infrastructure.persistence.routing.MediaLifecycleTransactional;
+import com.rewit.infrastructure.persistence.routing.ModerationTransactional;
+import com.rewit.infrastructure.security.ModerationAuditMacService;
+import com.rewit.infrastructure.security.ModerationAuditPayload;
 import com.rewit.infrastructure.storage.ImageSanitizer;
 import com.rewit.infrastructure.storage.ImageSanitizer.SanitizedImage;
 import org.slf4j.Logger;
@@ -70,6 +76,9 @@ public class PlaceMediaService {
     private final PlaceMediaReportRepository placeMediaReportRepository;
     private final PlaceMediaModerationAuditLogRepository placeMediaModerationAuditLogRepository;
     private final ModeratorRolePolicy moderatorRolePolicy;
+    private final ModerationAuditMacService moderationAuditMacService;
+    private final ModerationTransactionPort moderationTransactionExecutor;
+    private final MediaLifecycleTransactionPort mediaLifecycleTransactionExecutor;
 
     public PlaceMediaService(PlaceRepository placeRepository,
                              PlaceMediaRepository placeMediaRepository,
@@ -85,7 +94,6 @@ public class PlaceMediaService {
                 businessAccountRepository, userRepository, placeMediaReportRepository, placeMediaModerationAuditLogRepository, null);
     }
 
-    @Autowired
     public PlaceMediaService(PlaceRepository placeRepository,
                              PlaceMediaRepository placeMediaRepository,
                              AccountStatusPolicy accountStatusPolicy,
@@ -96,7 +104,7 @@ public class PlaceMediaService {
                              UserRepository userRepository,
                              PlaceMediaReportRepository placeMediaReportRepository,
                              PlaceMediaModerationAuditLogRepository placeMediaModerationAuditLogRepository,
-                             @Autowired(required = false) ModeratorRolePolicy moderatorRolePolicy) {
+                             ModeratorRolePolicy moderatorRolePolicy) {
         this.placeRepository = Objects.requireNonNull(placeRepository, "PlaceRepository must not be null");
         this.placeMediaRepository = Objects.requireNonNull(placeMediaRepository, "PlaceMediaRepository must not be null");
         this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
@@ -110,6 +118,42 @@ public class PlaceMediaService {
         this.moderatorRolePolicy = moderatorRolePolicy != null
                 ? moderatorRolePolicy
                 : new ModeratorRolePolicy(accountStatusPolicy, userRepository);
+        this.moderationAuditMacService = null;
+        this.moderationTransactionExecutor = null;
+        this.mediaLifecycleTransactionExecutor = null;
+    }
+
+    @Autowired
+    public PlaceMediaService(PlaceRepository placeRepository,
+                             PlaceMediaRepository placeMediaRepository,
+                             AccountStatusPolicy accountStatusPolicy,
+                             ObjectStoragePort objectStoragePort,
+                             ImageSanitizer imageSanitizer,
+                             RateLimiter rateLimiter,
+                             BusinessAccountRepository businessAccountRepository,
+                             UserRepository userRepository,
+                             PlaceMediaReportRepository placeMediaReportRepository,
+                             PlaceMediaModerationAuditLogRepository placeMediaModerationAuditLogRepository,
+                             @Autowired(required = false) ModeratorRolePolicy moderatorRolePolicy,
+                             ModerationAuditMacService moderationAuditMacService,
+                             ModerationTransactionPort moderationTransactionExecutor,
+                             MediaLifecycleTransactionPort mediaLifecycleTransactionExecutor) {
+        this.placeRepository = Objects.requireNonNull(placeRepository, "PlaceRepository must not be null");
+        this.placeMediaRepository = Objects.requireNonNull(placeMediaRepository, "PlaceMediaRepository must not be null");
+        this.accountStatusPolicy = Objects.requireNonNull(accountStatusPolicy, "AccountStatusPolicy must not be null");
+        this.objectStoragePort = Objects.requireNonNull(objectStoragePort, "ObjectStoragePort must not be null");
+        this.imageSanitizer = Objects.requireNonNull(imageSanitizer, "ImageSanitizer must not be null");
+        this.rateLimiter = Objects.requireNonNull(rateLimiter, "RateLimiter must not be null");
+        this.businessAccountRepository = Objects.requireNonNull(businessAccountRepository, "BusinessAccountRepository must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "UserRepository must not be null");
+        this.placeMediaReportRepository = Objects.requireNonNull(placeMediaReportRepository, "PlaceMediaReportRepository must not be null");
+        this.placeMediaModerationAuditLogRepository = Objects.requireNonNull(placeMediaModerationAuditLogRepository, "PlaceMediaModerationAuditLogRepository must not be null");
+        this.moderatorRolePolicy = moderatorRolePolicy != null
+                ? moderatorRolePolicy
+                : new ModeratorRolePolicy(accountStatusPolicy, userRepository);
+        this.moderationAuditMacService = Objects.requireNonNull(moderationAuditMacService, "ModerationAuditMacService must not be null");
+        this.moderationTransactionExecutor = Objects.requireNonNull(moderationTransactionExecutor, "ModerationTransactionPort must not be null");
+        this.mediaLifecycleTransactionExecutor = Objects.requireNonNull(mediaLifecycleTransactionExecutor, "MediaLifecycleTransactionPort must not be null");
     }
 
     @Transactional
@@ -225,7 +269,7 @@ public class PlaceMediaService {
         return PlaceMediaView.fromDomain(saved);
     }
 
-    @Transactional
+    @MediaLifecycleTransactional
     public PlaceMediaView setPrimaryMedia(UUID actorUserId, UUID placeId, UUID mediaId) {
         if (actorUserId == null) {
             throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
@@ -266,12 +310,10 @@ public class PlaceMediaService {
         return PlaceMediaView.fromDomain(saved);
     }
 
-    @Transactional
     public void deleteMedia(UUID actorUserId, UUID placeId, UUID mediaId) {
         deleteMedia(actorUserId, placeId, mediaId, null);
     }
 
-    @Transactional
     public void deleteMedia(UUID actorUserId, UUID placeId, UUID mediaId, RemovalSource intendedSource) {
         if (actorUserId == null) {
             throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
@@ -280,6 +322,37 @@ public class PlaceMediaService {
             throw new BusinessException("Identificadores inválidos", HttpStatus.BAD_REQUEST, "INVALID_IDENTIFIERS");
         }
 
+        if (moderationTransactionExecutor == null || mediaLifecycleTransactionExecutor == null) {
+            deleteMediaInternal(actorUserId, placeId, mediaId, intendedSource);
+            return;
+        }
+
+        if (shouldRouteDeleteToModeration(actorUserId, mediaId, intendedSource)) {
+            moderationTransactionExecutor.run(() -> deleteMediaInternal(actorUserId, placeId, mediaId, intendedSource));
+        } else {
+            mediaLifecycleTransactionExecutor.run(() -> deleteMediaInternal(actorUserId, placeId, mediaId, intendedSource));
+        }
+    }
+
+    private boolean shouldRouteDeleteToModeration(UUID actorUserId, UUID mediaId, RemovalSource intendedSource) {
+        if (intendedSource == RemovalSource.MODERATOR) {
+            return true;
+        }
+        if (intendedSource != null) {
+            return false;
+        }
+        boolean isAuthor = placeMediaRepository.findById(mediaId)
+                .map(media -> media.getUserId().equals(actorUserId))
+                .orElse(false);
+        if (isAuthor) {
+            return false;
+        }
+        return userRepository != null && userRepository.findById(actorUserId)
+                .map(u -> u.getRole() == Role.MODERATOR || u.getRole() == Role.ADMIN)
+                .orElse(false);
+    }
+
+    private void deleteMediaInternal(UUID actorUserId, UUID placeId, UUID mediaId, RemovalSource intendedSource) {
         accountStatusPolicy.requireOperational(actorUserId);
 
         Place place = placeRepository.findByIdForUpdate(placeId)
@@ -356,30 +429,40 @@ public class PlaceMediaService {
             }
         }
 
+        PlaceMediaModerationAction auditAction;
+        String auditReason;
         switch (effectiveSource) {
             case AUTHOR -> {
                 media.markRemovedByAuthor();
                 removalCause = "próprio autor da fotografia";
-                saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.AUTHOR_REMOVE, "Remoção pelo próprio autor", null, null);
+                auditAction = PlaceMediaModerationAction.AUTHOR_REMOVE;
+                auditReason = "Remoção pelo próprio autor";
             }
             case PLACE_MANAGER -> {
                 media.markRemovedByPlaceManager();
                 removalCause = "responsável/criador direto do local";
-                saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.PLACE_MANAGER_REMOVE, "Remoção pelo responsável/criador do local", null, null);
+                auditAction = PlaceMediaModerationAction.PLACE_MANAGER_REMOVE;
+                auditReason = "Remoção pelo responsável/criador do local";
             }
             case BUSINESS_OWNER -> {
                 media.markRemovedByBusinessOwner();
                 removalCause = "representante comercial do estabelecimento";
-                saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE, "Remoção pelo representante comercial do estabelecimento", null, null);
+                auditAction = PlaceMediaModerationAction.BUSINESS_OWNER_REMOVE;
+                auditReason = "Remoção pelo representante comercial do estabelecimento";
             }
             case MODERATOR -> {
+                requireModerator(actorUserId);
                 media.markRemovedByModerator();
                 removalCause = "moderação administrativa";
-                saveAuditLog(mediaId, placeId, actorUserId, PlaceMediaModerationAction.REMOVE, "Remoção por moderação administrativa", null, null);
+                auditAction = PlaceMediaModerationAction.REMOVE;
+                auditReason = "Remoção por moderação administrativa";
             }
             default -> throw new IllegalStateException("Origem de remoção inesperada: " + effectiveSource);
         }
         placeMediaRepository.save(media);
+        placeMediaRepository.flush();
+
+        saveAuditLog(mediaId, placeId, actorUserId, auditAction, auditReason, null, null);
 
         // Se a capa foi removida, elege deterministamente a foto ativa mais antiga como nova capa
         if (wasPrimary) {
@@ -389,25 +472,39 @@ public class PlaceMediaService {
             });
         }
 
-        // Resolve TODAS as denúncias pendentes associadas à mídia removida (AU-1):
-        // Registra como AUTO_RESOLVE_REPORT atribuído ao SYSTEM (sem atribuir decisão humana indevida)
-        List<PlaceMediaReport> reports = placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId);
-        for (PlaceMediaReport r : reports) {
-            if (r.isPending()) {
-                String resolutionNote = "Resolução automática: fotografia removida pelo " + removalCause;
-                r.autoResolve(resolutionNote);
-                placeMediaReportRepository.save(r);
-
+        // Resolve TODAS as denúncias pendentes associadas à mídia removida (AU-1 / S3-A13-F2 / SEC-F2-03):
+        // Registra como AUTO_RESOLVE_REPORT atribuído ao SYSTEM (sem atribuir decisão humana indevida).
+        // Quando executando sob rewit_media (AUTHOR/BUSINESS_OWNER/PLACE_MANAGER), delega a atualização à função
+        // SECURITY DEFINER rewit_auto_resolve_removed_place_media_reports; sob rewit_mod, atualiza diretamente.
+        String resolutionNote = "Resolução automática: fotografia removida pelo " + removalCause;
+        if (effectiveSource != RemovalSource.MODERATOR && placeMediaReportRepository.supportsDatabaseAutoResolve()) {
+            List<PlaceMediaReportRepository.AutoResolvedReport> resolved =
+                    placeMediaReportRepository.autoResolvePendingForRemovedMedia(mediaId, resolutionNote);
+            for (PlaceMediaReportRepository.AutoResolvedReport r : resolved) {
                 saveAuditLog(mediaId, placeId, null,
                         PlaceMediaModerationAction.AUTO_RESOLVE_REPORT,
-                        r.getReason(),
+                        r.reason(),
                         resolutionNote,
-                        r.getId());
+                        r.reportId());
+            }
+        } else {
+            List<PlaceMediaReport> reports = placeMediaReportRepository.findByPlaceMediaIdForUpdate(mediaId);
+            for (PlaceMediaReport r : reports) {
+                if (r.isPending()) {
+                    r.autoResolve(resolutionNote);
+                    placeMediaReportRepository.save(r);
+
+                    saveAuditLog(mediaId, placeId, null,
+                            PlaceMediaModerationAction.AUTO_RESOLVE_REPORT,
+                            r.getReason(),
+                            resolutionNote,
+                            r.getId());
+                }
             }
         }
     }
 
-    @Transactional
+    @MediaLifecycleTransactional
     public void reportMedia(UUID actorUserId, UUID placeId, UUID mediaId, String reason, String detail) {
         if (actorUserId == null) {
             throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
@@ -461,6 +558,7 @@ public class PlaceMediaService {
             boolean wasPrimary = media.isPrimary();
             media.markUnderReview();
             placeMediaRepository.save(media);
+            placeMediaRepository.flush();
             if (wasPrimary) {
                 placeMediaRepository.findFirstActiveByPlaceId(placeId).ifPresent(next -> {
                     next.setPrimary(true);
@@ -544,7 +642,7 @@ public class PlaceMediaService {
         return PlaceMediaReportView.of(report, media);
     }
 
-    @Transactional
+    @ModerationTransactional
     public PlaceMediaReportView decideReport(UUID moderatorUserId, UUID reportId, String decision, String notes) {
         if (reportId == null) {
             throw new BusinessException("Identificador de denúncia inválido", HttpStatus.BAD_REQUEST, "INVALID_REPORT_ID");
@@ -584,14 +682,21 @@ public class PlaceMediaService {
             throw new BusinessException("A denúncia já foi decidida anteriormente", HttpStatus.CONFLICT, "REPORT_ALREADY_DECIDED");
         }
 
+        Instant decidedAt = ModerationAuditPayload.canonicalTimestamp(Instant.now());
+        String normalizedNotes = notes != null ? notes.trim() : null;
+
         if (decision.equalsIgnoreCase("ACCEPT")) {
-            lockedReport.accept(moderatorUserId, notes);
+            String decisionMac = computeReportDecisionMac(
+                    lockedReport.getId(), lockedMedia.getId(), moderatorUserId,
+                    PlaceMediaReport.STATUS_ACCEPTED, lockedReport.getReason(), normalizedNotes, decidedAt);
+            lockedReport.accept(moderatorUserId, notes, decidedAt, decisionMac);
             placeMediaReportRepository.save(lockedReport);
 
             if (lockedMedia.isActive() || lockedMedia.isUnderReview()) {
                 boolean wasPrimary = lockedMedia.isPrimary();
                 lockedMedia.markRemovedByModerator();
                 placeMediaRepository.save(lockedMedia);
+                placeMediaRepository.flush();
 
                 if (wasPrimary) {
                     placeMediaRepository.findFirstActiveByPlaceId(lockedMedia.getPlaceId()).ifPresent(next -> {
@@ -619,7 +724,10 @@ public class PlaceMediaService {
             }
         } else {
             // Decisão REJECT: marca a denúncia individual como rejeitada e registra auditoria
-            lockedReport.reject(moderatorUserId, notes);
+            String decisionMac = computeReportDecisionMac(
+                    lockedReport.getId(), lockedMedia.getId(), moderatorUserId,
+                    PlaceMediaReport.STATUS_REJECTED, lockedReport.getReason(), normalizedNotes, decidedAt);
+            lockedReport.reject(moderatorUserId, notes, decidedAt, decisionMac);
             placeMediaReportRepository.save(lockedReport);
 
             saveAuditLog(lockedMedia.getId(), lockedMedia.getPlaceId(), moderatorUserId,
@@ -632,7 +740,7 @@ public class PlaceMediaService {
         return PlaceMediaReportView.of(lockedReport, lockedMedia);
     }
 
-    @Transactional
+    @ModerationTransactional
     public PlaceMediaModerationResult removeMediaByModerator(UUID moderatorUserId, UUID placeId, UUID mediaId, String reason, String notes) {
         if (placeId == null || mediaId == null) {
             throw new BusinessException("Identificadores inválidos", HttpStatus.BAD_REQUEST, "INVALID_IDENTIFIERS");
@@ -654,6 +762,7 @@ public class PlaceMediaService {
             boolean wasPrimary = lockedMedia.isPrimary();
             lockedMedia.markRemovedByModerator();
             placeMediaRepository.save(lockedMedia);
+            placeMediaRepository.flush();
 
             if (wasPrimary) {
                 placeMediaRepository.findFirstActiveByPlaceId(placeId).ifPresent(next -> {
@@ -689,7 +798,7 @@ public class PlaceMediaService {
         );
     }
 
-    @Transactional
+    @ModerationTransactional
     public PlaceMediaModerationResult releaseReviewByModerator(UUID moderatorUserId, UUID placeId, UUID mediaId, String notes) {
         if (placeId == null || mediaId == null) {
             throw new BusinessException("Identificadores inválidos", HttpStatus.BAD_REQUEST, "INVALID_IDENTIFIERS");
@@ -750,6 +859,7 @@ public class PlaceMediaService {
             }
         }
         placeMediaRepository.save(lockedMedia);
+        placeMediaRepository.flush();
 
         saveAuditLog(mediaId, placeId, moderatorUserId, PlaceMediaModerationAction.RELEASE_REVIEW, "Liberação de análise após rejeição das denúncias", notes, null);
 
@@ -762,7 +872,7 @@ public class PlaceMediaService {
         );
     }
 
-    @Transactional
+    @ModerationTransactional
     public PlaceMediaModerationResult restoreMediaByModerator(UUID moderatorUserId, UUID placeId, UUID mediaId, String notes) {
         if (placeId == null || mediaId == null) {
             throw new BusinessException("Identificadores inválidos", HttpStatus.BAD_REQUEST, "INVALID_IDENTIFIERS");
@@ -821,6 +931,7 @@ public class PlaceMediaService {
             }
         }
         placeMediaRepository.save(lockedMedia);
+        placeMediaRepository.flush();
 
         saveAuditLog(mediaId, placeId, moderatorUserId, PlaceMediaModerationAction.RESTORE, null, notes, null);
 
@@ -919,22 +1030,49 @@ public class PlaceMediaService {
         }
     }
 
+    private String computeReportDecisionMac(UUID reportId, UUID placeMediaId, UUID moderatorUserId,
+                                            String status, String reason, String decisionNotes, Instant decidedAt) {
+        if (moderationAuditMacService == null) {
+            return null;
+        }
+        return moderationAuditMacService.computeMac(ModerationAuditPayload.forPlaceMediaReportDecision(
+                reportId, placeMediaId, moderatorUserId, status, reason, decisionNotes, decidedAt));
+    }
+
     private void saveAuditLog(UUID mediaId, UUID placeId, UUID actorUserId,
                               PlaceMediaModerationAction action, String reason, String notes, UUID reportId) {
         PlaceMediaModerationAuditLog.ActorType actorType = (actorUserId != null)
                 ? PlaceMediaModerationAuditLog.ActorType.USER
                 : PlaceMediaModerationAuditLog.ActorType.SYSTEM;
+        UUID auditId = UUID.randomUUID();
+        Instant createdAt = ModerationAuditPayload.canonicalTimestamp(Instant.now());
+        String normalizedReason = (reason != null && !reason.isBlank()) ? reason.trim() : null;
+        String normalizedNotes = (notes != null && !notes.isBlank()) ? notes.trim() : null;
+        String authenticityMac = moderationAuditMacService != null
+                ? moderationAuditMacService.computeMac(ModerationAuditPayload.forPlaceMediaAudit(
+                        auditId,
+                        mediaId,
+                        placeId,
+                        reportId,
+                        actorUserId,
+                        actorType.name(),
+                        action.name(),
+                        normalizedReason,
+                        normalizedNotes,
+                        createdAt))
+                : null;
         placeMediaModerationAuditLogRepository.save(new PlaceMediaModerationAuditLog(
-                UUID.randomUUID(),
+                auditId,
                 mediaId,
                 placeId,
                 actorUserId,
                 actorType,
                 action,
-                reason,
-                notes,
+                normalizedReason,
+                normalizedNotes,
                 reportId,
-                Instant.now()
+                createdAt,
+                authenticityMac
         ));
     }
 

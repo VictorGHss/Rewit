@@ -242,14 +242,13 @@ class RateableTargetStatsPersistenceIntegrationTest {
         assertEquals(1, statsAfterRemoved.reviewsCount());
 
         // 4. Alterar a primeira review também para UNDER_REVIEW:
-        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-            ReviewJpaEntity entity = reviewJpaRepository.findAll().stream()
-                    .filter(r -> r.getUserId().equals(user1.getId()))
-                    .findFirst().orElseThrow();
-            entity.setStatus("UNDER_REVIEW");
-            reviewJpaRepository.save(entity);
-            rateableTargetStatsRepository.recalculateAndSave(place.getId());
-        });
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(
+                reviewJpaRepository.findAll().stream()
+                        .filter(r -> r.getUserId().equals(user1.getId()))
+                        .findFirst().orElseThrow().getId(),
+                "UNDER_REVIEW");
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                rateableTargetStatsRepository.recalculateAndSave(place.getId()));
 
         // Zero reviews ativas: média 0.00 e count 0
         TargetStatsView statsZero = reviewService.getTargetStats(place.getId());

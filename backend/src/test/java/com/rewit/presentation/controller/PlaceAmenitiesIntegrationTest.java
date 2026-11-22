@@ -156,7 +156,7 @@ class PlaceAmenitiesIntegrationTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PLACE_NOT_FOUND"));
 
-        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
         mockMvc.perform(withToken(get("/api/v1/places/{placeId}/amenities", placeId), admin))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PLACE_NOT_FOUND"));
@@ -214,7 +214,7 @@ class PlaceAmenitiesIntegrationTest {
 
         // A administração da mesma conta comercial passa a outra pessoa: o autor da última gravação muda.
         TestUser newAdmin = registerUser("replace_new");
-        jdbcTemplate.update("UPDATE business_accounts SET user_id = ? WHERE id = ?", newAdmin.id(), accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET user_id = ? WHERE id = ?", newAdmin.id(), accountId);
 
         putAmenities(newAdmin, placeId, accountId, "OUTDOOR_SEATING")
                 .andExpect(status().isOk())
@@ -325,7 +325,7 @@ class PlaceAmenitiesIntegrationTest {
         putAmenities(admin, placeId, accountId, "WIFI").andExpect(status().isOk());
         Map<String, Object> before = configurationRow(placeId);
 
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?",
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?",
                 admin.id());
 
         putAmenities(admin, placeId, accountId, "PARKING")
@@ -341,13 +341,13 @@ class PlaceAmenitiesIntegrationTest {
         TestUser admin = registerUser("pending");
         UUID placeId = createPlace();
         UUID accountId = createAccount(admin);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
 
         putAmenities(admin, placeId, accountId, "WIFI")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("BUSINESS_ACCOUNT_NOT_APPROVED"));
 
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
         putAmenities(admin, placeId, accountId, "WIFI")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("BUSINESS_ACCOUNT_NOT_APPROVED"));
@@ -424,22 +424,22 @@ class PlaceAmenitiesIntegrationTest {
         TestUser visitor = registerUser("temp_visitor");
 
         // Administrador suspenso: única pessoa operante da conta.
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?",
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?",
                 admin.id());
         assertHidden(visitor, placeId);
-        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", admin.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", admin.id());
         assertVisible(visitor, placeId, "WIFI", "CUSTOMER_RESTROOM");
 
         // Aprovação revogada e restaurada.
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
         assertHidden(visitor, placeId);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
         assertVisible(visitor, placeId, "WIFI", "CUSTOMER_RESTROOM");
 
         // Status do local e regravação do mesmo titular não mudam a titularidade (ADR-014): nada é apagado.
-        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
-        jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", placeId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = claimed_by_business_id WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = claimed_by_business_id WHERE id = ?", placeId);
         assertVisible(visitor, placeId, "WIFI", "CUSTOMER_RESTROOM");
 
         assertEquals(stored, configurationRow(placeId));
@@ -453,7 +453,7 @@ class PlaceAmenitiesIntegrationTest {
         UUID placeId = createPlace();
         UUID accountId = createApprovedAccountClaiming(admin, placeId);
         putAmenities(admin, placeId, accountId, "WIFI").andExpect(status().isOk());
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
 
         TestUser visitor = registerUser("private_visitor");
         JsonNode body = read(mockMvc.perform(withToken(get("/api/v1/places/{placeId}/amenities", placeId), visitor))
@@ -512,14 +512,14 @@ class PlaceAmenitiesIntegrationTest {
         TestUser adminB = registerUser("return_b");
         UUID accountB = createApprovedAccountClaiming(adminB, placeId);
         assertHidden(visitor, placeId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountA, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountA, placeId);
         assertHidden(visitor, placeId);
         assertEquals(0, count("SELECT count(*) FROM place_amenity_configurations WHERE place_id = ?", placeId));
 
         // B assume e configura; ao voltar para A, a de B também é apagada e A configura a sua.
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
         putAmenities(adminB, placeId, accountB, "PARKING").andExpect(status().isOk());
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountA, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountA, placeId);
         assertHidden(visitor, placeId);
         assertEquals(0, count("SELECT count(*) FROM place_amenity_selections WHERE place_id = ?", placeId));
         putAmenities(adminA, placeId, accountA, "WIFI").andExpect(status().isOk());
@@ -784,8 +784,8 @@ class PlaceAmenitiesIntegrationTest {
 
     private UUID createApprovedAccountClaiming(TestUser user, UUID placeId) throws Exception {
         UUID accountId = createAccount(user);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
         return accountId;
     }
 

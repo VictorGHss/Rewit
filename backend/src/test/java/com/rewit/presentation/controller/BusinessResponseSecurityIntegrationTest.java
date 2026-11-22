@@ -775,8 +775,8 @@ class BusinessResponseSecurityIntegrationTest {
     private UUID createAndApproveBusinessAccount(TestUser user, UUID placeId) throws Exception {
         UUID accountId = createAccount(user);
         // Aprova a conta comercial e vincula o local
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
         return accountId;
     }
 

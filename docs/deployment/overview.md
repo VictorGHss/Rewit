@@ -33,6 +33,10 @@ Este documento descreve a topologia de ambientes e o ciclo de implantação da p
 - **Produção e CI/CD**:
   - Proibido salvar arquivos `.env` em servidores ou imagens Docker.
   - Injeção através de gerenciadores de segredos seguros (AWS Secrets Manager, HashiCorp Vault ou GitHub Actions Encrypted Secrets).
+- **Separação de Credenciais de Banco e Segredos Criptográficos (ADR-017 / ADR-018)**:
+  - O PostgreSQL utiliza quatro credenciais independentes: role de migração/owner (exclusiva do Flyway), `rewit_app` (`APP_DB_PASSWORD`, tráfego público comum), `rewit_media` (`MEDIA_DB_PASSWORD`, transações de ciclo de vida público/automático de mídias `@MediaLifecycleTransactional`, SEC-F2-03) e `rewit_mod` (`MOD_DB_PASSWORD`, transações administrativas `@ModerationTransactional`).
+  - `MODERATION_AUDIT_SECRET` (>= 32 bytes CSPRNG) deve ser mantido fora do banco de dados, independente de `JWT_SECRET`, `PASSWORD_PEPPER_SECRET`, `REFRESH_TOKEN_SECRET`, `APP_DB_PASSWORD`, `MEDIA_DB_PASSWORD` e `MOD_DB_PASSWORD`. A rotação é controlada via `MODERATION_AUDIT_KEY_ID` + par opcional `MODERATION_AUDIT_SECRET_PREVIOUS` / `MODERATION_AUDIT_PREVIOUS_KEY_ID`.
+  - **Evolução operacional opcional (multi-JVM)**: enquanto a API pública, o ciclo de vida de mídias e os módulos administrativos executam no mesmo monólito JVM, RCE na JVM pública ainda teria acesso em memória às credenciais configuradas. Em ambientes de maior criticidade, a arquitetura de roteamento e privilégios já permite separar o deploy em containers JVM distintos (`rewit-api-public` apenas com `rewit_app`; `rewit-api-admin` isolado em rede interna/VPN com `rewit_mod` e `MODERATION_AUDIT_SECRET`).
 
 ---
 

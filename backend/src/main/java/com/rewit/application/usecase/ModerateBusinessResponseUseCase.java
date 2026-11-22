@@ -13,10 +13,13 @@ import com.rewit.domain.enums.BusinessResponseModerationAction;
 import com.rewit.domain.enums.BusinessResponseStatus;
 import com.rewit.domain.model.BusinessResponse;
 import com.rewit.domain.model.BusinessResponseModerationAuditLog;
+import com.rewit.infrastructure.persistence.routing.ModerationTransactional;
+import com.rewit.infrastructure.security.ModerationAuditMacService;
+import com.rewit.infrastructure.security.ModerationAuditPayload;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -60,6 +63,27 @@ public class ModerateBusinessResponseUseCase {
     private final BusinessAccountRepository businessAccountRepository;
     private final ModeratorRolePolicy moderatorRolePolicy;
     private final BusinessRepresentationPolicy representationPolicy;
+    private final ModerationAuditMacService moderationAuditMacService;
+
+    @Autowired
+    public ModerateBusinessResponseUseCase(BusinessResponseRepository businessResponseRepository,
+                                           BusinessResponseModerationAuditLogRepository auditLogRepository,
+                                           BusinessAccountRepository businessAccountRepository,
+                                           ModeratorRolePolicy moderatorRolePolicy,
+                                           BusinessRepresentationPolicy representationPolicy,
+                                           ModerationAuditMacService moderationAuditMacService) {
+        this.businessResponseRepository = Objects.requireNonNull(businessResponseRepository,
+                "BusinessResponseRepository must not be null");
+        this.auditLogRepository = Objects.requireNonNull(auditLogRepository,
+                "BusinessResponseModerationAuditLogRepository must not be null");
+        this.businessAccountRepository = Objects.requireNonNull(businessAccountRepository,
+                "BusinessAccountRepository must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
+        this.representationPolicy = Objects.requireNonNull(representationPolicy,
+                "BusinessRepresentationPolicy must not be null");
+        this.moderationAuditMacService = Objects.requireNonNull(moderationAuditMacService,
+                "ModerationAuditMacService must not be null");
+    }
 
     public ModerateBusinessResponseUseCase(BusinessResponseRepository businessResponseRepository,
                                            BusinessResponseModerationAuditLogRepository auditLogRepository,
@@ -75,14 +99,15 @@ public class ModerateBusinessResponseUseCase {
         this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
         this.representationPolicy = Objects.requireNonNull(representationPolicy,
                 "BusinessRepresentationPolicy must not be null");
+        this.moderationAuditMacService = null;
     }
 
-    @Transactional
+    @ModerationTransactional
     public BusinessResponseModerationResult execute(ModerateBusinessResponseCommand command) {
         validate(command);
         String reasonCode = command.reasonCode().trim();
         String justification = command.justification().trim();
-        Instant now = command.now() != null ? command.now() : Instant.now();
+        Instant now = ModerationAuditPayload.canonicalTimestamp(command.now());
         UUID moderatorUserId = command.moderatorUserId();
 
         // Estado e cargo atuais do moderador antes de ler o alvo: o JWT pode ser anterior a uma desativação ou a um
@@ -132,9 +157,22 @@ public class ModerateBusinessResponseUseCase {
             throw ex;
         }
 
+        UUID auditId = UUID.randomUUID();
+        String authenticityMac = moderationAuditMacService != null
+                ? moderationAuditMacService.computeMac(ModerationAuditPayload.forBusinessResponseModeration(
+                        auditId,
+                        saved.getId(),
+                        moderatorUserId,
+                        command.action().name(),
+                        reasonCode,
+                        justification,
+                        previousStatus.name(),
+                        saved.getStatus().name(),
+                        now))
+                : null;
         BusinessResponseModerationAuditLog auditLog = auditLogRepository.save(new BusinessResponseModerationAuditLog(
-                UUID.randomUUID(), saved.getId(), moderatorUserId, command.action(), reasonCode, justification,
-                previousStatus, saved.getStatus(), now));
+                auditId, saved.getId(), moderatorUserId, command.action(), reasonCode, justification,
+                previousStatus, saved.getStatus(), now, authenticityMac));
 
         return BusinessResponseModerationResult.of(auditLog, saved);
     }

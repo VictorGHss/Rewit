@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -25,6 +26,10 @@ class StorageGcExecutionLockIntegrationTest {
 
     @Autowired
     private DataSource dataSource;
+
+    @Autowired
+    @Qualifier("appDataSource")
+    private DataSource appDataSource;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -97,6 +102,6 @@ class StorageGcExecutionLockIntegrationTest {
     }
 
     private int activeConnections() {
-        return ((HikariDataSource) dataSource).getHikariPoolMXBean().getActiveConnections();
+        return ((HikariDataSource) appDataSource).getHikariPoolMXBean().getActiveConnections();
     }
 }

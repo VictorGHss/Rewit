@@ -115,7 +115,7 @@ class DiscussionControllerIntegrationTest {
                 "Texto avaliativo para testes de API de discussões",
                 isAnonymous,
                 false,
-                status,
+                ReviewStatus.ACTIVE,
                 visibility,
                 null,
                 null,
@@ -123,7 +123,11 @@ class DiscussionControllerIntegrationTest {
                 Instant.now(),
                 Instant.now()
         );
-        return reviewRepository.save(review);
+        Review saved = reviewRepository.save(review);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
+        return saved;
     }
 
     // 1. 401 Unauthorized para não autenticado

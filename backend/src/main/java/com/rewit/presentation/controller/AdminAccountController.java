@@ -13,6 +13,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -20,7 +21,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Ciclo de vida de contas por ação administrativa (C2): suspensão, reversão da suspensão e exclusão lógica.
+ * Ciclo de vida de contas por ação administrativa (C2 / S3-A13-F2): suspensão, reversão da suspensão e exclusão lógica.
  *
  * <p>Restrito a {@code ADMIN} (sanção de conta, mais ampla que a moderação de conteúdo de MODERATOR). A role do
  * JWT é só a primeira barreira: o caso de uso confirma o estado e a role atuais do ator no banco.
@@ -29,6 +30,9 @@ import java.util.UUID;
 @RequestMapping("/api/v1/admin/users")
 @Tag(name = "Contas (Administração)", description = "Suspensão, reversão da suspensão e exclusão lógica de contas (C2)")
 public class AdminAccountController {
+
+    public record AccountLifecycleReasonRequest(String reason) {
+    }
 
     private final AdminAccountLifecycleUseCase adminAccountLifecycleUseCase;
 
@@ -41,8 +45,11 @@ public class AdminAccountController {
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Suspender conta (também uma conta desativada) e revogar as sessões",
             security = @SecurityRequirement(name = "bearerAuth"))
-    public ResponseEntity<Void> suspend(@PathVariable("userId") UUID userId, Authentication authentication) {
-        adminAccountLifecycleUseCase.execute(extractAuthenticatedUserId(authentication), userId, Action.SUSPEND);
+    public ResponseEntity<Void> suspend(@PathVariable("userId") UUID userId,
+                                        @RequestBody(required = false) AccountLifecycleReasonRequest body,
+                                        Authentication authentication) {
+        adminAccountLifecycleUseCase.execute(
+                extractAuthenticatedUserId(authentication), userId, Action.SUSPEND, body != null ? body.reason() : null);
         return ResponseEntity.noContent().build();
     }
 
@@ -50,8 +57,11 @@ public class AdminAccountController {
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Reverter a suspensão de uma conta e revogar as sessões",
             security = @SecurityRequirement(name = "bearerAuth"))
-    public ResponseEntity<Void> reinstate(@PathVariable("userId") UUID userId, Authentication authentication) {
-        adminAccountLifecycleUseCase.execute(extractAuthenticatedUserId(authentication), userId, Action.REINSTATE);
+    public ResponseEntity<Void> reinstate(@PathVariable("userId") UUID userId,
+                                          @RequestBody(required = false) AccountLifecycleReasonRequest body,
+                                          Authentication authentication) {
+        adminAccountLifecycleUseCase.execute(
+                extractAuthenticatedUserId(authentication), userId, Action.REINSTATE, body != null ? body.reason() : null);
         return ResponseEntity.noContent().build();
     }
 
@@ -59,8 +69,11 @@ public class AdminAccountController {
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Excluir logicamente uma conta (definitivo) e revogar as sessões",
             security = @SecurityRequirement(name = "bearerAuth"))
-    public ResponseEntity<Void> delete(@PathVariable("userId") UUID userId, Authentication authentication) {
-        adminAccountLifecycleUseCase.execute(extractAuthenticatedUserId(authentication), userId, Action.DELETE);
+    public ResponseEntity<Void> delete(@PathVariable("userId") UUID userId,
+                                       @RequestBody(required = false) AccountLifecycleReasonRequest body,
+                                       Authentication authentication) {
+        adminAccountLifecycleUseCase.execute(
+                extractAuthenticatedUserId(authentication), userId, Action.DELETE, body != null ? body.reason() : null);
         return ResponseEntity.noContent().build();
     }
 

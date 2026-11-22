@@ -212,7 +212,7 @@ class ReviewMediaLifecycleIntegrationTest {
         for (String state : List.of("REMOVED", "UNDER_REVIEW")) {
             UUID reviewId = review(author, "PUBLIC", ReviewStatus.ACTIVE);
             UUID mediaId = id(upload(author, reviewId, jpeg()));
-            jdbcTemplate.update("UPDATE reviews SET status = ? WHERE id = ?", state, reviewId);
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(reviewId, state);
 
             download(stranger, reviewId, mediaId).andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("REVIEW_NOT_FOUND"));
@@ -374,8 +374,12 @@ class ReviewMediaLifecycleIntegrationTest {
         Place place = placeRepository.save(new Place(null, "Local Mídia " + suffix, "local-midia-" + suffix, "RESTAURANTE",
                 "Descrição", "Rua Mídia, 1", "1", "Centro", "Curitiba", "PR", "BR", -25.43, -49.27, 50, "USER", false,
                 null, "ACTIVE"));
-        return reviewRepository.save(new Review(null, author.id(), place.getId(), "Avaliação com mídia", false, false,
-                status, visibility, null, null, null, Instant.now(), Instant.now())).getId();
+        UUID id = reviewRepository.save(new Review(null, author.id(), place.getId(), "Avaliação com mídia", false, false,
+                ReviewStatus.ACTIVE, visibility, null, null, null, Instant.now(), Instant.now())).getId();
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(id, status.name());
+        }
+        return id;
     }
 
     private ResultActions upload(TestUser user, UUID reviewId, byte[] bytes) throws Exception {

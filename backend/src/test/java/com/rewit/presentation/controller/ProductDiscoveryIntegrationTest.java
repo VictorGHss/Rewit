@@ -389,7 +389,10 @@ class ProductDiscoveryIntegrationTest {
         String slug = "mercado-" + UUID.randomUUID();
         UUID id = placeRepository.save(new Place(null, "Mercado " + status + " " + suffix, slug,
                 "MERCADO", "Descrição", "Rua Produto, " + slug, "Curitiba", "PR", "BR", -25.43, -49.27, 50, "USER", false,
-                null, status)).getId();
+                null, "ACTIVE")).getId();
+        if (!"ACTIVE".equals(status)) {
+            com.rewit.config.PrivilegedTestDatabase.setPlaceStatus(id, status);
+        }
         createdTargets.add(id);
         return id;
     }

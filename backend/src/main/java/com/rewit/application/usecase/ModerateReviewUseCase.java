@@ -17,10 +17,12 @@ import com.rewit.domain.model.ModerationAuditLog;
 import com.rewit.domain.model.Report;
 import com.rewit.domain.model.Review;
 import com.rewit.domain.model.ReviewMedia;
+import com.rewit.infrastructure.persistence.routing.ModerationTransactional;
+import com.rewit.infrastructure.security.ModerationAuditMacService;
+import com.rewit.infrastructure.security.ModerationAuditPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -54,6 +56,7 @@ public class ModerateReviewUseCase {
     private final RateableTargetStatsRepository rateableTargetStatsRepository;
     private final ReputationService reputationService;
     private final ReviewMediaRepository reviewMediaRepository;
+    private final ModerationAuditMacService moderationAuditMacService;
 
     @Autowired
     public ModerateReviewUseCase(
@@ -63,7 +66,8 @@ public class ModerateReviewUseCase {
             ModerationAuditLogRepository moderationAuditLogRepository,
             RateableTargetStatsRepository rateableTargetStatsRepository,
             ReputationService reputationService,
-            @Autowired(required = false) ReviewMediaRepository reviewMediaRepository
+            @Autowired(required = false) ReviewMediaRepository reviewMediaRepository,
+            ModerationAuditMacService moderationAuditMacService
     ) {
         this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
         this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "moderatorRolePolicy must not be null");
@@ -72,6 +76,26 @@ public class ModerateReviewUseCase {
         this.rateableTargetStatsRepository = Objects.requireNonNull(rateableTargetStatsRepository, "rateableTargetStatsRepository must not be null");
         this.reputationService = Objects.requireNonNull(reputationService, "reputationService must not be null");
         this.reviewMediaRepository = reviewMediaRepository;
+        this.moderationAuditMacService = Objects.requireNonNull(moderationAuditMacService, "moderationAuditMacService must not be null");
+    }
+
+    public ModerateReviewUseCase(
+            ReviewRepository reviewRepository,
+            ModeratorRolePolicy moderatorRolePolicy,
+            ReportRepository reportRepository,
+            ModerationAuditLogRepository moderationAuditLogRepository,
+            RateableTargetStatsRepository rateableTargetStatsRepository,
+            ReputationService reputationService,
+            ReviewMediaRepository reviewMediaRepository
+    ) {
+        this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "moderatorRolePolicy must not be null");
+        this.reportRepository = Objects.requireNonNull(reportRepository, "reportRepository must not be null");
+        this.moderationAuditLogRepository = Objects.requireNonNull(moderationAuditLogRepository, "moderationAuditLogRepository must not be null");
+        this.rateableTargetStatsRepository = Objects.requireNonNull(rateableTargetStatsRepository, "rateableTargetStatsRepository must not be null");
+        this.reputationService = Objects.requireNonNull(reputationService, "reputationService must not be null");
+        this.reviewMediaRepository = reviewMediaRepository;
+        this.moderationAuditMacService = null;
     }
 
     public ModerateReviewUseCase(
@@ -82,10 +106,10 @@ public class ModerateReviewUseCase {
             RateableTargetStatsRepository rateableTargetStatsRepository,
             ReputationService reputationService
     ) {
-        this(reviewRepository, moderatorRolePolicy, reportRepository, moderationAuditLogRepository, rateableTargetStatsRepository, reputationService, null);
+        this(reviewRepository, moderatorRolePolicy, reportRepository, moderationAuditLogRepository, rateableTargetStatsRepository, reputationService, (ReviewMediaRepository) null);
     }
 
-    @Transactional
+    @ModerationTransactional
     public ModerateReviewResult execute(
             UUID reviewId,
             UUID moderatorUserId,
@@ -97,7 +121,7 @@ public class ModerateReviewUseCase {
         return execute(new ModerateReviewCommand(reviewId, moderatorUserId, action, reasonCode, justification, now));
     }
 
-    @Transactional
+    @ModerationTransactional
     public ModerateReviewResult execute(ModerateReviewCommand command) {
         if (command == null) {
             throw new BusinessException("Comando de moderação é obrigatório", HttpStatus.BAD_REQUEST, "MISSING_COMMAND");
@@ -133,7 +157,7 @@ public class ModerateReviewUseCase {
             throw new BusinessException("A justificativa não pode exceder 1000 caracteres", HttpStatus.BAD_REQUEST, "INVALID_JUSTIFICATION_LENGTH");
         }
 
-        Instant now = command.now() != null ? command.now() : Instant.now();
+        Instant now = ModerationAuditPayload.canonicalTimestamp(command.now());
 
         // Estado e role atuais do moderador antes de qualquer lock: o JWT, e a role nele, pode ser anterior a uma
         // desativação ou a um rebaixamento (conta inoperante 401 ACCOUNT_DISABLED; sem MODERATOR/ADMIN 403 FORBIDDEN)
@@ -219,18 +243,36 @@ public class ModerateReviewUseCase {
                 ? ModerationDecision.ACCEPTED
                 : ModerationDecision.REJECTED;
 
+        UUID auditId = UUID.randomUUID();
+        String trimmedReasonCode = command.reasonCode().trim();
+        String authenticityMac = moderationAuditMacService != null
+                ? moderationAuditMacService.computeMac(ModerationAuditPayload.forReviewModeration(
+                        auditId,
+                        review.getId(),
+                        command.moderatorUserId(),
+                        command.action().name(),
+                        decision.name(),
+                        trimmedReasonCode,
+                        trimmedJustification,
+                        previousStatus.name(),
+                        review.getStatus().name(),
+                        pendingReports.size(),
+                        now))
+                : null;
+
         ModerationAuditLog auditLog = new ModerationAuditLog(
-                UUID.randomUUID(),
+                auditId,
                 review.getId(),
                 command.moderatorUserId(),
                 command.action(),
                 decision,
-                command.reasonCode().trim(),
+                trimmedReasonCode,
                 trimmedJustification,
                 previousStatus,
                 review.getStatus(),
                 pendingReports.size(),
-                now
+                now,
+                authenticityMac
         );
         moderationAuditLogRepository.save(auditLog);
 

@@ -376,7 +376,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         TestUser businessAdmin = registerUser("pending_adm");
         UUID placeId = createPlace();
         UUID accountId = createAccount(businessAdmin); // cria sem aprovar (fica PENDING)
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
 
         UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
                 accountId,
@@ -425,7 +425,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
 
         // Desativa o local no catálogo
-        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
 
         UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
                 accountId,
@@ -456,7 +456,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         UUID accountId = createAndApproveBusinessAccount(businessAdmin, placeId);
 
         // Suspende a conta pessoal do usuário
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", businessAdmin.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", businessAdmin.id());
 
         UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
                 accountId,
@@ -670,8 +670,8 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         UUID accountId = createAccount(businessAdmin);
 
         // Marca a conta comercial expressamente como REJECTED
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
 
         UpdatePlaceOpeningHoursRequest request = new UpdatePlaceOpeningHoursRequest(
                 accountId,
@@ -719,7 +719,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
 
         // 2. Local perde o vínculo comercial (ex.: desvinculação administrativa ou transferência)
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
 
         // 3. Antigo responsável tenta atualizar os horários
         UpdatePlaceOpeningHoursRequest newRequest = new UpdatePlaceOpeningHoursRequest(
@@ -936,7 +936,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 .andExpect(jsonPath("$.days[0].intervals[0].openTime").value("08:00"));
 
         // 2. Administrador da conta A é temporariamente suspenso
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", businessAdmin.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", businessAdmin.id());
 
         // GET passa a retornar configured = false e days = [] (oculto, sem expor dados)
         mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), visitor))
@@ -952,7 +952,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 "SELECT count(*) FROM place_opening_hours_intervals WHERE place_id = ?", Integer.class, placeId));
 
         // 3. Administrador volta a ser operacional (reativado)
-        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", businessAdmin.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", businessAdmin.id());
 
         // GET volta a retornar a configuração anterior automaticamente sem nova gravação
         mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), visitor))
@@ -992,8 +992,8 @@ class PlaceOpeningHoursSecurityIntegrationTest {
         // 2. Conta B aprovada é criada e passa a reivindicar o local (transferência)
         TestUser adminB = registerUser("trans_adm_b");
         UUID accountB = createAccount(adminB);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountB);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountB);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
 
         // 3. Enquanto B não configura seus próprios horários:
         // GET retorna configured = false e days = [] (não revela horários de A)
@@ -1067,7 +1067,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 .andExpect(status().isOk());
 
         // Inelegibilidade por desvinculação
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
 
         TestUser visitor = registerUser("auditor_v");
         mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), visitor))
@@ -1107,7 +1107,7 @@ class PlaceOpeningHoursSecurityIntegrationTest {
                 .andExpect(jsonPath("$.code").value("PLACE_NOT_FOUND"));
 
         // 2. Local inativado no catálogo -> 404
-        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
         mockMvc.perform(withToken(get("/api/v1/places/{placeId}/opening-hours", placeId), businessAdmin))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PLACE_NOT_FOUND"));
@@ -1170,8 +1170,8 @@ class PlaceOpeningHoursSecurityIntegrationTest {
 
     private UUID createAndApproveBusinessAccount(TestUser user, UUID placeId) throws Exception {
         UUID accountId = createAccount(user);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
         return accountId;
     }
 

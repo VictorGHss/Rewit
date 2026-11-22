@@ -221,8 +221,12 @@ class DiscussionThreadControllerIntegrationTest {
     /** Cria discussões em ordem cronológica estrita, para tornar a ordenação verificável. */
     private ReviewDiscussion comment(Account author, UUID parentId, DiscussionStatus status) {
         clock = clock.plusSeconds(1);
-        return discussionRepository.save(new ReviewDiscussion(null, review.getId(), author.userId(), parentId,
-                "Comentário de teste", author.userId().equals(owner.userId()), status, clock, clock));
+        ReviewDiscussion saved = discussionRepository.save(new ReviewDiscussion(null, review.getId(), author.userId(), parentId,
+                "Comentário de teste", author.userId().equals(owner.userId()), DiscussionStatus.ACTIVE, clock, clock));
+        if (status != DiscussionStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setDiscussionStatus(saved.getId(), status.name());
+        }
+        return saved;
     }
 
     private Review createReview(UUID authorId) {

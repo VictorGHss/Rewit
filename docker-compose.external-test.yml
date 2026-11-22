@@ -49,6 +49,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       APP_DB_USER: rewit_app
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
+      MEDIA_DB_USER: rewit_media
+      MEDIA_DB_PASSWORD: ${MEDIA_DB_PASSWORD:?}
+      MOD_DB_USER: rewit_mod
+      MOD_DB_PASSWORD: ${MOD_DB_PASSWORD:?}
       PGDATA: /var/lib/postgresql/data
     ports:
       - "127.0.0.1:${POSTGRES_PORT:?}:5432"

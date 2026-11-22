@@ -127,7 +127,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Resposta à avaliação: grava, relê fiel e aparece só entre as respostas ativas diretas da avaliação")
     void persistsReviewResponse() {
         Fixture f = fixture();
@@ -154,7 +153,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Resposta a um comentário da mesma avaliação é aceita e fica fora da lista direta da avaliação")
     void persistsDiscussionResponse() {
         Fixture f = fixture();
@@ -174,7 +172,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Comentário de outra avaliação é recusado pela FK composta (discussion_id, review_id)")
     void rejectsDiscussionFromAnotherReview() {
         Fixture f = fixture();
@@ -191,7 +188,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("CHECKs de status, origem da remoção, coerência da remoção e conteúdo")
     void enforcesChecks() {
         Fixture f = fixture();
@@ -203,28 +199,27 @@ class BusinessResponsePersistenceIntegrationTest {
         Timestamp removedAt = Timestamp.from(now);
 
         // Status fora do domínio viola também chk_business_responses_removal; o PostgreSQL relata só uma delas
-        assertRejected("chk_business_responses_", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
+        assertPrivilegedRejected("chk_business_responses_", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
                 f.businessAdmin(), "x", "UNDER_REVIEW", null, null);
-        assertRejected("chk_business_responses_removed_by", insert, UUID.randomUUID(), f.review(), f.business(),
+        assertPrivilegedRejected("chk_business_responses_removed_by", insert, UUID.randomUUID(), f.review(), f.business(),
                 f.place(), f.businessAdmin(), "x", "REMOVED", "SYSTEM", removedAt);
-        assertRejected("chk_business_responses_removal", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
+        assertPrivilegedRejected("chk_business_responses_removal", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
                 f.businessAdmin(), "x", "ACTIVE", "BUSINESS", removedAt);
-        assertRejected("chk_business_responses_removal", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
+        assertPrivilegedRejected("chk_business_responses_removal", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
                 f.businessAdmin(), "x", "REMOVED", null, removedAt);
-        assertRejected("chk_business_responses_removal", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
+        assertPrivilegedRejected("chk_business_responses_removal", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
                 f.businessAdmin(), "x", "REMOVED", "MODERATION", null);
-        assertRejected("chk_business_responses_content", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
+        assertPrivilegedRejected("chk_business_responses_content", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
                 f.businessAdmin(), "   ", "ACTIVE", null, null);
-        assertRejected("chk_business_responses_content", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
+        assertPrivilegedRejected("chk_business_responses_content", insert, UUID.randomUUID(), f.review(), f.business(), f.place(),
                 f.businessAdmin(), "a".repeat(2001), "ACTIVE", null, null);
 
-        // Limite exato e remoção coerente são aceitos
-        jdbcTemplate.update(insert, UUID.randomUUID(), f.review(), f.business(), f.place(), f.businessAdmin(),
+        // Limite exato e remoção coerente são aceitos (owner)
+        PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), f.review(), f.business(), f.place(), f.businessAdmin(),
                 "a".repeat(2000), "REMOVED", "MODERATION", removedAt);
     }
 
     @Test
-    @Transactional
     @DisplayName("No máximo uma resposta ativa por empresa e avaliação; outra empresa responde normalmente")
     void uniqueActiveReviewResponse() {
         Fixture f = fixture();
@@ -244,7 +239,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("No máximo uma resposta ativa por empresa e comentário")
     void uniqueActiveDiscussionResponse() {
         Fixture f = fixture();
@@ -259,18 +253,21 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Remoção lógica preserva o histórico e libera nova resposta ao mesmo alvo")
     void republishAfterRemoval() {
         Fixture f = fixture();
         BusinessResponse first = responseRepository.save(publish(f, null, "Primeira"));
         BusinessResponse firstOnDiscussion = responseRepository.save(publish(f, f.rootDiscussion(), "Primeira"));
 
-        BusinessResponse locked = responseRepository.findByIdForUpdate(first.getId()).orElseThrow();
-        locked.removeByBusiness(now.plusSeconds(5));
-        responseRepository.save(locked);
-        firstOnDiscussion.removeByModeration(now.plusSeconds(5));
-        responseRepository.save(firstOnDiscussion);
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.executeWithoutResult(_ -> {
+            BusinessResponse locked = responseRepository.findByIdForUpdate(first.getId()).orElseThrow();
+            locked.removeByBusiness(now.plusSeconds(5));
+            responseRepository.save(locked);
+        });
+        PrivilegedTestDatabase.jdbc().update(
+                "UPDATE business_responses SET status = 'REMOVED', removed_by = 'MODERATION', removed_at = ? WHERE id = ?",
+                Timestamp.from(now.plusSeconds(5)), firstOnDiscussion.getId());
 
         BusinessResponse second = responseRepository.save(publish(f, null, "Segunda"));
         BusinessResponse secondOnDiscussion = responseRepository.save(publish(f, f.rootDiscussion(), "Segunda"));
@@ -294,13 +291,12 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Alvo, empresa, local, autor e conteúdo não mudam numa atualização de estado (colunas não atualizáveis)")
     void identityColumnsAreNotUpdated() {
         Fixture f = fixture();
         BusinessResponse saved = responseRepository.save(publish(f, null, "Original"));
         // Alteração externa simulada; a gravação da remoção não deve reescrever as colunas de identidade
-        jdbcTemplate.update("UPDATE business_responses SET content = 'Alterado no banco' WHERE id = ?", saved.getId());
+        PrivilegedTestDatabase.jdbc().update("UPDATE business_responses SET content = 'Alterado no banco' WHERE id = ?", saved.getId());
 
         BusinessResponse stale = new BusinessResponse(saved.getId(), saved.getReviewId(), null, UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), "Outro conteúdo", BusinessResponseStatus.ACTIVE, null, null,
@@ -319,13 +315,12 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Exclusões: avaliação e comentário levam as respostas, nunca a auditoria; empresa, local e autor são histórico (RESTRICT)")
     void deletionBehaviour() {
         Fixture f = fixture();
         BusinessResponse onReview = responseRepository.save(publish(f, null, "Na avaliação"));
         BusinessResponse onDiscussion = responseRepository.save(publish(f, f.rootDiscussion(), "No comentário"));
-        auditLogRepository.save(audit(onReview.getId(), insertUser()));
+        insertAuditDirectly(audit(onReview.getId(), insertUser()));
 
         assertRuntimeCannotDeleteAndForeignKeyRestricts("business_responses_business_account_id_fkey", "business_accounts",
                 "DELETE FROM business_accounts WHERE id = ?", f.business());
@@ -353,15 +348,14 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Auditoria de moderação: grava, lê em ordem, é append-only e o moderador é RESTRICT")
     void auditTrail() {
         Fixture f = fixture();
         BusinessResponse response = responseRepository.save(publish(f, null, "Resposta"));
         UUID moderator = insertUser();
 
-        BusinessResponseModerationAuditLog removal = auditLogRepository.save(audit(response.getId(), moderator));
-        BusinessResponseModerationAuditLog restore = auditLogRepository.save(new BusinessResponseModerationAuditLog(
+        BusinessResponseModerationAuditLog removal = insertAuditDirectly(audit(response.getId(), moderator));
+        BusinessResponseModerationAuditLog restore = insertAuditDirectly(new BusinessResponseModerationAuditLog(
                 null, response.getId(), moderator, BusinessResponseModerationAction.RESTORE_RESPONSE, "APPEAL",
                 "Recurso aceito", BusinessResponseStatus.REMOVED, BusinessResponseStatus.ACTIVE, now.plusSeconds(10)));
 
@@ -376,7 +370,7 @@ class BusinessResponsePersistenceIntegrationTest {
 
         assertRejected("append-only", "UPDATE business_response_moderation_audit_logs SET justification = 'x' WHERE id = ?",
                 removal.getId());
-        assertRejected("chk_business_response_audit_action", """
+        assertPrivilegedRejected("chk_business_response_audit_action", """
                 INSERT INTO business_response_moderation_audit_logs (response_id, moderator_user_id, action, reason_code,
                     justification, previous_status, new_status)
                 VALUES (?, ?, 'REMOVE_DISCUSSION', 'SPAM', 'j', 'ACTIVE', 'REMOVED')
@@ -429,7 +423,6 @@ class BusinessResponsePersistenceIntegrationTest {
     // ------------------------------------------------------------------------------- caminhos de aplicação (C11)
 
     @Test
-    @Transactional
     @DisplayName("Locais da avaliação: alvo PLACE, local de SERVICE e de EVENT avaliados e local de contexto, sem outros")
     void associatedPlacesFromEachPath() {
         UUID reviewer = insertUser();
@@ -447,7 +440,7 @@ class BusinessResponsePersistenceIntegrationTest {
         jdbcTemplate.update("INSERT INTO events (id, place_id, title, category, start_at, end_at) "
                 + "VALUES (?, ?, 'Show', 'MUSICA', NOW(), NOW() + INTERVAL '2 hours')", event, eventPlace);
         UUID review = insertReview(reviewer);
-        jdbcTemplate.update("UPDATE reviews SET context_place_id = ? WHERE id = ?", contextPlace, review);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE reviews SET context_place_id = ? WHERE id = ?", contextPlace, review);
         for (UUID target : List.of(targetPlace, service, event)) {
             jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 4)", review, target);
         }
@@ -456,13 +449,12 @@ class BusinessResponsePersistenceIntegrationTest {
                 reviewRepository.findAssociatedPlaceIds(review));
         assertFalse(reviewRepository.findAssociatedPlaceIds(review).contains(unrelated));
         // Contexto que coincide com um alvo não duplica; avaliação sem locais devolve vazio
-        jdbcTemplate.update("UPDATE reviews SET context_place_id = ? WHERE id = ?", targetPlace, review);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE reviews SET context_place_id = ? WHERE id = ?", targetPlace, review);
         assertEquals(Set.of(targetPlace, servicePlace, eventPlace), reviewRepository.findAssociatedPlaceIds(review));
         assertTrue(reviewRepository.findAssociatedPlaceIds(insertReview(reviewer)).isEmpty());
     }
 
     @Test
-    @Transactional
     @DisplayName("Visão pública: só respostas ativas diretas, com empresa e local, em ordem estável e paginada")
     void publicViewPage() {
         Fixture f = fixture();
@@ -474,8 +466,8 @@ class BusinessResponsePersistenceIntegrationTest {
         BusinessResponse second = responseRepository.save(BusinessResponse.publish(f.review(), null, otherBusiness,
                 otherPlace, otherAdmin, "Segunda", now.plusSeconds(1)));
         responseRepository.save(publish(f, f.rootDiscussion(), "No comentário"));
-        BusinessResponse removed = BusinessResponse.publish(f.review(), null, insertBusiness(insertUser()), f.place(),
-                f.businessAdmin(), "Removida", now.plusSeconds(2));
+        BusinessResponse removed = responseRepository.save(BusinessResponse.publish(f.review(), null, insertBusiness(insertUser()), f.place(),
+                f.businessAdmin(), "Removida", now.plusSeconds(2)));
         removed.removeByBusiness(now.plusSeconds(3));
         responseRepository.save(removed);
 
@@ -501,7 +493,6 @@ class BusinessResponsePersistenceIntegrationTest {
     // ---------------------------------------------------------------------------------------------------------
 
     @Test
-    @Transactional
     @DisplayName("Listas públicas ocultam a representação inelegível em conteúdo e contagem, isolam as outras empresas "
             + "e a reexibem quando volta a ser elegível, sem alterar a linha nem a auditoria")
     void publicListingsFollowCurrentEligibility() {
@@ -526,14 +517,10 @@ class BusinessResponsePersistenceIntegrationTest {
         }
         Runnable approve = () -> setVerification(f.business(), "APPROVED");
         Runnable reactivate = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
-        Runnable deleteWithSavepoint = () -> {
-            jdbcTemplate.execute("SAVEPOINT sp_admin_deleted");
-            setAccountStatus(f.businessAdmin(), AccountStatus.DELETED);
-        };
-        Runnable rollbackDeletedSavepoint = () ->
-                jdbcTemplate.execute("ROLLBACK TO SAVEPOINT sp_admin_deleted; RELEASE SAVEPOINT sp_admin_deleted");
-        Runnable reopen = () -> jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
-        Runnable reclaim = () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+        Runnable deleteAdmin = () -> setAccountStatus(f.businessAdmin(), AccountStatus.DELETED);
+        Runnable restoreDeletedAdmin = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
+        Runnable reopen = () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
+        Runnable reclaim = () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
                 f.business(), f.place());
         List<StateChange> changes = List.of(
                 new StateChange("conta PENDING", () -> setVerification(f.business(), "PENDING"), approve),
@@ -542,14 +529,14 @@ class BusinessResponsePersistenceIntegrationTest {
                         () -> setAccountStatus(f.businessAdmin(), AccountStatus.DEACTIVATED), reactivate),
                 new StateChange("administrador SUSPENDED",
                         () -> setAccountStatus(f.businessAdmin(), AccountStatus.SUSPENDED), reactivate),
-                new StateChange("administrador DELETED", deleteWithSavepoint, rollbackDeletedSavepoint),
+                new StateChange("administrador DELETED", deleteAdmin, restoreDeletedAdmin),
                 new StateChange("local INACTIVE",
-                        () -> jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
+                        () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
                 new StateChange("local CLOSED",
-                        () -> jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.place()), reopen),
-                new StateChange("local sem vínculo", () -> jdbcTemplate.update(
+                        () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.place()), reopen),
+                new StateChange("local sem vínculo", () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                         "UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place()), reclaim),
-                new StateChange("local vinculado a outra empresa", () -> jdbcTemplate.update(
+                new StateChange("local vinculado a outra empresa", () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                         "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, f.place()), reclaim));
 
         assertPublicResponses(f, allOnReview, allOnComment, "elegível");
@@ -568,7 +555,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Paginação e contagem só sobre as visíveis: a resposta oculta no meio não deixa buraco nem desloca a ordem")
     void paginationCountsOnlyVisibleResponses() {
         Fixture f = fixture();
@@ -602,7 +588,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Paridade: a lista pública mostra exatamente as representações que BusinessRepresentationPolicy "
             + "considera elegíveis, em toda a matriz de conta, administrador e local")
     void publicFilterMatchesJavaPolicy() {
@@ -622,10 +607,10 @@ class BusinessResponsePersistenceIntegrationTest {
                     setAccountStatus(admin, administratorStatus);
                     switch (placeState) {
                         case "INACTIVE", "CLOSED" ->
-                                jdbcTemplate.update("UPDATE places SET status = ? WHERE id = ?", placeState, place);
+                                com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = ? WHERE id = ?", placeState, place);
                         case "UNCLAIMED" ->
-                                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", place);
-                        case "OTHER_BUSINESS" -> jdbcTemplate.update(
+                                com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", place);
+                        case "OTHER_BUSINESS" -> com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                                 "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
                         default -> {
                         }
@@ -644,14 +629,13 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Resposta ativa oculta continua ocupando a vaga da empresa no alvo: nova publicação por outro local "
             + "recebe 409 até a empresa retirar a oculta")
     void hiddenActiveResponseStillHoldsUniqueness() {
         Fixture f = fixture();
         UUID secondPlace = representedPlace(f, f.business());
         BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Pelo primeiro local"), now);
-        jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.place());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.place());
         assertTrue(responseRepository.findActiveReviewResponseViews(f.review(), 0, 10).content().isEmpty());
 
         BusinessException duplicate = assertThrows(BusinessException.class,
@@ -665,7 +649,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Restauração revalida a elegibilidade no banco: a consulta sinaliza o bloqueio, a restauração recusa "
             + "409 sem gravar nem auditar, e passa quando a representação volta a ser elegível")
     void restoreRevalidatesCurrentEligibility() {
@@ -682,25 +665,21 @@ class BusinessResponsePersistenceIntegrationTest {
         }
         Runnable approve = () -> setVerification(f.business(), "APPROVED");
         Runnable reactivate = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
-        Runnable deleteWithSavepoint = () -> {
-            jdbcTemplate.execute("SAVEPOINT sp_admin_deleted");
-            setAccountStatus(f.businessAdmin(), AccountStatus.DELETED);
-        };
-        Runnable rollbackDeletedSavepoint = () ->
-                jdbcTemplate.execute("ROLLBACK TO SAVEPOINT sp_admin_deleted; RELEASE SAVEPOINT sp_admin_deleted");
-        Runnable reopen = () -> jdbcTemplate.update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
+        Runnable deleteAdmin = () -> setAccountStatus(f.businessAdmin(), AccountStatus.DELETED);
+        Runnable restoreDeletedAdmin = () -> setAccountStatus(f.businessAdmin(), AccountStatus.ACTIVE);
+        Runnable reopen = () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'ACTIVE' WHERE id = ?", f.place());
         List<Blocked> cases = List.of(
                 new Blocked(BusinessResponseRestorationBlocker.ACCOUNT_NOT_APPROVED,
                         () -> setVerification(f.business(), "PENDING"), approve),
                 new Blocked(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
                         () -> setAccountStatus(f.businessAdmin(), AccountStatus.SUSPENDED), reactivate),
                 new Blocked(BusinessResponseRestorationBlocker.ADMINISTRATOR_NOT_OPERATIONAL,
-                        deleteWithSavepoint, rollbackDeletedSavepoint),
+                        deleteAdmin, restoreDeletedAdmin),
                 new Blocked(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED,
-                        () -> jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
+                        () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", f.place()), reopen),
                 new Blocked(BusinessResponseRestorationBlocker.PLACE_NOT_REPRESENTED,
-                        () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place()),
-                        () -> jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+                        () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place()),
+                        () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
                                 f.business(), f.place())));
 
         for (Blocked blocked : cases) {
@@ -733,7 +712,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Paridade na consulta administrativa: os bloqueios de elegibilidade de cada removida são os motivos de "
             + "BusinessRepresentationPolicy para a mesma representação")
     void removedQueryBlockersMatchJavaPolicy() {
@@ -746,18 +724,20 @@ class BusinessResponsePersistenceIntegrationTest {
                     UUID admin = insertUser();
                     UUID business = insertBusiness(admin);
                     UUID place = representedPlace(f, business);
-                    BusinessResponse removed = BusinessResponse.publish(f.review(), null, business, place, admin,
-                            "Paridade " + sequence, now.plusMillis(sequence));
-                    removed.removeByModeration(now.plusSeconds(1).plusMillis(sequence));
-                    UUID response = responseRepository.save(removed).getId();
+                    BusinessResponse savedActive = responseRepository.save(BusinessResponse.publish(f.review(), null, business, place, admin,
+                            "Paridade " + sequence, now.plusMillis(sequence)));
+                    UUID response = savedActive.getId();
+                    PrivilegedTestDatabase.jdbc().update(
+                            "UPDATE business_responses SET status = 'REMOVED', removed_by = 'MODERATION', removed_at = ? WHERE id = ?",
+                            Timestamp.from(now.plusSeconds(1).plusMillis(sequence)), response);
                     sequence++;
                     setVerification(business, verification);
                     setAccountStatus(admin, administratorStatus);
                     switch (placeState) {
-                        case "CLOSED" -> jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", place);
+                        case "CLOSED" -> com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'CLOSED' WHERE id = ?", place);
                         case "UNCLAIMED" ->
-                                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", place);
-                        case "OTHER_BUSINESS" -> jdbcTemplate.update(
+                                com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", place);
+                        case "OTHER_BUSINESS" -> com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                                 "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
                         default -> {
                         }
@@ -781,7 +761,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Ponta a ponta: publica, recusa a segunda ativa, remove e publica outra")
     void publishRemoveRepublish() {
         Fixture f = fixture();
@@ -805,13 +784,12 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Vínculo perdido: nova resposta bloqueada (403); a já publicada fica e a conta ainda pode removê-la")
     void lostLinkBlocksNewButAllowsRemoval() {
         Fixture f = fixture();
         BusinessResponseView published = publishUseCase.execute(command(f, f.place(), "Resposta"), now);
 
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", insertBusiness(insertUser()),
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", insertBusiness(insertUser()),
                 f.place());
 
         assertEquals("BUSINESS_NOT_RESPONSIBLE", assertThrows(BusinessException.class,
@@ -829,7 +807,7 @@ class BusinessResponsePersistenceIntegrationTest {
         Fixture f = tx.execute(_ -> fixture());
         UUID secondPlace = tx.execute(_ -> {
             UUID place = insertPlace();
-            jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
+            com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
             jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 5)",
                     f.review(), place);
             return place;
@@ -879,9 +857,12 @@ class BusinessResponsePersistenceIntegrationTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             // Simula a decisão de reivindicação: trava o local (como o C9) e troca o vínculo antes do commit
-            Future<?> relink = executor.submit(() -> tx.executeWithoutResult(_ -> {
-                jdbcTemplate.queryForObject("SELECT id FROM places WHERE id = ? FOR UPDATE", UUID.class, f.place());
-                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, f.place());
+            var ownerDs = PrivilegedTestDatabase.jdbc().getDataSource();
+            var ownerTx = new TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(ownerDs));
+            var ownerJdbc = new JdbcTemplate(ownerDs);
+            Future<?> relink = executor.submit(() -> ownerTx.executeWithoutResult(_ -> {
+                ownerJdbc.queryForObject("SELECT id FROM places WHERE id = ? FOR UPDATE", UUID.class, f.place());
+                ownerJdbc.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, f.place());
                 locked.countDown();
                 await(release);
             }));
@@ -910,14 +891,13 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Comentário ponta a ponta: avaliação correta, uma ativa por empresa, outra empresa e alvos independentes")
     void discussionResponsesEndToEnd() {
         Fixture f = fixture();
         UUID otherAdmin = insertUser();
         UUID otherBusiness = insertBusiness(otherAdmin);
         UUID otherPlace = insertPlace();
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, otherPlace);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, otherPlace);
         jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 3)", f.review(), otherPlace);
         UUID secondRoot = insertDiscussion(f.review(), f.reviewer());
 
@@ -953,7 +933,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Comentário: remover libera o índice parcial, a nova publicação preserva o histórico e só a ativa é listada")
     void discussionRemoveAndRepublish() {
         Fixture f = fixture();
@@ -972,16 +951,12 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Comentário em quarentena: publicação e listagem respondem 404; respostas existentes ficam ocultas")
     void quarantinedDiscussionHidesResponses() {
         Fixture f = fixture();
         publishDiscussionUseCase.execute(
                 discussionCommand(f.businessAdmin(), f.business(), f.rootDiscussion(), f.place(), "Resposta"), now);
-        // Pelo domínio, como a denúncia faz: um UPDATE direto deixaria a entidade antiga no cache desta transação
-        ReviewDiscussion root = discussionRepository.findById(f.rootDiscussion()).orElseThrow();
-        root.markUnderReview();
-        discussionRepository.save(root);
+        PrivilegedTestDatabase.setDiscussionStatus(f.rootDiscussion(), "UNDER_REVIEW");
 
         assertEquals("DISCUSSION_NOT_FOUND", assertThrows(BusinessException.class,
                 () -> listDiscussionUseCase.execute(f.reviewer(), f.rootDiscussion(), 0, 10)).getErrorCode());
@@ -997,7 +972,7 @@ class BusinessResponsePersistenceIntegrationTest {
         Fixture f = tx.execute(_ -> fixture());
         UUID secondPlace = tx.execute(_ -> {
             UUID place = insertPlace();
-            jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
+            com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", f.business(), place);
             jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 5)",
                     f.review(), place);
             return place;
@@ -1039,7 +1014,6 @@ class BusinessResponsePersistenceIntegrationTest {
     // ------------------------------------------------------------------------------------ moderação (C11)
 
     @Test
-    @Transactional
     @DisplayName("Moderação: remoção e restauração gravam resposta e auditoria juntas, em ordem e append-only")
     void moderationRemoveAndRestoreWithAudit() {
         Fixture f = fixture();
@@ -1073,7 +1047,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Restaurar com resposta nova ativa (avaliação e comentário): 409, nova intacta, antiga removida, sem auditoria")
     void restoreConflictsWithNewerResponse() {
         Fixture f = fixture();
@@ -1166,7 +1139,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Removidas para a moderação: só REMOVED, filtros por alvo, conta, local e origem, restorabilidade e última decisão")
     void removedResponsesForModeration() {
         Fixture f = fixture();
@@ -1174,7 +1146,7 @@ class BusinessResponsePersistenceIntegrationTest {
         UUID otherAdmin = insertUser();
         UUID otherBusiness = insertBusiness(otherAdmin);
         UUID otherPlace = insertPlace();
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, otherPlace);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherBusiness, otherPlace);
         jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 3)", f.review(), otherPlace);
 
         // Avaliação: retirada pela empresa, depois outra removida pela moderação (nada ativo no alvo)
@@ -1257,7 +1229,6 @@ class BusinessResponsePersistenceIntegrationTest {
     }
 
     @Test
-    @Transactional
     @DisplayName("Removidas com o mesmo removed_at: páginas sem duplicar nem omitir, desempate por id decrescente")
     void removedPaginationWithTies() {
         Fixture f = fixture();
@@ -1265,7 +1236,7 @@ class BusinessResponsePersistenceIntegrationTest {
         List<UUID> inserted = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
             UUID id = UUID.randomUUID();
-            jdbcTemplate.update("""
+            PrivilegedTestDatabase.jdbc().update("""
                     INSERT INTO business_responses (id, review_id, business_account_id, place_id, author_user_id, content,
                                                     status, removed_by, removed_at)
                     VALUES (?, ?, ?, ?, ?, 'Retirada', 'REMOVED', 'BUSINESS', ?)
@@ -1324,12 +1295,14 @@ class BusinessResponsePersistenceIntegrationTest {
         return new PublishReviewBusinessResponseCommand(f.businessAdmin(), f.business(), f.review(), placeId, content);
     }
 
-    /** Espera alguma sessão bloqueada em lock de linha (a publicação parada no FOR UPDATE do local). */
+    /** Espera alguma sessão bloqueada em lock de linha (a publicação parada no FOR UPDATE do local ou restauração no índice). */
     private void waitForLockWaiter() throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
-            if (count("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-                    + "AND wait_event_type = 'Lock'") > 0) {
+            Integer waiting = PrivilegedTestDatabase.jdbc().queryForObject(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+                    Integer.class);
+            if (waiting != null && waiting > 0) {
                 return;
             }
             Thread.sleep(20);
@@ -1352,44 +1325,44 @@ class BusinessResponsePersistenceIntegrationTest {
         UUID businessAdmin = insertUser();
         UUID place = insertPlace();
         UUID business = insertBusiness(businessAdmin);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", business, place);
+        PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", business, place);
         UUID review = insertReview(reviewer);
-        jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 4)", review, place);
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 4)", review, place);
         UUID root = insertDiscussion(review, reviewer);
         return new Fixture(reviewer, businessAdmin, place, business, review, root);
     }
 
     private UUID insertUser() {
         UUID id = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO users (id, email, auth_provider) VALUES (?, ?, 'LOCAL')",
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO users (id, email, auth_provider) VALUES (?, ?, 'LOCAL')",
                 id, "c11." + id + "@rewit.test");
         return id;
     }
 
     private UUID insertPlace() {
         UUID id = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", id);
-        jdbcTemplate.update("INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) "
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", id);
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) "
                 + "VALUES (?, ?, ?, 'CAFE', ?, 'Curitiba', 'PR', ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326))",
                 id, "Local C11 " + id, "c11-" + id, "Rua A, " + id.toString().substring(0, 8));
         return id;
     }
 
     private UUID insertBusiness(UUID adminUserId) {
-        return jdbcTemplate.queryForObject("INSERT INTO business_accounts (user_id, corporate_name, tax_id, "
+        return PrivilegedTestDatabase.jdbc().queryForObject("INSERT INTO business_accounts (user_id, corporate_name, tax_id, "
                         + "verification_status) VALUES (?, 'Empresa C11', ?, 'APPROVED') RETURNING id",
                 UUID.class, adminUserId, UUID.randomUUID().toString().replace("-", "").substring(0, 14));
     }
 
     private UUID insertReview(UUID userId) {
         UUID id = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO reviews (id, user_id) VALUES (?, ?)", id, userId);
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO reviews (id, user_id) VALUES (?, ?)", id, userId);
         return id;
     }
 
     private UUID insertDiscussion(UUID reviewId, UUID userId) {
         UUID id = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO review_discussions (id, review_id, user_id, content) VALUES (?, ?, ?, 'Comentário')",
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO review_discussions (id, review_id, user_id, content) VALUES (?, ?, ?, 'Comentário')",
                 id, reviewId, userId);
         return id;
     }
@@ -1397,26 +1370,39 @@ class BusinessResponsePersistenceIntegrationTest {
     /** Local ativo, vinculado à conta e associado à avaliação do fixture: representação elegível por esse local. */
     private UUID representedPlace(Fixture f, UUID business) {
         UUID place = insertPlace();
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", business, place);
-        jdbcTemplate.update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 4)", f.review(), place);
+        PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", business, place);
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO review_targets (review_id, target_id, rating) VALUES (?, ?, 4)", f.review(), place);
         return place;
     }
 
     /** Estado pessoal coerente com as constraints de users (is_active e deleted_at acompanham account_status). */
     private void setAccountStatus(UUID userId, AccountStatus status) {
-        jdbcTemplate.update("UPDATE users SET account_status = ?, is_active = ?, deleted_at = ? WHERE id = ?",
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = ?, is_active = ?, deleted_at = ? WHERE id = ?",
                 status.name(), status == AccountStatus.ACTIVE,
                 status == AccountStatus.DELETED ? Timestamp.from(now) : null, userId);
     }
 
     /** Sincroniza e esvazia o contexto de persistência, para o JPA reler o que foi alterado direto no banco. */
     private void forgetLoadedEntities() {
-        entityManager.flush();
-        entityManager.clear();
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            entityManager.flush();
+            entityManager.clear();
+        }
+    }
+
+    private BusinessResponseModerationAuditLog insertAuditDirectly(BusinessResponseModerationAuditLog log) {
+        PrivilegedTestDatabase.jdbc().update("""
+                INSERT INTO business_response_moderation_audit_logs
+                    (id, response_id, moderator_user_id, action, reason_code, justification, previous_status, new_status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, log.getId(), log.getResponseId(), log.getModeratorUserId(), log.getAction().name(),
+                log.getReasonCode(), log.getJustification(), log.getPreviousStatus().name(),
+                log.getNewStatus().name(), Timestamp.from(log.getCreatedAt()));
+        return log;
     }
 
     private void setVerification(UUID business, String verificationStatus) {
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = ? WHERE id = ?", verificationStatus,
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = ? WHERE id = ?", verificationStatus,
                 business);
     }
 
@@ -1460,9 +1446,8 @@ class BusinessResponsePersistenceIntegrationTest {
      * Executa o comando num savepoint da transação corrente e exige que o banco o recuse citando {@code expected}
      * (nome da constraint ou trecho da mensagem); o savepoint é desfeito para a transação seguir utilizável.
      */
-    private void assertRejected(String expected, String sql, Object... args) {
-        jdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
-            Savepoint savepoint = connection.setSavepoint();
+    private void assertPrivilegedRejected(String expected, String sql, Object... args) {
+        PrivilegedTestDatabase.jdbc().execute((ConnectionCallback<Void>) connection -> {
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 for (int i = 0; i < args.length; i++) {
                     statement.setObject(i + 1, args[i]);
@@ -1470,7 +1455,26 @@ class BusinessResponsePersistenceIntegrationTest {
                 statement.executeUpdate();
                 fail("O banco deveria recusar: " + sql);
             } catch (SQLException expectedFailure) {
-                connection.rollback(savepoint);
+                String message = String.valueOf(expectedFailure.getMessage());
+                assertTrue(message.contains(expected), () -> "Esperava " + expected + ", veio: " + message);
+            }
+            return null;
+        });
+    }
+
+    private void assertRejected(String expected, String sql, Object... args) {
+        jdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
+            Savepoint savepoint = connection.getAutoCommit() ? null : connection.setSavepoint();
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                for (int i = 0; i < args.length; i++) {
+                    statement.setObject(i + 1, args[i]);
+                }
+                statement.executeUpdate();
+                fail("O banco deveria recusar: " + sql);
+            } catch (SQLException expectedFailure) {
+                if (savepoint != null) {
+                    connection.rollback(savepoint);
+                }
                 String message = String.valueOf(expectedFailure.getMessage());
                 assertTrue(message.contains(expected) || (expected.equals("append-only") && message.contains("permission denied")), () -> "Esperava " + expected + ", veio: " + message);
             }
@@ -1499,7 +1503,7 @@ class BusinessResponsePersistenceIntegrationTest {
 
     private void cleanup(Fixture f) {
         PrivilegedTestDatabase.jdbc().update("DELETE FROM reviews WHERE id = ?", f.review());
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", f.place());
         // Exclusão física de fixtures é administrativa: o runtime não apaga locais, alvos, empresas nem usuários (V37)
         PrivilegedTestDatabase.jdbc().update("DELETE FROM places WHERE id = ?", f.place());
         PrivilegedTestDatabase.jdbc().update("DELETE FROM rateable_targets WHERE id = ?", f.place());

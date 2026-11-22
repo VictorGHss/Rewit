@@ -213,10 +213,9 @@ class AuthenticationIntegrationTest {
         JsonNode node = objectMapper.readTree(registerResult.getResponse().getContentAsString());
         String accessToken = node.get("accessToken").asText();
 
-        // Executar soft-delete
+        // Executar soft-delete administrativo em fixture
         User user = userRepository.findByEmail(email).orElseThrow();
-        user.softDelete();
-        userRepository.save(user);
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(user.getId(), "DELETED");
 
         // Tentativa de login deve falhar com 401
         mockMvc.perform(post("/api/v1/auth/login")

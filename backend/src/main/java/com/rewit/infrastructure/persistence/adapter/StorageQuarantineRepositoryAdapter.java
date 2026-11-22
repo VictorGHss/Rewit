@@ -5,6 +5,8 @@ import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinePurgeRe
 import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantineResolution;
 import com.rewit.application.dto.storage.StorageQuarantineDtos.QuarantinedStorageObject;
 import com.rewit.application.dto.storage.StorageReconciliationDtos.OrphanCandidate;
+import com.rewit.application.port.AppTransactionPort;
+import com.rewit.application.port.MediaLifecycleTransactionPort;
 import com.rewit.application.port.StorageQuarantineRepository;
 import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.enums.StorageQuarantineStatus;
@@ -46,17 +48,23 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
     private final ReviewJpaRepository reviewJpaRepository;
     private final com.rewit.infrastructure.persistence.repository.PlaceMediaJpaRepository placeMediaJpaRepository;
     private final com.rewit.infrastructure.persistence.repository.PlaceJpaRepository placeJpaRepository;
+    private final MediaLifecycleTransactionPort mediaLifecycleTransactionExecutor;
+    private final AppTransactionPort appTransactionExecutor;
 
     public StorageQuarantineRepositoryAdapter(StorageObjectQuarantineJpaRepository quarantineJpaRepository,
                                               ReviewMediaJpaRepository reviewMediaJpaRepository,
                                               ReviewJpaRepository reviewJpaRepository,
                                               com.rewit.infrastructure.persistence.repository.PlaceMediaJpaRepository placeMediaJpaRepository,
-                                              com.rewit.infrastructure.persistence.repository.PlaceJpaRepository placeJpaRepository) {
+                                              com.rewit.infrastructure.persistence.repository.PlaceJpaRepository placeJpaRepository,
+                                              MediaLifecycleTransactionPort mediaLifecycleTransactionExecutor,
+                                              AppTransactionPort appTransactionExecutor) {
         this.quarantineJpaRepository = Objects.requireNonNull(quarantineJpaRepository, "quarantineJpaRepository must not be null");
         this.reviewMediaJpaRepository = Objects.requireNonNull(reviewMediaJpaRepository, "reviewMediaJpaRepository must not be null");
         this.reviewJpaRepository = Objects.requireNonNull(reviewJpaRepository, "reviewJpaRepository must not be null");
         this.placeMediaJpaRepository = Objects.requireNonNull(placeMediaJpaRepository, "placeMediaJpaRepository must not be null");
         this.placeJpaRepository = Objects.requireNonNull(placeJpaRepository, "placeJpaRepository must not be null");
+        this.mediaLifecycleTransactionExecutor = Objects.requireNonNull(mediaLifecycleTransactionExecutor, "mediaLifecycleTransactionExecutor must not be null");
+        this.appTransactionExecutor = Objects.requireNonNull(appTransactionExecutor, "appTransactionExecutor must not be null");
     }
 
     @Override
@@ -147,12 +155,14 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
             }
         }
 
-        quarantineJpaRepository.markConfirmedOrphan(entryId.get(), now);
+        Boolean confirmed = quarantineJpaRepository.confirmEntryAsRuntime(entryId.get());
+        if (!Boolean.TRUE.equals(confirmed)) {
+            return new QuarantineResolution(QuarantineResolution.Kind.ENTRY_CHANGED, null);
+        }
         return new QuarantineResolution(QuarantineResolution.Kind.CONFIRMED_ORPHAN, null);
     }
 
     @Override
-    @Transactional
     public QuarantinePurgeResolution purgeConfirmedOrphanUnderCreationLock(String objectKey, UUID entityId,
                                                                            Instant expectedFirstObservedAt,
                                                                            Function<String, ObjectDeletionResult> physicalDeletion) {
@@ -160,6 +170,20 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
         Objects.requireNonNull(entityId, "entityId must not be null");
         Objects.requireNonNull(expectedFirstObservedAt, "expectedFirstObservedAt must not be null");
         Objects.requireNonNull(physicalDeletion, "physicalDeletion must not be null");
+
+        // Expurgo de place_media (marcação de purged_at) executa sob rewit_media (SEC-F2-03);
+        // expurgo de review_media permanece sob rewit_app.
+        if (objectKey.startsWith("places/")) {
+            return mediaLifecycleTransactionExecutor.execute(() ->
+                    purgeConfirmedOrphanInternal(objectKey, entityId, expectedFirstObservedAt, physicalDeletion));
+        }
+        return appTransactionExecutor.execute(() ->
+                purgeConfirmedOrphanInternal(objectKey, entityId, expectedFirstObservedAt, physicalDeletion));
+    }
+
+    private QuarantinePurgeResolution purgeConfirmedOrphanInternal(String objectKey, UUID entityId,
+                                                                   Instant expectedFirstObservedAt,
+                                                                   Function<String, ObjectDeletionResult> physicalDeletion) {
 
         // 1. Mesmo lock do upload e da rechecagem, na mesma ordem (entidade dona → quarentena)
         if (objectKey.startsWith("places/")) {
@@ -184,7 +208,7 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
                         && ref.getRemovedAt() != null
                         && !ref.getRemovedAt().plus(Duration.ofHours(24)).isAfter(Instant.now());
                 if (ref.getPurgedAt() == null && !isRemovedGraceElapsed) {
-                    quarantineJpaRepository.releaseEntry(entryId.get());
+                    releaseLockedConfirmedEntry(objectKey, entryId.get());
                     ReviewMediaStatus refStatus = "REMOVED".equalsIgnoreCase(ref.getStatus())
                             ? ReviewMediaStatus.REMOVED : ReviewMediaStatus.ACTIVE;
                     return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND, refStatus, null);
@@ -193,10 +217,21 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
         } else {
             List<ReviewMediaJpaEntity> references = reviewMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
             if (!references.isEmpty()) {
-                quarantineJpaRepository.releaseEntry(entryId.get());
+                releaseLockedConfirmedEntry(objectKey, entryId.get());
                 return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.REFERENCE_FOUND,
                         ReviewMediaStatus.valueOf(references.get(0).getStatus()), null);
             }
+        }
+
+        // 3b. Validação temporal autoritativa no PostgreSQL sob os locks (SEC-F2-04-ARCH-01):
+        //     executada imediatamente antes da exclusão física no storage usando clock_timestamp().
+        //     Garante status CONFIRMED_ORPHAN, first_observed_at não futuro e >= 24h, e
+        //     confirmed_at coerente (>= first_observed_at + 24h) e não futuro.
+        Boolean dbEligible = quarantineJpaRepository.isLockedConfirmedEntryEligibleForPurge(entryId.get());
+        if (!Boolean.TRUE.equals(dbEligible)) {
+            throw new IllegalStateException(
+                    "Integridade temporal da quarentena violada segundo o relógio do PostgreSQL para entrada "
+                            + entryId.get() + " (" + objectKey + ")");
         }
 
         // 4. Operação externa, com os locks mantidos; não é revertida por rollback
@@ -205,7 +240,7 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
 
         // 5. A linha só sai depois do storage: se o commit falhar, a próxima execução obtém NOT_FOUND
         if (deletionResult.isAbsentAfterwards()) {
-            quarantineJpaRepository.releaseEntry(entryId.get());
+            releaseLockedConfirmedEntry(objectKey, entryId.get());
             if (objectKey.startsWith("places/")) {
                 List<com.rewit.infrastructure.persistence.entity.PlaceMediaJpaEntity> references =
                         placeMediaJpaRepository.findByObjectKeyIn(List.of(objectKey));
@@ -217,5 +252,18 @@ public class StorageQuarantineRepositoryAdapter implements StorageQuarantineRepo
             }
         }
         return new QuarantinePurgeResolution(QuarantinePurgeResolution.Kind.STORAGE_ATTEMPTED, null, deletionResult);
+    }
+
+    /**
+     * Libera a entrada CONFIRMED_ORPHAN já travada. Sob {@code rewit_media} ({@code places/}) não há DELETE direto:
+     * usa a função restrita {@code rewit_release_place_quarantine_entry}, que só remove entradas {@code places/}
+     * em CONFIRMED_ORPHAN. O caminho {@code reviews/} permanece sob {@code rewit_app} com DELETE por id.
+     */
+    private void releaseLockedConfirmedEntry(String objectKey, UUID entryId) {
+        if (objectKey.startsWith("places/")) {
+            quarantineJpaRepository.releasePlaceEntryAsMediaRole(entryId);
+        } else {
+            quarantineJpaRepository.releaseEntry(entryId);
+        }
     }
 }

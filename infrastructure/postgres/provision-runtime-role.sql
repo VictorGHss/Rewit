@@ -1,22 +1,25 @@
 -- ==============================================================================
--- REWIT - PROVISIONAMENTO DA ROLE DE RUNTIME (rewit_app)
+-- REWIT - PROVISIONAMENTO DAS ROLES DE RUNTIME (rewit_app, rewit_media e rewit_mod)
 -- Fonte única do provisionamento: usada pelo init do container (init/02-create-app-role.sh)
--- e diretamente por administradores para provisionar ou rotacionar a senha.
+-- e diretamente por administradores para provisionar ou rotacionar senhas.
 --
 -- Uso administrativo (a senha é pedida duas vezes, sem eco, pelo próprio psql):
 --   psql -U rewit_user -d rewit_db -v app_user=rewit_app -f provision-runtime-role.sql
--- Uso automatizado: prefira init/02-create-app-role.sh, que valida APP_DB_PASSWORD e a envia
--- pela entrada padrão do psql.
+--   psql -U rewit_user -d rewit_db -v app_user=rewit_media -f provision-runtime-role.sql
+--   psql -U rewit_user -d rewit_db -v app_user=rewit_mod -f provision-runtime-role.sql
+-- Uso automatizado: prefira init/02-create-app-role.sh, que valida APP_DB_PASSWORD,
+-- MEDIA_DB_PASSWORD e MOD_DB_PASSWORD e as envia pela entrada padrão do psql.
 --
--- Segurança (SEC-2 / SEC-3):
+-- Segurança (SEC-2 / SEC-3 / S3-A13-F2 / SEC-F2-03):
 --   * A senha NUNCA entra em texto SQL: \password lê a senha, calcula o verificador SCRAM no
 --     cliente (libpq) e envia ao servidor apenas o hash. Nada a interpolar, escapar ou registrar.
 --   * O nome da role chega como variável psql e é repassado como valor literal (:'app_user') para
 --     uma configuração de sessão; o bloco PL/pgSQL o valida e só o usa via format('%I').
 --   * Atributos privilegiados são removidos de forma explícita e a role não pode ser owner.
---   * Privilégios de tabela são responsabilidade exclusiva das migrations (V36); este script não
---     os concede, para não reabrir permissões retiradas (ex.: colunas de auditoria e decisão).
---   * O nome da role é fixo (rewit_app), porque é a role que recebe os privilégios das migrations.
+--   * Privilégios de tabela são responsabilidade exclusiva das migrations (V36/V37/V44/V45); este
+--     script não os concede, para não reabrir permissões retiradas.
+--   * Os nomes suportados são fixos (rewit_app, rewit_media e rewit_mod), pois são as roles que
+--     recebem os privilégios separados das migrations. Nenhuma pode ter membership em outra (sem SET ROLE).
 -- ==============================================================================
 
 \set ON_ERROR_STOP on
@@ -38,10 +41,11 @@ BEGIN
     IF v_user = current_user OR v_user = 'postgres' OR v_user LIKE 'pg\_%' THEN
         RAISE EXCEPTION 'A role de runtime não pode ser a role administrativa nem uma role reservada: %', v_user;
     END IF;
-    -- As migrations (V36) concedem os privilégios de runtime somente a rewit_app: outro nome produziria um
-    -- login sem privilégios que só falharia no primeiro acesso (P3-2). A configuração é recusada aqui.
-    IF v_user <> 'rewit_app' THEN
-        RAISE EXCEPTION 'APP_DB_USER/app_user=% não é suportado: a role de runtime é fixa (rewit_app), pois as migrations concedem privilégios somente a ela', v_user;
+    -- As migrations (V36/V45) concedem privilégios de runtime somente a rewit_app (público),
+    -- rewit_media (ciclo de vida de mídias) e rewit_mod (moderação administrativa):
+    -- outro nome produziria um login sem privilégios (P3-2 / SEC-F2-03).
+    IF v_user NOT IN ('rewit_app', 'rewit_media', 'rewit_mod') THEN
+        RAISE EXCEPTION 'APP_DB_USER/MEDIA_DB_USER/MOD_DB_USER/app_user=% não é suportado: as roles de runtime são fixas (rewit_app, rewit_media e rewit_mod), pois as migrations concedem privilégios somente a elas', v_user;
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_user) THEN
@@ -52,7 +56,7 @@ BEGIN
         'ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS',
         v_user);
 
-    -- Nenhuma membership: a role não herda nem assume privilégios de outras roles
+    -- Nenhuma membership: a role não herda nem assume privilégios de outras roles (inclusive entre rewit_app e rewit_mod)
     FOR v_grant IN
         SELECT g.rolname AS granted_role
         FROM pg_auth_members am
@@ -61,6 +65,18 @@ BEGIN
         WHERE m.rolname = v_user
     LOOP
         EXECUTE format('REVOKE %I FROM %I', v_grant.granted_role, v_user);
+    END LOOP;
+
+    -- Garante também que nenhuma role de runtime seja membro desta role (impede SET ROLE cruzado)
+    FOR v_grant IN
+        SELECT m.rolname AS member_role
+        FROM pg_auth_members am
+        JOIN pg_roles g ON g.oid = am.roleid
+        JOIN pg_roles m ON m.oid = am.member
+        WHERE g.rolname = v_user
+          AND m.rolname IN ('rewit_app', 'rewit_media', 'rewit_mod')
+    LOOP
+        EXECUTE format('REVOKE %I FROM %I', v_user, v_grant.member_role);
     END LOOP;
 
     -- A role de runtime nunca é owner de objetos (em nenhum database do cluster)
@@ -86,12 +102,12 @@ DECLARE
     v_user TEXT := current_setting('rewit.provision_app_user');
     v_role RECORD;
 BEGIN
-    SELECT rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls, rolcanlogin
+    SELECT rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls, rolcanlogin, rolinherit
     INTO v_role
     FROM pg_roles WHERE rolname = v_user;
 
     IF v_role.rolsuper OR v_role.rolcreaterole OR v_role.rolcreatedb
-       OR v_role.rolreplication OR v_role.rolbypassrls OR NOT v_role.rolcanlogin THEN
+       OR v_role.rolreplication OR v_role.rolbypassrls OR v_role.rolinherit OR NOT v_role.rolcanlogin THEN
         RAISE EXCEPTION 'Role de runtime % ficou com atributos inesperados', v_user;
     END IF;
     IF EXISTS (SELECT 1 FROM pg_auth_members am JOIN pg_roles m ON m.oid = am.member WHERE m.rolname = v_user) THEN

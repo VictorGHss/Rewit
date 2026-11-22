@@ -40,4 +40,23 @@ public interface PlaceMediaReportRepository {
      * ou {@link PlaceMediaReport#DECISION_ORIGIN_LEGACY}); {@code null} em qualquer filtro não restringe.
      */
     PageResult<PlaceMediaReport> findByStatusAndDecisionOrigin(String status, String decisionOrigin, int page, int size);
+
+    record AutoResolvedReport(UUID reportId, String reason) {
+    }
+
+    /**
+     * Indica se o repositório suporta auto-resolução controlada via função SECURITY DEFINER
+     * {@code public.rewit_auto_resolve_removed_place_media_reports} (S3-A13-F2).
+     */
+    default boolean supportsDatabaseAutoResolve() {
+        return false;
+    }
+
+    /**
+     * Auto-resolve denúncias {@code PENDING} de uma fotografia já {@code REMOVED} por origem não administrativa,
+     * via função {@code SECURITY DEFINER} no banco (evitando privilégio de {@code UPDATE} direto para {@code rewit_app}).
+     */
+    default List<AutoResolvedReport> autoResolvePendingForRemovedMedia(UUID placeMediaId, String decisionNotes) {
+        return List.of();
+    }
 }

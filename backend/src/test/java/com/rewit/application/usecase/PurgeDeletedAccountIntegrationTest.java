@@ -498,7 +498,7 @@ class PurgeDeletedAccountIntegrationTest {
                 + "VALUES (?, 'VIEW', 'PLACE', ?)", d, targetId);
         jdbcTemplate.update("INSERT INTO business_accounts (user_id, corporate_name, tax_id) VALUES (?, ?, ?)",
                 d, "Empresa " + suffix(), UUID.randomUUID().toString().replace("-", ""));
-        jdbcTemplate.update("INSERT INTO moderation_audit_logs (review_id, moderator_user_id, action, decision, reason_code, "
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO moderation_audit_logs (review_id, moderator_user_id, action, decision, reason_code, "
                 + "justification, previous_review_status, new_review_status) "
                 + "VALUES (?, ?, 'REMOVE_REVIEW', 'REJECTED', 'SPAM', 'Decisão histórica tomada pela conta', 'ACTIVE', 'ACTIVE')",
                 activeReviewId, d);

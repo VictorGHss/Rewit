@@ -372,9 +372,8 @@ class ModerateReviewIntegrationTest {
                 List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.0"), "Bom"))
         ));
 
-        // Desativa o autor da avaliação
-        author.softDelete();
-        userRepository.save(author);
+        // Desativa o autor da avaliação em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(author.getId(), "DELETED");
 
         // Moderador remove a avaliação
         ModerateReviewCommand cmd = new ModerateReviewCommand(
@@ -415,14 +414,11 @@ class ModerateReviewIntegrationTest {
                 List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.0"), "Bom"))
         ));
 
-        // Coloca a avaliação em UNDER_REVIEW
-        Review domainReview = reviewRepository.findById(review.id()).orElseThrow();
-        domainReview.markUnderReview();
-        reviewRepository.save(domainReview);
+        // Coloca a avaliação em UNDER_REVIEW em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(review.id(), "UNDER_REVIEW");
 
-        // Desativa o autor
-        author.softDelete();
-        userRepository.save(author);
+        // Desativa o autor em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(author.getId(), "DELETED");
 
         // Moderador restaura a avaliação
         ModerateReviewCommand cmd = new ModerateReviewCommand(

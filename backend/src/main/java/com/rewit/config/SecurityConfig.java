@@ -61,12 +61,18 @@ public class SecurityConfig {
             @Value("${rewit.security.password-pepper-previous:}") String passwordPepperPrevious,
             @Value("${rewit.security.refresh-token-secret}") String refreshTokenSecret,
             @Value("${rewit.security.refresh-token-secret-previous:}") String refreshTokenSecretPrevious,
+            @Value("${rewit.security.moderation-audit-secret}") String moderationAuditSecret,
+            @Value("${rewit.security.moderation-audit-secret-previous:}") String moderationAuditSecretPrevious,
+            @Value("${spring.datasource.password:}") String appDbPassword,
+            @Value("${rewit.datasource.media.password:}") String mediaDbPassword,
+            @Value("${rewit.datasource.moderation.password:}") String modDbPassword,
             @Value("${rewit.security.jwt-issuer:rewit-api}") String jwtIssuer,
             @Value("${rewit.security.jwt-audience:rewit-clients}") String jwtAudience
     ) {
         this.jwtSecretBytes = SecuritySecretValidator.decodeSecret("JWT_SECRET", jwtSecret);
         SecuritySecretValidator.validateSecret("PASSWORD_PEPPER_SECRET", passwordPepper);
         SecuritySecretValidator.validateSecret("REFRESH_TOKEN_SECRET", refreshTokenSecret);
+        byte[] modAuditBytes = SecuritySecretValidator.decodeSecret("MODERATION_AUDIT_SECRET", moderationAuditSecret);
 
         Map<String, String> configuredSecrets = new LinkedHashMap<>();
         configuredSecrets.put("JWT_SECRET", jwtSecret);
@@ -80,7 +86,23 @@ public class SecurityConfig {
             SecuritySecretValidator.validateSecret("REFRESH_TOKEN_SECRET_PREVIOUS", refreshTokenSecretPrevious);
             configuredSecrets.put("REFRESH_TOKEN_SECRET_PREVIOUS", refreshTokenSecretPrevious);
         }
+        configuredSecrets.put("MODERATION_AUDIT_SECRET", moderationAuditSecret);
+        byte[] modAuditPrevBytes = null;
+        if (moderationAuditSecretPrevious != null && !moderationAuditSecretPrevious.isBlank()) {
+            modAuditPrevBytes = SecuritySecretValidator.decodeSecret("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious);
+            configuredSecrets.put("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious);
+        }
         SecuritySecretValidator.validateDistinct(configuredSecrets);
+
+        // Garante independência de MODERATION_AUDIT_SECRET (e anterior) em relação às senhas de banco
+        validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "APP_DB_PASSWORD", appDbPassword);
+        validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "MEDIA_DB_PASSWORD", mediaDbPassword);
+        validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "MOD_DB_PASSWORD", modDbPassword);
+        if (modAuditPrevBytes != null) {
+            validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "APP_DB_PASSWORD", appDbPassword);
+            validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "MEDIA_DB_PASSWORD", mediaDbPassword);
+            validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "MOD_DB_PASSWORD", modDbPassword);
+        }
 
         this.jwtIssuer = jwtIssuer;
         this.jwtAudience = jwtAudience;
@@ -93,9 +115,26 @@ public class SecurityConfig {
                 "",
                 "test_refresh_token_secret_with_sufficient_entropy_and_at_least_32_bytes_12345!",
                 "",
+                "test_moderation_audit_secret_with_sufficient_entropy_and_at_least_32_bytes_1!",
+                "",
+                "",
+                "",
+                "",
                 jwtIssuer,
                 jwtAudience
         );
+    }
+
+    private static void validateNotSameAsPassword(String secretName, String secretRaw, byte[] secretBytes,
+                                                  String passwordName, String passwordRaw) {
+        if (passwordRaw == null || passwordRaw.isBlank()) {
+            return;
+        }
+        if (secretRaw.trim().equals(passwordRaw.trim())
+                || java.security.MessageDigest.isEqual(secretBytes, passwordRaw.trim().getBytes(StandardCharsets.UTF_8))) {
+            throw new IllegalArgumentException(
+                    "Reutilização de credencial proibida: '" + secretName + "' não pode coincidir com '" + passwordName + "'.");
+        }
     }
 
     @Bean

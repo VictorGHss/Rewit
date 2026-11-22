@@ -42,6 +42,12 @@ class ModerationAuditLogPersistenceIntegrationTest {
     private ModerationAuditLogRepository auditLogRepository;
 
     @Autowired
+    private com.rewit.application.port.ModerationTransactionPort moderationTransactionPort;
+
+    @Autowired
+    private com.rewit.infrastructure.security.ModerationAuditMacService moderationAuditMacService;
+
+    @Autowired
     private UserRepository userRepository;
 
     @Autowired
@@ -115,7 +121,6 @@ class ModerationAuditLogPersistenceIntegrationTest {
 
     @Test
     @DisplayName("Persistir ModerationAuditLog no PostgreSQL com sucesso e integridade referencial")
-    @Transactional
     void shouldPersistModerationAuditLogWithReferentialIntegrity() {
         // 1. Criar Moderador
         // Moderador criado e confirmado administrativamente (papel não é atribuível pelo runtime)
@@ -135,20 +140,29 @@ class ModerationAuditLogPersistenceIntegrationTest {
 
         RateableTarget target = rateableTargetRepository.save(new RateableTarget(UUID.randomUUID(), TargetType.PLACE));
 
-        // 3. Criar Review
+        // 3. Criar Review (nasce ACTIVE e entra em UNDER_REVIEW via fixture administrativa)
         Review review = new Review(
                 null, author.getId(), place.getId(), "Avaliação a ser moderada",
                 false, false,
-                ReviewStatus.UNDER_REVIEW, "PUBLIC",
+                ReviewStatus.ACTIVE, "PUBLIC",
                 null, null, null,
                 Instant.now(), Instant.now()
         );
         review.addTarget(new ReviewTarget(null, review.getId(), target.getId(), new BigDecimal("3.0"), "Comentário"));
         Review savedReview = reviewRepository.save(review);
+        PrivilegedTestDatabase.setReviewStatus(savedReview.getId(), "UNDER_REVIEW");
 
-        // 4. Criar e persistir ModerationAuditLog
+        // 4. Criar e persistir ModerationAuditLog sob rewit_mod com transição correlacionada e MAC válido
+        UUID auditId = UUID.randomUUID();
+        Instant occurredAt = com.rewit.infrastructure.security.ModerationAuditPayload.canonicalTimestamp(Instant.now());
+        String mac = moderationAuditMacService.computeMac(
+                com.rewit.infrastructure.security.ModerationAuditPayload.forReviewModeration(
+                        auditId, savedReview.getId(), savedMod.getId(),
+                        ModerationAction.REMOVE_REVIEW.name(), ModerationDecision.ACCEPTED.name(),
+                        "SPAM_AND_ABUSE", "Avaliação viola as diretrizes de conduta da comunidade",
+                        ReviewStatus.UNDER_REVIEW.name(), ReviewStatus.REMOVED.name(), 2, occurredAt));
         ModerationAuditLog auditLog = new ModerationAuditLog(
-                null,
+                auditId,
                 savedReview.getId(),
                 savedMod.getId(),
                 ModerationAction.REMOVE_REVIEW,
@@ -158,10 +172,16 @@ class ModerationAuditLogPersistenceIntegrationTest {
                 ReviewStatus.UNDER_REVIEW,
                 ReviewStatus.REMOVED,
                 2,
-                Instant.now()
+                occurredAt,
+                mac
         );
 
-        ModerationAuditLog savedLog = auditLogRepository.save(auditLog);
+        ModerationAuditLog savedLog = moderationTransactionPort.execute(() -> {
+            Review toModerate = reviewRepository.findByIdForUpdate(savedReview.getId()).orElseThrow();
+            toModerate.markRemovedByModerator(occurredAt);
+            reviewRepository.save(toModerate);
+            return auditLogRepository.save(auditLog);
+        });
 
         assertNotNull(savedLog);
         assertEquals(savedReview.getId(), savedLog.getReviewId());

@@ -82,7 +82,7 @@ class StaleTokenMutationIntegrationTest {
         // Conta ativa: o token funciona normalmente
         perform(post("/api/v1/users/{id}/follow", author.userId()), actor.accessToken()).andExpect(status().isOk());
 
-        assertEquals(1, jdbcTemplate.update(deactivationSql, actor.userId()));
+        assertEquals(1, com.rewit.config.PrivilegedTestDatabase.jdbc().update(deactivationSql, actor.userId()));
 
         // Mesmo token, ainda dentro da validade: toda mutação é recusada
         expectAccountDisabled(perform(post("/api/v1/reviews/{id}/helpful", authorReview.getId()), actor.accessToken()));

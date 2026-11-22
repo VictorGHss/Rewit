@@ -574,15 +574,59 @@ class DatabaseDomainIntegrityTest {
             UUID mediaId = f.media();
             UUID placeId = f.place();
 
-            // 1. rewit_app consegue inserir registros de auditoria (DML INSERT permitido)
-            try (PreparedStatement ps = appConn.prepareStatement(
-                    "INSERT INTO place_media_moderation_audit_logs " +
-                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at) " +
-                            "VALUES (?, ?, ?, NULL, 'SYSTEM', 'RELEASE_REVIEW', 'Análise aprovada', 'Sem denúncias ativas', NOW())")) {
-                ps.setObject(1, auditId);
-                ps.setObject(2, mediaId);
-                ps.setObject(3, placeId);
-                assertEquals(1, ps.executeUpdate(), "rewit_app deve conseguir inserir na trilha de auditoria");
+            // 1. SEC-F2-03: rewit_app é bloqueada de atualizar place_media ou inserir em place_media_moderation_audit_logs;
+            //    o fluxo público de ciclo de vida executa sob rewit_media em transação atômica com MAC.
+            String testMac = "aud1$v1$" + "b".repeat(64);
+            assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement(
+                        "UPDATE place_media SET status = 'REMOVED', removal_source = 'AUTHOR', removed_at = NOW(), is_primary = FALSE WHERE id = ?")) {
+                    ps.setObject(1, mediaId);
+                    ps.executeUpdate();
+                }
+            });
+            UUID authorId;
+            try (PreparedStatement ps = appConn.prepareStatement("SELECT user_id FROM place_media WHERE id = ?")) {
+                ps.setObject(1, mediaId);
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    authorId = rs.getObject(1, UUID.class);
+                }
+            }
+            assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement(
+                        "INSERT INTO place_media_moderation_audit_logs " +
+                                "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at, authenticity_mac) " +
+                                "VALUES (?, ?, ?, ?, 'USER', 'AUTHOR_REMOVE', 'Remoção pelo próprio autor', NULL, NOW(), ?)")) {
+                    ps.setObject(1, auditId);
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, placeId);
+                    ps.setObject(4, authorId);
+                    ps.setString(5, testMac);
+                    ps.executeUpdate();
+                }
+            });
+
+            var infra = com.rewit.config.TestInfrastructureConfig.current();
+            try (Connection mediaConn = java.sql.DriverManager.getConnection(
+                    infra.datasourceUrl(), infra.mediaDbUser(), infra.mediaDbPassword())) {
+                mediaConn.setAutoCommit(false);
+                try (PreparedStatement ps = mediaConn.prepareStatement(
+                        "UPDATE place_media SET status = 'REMOVED', removal_source = 'AUTHOR', removed_at = NOW(), is_primary = FALSE WHERE id = ?")) {
+                    ps.setObject(1, mediaId);
+                    assertEquals(1, ps.executeUpdate());
+                }
+                try (PreparedStatement ps = mediaConn.prepareStatement(
+                        "INSERT INTO place_media_moderation_audit_logs " +
+                                "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at, authenticity_mac) " +
+                                "VALUES (?, ?, ?, ?, 'USER', 'AUTHOR_REMOVE', 'Remoção pelo próprio autor', NULL, NOW(), ?)")) {
+                    ps.setObject(1, auditId);
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, placeId);
+                    ps.setObject(4, authorId);
+                    ps.setString(5, testMac);
+                    assertEquals(1, ps.executeUpdate(), "rewit_media deve conseguir inserir AUTHOR_REMOVE coerente com MAC");
+                }
+                mediaConn.commit();
             }
 
             // 2. rewit_app NÃO é owner da tabela e o PostgreSQL recusa qualquer comando de DDL

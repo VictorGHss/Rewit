@@ -52,6 +52,9 @@ public class BusinessResponseModerationAuditLogJpaEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "authenticity_mac", updatable = false, length = 128)
+    private String authenticityMac;
+
     protected BusinessResponseModerationAuditLogJpaEntity() {
     }
 
@@ -66,11 +69,12 @@ public class BusinessResponseModerationAuditLogJpaEntity {
         entity.previousStatus = log.getPreviousStatus();
         entity.newStatus = log.getNewStatus();
         entity.createdAt = log.getCreatedAt();
+        entity.authenticityMac = log.getAuthenticityMac();
         return entity;
     }
 
     public BusinessResponseModerationAuditLog toDomain() {
         return new BusinessResponseModerationAuditLog(id, responseId, moderatorUserId, action, reasonCode, justification,
-                previousStatus, newStatus, createdAt);
+                previousStatus, newStatus, createdAt, authenticityMac);
     }
 }

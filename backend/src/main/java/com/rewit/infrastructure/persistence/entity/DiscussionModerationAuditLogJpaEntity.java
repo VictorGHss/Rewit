@@ -60,6 +60,9 @@ public class DiscussionModerationAuditLogJpaEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "authenticity_mac", updatable = false, length = 128)
+    private String authenticityMac;
+
     protected DiscussionModerationAuditLogJpaEntity() {
     }
 
@@ -76,11 +79,12 @@ public class DiscussionModerationAuditLogJpaEntity {
         entity.newStatus = log.getNewStatus();
         entity.reportsAffectedCount = log.getReportsAffectedCount();
         entity.createdAt = log.getCreatedAt();
+        entity.authenticityMac = log.getAuthenticityMac();
         return entity;
     }
 
     public DiscussionModerationAuditLog toDomain() {
         return new DiscussionModerationAuditLog(id, discussionId, moderatorUserId, action, decision, reasonCode,
-                justification, previousStatus, newStatus, reportsAffectedCount, createdAt);
+                justification, previousStatus, newStatus, reportsAffectedCount, createdAt, authenticityMac);
     }
 }

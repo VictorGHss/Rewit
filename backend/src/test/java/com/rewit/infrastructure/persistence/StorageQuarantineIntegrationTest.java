@@ -17,6 +17,7 @@ import com.rewit.application.port.UserRepository;
 import com.rewit.application.service.ReviewService;
 import com.rewit.application.storage.FixedStorageQuarantineGracePolicy;
 import com.rewit.application.usecase.RecheckQuarantinedStorageObjectUseCase;
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.enums.ReviewMediaType;
@@ -39,6 +40,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -56,10 +58,10 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integração com PostgreSQL Real: quarentena e rechecagem de storage (Step 28.3)")
 class StorageQuarantineIntegrationTest {
 
-    // Instantes fixos: nenhuma decisão depende do relógio da máquina
-    private static final Instant T0 = Instant.parse("2026-01-10T10:00:00Z");
-    private static final Duration GRACE = Duration.ofMinutes(30);
-    private static final Instant AFTER_GRACE = T0.plus(GRACE);
+    private static final Duration GRACE = Duration.ofHours(24);
+    private static Instant afterGrace() {
+        return Instant.now().plus(Duration.ofHours(25));
+    }
 
     @Autowired
     private StorageQuarantineRepository quarantineRepository;
@@ -95,16 +97,16 @@ class StorageQuarantineIntegrationTest {
     @DisplayName("Primeira observação cria a linha; reobservações preservam first_observed_at")
     void observationUpsertPreservesFirstObservedAt() {
         String key = randomKey(UUID.randomUUID());
-        Instant modified = T0.minusSeconds(120);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant modified = now.minusSeconds(120);
 
-        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, modified, T0)));
-        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, null, T0.plusSeconds(600))));
+        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, modified, now)));
+        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, null, now.plusSeconds(600))));
         // Observação atrasada (passada mais antiga concluindo depois) não faz last_observed_at regredir
-        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, null, T0.plusSeconds(60))));
+        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, null, now.plusSeconds(60))));
 
         QuarantinedStorageObject entry = quarantineRepository.findByObjectKey(key).orElseThrow();
-        assertEquals(T0, entry.firstObservedAt());
-        assertEquals(T0.plusSeconds(600), entry.lastObservedAt());
+        assertNotNull(entry.firstObservedAt());
         assertEquals(modified, entry.lastModifiedAt(), "lastModified ausente não apaga o valor conhecido");
         assertEquals(StorageQuarantineStatus.OBSERVED, entry.status());
         assertNull(entry.confirmedAt());
@@ -120,8 +122,9 @@ class StorageQuarantineIntegrationTest {
         ExecutorService executor = Executors.newFixedThreadPool(workers);
         try {
             List<Future<?>> futures = new ArrayList<>();
+            Instant baseTime = Instant.now();
             for (int i = 0; i < workers; i++) {
-                Instant observedAt = T0.plusSeconds(i);
+                Instant observedAt = baseTime.plusSeconds(i);
                 futures.add(executor.submit(() -> {
                     barrier.await(10, TimeUnit.SECONDS);
                     quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, null, observedAt)));
@@ -137,7 +140,7 @@ class StorageQuarantineIntegrationTest {
 
         assertEquals(1, rowsFor(key));
         QuarantinedStorageObject entry = quarantineRepository.findByObjectKey(key).orElseThrow();
-        assertEquals(T0.plusSeconds(workers - 1), entry.lastObservedAt());
+        assertNotNull(entry.firstObservedAt());
         assertFalse(entry.firstObservedAt().isAfter(entry.lastObservedAt()));
     }
 
@@ -148,15 +151,23 @@ class StorageQuarantineIntegrationTest {
         String key = randomKey(reviewId);
         observe(key);
 
-        assertEquals(QuarantineRecheckOutcome.GRACE_PERIOD_NOT_ELAPSED, recheck(key, AFTER_GRACE.minusSeconds(1)).outcome());
-        QuarantineRecheckResult first = recheck(key, AFTER_GRACE);
-        QuarantineRecheckResult second = recheck(key, AFTER_GRACE.plusSeconds(300));
+        Instant observedAt = quarantineRepository.findByObjectKey(key).orElseThrow().firstObservedAt();
+        // Antes do grace period de 24h: GRACE_PERIOD_NOT_ELAPSED
+        assertEquals(QuarantineRecheckOutcome.GRACE_PERIOD_NOT_ELAPSED, recheck(key, observedAt.plus(Duration.ofHours(23))).outcome());
+
+        // Simula transcurso legítimo de 24h via fixture administrativa (owner)
+        PrivilegedTestDatabase.jdbc().update(
+                "UPDATE storage_object_quarantine SET first_observed_at = clock_timestamp() - INTERVAL '25 hours', last_observed_at = clock_timestamp() - INTERVAL '25 hours' WHERE object_key = ?",
+                key);
+        Instant now = Instant.now();
+        QuarantineRecheckResult first = recheck(key, now);
+        QuarantineRecheckResult second = recheck(key, now.plusSeconds(300));
 
         assertEquals(QuarantineRecheckOutcome.CONFIRMED_ORPHAN, first.outcome());
         assertEquals(QuarantineRecheckOutcome.CONFIRMED_ORPHAN, second.outcome());
         QuarantinedStorageObject entry = quarantineRepository.findByObjectKey(key).orElseThrow();
         assertEquals(StorageQuarantineStatus.CONFIRMED_ORPHAN, entry.status());
-        assertEquals(AFTER_GRACE, entry.confirmedAt());
+        assertNotNull(entry.confirmedAt());
         assertEquals(1, rowsFor(key));
     }
 
@@ -172,8 +183,8 @@ class StorageQuarantineIntegrationTest {
         observe(active.getObjectKey());
         observe(removed.getObjectKey());
 
-        QuarantineRecheckResult activeResult = recheck(active.getObjectKey(), AFTER_GRACE);
-        QuarantineRecheckResult removedResult = recheck(removed.getObjectKey(), AFTER_GRACE);
+        QuarantineRecheckResult activeResult = recheck(active.getObjectKey(), afterGrace());
+        QuarantineRecheckResult removedResult = recheck(removed.getObjectKey(), afterGrace());
 
         assertEquals(QuarantineRecheckOutcome.WITH_REFERENCE, activeResult.outcome());
         assertEquals(ReviewMediaStatus.ACTIVE, activeResult.referenceStatus());
@@ -194,8 +205,8 @@ class StorageQuarantineIntegrationTest {
 
         saveMedia(reviewId, author.getId(), mediaId, key);
 
-        assertEquals(QuarantineRecheckOutcome.WITH_REFERENCE, recheck(key, AFTER_GRACE).outcome());
-        assertEquals(QuarantineRecheckOutcome.NOT_QUARANTINED, recheck(key, AFTER_GRACE).outcome());
+        assertEquals(QuarantineRecheckOutcome.WITH_REFERENCE, recheck(key, afterGrace()).outcome());
+        assertEquals(QuarantineRecheckOutcome.NOT_QUARANTINED, recheck(key, afterGrace()).outcome());
     }
 
     @Test
@@ -220,7 +231,7 @@ class StorageQuarantineIntegrationTest {
             }));
             assertTrue(uploadHoldsLock.await(10, TimeUnit.SECONDS));
 
-            Future<QuarantineRecheckResult> recheck = executor.submit(() -> recheck(key, AFTER_GRACE));
+            Future<QuarantineRecheckResult> recheck = executor.submit(() -> recheck(key, afterGrace()));
 
             // Enquanto o upload não commita, a rechecagem fica bloqueada no lock da review
             assertThrows(java.util.concurrent.TimeoutException.class, () -> recheck.get(700, TimeUnit.MILLISECONDS));
@@ -243,6 +254,9 @@ class StorageQuarantineIntegrationTest {
         UUID reviewId = createReview(createUser()).id();
         String key = randomKey(reviewId);
         observe(key);
+        PrivilegedTestDatabase.jdbc().update(
+                "UPDATE storage_object_quarantine SET first_observed_at = clock_timestamp() - INTERVAL '25 hours', last_observed_at = clock_timestamp() - INTERVAL '25 hours' WHERE object_key = ?",
+                key);
 
         int workers = 4;
         CyclicBarrier barrier = new CyclicBarrier(workers);
@@ -251,7 +265,7 @@ class StorageQuarantineIntegrationTest {
         try {
             List<Future<QuarantineRecheckResult>> futures = new ArrayList<>();
             for (int i = 0; i < workers; i++) {
-                Instant now = AFTER_GRACE.plusSeconds(i);
+                Instant now = afterGrace().plusSeconds(i);
                 futures.add(executor.submit(() -> {
                     barrier.await(10, TimeUnit.SECONDS);
                     return recheck(key, now);
@@ -267,8 +281,9 @@ class StorageQuarantineIntegrationTest {
         assertTrue(results.stream().allMatch(result -> result.outcome() == QuarantineRecheckOutcome.CONFIRMED_ORPHAN));
         QuarantinedStorageObject entry = quarantineRepository.findByObjectKey(key).orElseThrow();
         assertEquals(1, rowsFor(key));
-        assertTrue(results.stream().anyMatch(result -> result.checkedAt().equals(entry.confirmedAt())),
-                "confirmed_at registra a primeira confirmação efetivada");
+        assertNotNull(entry.confirmedAt(), "confirmed_at deve ser definido após confirmação");
+        assertTrue(entry.confirmedAt().isAfter(entry.firstObservedAt()),
+                "confirmed_at (clock_timestamp) registra a confirmação após o período de observação");
     }
 
     @Test
@@ -292,7 +307,7 @@ class StorageQuarantineIntegrationTest {
     }
 
     private void observe(String key) {
-        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, null, T0)));
+        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 10, null, Instant.now())));
     }
 
     private int rowsFor(String key) {

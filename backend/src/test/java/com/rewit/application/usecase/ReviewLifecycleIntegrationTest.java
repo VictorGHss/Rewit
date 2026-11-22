@@ -351,12 +351,8 @@ class ReviewLifecycleIntegrationTest {
                 List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.0"), "Alvo"))
         ));
 
-        // Força transição para UNDER_REVIEW
-        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-            ReviewJpaEntity entity = reviewJpaRepository.findById(created.id()).orElseThrow();
-            entity.setStatus("UNDER_REVIEW");
-            reviewJpaRepository.save(entity);
-        });
+        // Força transição para UNDER_REVIEW em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(created.id(), "UNDER_REVIEW");
 
         // Soft delete a partir de UNDER_REVIEW é permitido
         Instant deleteTime = Instant.now().plusSeconds(180).truncatedTo(ChronoUnit.MICROS);
@@ -443,9 +439,8 @@ class ReviewLifecycleIntegrationTest {
                 List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("3.5"), "Normal"))
         ));
 
-        // Desativa o autor da avaliação
-        author.softDelete();
-        userRepository.save(author);
+        // Desativa o autor da avaliação em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(author.getId(), "DELETED");
 
         // A conta não opera mais: a edição é recusada antes do lock da review (C2 Fase 1). Operações de terceiros
         // sobre o conteúdo do autor inativo seguem permitidas (Caso 8 e testes de moderação).
@@ -483,9 +478,8 @@ class ReviewLifecycleIntegrationTest {
                 List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("5.0"), "Excelente"))
         ));
 
-        // Desativa o autor da avaliação
-        author.softDelete();
-        userRepository.save(author);
+        // Desativa o autor da avaliação em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(author.getId(), "DELETED");
 
         // Votante adiciona Helpful (dispara recalculateAndSave para o autor inativo)
         ReviewHelpfulService.HelpfulResult addResult = reviewHelpfulService.addHelpful(created.id(), voter.getId());
@@ -513,9 +507,8 @@ class ReviewLifecycleIntegrationTest {
                 List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("4.0"), "Bom"))
         ));
 
-        // Desativa o autor da avaliação
-        author.softDelete();
-        userRepository.save(author);
+        // Desativa o autor da avaliação em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(author.getId(), "DELETED");
 
         // A conta não opera mais: a exclusão é recusada antes do lock da review (C2 Fase 1); o destino do
         // conteúdo de contas excluídas depende das decisões de produto do ciclo de vida da conta.

@@ -238,13 +238,13 @@ class PlaceBusinessProfileIntegrationTest {
                 404, "BUSINESS_ACCOUNT_NOT_FOUND");
         expectCode(putProfile(intruder, placeId, change), 404, "BUSINESS_ACCOUNT_NOT_FOUND");
 
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'PENDING' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'PENDING' WHERE id = ?", accountId);
         expectCode(putProfile(owner, placeId, change), 409, "BUSINESS_ACCOUNT_NOT_APPROVED");
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
         expectCode(putProfile(owner, placeId, change), 409, "BUSINESS_ACCOUNT_NOT_APPROVED");
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
 
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", owner.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", owner.id());
         expectCode(putProfile(owner, placeId, change), 401, "ACCOUNT_DISABLED");
 
         assertEquals(before, jdbcTemplate.queryForMap(PROFILE_COLUMNS, placeId));
@@ -283,7 +283,7 @@ class PlaceBusinessProfileIntegrationTest {
         expectCode(putProfile(owner, UUID.randomUUID(), body(accountId, DESCRIPTION, null, null, null, null)),
                 404, "PLACE_NOT_FOUND");
 
-        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
         Map<String, Object> before = jdbcTemplate.queryForMap(PROFILE_COLUMNS, placeId);
         expectCode(putProfile(owner, placeId, body(accountId, DESCRIPTION, PHONE, null, null, null)),
                 404, "PLACE_NOT_FOUND");
@@ -357,15 +357,14 @@ class PlaceBusinessProfileIntegrationTest {
         UUID accountB = createAccount(registerUser("profile_conc_b"));
         Map<String, Object> before = jdbcTemplate.queryForMap(PROFILE_COLUMNS, placeId);
 
-        TransactionTemplate tx = new TransactionTemplate(transactionManager);
         CountDownLatch changed = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         AtomicInteger holderPid = new AtomicInteger();
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<?> holder = executor.submit(() -> tx.executeWithoutResult(status -> {
-                holderPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
-                jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
+            Future<?> holder = executor.submit(() -> com.rewit.config.PrivilegedTestDatabase.inOwnerTransaction(ownerJdbc -> {
+                holderPid.set(ownerJdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                ownerJdbc.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
                 changed.countDown();
                 awaitRelease(release);
             }));
@@ -402,7 +401,7 @@ class PlaceBusinessProfileIntegrationTest {
                   AND ? = ANY (pg_blocking_pids(pid))
                 """;
         while (System.nanoTime() < deadline) {
-            Integer waiting = jdbcTemplate.queryForObject(sql, Integer.class, blocker);
+            Integer waiting = com.rewit.config.PrivilegedTestDatabase.jdbc().queryForObject(sql, Integer.class, blocker);
             if (waiting != null && waiting > 0) {
                 return;
             }
@@ -537,8 +536,8 @@ class PlaceBusinessProfileIntegrationTest {
 
     private UUID approvedOwner(TestUser user, UUID placeId) throws Exception {
         UUID accountId = createAccount(user);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
-        assertEquals(1, jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        assertEquals(1, com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
                 accountId, placeId));
         return accountId;
     }

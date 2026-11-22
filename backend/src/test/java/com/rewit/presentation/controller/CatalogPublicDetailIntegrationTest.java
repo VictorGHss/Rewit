@@ -106,7 +106,7 @@ class CatalogPublicDetailIntegrationTest {
     void unavailableTargetsLookMissing(String placeStatus, String productStatus) throws Exception {
         TestUser viewer = register("detalhe_leitor");
         Fixture f = fixture();
-        jdbcTemplate.update("UPDATE places SET status = ? WHERE id = ?", placeStatus, f.placeId());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = ? WHERE id = ?", placeStatus, f.placeId());
         jdbcTemplate.update("UPDATE products SET status = ? WHERE id = ?", productStatus, f.productId());
 
         UUID missing = UUID.randomUUID();
@@ -149,7 +149,7 @@ class CatalogPublicDetailIntegrationTest {
                 hiddenTarget.get("detail").asText().replaceAll("[0-9a-f-]{36}", ""));
 
         // Local de contexto fechado: mesmo 404 de um local inexistente, mesmo com alvo disponível
-        jdbcTemplate.update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.placeId());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'CLOSED' WHERE id = ?", f.placeId());
         UUID activeProduct = productRepository.save(new Product(null, "Produto ativo " + UUID.randomUUID(), "Marca", null,
                 null, "BEBIDA", null, "ACTIVE")).getId();
         JsonNode hiddenContext = read(post("/api/v1/reviews").contentType(MediaType.APPLICATION_JSON)

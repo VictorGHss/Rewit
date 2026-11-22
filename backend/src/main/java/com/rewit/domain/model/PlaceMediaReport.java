@@ -36,11 +36,12 @@ public class PlaceMediaReport {
     private Instant decidedAt;
     private String decisionNotes;
     private final boolean legacyDecision;
+    private String authenticityMac;
 
     public PlaceMediaReport(UUID id, UUID placeMediaId, UUID reporterUserId,
                             String reason, String detail) {
         this(id, placeMediaId, reporterUserId, reason, detail, STATUS_PENDING,
-                Instant.now(), Instant.now(), null, null, null, false);
+                Instant.now(), Instant.now(), null, null, null, false, null);
     }
 
     public PlaceMediaReport(UUID id, UUID placeMediaId, UUID reporterUserId,
@@ -48,7 +49,7 @@ public class PlaceMediaReport {
                             Instant createdAt, Instant updatedAt,
                             UUID decidedByUserId, Instant decidedAt, String decisionNotes) {
         this(id, placeMediaId, reporterUserId, reason, detail, status,
-                createdAt, updatedAt, decidedByUserId, decidedAt, decisionNotes, false);
+                createdAt, updatedAt, decidedByUserId, decidedAt, decisionNotes, false, null);
     }
 
     public PlaceMediaReport(UUID id, UUID placeMediaId, UUID reporterUserId,
@@ -56,6 +57,15 @@ public class PlaceMediaReport {
                             Instant createdAt, Instant updatedAt,
                             UUID decidedByUserId, Instant decidedAt, String decisionNotes,
                             boolean legacyDecision) {
+        this(id, placeMediaId, reporterUserId, reason, detail, status,
+                createdAt, updatedAt, decidedByUserId, decidedAt, decisionNotes, legacyDecision, null);
+    }
+
+    public PlaceMediaReport(UUID id, UUID placeMediaId, UUID reporterUserId,
+                            String reason, String detail, String status,
+                            Instant createdAt, Instant updatedAt,
+                            UUID decidedByUserId, Instant decidedAt, String decisionNotes,
+                            boolean legacyDecision, String authenticityMac) {
         this.id = id != null ? id : UUID.randomUUID();
         this.placeMediaId = Objects.requireNonNull(placeMediaId, "placeMediaId must not be null");
         this.reporterUserId = Objects.requireNonNull(reporterUserId, "reporterUserId must not be null");
@@ -71,6 +81,7 @@ public class PlaceMediaReport {
         this.decidedAt = decidedAt;
         this.decisionNotes = decisionNotes != null ? decisionNotes.trim() : null;
         this.legacyDecision = legacyDecision;
+        this.authenticityMac = authenticityMac;
     }
 
     public boolean isPending() {
@@ -92,25 +103,36 @@ public class PlaceMediaReport {
     public void autoResolve(String notes) {
         this.status = STATUS_AUTO_RESOLVED;
         this.decidedByUserId = null;
-        this.decidedAt = Instant.now();
+        this.decidedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         this.updatedAt = this.decidedAt;
         this.decisionNotes = notes != null ? notes.trim() : null;
+        this.authenticityMac = null;
     }
 
     public void accept(UUID moderatorUserId, String notes) {
+        accept(moderatorUserId, notes, Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS), null);
+    }
+
+    public void accept(UUID moderatorUserId, String notes, Instant decidedAt, String authenticityMac) {
         this.status = STATUS_ACCEPTED;
         this.decidedByUserId = Objects.requireNonNull(moderatorUserId, "moderatorUserId must not be null");
-        this.decidedAt = Instant.now();
+        this.decidedAt = (decidedAt != null ? decidedAt : Instant.now()).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         this.updatedAt = this.decidedAt;
         this.decisionNotes = notes != null ? notes.trim() : null;
+        this.authenticityMac = authenticityMac;
     }
 
     public void reject(UUID moderatorUserId, String notes) {
+        reject(moderatorUserId, notes, Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS), null);
+    }
+
+    public void reject(UUID moderatorUserId, String notes, Instant decidedAt, String authenticityMac) {
         this.status = STATUS_REJECTED;
         this.decidedByUserId = Objects.requireNonNull(moderatorUserId, "moderatorUserId must not be null");
-        this.decidedAt = Instant.now();
+        this.decidedAt = (decidedAt != null ? decidedAt : Instant.now()).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         this.updatedAt = this.decidedAt;
         this.decisionNotes = notes != null ? notes.trim() : null;
+        this.authenticityMac = authenticityMac;
     }
 
     public UUID getId() {
@@ -159,6 +181,10 @@ public class PlaceMediaReport {
 
     public boolean isLegacyDecision() {
         return legacyDecision;
+    }
+
+    public String getAuthenticityMac() {
+        return authenticityMac;
     }
 
     /**

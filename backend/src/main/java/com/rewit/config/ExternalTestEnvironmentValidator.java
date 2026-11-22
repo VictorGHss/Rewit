@@ -35,6 +35,10 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
         REQUIRED.put("spring.datasource.url", "DATABASE_URL");
         REQUIRED.put("spring.datasource.username", "APP_DB_USER");
         REQUIRED.put("spring.datasource.password", "APP_DB_PASSWORD");
+        REQUIRED.put("rewit.datasource.media.username", "MEDIA_DB_USER");
+        REQUIRED.put("rewit.datasource.media.password", "MEDIA_DB_PASSWORD");
+        REQUIRED.put("rewit.datasource.moderation.username", "MOD_DB_USER");
+        REQUIRED.put("rewit.datasource.moderation.password", "MOD_DB_PASSWORD");
         REQUIRED.put("spring.flyway.user", "FLYWAY_DB_USER ou POSTGRES_USER");
         REQUIRED.put("spring.flyway.password", "FLYWAY_DB_PASSWORD ou POSTGRES_PASSWORD");
         REQUIRED.put("spring.data.redis.host", "REDIS_HOST");
@@ -46,18 +50,22 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
         REQUIRED.put("rewit.security.jwt-secret", "JWT_SECRET");
         REQUIRED.put("rewit.security.password-pepper", "PASSWORD_PEPPER_SECRET");
         REQUIRED.put("rewit.security.refresh-token-secret", "REFRESH_TOKEN_SECRET");
+        REQUIRED.put("rewit.security.moderation-audit-secret", "MODERATION_AUDIT_SECRET");
         REQUIRED.put("rewit.rate-limit.key-secret", "RATE_LIMIT_KEY_SECRET");
     }
 
     /** Credenciais que não podem valer num ambiente publicado: valores do .env.example e fallbacks do perfil local. */
     private static final Set<String> CREDENTIAL_PROPERTIES = Set.of(
             "spring.datasource.password",
+            "rewit.datasource.media.password",
+            "rewit.datasource.moderation.password",
             "spring.flyway.password",
             "rewit.minio.access-key",
             "rewit.minio.secret-key",
             "rewit.security.jwt-secret",
             "rewit.security.password-pepper",
             "rewit.security.refresh-token-secret",
+            "rewit.security.moderation-audit-secret",
             "rewit.rate-limit.key-secret"
     );
 

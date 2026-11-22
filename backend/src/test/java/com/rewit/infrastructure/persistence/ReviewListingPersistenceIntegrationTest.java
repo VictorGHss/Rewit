@@ -321,9 +321,7 @@ class ReviewListingPersistenceIntegrationTest {
                 List.of(new CreateReviewTargetCommand(target.getId(), new BigDecimal("1.0"), null))
         );
         ReviewDetailView underReview = reviewService.createReview(cmdUnderReview);
-        ReviewJpaEntity entityUnderReview = reviewJpaRepository.findById(underReview.id()).orElseThrow();
-        entityUnderReview.setStatus(ReviewStatus.UNDER_REVIEW.name());
-        reviewJpaRepository.saveAndFlush(entityUnderReview);
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(underReview.id(), ReviewStatus.UNDER_REVIEW.name());
 
         // Review REMOVED
         CreateReviewCommand cmdRemoved = new CreateReviewCommand(

@@ -25,6 +25,7 @@ import com.rewit.application.usecase.PurgeConfirmedOrphanStorageObjectUseCase;
 import com.rewit.application.usecase.RecheckQuarantinedStorageObjectUseCase;
 import com.rewit.application.usecase.ReconcileReviewMediaStorageUseCase;
 import com.rewit.application.usecase.RunStorageGcCycleUseCase;
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.ReviewMediaType;
 import com.rewit.domain.enums.StorageQuarantineStatus;
@@ -69,8 +70,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Testes de Integração com PostgreSQL e SeaweedFS reais: ciclo do storage GC (Step 28.5)")
 class StorageGcCycleIntegrationTest {
 
-    private static final Instant T0 = Instant.parse("2026-03-01T03:00:00Z");
-    private static final Duration GRACE = Duration.ofMinutes(30);
+    private static final Duration GRACE = Duration.ofHours(24);
 
     @Autowired
     private ObjectStoragePort storage;
@@ -103,7 +103,7 @@ class StorageGcCycleIntegrationTest {
     private RateableTargetRepository targetRepository;
 
     private final List<String> ownKeys = new CopyOnWriteArrayList<>();
-    private final MutableClock clock = new MutableClock(T0);
+    private final MutableClock clock = new MutableClock(Instant.now());
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private String ownPrefix;
     private String orphanKey;
@@ -128,7 +128,10 @@ class StorageGcCycleIntegrationTest {
         PurgeConfirmedOrphanStorageObjectUseCase purge = new PurgeConfirmedOrphanStorageObjectUseCase(quarantineRepository, storage);
         for (String key : ownKeys) {
             storage.delete(key);
-            recheck.recheck(key, T0.plus(Duration.ofDays(365)));
+            PrivilegedTestDatabase.jdbc().update(
+                    "UPDATE storage_object_quarantine SET first_observed_at = clock_timestamp() - INTERVAL '25 hours' WHERE object_key = ?",
+                    key);
+            recheck.recheck(key, Instant.now().plus(Duration.ofDays(365)));
             purge.purge(key);
         }
     }
@@ -140,7 +143,10 @@ class StorageGcCycleIntegrationTest {
                 reconcile(), scopedQuarantine(), recheck(), metrics(), clock, limits());
 
         StorageGcCycleReport first = gc.runCycle();
-        clock.set(T0.plus(GRACE));
+        PrivilegedTestDatabase.jdbc().update(
+                "UPDATE storage_object_quarantine SET first_observed_at = clock_timestamp() - INTERVAL '25 hours', last_observed_at = clock_timestamp() - INTERVAL '25 hours' WHERE object_key = ?",
+                orphanKey);
+        clock.set(Instant.now());
         StorageGcCycleReport second = gc.runCycle();
 
         assertEquals(StorageGcRunStatus.COMPLETED, first.status());
@@ -164,7 +170,10 @@ class StorageGcCycleIntegrationTest {
 
         gc.runCycle();
         assertTrue(storage.exists(orphanKey), "dentro do grace period nada é removido");
-        clock.set(T0.plus(GRACE));
+        PrivilegedTestDatabase.jdbc().update(
+                "UPDATE storage_object_quarantine SET first_observed_at = clock_timestamp() - INTERVAL '25 hours', last_observed_at = clock_timestamp() - INTERVAL '25 hours' WHERE object_key = ?",
+                orphanKey);
+        clock.set(Instant.now());
         StorageGcCycleReport second = gc.runCycle();
         StorageGcCycleReport third = gc.runCycle();
 
@@ -183,7 +192,10 @@ class StorageGcCycleIntegrationTest {
     void retryableFailureKeepsQuarantine() {
         ObjectStorageDeletionPort unavailable = key -> ObjectDeletionResult.TRANSIENT_FAILURE;
         destructive(unavailable).runCycle();
-        clock.set(T0.plus(GRACE));
+        PrivilegedTestDatabase.jdbc().update(
+                "UPDATE storage_object_quarantine SET first_observed_at = clock_timestamp() - INTERVAL '25 hours', last_observed_at = clock_timestamp() - INTERVAL '25 hours' WHERE object_key = ?",
+                orphanKey);
+        clock.set(Instant.now());
 
         StorageGcCycleReport failed = destructive(unavailable).runCycle();
 

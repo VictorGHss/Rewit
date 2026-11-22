@@ -28,12 +28,22 @@ public class ModerationAuditLog {
     private final ReviewStatus newReviewStatus;
     private final int reportsAffectedCount;
     private final Instant createdAt;
+    private final String authenticityMac;
 
     public ModerationAuditLog(UUID id, UUID reviewId, UUID moderatorUserId,
                               ModerationAction action, ModerationDecision decision,
                               String reasonCode, String justification,
                               ReviewStatus previousReviewStatus, ReviewStatus newReviewStatus,
                               int reportsAffectedCount, Instant createdAt) {
+        this(id, reviewId, moderatorUserId, action, decision, reasonCode, justification,
+                previousReviewStatus, newReviewStatus, reportsAffectedCount, createdAt, null);
+    }
+
+    public ModerationAuditLog(UUID id, UUID reviewId, UUID moderatorUserId,
+                              ModerationAction action, ModerationDecision decision,
+                              String reasonCode, String justification,
+                              ReviewStatus previousReviewStatus, ReviewStatus newReviewStatus,
+                              int reportsAffectedCount, Instant createdAt, String authenticityMac) {
         if (reviewId == null) {
             throw new BusinessException("O identificador da avaliação auditada é obrigatório", "MISSING_REVIEW_ID");
         }
@@ -79,6 +89,7 @@ public class ModerationAuditLog {
         this.newReviewStatus = newReviewStatus;
         this.reportsAffectedCount = reportsAffectedCount;
         this.createdAt = createdAt != null ? createdAt : Instant.now();
+        this.authenticityMac = authenticityMac;
     }
 
     public UUID getId() {
@@ -123,6 +134,10 @@ public class ModerationAuditLog {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getAuthenticityMac() {
+        return authenticityMac;
     }
 
     @Override

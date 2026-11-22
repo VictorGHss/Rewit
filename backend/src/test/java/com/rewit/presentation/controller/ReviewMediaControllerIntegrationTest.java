@@ -131,7 +131,7 @@ class ReviewMediaControllerIntegrationTest {
                 "Avaliação para testes HTTP de mídia",
                 isAnonymous,
                 false,
-                status,
+                ReviewStatus.ACTIVE,
                 visibility,
                 null,
                 null,
@@ -139,7 +139,11 @@ class ReviewMediaControllerIntegrationTest {
                 Instant.now(),
                 Instant.now()
         );
-        return reviewRepository.save(review);
+        Review saved = reviewRepository.save(review);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
+        return saved;
     }
 
     // 1. 401 Unauthorized

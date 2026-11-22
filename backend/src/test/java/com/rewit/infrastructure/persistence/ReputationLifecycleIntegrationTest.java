@@ -141,10 +141,8 @@ class ReputationLifecycleIntegrationTest {
 
         assertEquals(1, reputationRepository.findByUserId(author.getId()).get().getActiveReviews());
 
-        // Coloca a avaliação em moderação preventiva (UNDER_REVIEW)
-        Review review = reviewRepository.findById(created.id()).orElseThrow();
-        review.markUnderReview();
-        reviewRepository.save(review);
+        // Coloca a avaliação em moderação preventiva (UNDER_REVIEW) em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(created.id(), "UNDER_REVIEW");
 
         // Recálculo reflete a mudança de status
         UserReputation updated = reputationService.recalculateAndSave(author.getId());
@@ -352,8 +350,7 @@ class ReputationLifecycleIntegrationTest {
     @DisplayName("Usuário soft-deleted existente: recalculateAndSave retorna null sem gerar snapshot e getReputation lança 404")
     void softDeletedExistingUser_recalculateReturnsNullAndGetReputationThrowsNotFound() {
         User user = createUser("lc_sd_user");
-        user.softDelete();
-        userRepository.save(user);
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(user.getId(), "DELETED");
 
         UserReputation snapshot = reputationService.recalculateAndSave(user.getId());
         assertNull(snapshot, "Snapshot não deve ser gerado para usuário soft-deleted");
@@ -369,13 +366,7 @@ class ReputationLifecycleIntegrationTest {
     @DisplayName("Usuário desativado (isActive=false) existente: recalculateAndSave retorna null e getReputation lança 404")
     void inactiveExistingUser_recalculateReturnsNullAndGetReputationThrowsNotFound() {
         User user = createUser("lc_in_user");
-        User inactive = User.rehydrate(
-            user.getId(), user.getEmail(), user.getPasswordHash(),
-            user.getAuthProvider(), user.getProviderUserId(),
-            false, user.isVerified(), user.getRole(),
-            null, user.getCreatedAt(), user.getUpdatedAt()
-        );
-        userRepository.save(inactive);
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(user.getId(), "SUSPENDED");
 
         UserReputation snapshot = reputationService.recalculateAndSave(user.getId());
         assertNull(snapshot, "Snapshot não deve ser gerado para usuário inativo");

@@ -143,7 +143,7 @@ class FeedV2ControllerIntegrationTest {
                 "Avaliação para testes de API Feed V2.",
                 isAnonymous,
                 false,
-                status,
+                ReviewStatus.ACTIVE,
                 visibility,
                 -23.5505,
                 -46.6333,
@@ -166,6 +166,9 @@ class FeedV2ControllerIntegrationTest {
         }
 
         Review saved = reviewRepository.save(review);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
         for (ReviewTarget rt : review.getTargets()) {
             reviewTargetRepository.save(rt);
         }

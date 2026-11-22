@@ -26,10 +26,10 @@ public class PlaceMediaReportJpaEntity {
     @Column(name = "reporter_user_id", nullable = false, updatable = false)
     private UUID reporterUserId;
 
-    @Column(name = "reason", nullable = false, length = 64)
+    @Column(name = "reason", nullable = false, updatable = false, length = 64)
     private String reason;
 
-    @Column(name = "detail", length = 500)
+    @Column(name = "detail", updatable = false, length = 500)
     private String detail;
 
     @Column(name = "status", nullable = false, length = 32)
@@ -41,14 +41,17 @@ public class PlaceMediaReportJpaEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    @Column(name = "decided_by_user_id")
+    @Column(name = "decided_by_user_id", insertable = false)
     private UUID decidedByUserId;
 
-    @Column(name = "decided_at")
+    @Column(name = "decided_at", insertable = false)
     private Instant decidedAt;
 
-    @Column(name = "decision_notes", length = 500)
+    @Column(name = "decision_notes", insertable = false, length = 500)
     private String decisionNotes;
+
+    @Column(name = "authenticity_mac", insertable = false, length = 128)
+    private String authenticityMac;
 
     // Condição histórica fixada pela migração V36 (LEG-1): somente leitura para o runtime, que não tem
     // privilégio de INSERT/UPDATE nesta coluna. Novas linhas recebem o DEFAULT FALSE do banco.
@@ -61,7 +64,7 @@ public class PlaceMediaReportJpaEntity {
     public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
                                      String reason, String detail, String status,
                                      Instant createdAt, Instant updatedAt) {
-        this(id, placeMediaId, reporterUserId, reason, detail, status, createdAt, updatedAt, null, null, null, false);
+        this(id, placeMediaId, reporterUserId, reason, detail, status, createdAt, updatedAt, null, null, null, false, null);
     }
 
     public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
@@ -69,7 +72,7 @@ public class PlaceMediaReportJpaEntity {
                                      Instant createdAt, Instant updatedAt,
                                      UUID decidedByUserId, Instant decidedAt, String decisionNotes) {
         this(id, placeMediaId, reporterUserId, reason, detail, status,
-                createdAt, updatedAt, decidedByUserId, decidedAt, decisionNotes, false);
+                createdAt, updatedAt, decidedByUserId, decidedAt, decisionNotes, false, null);
     }
 
     public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
@@ -77,6 +80,15 @@ public class PlaceMediaReportJpaEntity {
                                      Instant createdAt, Instant updatedAt,
                                      UUID decidedByUserId, Instant decidedAt, String decisionNotes,
                                      boolean isLegacyDecision) {
+        this(id, placeMediaId, reporterUserId, reason, detail, status,
+                createdAt, updatedAt, decidedByUserId, decidedAt, decisionNotes, isLegacyDecision, null);
+    }
+
+    public PlaceMediaReportJpaEntity(UUID id, UUID placeMediaId, UUID reporterUserId,
+                                     String reason, String detail, String status,
+                                     Instant createdAt, Instant updatedAt,
+                                     UUID decidedByUserId, Instant decidedAt, String decisionNotes,
+                                     boolean isLegacyDecision, String authenticityMac) {
         this.id = id != null ? id : UUID.randomUUID();
         this.placeMediaId = placeMediaId;
         this.reporterUserId = reporterUserId;
@@ -89,6 +101,7 @@ public class PlaceMediaReportJpaEntity {
         this.decidedAt = decidedAt;
         this.decisionNotes = decisionNotes;
         this.isLegacyDecision = isLegacyDecision;
+        this.authenticityMac = authenticityMac;
     }
 
     public static PlaceMediaReportJpaEntity fromDomain(com.rewit.domain.model.PlaceMediaReport domain) {
@@ -105,7 +118,8 @@ public class PlaceMediaReportJpaEntity {
                 domain.getDecidedByUserId(),
                 domain.getDecidedAt(),
                 domain.getDecisionNotes(),
-                domain.isLegacyDecision()
+                domain.isLegacyDecision(),
+                domain.getAuthenticityMac()
         );
     }
 
@@ -122,7 +136,8 @@ public class PlaceMediaReportJpaEntity {
                 this.decidedByUserId,
                 this.decidedAt,
                 this.decisionNotes,
-                this.isLegacyDecision
+                this.isLegacyDecision,
+                this.authenticityMac
         );
     }
 

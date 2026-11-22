@@ -1,0 +1,14 @@
+package com.rewit.application.port;
+
+import java.util.function.Supplier;
+
+/**
+ * Porta de aplicação para execução transacional explícita sob a role pública padrão {@code rewit_app}
+ * (S3-A13-F2), preservando o isolamento de fronteiras da Clean Architecture na camada {@code application}.
+ */
+public interface AppTransactionPort {
+
+    <T> T execute(Supplier<T> action);
+
+    void run(Runnable action);
+}

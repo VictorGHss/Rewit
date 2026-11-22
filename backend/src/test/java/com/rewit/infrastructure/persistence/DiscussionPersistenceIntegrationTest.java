@@ -294,7 +294,7 @@ class DiscussionPersistenceIntegrationTest {
             replies.add(discussionService.createDiscussion(new CreateDiscussionCommand(
                     review.getId(), author.getId(), repliedRoot, "Resposta " + i)).id());
         }
-        jdbcTemplate.update("UPDATE review_discussions SET created_at = TIMESTAMPTZ '2026-01-01 12:00:00+00' "
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE review_discussions SET created_at = TIMESTAMPTZ '2026-01-01 12:00:00+00' "
                 + "WHERE review_id = ?", review.getId());
 
         // O PostgreSQL compara UUID byte a byte, a mesma ordem da forma textual em minúsculas.
@@ -378,11 +378,12 @@ class DiscussionPersistenceIntegrationTest {
                 null,
                 "Comentário em moderação preventiva",
                 false,
-                DiscussionStatus.UNDER_REVIEW,
+                DiscussionStatus.ACTIVE,
                 java.time.Instant.now(),
                 java.time.Instant.now()
         );
         ReviewDiscussion saved = discussionRepository.save(underReview);
+        com.rewit.config.PrivilegedTestDatabase.setDiscussionStatus(saved.getId(), "UNDER_REVIEW");
 
         Optional<ReviewDiscussion> retrieved = discussionRepository.findById(saved.getId());
         assertTrue(retrieved.isPresent());
@@ -428,7 +429,7 @@ class DiscussionPersistenceIntegrationTest {
         Review review = createTestReview(author, place, "PUBLIC");
 
         assertThrows(DataIntegrityViolationException.class, () -> {
-            jdbcTemplate.update(
+            com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                     "INSERT INTO review_discussions (id, review_id, user_id, content, is_from_owner, status, created_at, updated_at) " +
                     "VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())",
                     UUID.randomUUID(),

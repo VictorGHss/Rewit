@@ -54,7 +54,7 @@ A V44 existe apenas nesta branch não integrada e nenhum banco persistente a exe
 - Quem possui o refresh token válido pode renová-lo pela API (esperado).
 - O runtime ainda pode revogar sessões de terceiros (`UPDATE revoked_at`) e inserir sessões inertes: negação de serviço, fora do escopo.
 - Segredos externos comprometidos junto com SQL anulam a proteção; mantê-los fora do banco, em cofre próprio, e rotacioná-los.
-- **S3-A13-F2 (moderação) continua aberto**: este ADR não o trata.
+- **S3-A13-F2 / SEC-F2-03 (moderação, ciclo de vida de mídias e auditoria)**: não é tratado neste ADR, tendo sido mitigado em seguida pela [ADR-018](ADR-018-moderation-and-audit-sql-compromise-hardening.md) (migração `V45`, separação `rewit_app`/`rewit_media`/`rewit_mod` e autenticidade criptográfica `HMAC-SHA256`).
 
 ## Alternativas Rejeitadas
 - **MAC em colunas de sessão**: ver §3.

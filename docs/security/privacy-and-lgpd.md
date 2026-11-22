@@ -67,7 +67,11 @@ Toda foto capturada por smartphones modernos embute metadados EXIF detalhados no
    - Refresh token opaco de 56 bytes (16 do UUID do usuário, 8 da expiração em epoch seconds e 32 de CSPRNG), em Base64URL canônico de 75 caracteres; para os clientes é só uma string.
    - Hash persistido exclusivamente como HMAC-SHA256 via segredo dedicado `REFRESH_TOKEN_SECRET` (tabela `auth_sessions`), rotacionado a cada uso, com detecção de reúso e lock pessimista.
    - Integridade das sessões no banco: trigger `trg_guard_auth_session_integrity` (V44) e `rewit_app` sem `DELETE` em `auth_sessions`; a remoção legítima (cleanup e purge LGPD) ocorre por funções `SECURITY DEFINER` restritas.
-3. **Prevenção de Vazamento em Logs**:
+3. **Separação de Credenciais de Moderação e Autenticidade de Auditoria (S3-A13-F2 / ADR-018)**:
+   - Operações administrativas de moderação, reivindicações comerciais e ciclo de vida de contas operam sob a credencial PostgreSQL isolada `rewit_mod` (`MOD_DB_PASSWORD`), separada de `rewit_app` (`APP_DB_PASSWORD`), via roteamento transacional `@ModerationTransactional`.
+   - As 6 trilhas append-only de auditoria e as decisões persistidas em `place_media_reports` e `place_claim_requests` recebem `authenticity_mac` (`HMAC-SHA256` canônico `aud1$<keyId>$<hex>` via `MODERATION_AUDIT_SECRET` externo ao banco, independente de senhas de banco e demais segredos), garantindo autenticidade de origem da aplicação e integridade criptográfica do payload.
+   - O purge LGPD (`PurgeDeletedAccountUseCase`) permanece integralmente compatível com os guards da V45: `rewit_app` continua podendo minimizar dados de contas já em `DELETED`, sem permissão para suspender, excluir ou reintegrar contas.
+4. **Prevenção de Vazamento em Logs**:
    - É terminantemente proibido registrar em logs de aplicação (SLF4J/Logback):
      - Senhas ou hashes;
      - Cabeçalhos `Authorization`;

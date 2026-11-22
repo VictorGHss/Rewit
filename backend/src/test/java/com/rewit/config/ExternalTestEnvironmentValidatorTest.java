@@ -26,6 +26,10 @@ class ExternalTestEnvironmentValidatorTest {
         env.setProperty("spring.datasource.url", "jdbc:postgresql://127.0.0.1:15432/rewit_ext");
         env.setProperty("spring.datasource.username", "rewit_app");
         env.setProperty("spring.datasource.password", DB_PASSWORD);
+        env.setProperty("rewit.datasource.media.username", "rewit_media");
+        env.setProperty("rewit.datasource.media.password", "senha-media-Kp4!xV7s");
+        env.setProperty("rewit.datasource.moderation.username", "rewit_mod");
+        env.setProperty("rewit.datasource.moderation.password", "senha-mod-Yr8#mN4q");
         env.setProperty("spring.flyway.user", "rewit_user");
         env.setProperty("spring.flyway.password", "senha-migracao-Lw3!rT9d");
         env.setProperty("spring.data.redis.host", "localhost");
@@ -37,6 +41,7 @@ class ExternalTestEnvironmentValidatorTest {
         env.setProperty("rewit.security.jwt-secret", "jwt-externo-com-entropia-suficiente-Zp4!Qw8@Lk2#");
         env.setProperty("rewit.security.password-pepper", "pepper-externo-com-entropia-suficiente-Rm7!Vx2@Np9#");
         env.setProperty("rewit.security.refresh-token-secret", "refresh-externo-com-entropia-suficiente-Tk5!Bj8@Wd3#");
+        env.setProperty("rewit.security.moderation-audit-secret", "mod-audit-externo-com-entropia-suficiente-Kp9!Zx4@Qc1#");
         env.setProperty("rewit.rate-limit.key-secret", "rate-limit-externo-com-entropia-Hy6$Vb3%Nm1&");
         return env;
     }
@@ -79,8 +84,8 @@ class ExternalTestEnvironmentValidatorTest {
                 assertTrue(all.getMessage().contains(property), "a mensagem deve citar " + property);
             }
         }
-        for (String variable : new String[]{"APP_DB_PASSWORD", "OBJECT_STORAGE_SECRET_KEY", "JWT_SECRET",
-                "PASSWORD_PEPPER_SECRET", "REFRESH_TOKEN_SECRET", "RATE_LIMIT_KEY_SECRET"}) {
+        for (String variable : new String[]{"APP_DB_PASSWORD", "MEDIA_DB_PASSWORD", "MOD_DB_PASSWORD", "OBJECT_STORAGE_SECRET_KEY", "JWT_SECRET",
+                "PASSWORD_PEPPER_SECRET", "REFRESH_TOKEN_SECRET", "MODERATION_AUDIT_SECRET", "RATE_LIMIT_KEY_SECRET"}) {
             assertTrue(all.getMessage().contains(variable), "a mensagem deve citar " + variable);
         }
 

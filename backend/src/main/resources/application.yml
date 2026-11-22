@@ -74,6 +74,10 @@ rewit:
     password-pepper-previous-key-id: ${PASSWORD_PEPPER_PREVIOUS_KEY_ID:}
     refresh-token-secret: ${REFRESH_TOKEN_SECRET:}
     refresh-token-secret-previous: ${REFRESH_TOKEN_SECRET_PREVIOUS:}
+    moderation-audit-secret: ${MODERATION_AUDIT_SECRET:}
+    moderation-audit-key-id: ${MODERATION_AUDIT_KEY_ID:v1}
+    moderation-audit-secret-previous: ${MODERATION_AUDIT_SECRET_PREVIOUS:}
+    moderation-audit-previous-key-id: ${MODERATION_AUDIT_PREVIOUS_KEY_ID:}
     jwt-issuer: ${JWT_ISSUER:rewit-api}
     jwt-audience: ${JWT_AUDIENCE:rewit-clients}
     access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}

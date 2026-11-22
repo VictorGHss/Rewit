@@ -258,7 +258,7 @@ class AccountLifecycleIntegrationTest {
         deactivate(user);
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        try (Connection suspension = dataSource.getConnection()) {
+        try (Connection suspension = PrivilegedTestDatabase.jdbc().getDataSource().getConnection()) {
             suspension.setAutoCommit(false);
             try (PreparedStatement ps = suspension.prepareStatement(
                     "UPDATE users SET account_status = 'SUSPENDED' WHERE id = ? AND account_status = 'DEACTIVATED'")) {

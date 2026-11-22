@@ -203,12 +203,12 @@ class ReportDiscussionIntegrationTest {
     void replyAccessFollowsThreadVisibility() {
         ReviewDiscussion quarantinedRoot = createDiscussion(review, commenter.getId(), null);
         ReviewDiscussion hiddenReply = createDiscussion(review, createUser("resp1").getId(), quarantinedRoot.getId());
-        jdbcTemplate.update("UPDATE review_discussions SET status = 'UNDER_REVIEW' WHERE id = ?", quarantinedRoot.getId());
+        com.rewit.config.PrivilegedTestDatabase.setDiscussionStatus(quarantinedRoot.getId(), "UNDER_REVIEW");
         assertDiscussionNotFound(() -> report(createUser("x1"), hiddenReply));
 
         ReviewDiscussion removedRoot = createDiscussion(review, commenter.getId(), null);
         ReviewDiscussion visibleReply = createDiscussion(review, createUser("resp2").getId(), removedRoot.getId());
-        jdbcTemplate.update("UPDATE review_discussions SET status = 'REMOVED' WHERE id = ?", removedRoot.getId());
+        com.rewit.config.PrivilegedTestDatabase.setDiscussionStatus(removedRoot.getId(), "REMOVED");
         assertTrue(report(createUser("x2"), visibleReply).newlyCreated());
     }
 
@@ -232,7 +232,7 @@ class ReportDiscussionIntegrationTest {
     @DisplayName("Conta inativa não denuncia (401 ACCOUNT_DISABLED)")
     void inactiveReporterIsRejected() {
         User inactive = createUser("inativo");
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?", inactive.getId());
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(inactive.getId(), "SUSPENDED");
 
         BusinessException ex = assertThrows(BusinessException.class, () -> report(inactive, comment));
         assertEquals("ACCOUNT_DISABLED", ex.getErrorCode());
@@ -252,7 +252,7 @@ class ReportDiscussionIntegrationTest {
         assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
                 "INSERT INTO discussion_reports (discussion_id, reporter_user_id, reason) VALUES (?, ?, 'INVALIDO')",
                 comment.getId(), other));
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+        assertThrows(DataIntegrityViolationException.class, () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                 "INSERT INTO discussion_reports (discussion_id, reporter_user_id, reason, status) VALUES (?, ?, 'SPAM', 'OUTRO')",
                 comment.getId(), other));
         assertEquals(1, count("SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_discussion_reports_pending_queue'"));

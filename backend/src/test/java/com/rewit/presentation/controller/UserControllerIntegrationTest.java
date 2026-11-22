@@ -131,7 +131,7 @@ class UserControllerIntegrationTest {
                 "Experiência da avaliação",
                 false,
                 false,
-                status,
+                ReviewStatus.ACTIVE,
                 visibility,
                 -23.5505,
                 -46.6333,
@@ -143,6 +143,9 @@ class UserControllerIntegrationTest {
         review.addTarget(reviewTarget);
         Review saved = reviewRepository.save(review);
         reviewTargetRepository.save(reviewTarget);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
         return saved;
     }
 
@@ -262,9 +265,7 @@ class UserControllerIntegrationTest {
         TestUser targetUser = registerUser("softdel");
         TestUser requester = registerUser("reqsoft");
 
-        User user = userRepository.findById(targetUser.userId()).orElseThrow();
-        user.softDelete();
-        userRepository.save(user);
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(targetUser.userId(), "DELETED");
 
         mockMvc.perform(get("/api/v1/users/{id}", targetUser.userId())
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + requester.accessToken())
