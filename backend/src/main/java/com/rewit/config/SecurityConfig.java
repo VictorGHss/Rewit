@@ -66,6 +66,7 @@ public class SecurityConfig {
             @Value("${spring.datasource.password:}") String appDbPassword,
             @Value("${rewit.datasource.media.password:}") String mediaDbPassword,
             @Value("${rewit.datasource.moderation.password:}") String modDbPassword,
+            @Value("${spring.flyway.password:}") String flywayDbPassword,
             @Value("${rewit.security.jwt-issuer:rewit-api}") String jwtIssuer,
             @Value("${rewit.security.jwt-audience:rewit-clients}") String jwtAudience
     ) {
@@ -94,18 +95,51 @@ public class SecurityConfig {
         }
         SecuritySecretValidator.validateDistinct(configuredSecrets);
 
-        // Garante independência de MODERATION_AUDIT_SECRET (e anterior) em relação às senhas de banco
+        // Garante independência de MODERATION_AUDIT_SECRET (e anterior) em relação às senhas de banco (runtime e migrator)
         validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "APP_DB_PASSWORD", appDbPassword);
         validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "MEDIA_DB_PASSWORD", mediaDbPassword);
         validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "MOD_DB_PASSWORD", modDbPassword);
+        validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "FLYWAY_DB_PASSWORD", flywayDbPassword);
         if (modAuditPrevBytes != null) {
             validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "APP_DB_PASSWORD", appDbPassword);
             validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "MEDIA_DB_PASSWORD", mediaDbPassword);
             validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "MOD_DB_PASSWORD", modDbPassword);
+            validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "FLYWAY_DB_PASSWORD", flywayDbPassword);
         }
 
         this.jwtIssuer = jwtIssuer;
         this.jwtAudience = jwtAudience;
+    }
+
+    public SecurityConfig(
+            String jwtSecret,
+            String passwordPepper,
+            String passwordPepperPrevious,
+            String refreshTokenSecret,
+            String refreshTokenSecretPrevious,
+            String moderationAuditSecret,
+            String moderationAuditSecretPrevious,
+            String appDbPassword,
+            String mediaDbPassword,
+            String modDbPassword,
+            String jwtIssuer,
+            String jwtAudience
+    ) {
+        this(
+                jwtSecret,
+                passwordPepper,
+                passwordPepperPrevious,
+                refreshTokenSecret,
+                refreshTokenSecretPrevious,
+                moderationAuditSecret,
+                moderationAuditSecretPrevious,
+                appDbPassword,
+                mediaDbPassword,
+                modDbPassword,
+                "",
+                jwtIssuer,
+                jwtAudience
+        );
     }
 
     public SecurityConfig(String jwtSecret, String jwtIssuer, String jwtAudience) {
@@ -116,6 +150,7 @@ public class SecurityConfig {
                 "test_refresh_token_secret_with_sufficient_entropy_and_at_least_32_bytes_12345!",
                 "",
                 "test_moderation_audit_secret_with_sufficient_entropy_and_at_least_32_bytes_1!",
+                "",
                 "",
                 "",
                 "",

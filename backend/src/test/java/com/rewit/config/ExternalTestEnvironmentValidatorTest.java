@@ -207,4 +207,27 @@ class ExternalTestEnvironmentValidatorTest {
         assertFalse(error.getMessage().contains(DB_PASSWORD));
         assertFalse(error.getMessage().contains(STORAGE_SECRET));
     }
+
+    @Test
+    @DisplayName("Rejeita APP_DB_USER diferente de rewit_app, troca de roles e senha runtime igual à migrator")
+    void rejectsWrongRuntimeRoleNamesAndMigratorPasswordReuse() {
+        MockEnvironment wrongAppUser = validEnvironment();
+        wrongAppUser.setProperty("spring.datasource.username", "postgres");
+        IllegalStateException ex1 = assertThrows(IllegalStateException.class,
+                () -> ExternalTestEnvironmentValidator.validate(wrongAppUser));
+        assertTrue(ex1.getMessage().contains("APP_DB_USER=rewit_app"));
+
+        MockEnvironment sameAsMigratorPass = validEnvironment();
+        sameAsMigratorPass.setProperty("spring.datasource.password", "senha-migracao-Lw3!rT9d");
+        IllegalStateException ex2 = assertThrows(IllegalStateException.class,
+                () -> ExternalTestEnvironmentValidator.validate(sameAsMigratorPass));
+        assertTrue(ex2.getMessage().contains("APP_DB_PASSWORD"));
+        assertFalse(ex2.getMessage().contains("senha-migracao-Lw3!rT9d"));
+
+        MockEnvironment wrongModUser = validEnvironment();
+        wrongModUser.setProperty("rewit.datasource.moderation.username", "rewit_media");
+        IllegalStateException ex3 = assertThrows(IllegalStateException.class,
+                () -> ExternalTestEnvironmentValidator.validate(wrongModUser));
+        assertTrue(ex3.getMessage().contains("MOD_DB_USER=rewit_mod"));
+    }
 }
