@@ -7,7 +7,7 @@ Este guia estabelece os padrões técnicos, convenções de nomenclatura e fluxo
 ## 1. Padrões por Linguagem e Ecossistema
 
 ### Java / Spring Boot
-- **Versão**: Java 21 LTS
+- **Versão**: Java 25 LTS (conforme `backend/pom.xml` e `infrastructure/docker/backend.Dockerfile`)
 - **Padrão de Formatação**: Google Java Format (indentação de 4 espaços para blocos, 8 espaços para quebras contínuas).
 - **Nomenclatura**:
   - Classes e Interfaces: `PascalCase` (ex: `ReviewService`, `PostGisConfig`).
@@ -35,10 +35,12 @@ Este guia estabelece os padrões técnicos, convenções de nomenclatura e fluxo
 
 ## 2. Convenção de Commits (Conventional Commits)
 
-Todas as mensagens de commit devem seguir rigorosamente o padrão:
+Todas as mensagens de commit devem seguir rigorosamente o padrão, com **descrição obrigatória em português brasileiro (PT-BR)** (preservando os tipos padronizados e termos técnicos originais):
+```text
+<tipo>(<escopo>): <descrição concisa em PT-BR>
 ```
-<tipo>(<escopo>): <descrição sucinta em minúsculas>
-```
+Exemplo: `feat(deploy): adicionar provisionamento do PostgreSQL gerenciado`.
+
 ### Tipos Permitidos:
 - `feat`: Nova funcionalidade para o usuário ou cliente;
 - `fix`: Correção de bug em código de produção;
@@ -53,7 +55,9 @@ Todas as mensagens de commit devem seguir rigorosamente o padrão:
 
 ## 3. Fluxo de Branches
 
-- `main`: Código em produção ou pronto para release final.
-- `develop`: Ramo principal de integração de novas funcionalidades.
-- `feature/<nome-da-funcionalidade>`: Branches efêmeras criadas a partir de `develop`.
-- `hotfix/<nome-do-bug>`: Correções urgentes derivadas de `main` e integradas de volta em `main` e `develop`.
+A branch **`main`** é a única base canônica de integração (ver [`AGENTS.md`](../../AGENTS.md), [`CONTRIBUTING.md`](../../CONTRIBUTING.md) e [`docs/development/agent-workflow.md`](agent-workflow.md)):
+
+- `main`: Única branch canônica de integração (código pronto para produção e releases estáveis).
+- `agent/neon/<slug>`: Branches temporárias criadas a partir de `main` para tarefas executadas por agentes em worktrees isoladas (uma tarefa por worktree).
+- Branches curtas derivadas diretamente de `main` para contribuições humanas.
+- `hotfix/<slug>`: Correções urgentes derivadas diretamente de `main` e integradas de volta em `main`.

@@ -82,6 +82,7 @@ O **Rewit** transcende os catálogos estáticos de avaliação baseados em simpl
 ├── .env.example               # Matriz documentada de variáveis de ambiente
 ├── .gitignore                 # Filtro de segurança e integridade do repositório
 ├── PROJECT_RULES.md           # 31 princípios inegociáveis do projeto
+├── AGENTS.md                  # Contrato operacional central dos agentes
 ├── PRODUCT_VISION.md          # Visão completa de negócio e produto
 ├── ARCHITECTURE.md            # Arquitetura detalhada do sistema
 ├── CONTRIBUTING.md            # Guia de contribuição e convenção de commits
@@ -96,7 +97,7 @@ O **Rewit** transcende os catálogos estáticos de avaliação baseados em simpl
 
 ### Pré-Requisitos
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (com suporte a Compose v2)
-- [Java JDK 21 LTS](https://adoptium.net/) e Maven 3.9+
+- [Java JDK 25 LTS](https://adoptium.net/) e Maven 3.9+
 - [Node.js 20 LTS](https://nodejs.org/)
 - [Flutter SDK 3.24+](https://flutter.dev/docs/get-started/install)
 
@@ -157,6 +158,11 @@ flutter run
 
 ## 6. Documentação Arquitetural e ADRs
 
+- [Contrato Operacional dos Agentes](AGENTS.md)
+- [Runbook Operacional dos Agentes](docs/development/agent-workflow.md)
+- [Guia de Contribuição](CONTRIBUTING.md)
+- [Padrões de Código e Desenvolvimento](docs/development/code-standards.md)
+- [Guia de Configuração e Ambiente Local](docs/development/local-setup.md)
 - [Regras e Diretrizes do Projeto](PROJECT_RULES.md)
 - [Visão do Produto e Negócio](PRODUCT_VISION.md)
 - [Arquitetura de Software](ARCHITECTURE.md)
