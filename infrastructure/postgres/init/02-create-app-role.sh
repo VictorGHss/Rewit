@@ -2,15 +2,24 @@
 # ==============================================================================
 # REWIT - INICIALIZAÇÃO DAS ROLES DE RUNTIME (rewit_app, rewit_media e rewit_mod)
 # Executado pelo entrypoint do PostgreSQL na criação inicial do banco. Também pode ser
-# executado manualmente para provisionar de novo ou rotacionar as senhas num banco existente:
+# executado manualmente (localmente sob SUPERUSER ou contra PostgreSQL gerenciado sob
+# conta administrativa não-superuser com CREATEROLE, usando PGHOST/PGPORT/PGSSLMODE/PGPASSWORD)
+# para provisionar de novo ou rotacionar as senhas num banco existente:
 #   docker compose exec postgres /docker-entrypoint-initdb.d/02-create-app-role.sh
-# (as senhas vêm de APP_DB_PASSWORD, MEDIA_DB_PASSWORD e MOD_DB_PASSWORD no ambiente do container,
-# definidas pelo .env).
+# (as senhas vêm de APP_DB_PASSWORD, MEDIA_DB_PASSWORD e MOD_DB_PASSWORD no ambiente).
 #
-# SEC-2 / SEC-3 / S3-A13-F2 / SEC-F2-03: as senhas nunca são concatenadas em SQL nem passadas em argumentos
-# de processo. Elas seguem pela entrada padrão até o \password do psql, que envia ao servidor
-# apenas o verificador SCRAM. O SQL é o de provision-runtime-role.sql (fonte única), montado em
-# /opt/rewit/postgres pelo docker-compose.yml.
+# SEC-2 / SEC-3 / S3-A13-F2 / SEC-F2-03 / F2-DEPLOY-03.5.1:
+#   * Delegação 100% canônica a provision-runtime-role.sql (fonte única, sem duplicação).
+#   * As senhas nunca são concatenadas em SQL nem passadas em argumentos de processo: seguem
+#     pela entrada padrão até o \password do psql (verificador SCRAM no cliente).
+#   * Compatível com SUPERUSER (local) e com administrador gerenciado com CREATEROLE.
+#   * Precedência de conexão administrativa: POSTGRES_USER > PGUSER > postgres e
+#     POSTGRES_DB > PGDATABASE > $ADMIN_USER (demais variáveis libpq como PGHOST/PGPORT/PGSSLMODE/
+#     PGPASSWORD são honradas diretamente pelo psql).
+#   * Semântica de rotação: as três roles são provisionadas/rotacionadas individualmente, sem
+#     transação global compartilhada entre si nem com o meta-comando \password. Uma falha
+#     intermediária pode deixar as roles anteriores já atualizadas; nunca trate saída != 0 como
+#     sucesso global — corrija a causa e reexecute este script (idempotente) até obter código 0.
 # ==============================================================================
 set -eu
 export LC_ALL=C
@@ -19,8 +28,8 @@ PROVISION_SQL="${REWIT_PROVISION_SQL:-/opt/rewit/postgres/provision-runtime-role
 APP_USER="${APP_DB_USER:-rewit_app}"
 MEDIA_USER="${MEDIA_DB_USER:-rewit_media}"
 MOD_USER="${MOD_DB_USER:-rewit_mod}"
-ADMIN_USER="${POSTGRES_USER:-postgres}"
-ADMIN_DB="${POSTGRES_DB:-$ADMIN_USER}"
+ADMIN_USER="${POSTGRES_USER:-${PGUSER:-postgres}}"
+ADMIN_DB="${POSTGRES_DB:-${PGDATABASE:-$ADMIN_USER}}"
 
 fail() {
     printf '02-create-app-role: ERRO: %s\n' "$1" >&2
@@ -70,7 +79,7 @@ validate_role_name() {
         fail "$var_name excede 63 caracteres."
     fi
     if [ "$role_value" = "$ADMIN_USER" ]; then
-        fail "$var_name não pode ser a role administrativa (POSTGRES_USER)."
+        fail "$var_name não pode ser a role administrativa (POSTGRES_USER/PGUSER)."
     fi
 }
 
