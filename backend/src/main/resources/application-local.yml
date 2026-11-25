@@ -72,6 +72,8 @@ rewit:
     access-key: ${OBJECT_STORAGE_ACCESS_KEY:${MINIO_ROOT_USER:rewit_local_access}}
     secret-key: ${OBJECT_STORAGE_SECRET_KEY:${MINIO_ROOT_PASSWORD:rewit_local_secret}}
     bucket-name: ${OBJECT_STORAGE_BUCKET:${MINIO_BUCKET_NAME:rewit-local}}
+    region: ${OBJECT_STORAGE_REGION:us-east-1}
+    auto-create-bucket: ${OBJECT_STORAGE_AUTO_CREATE_BUCKET:true}
   security:
     jwt-secret: ${JWT_SECRET:}
     password-pepper: ${PASSWORD_PEPPER_SECRET:}

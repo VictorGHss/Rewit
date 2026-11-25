@@ -38,11 +38,13 @@ docker compose ps
 ```
 
 ### Passo 3: Execução do Backend
-Acesse a pasta do backend e execute a aplicação:
+Acesse a pasta do backend e execute a aplicação informando explicitamente o profile `local` (o `application.yml` não faz mais fallback silencioso para `local`):
 ```powershell
 cd backend
+$env:SPRING_PROFILES_ACTIVE = "local"
 ./mvnw spring-boot:run
 ```
+*(No Linux/macOS: `SPRING_PROFILES_ACTIVE=local ./mvnw spring-boot:run`)*.
 O backend estará acessível em: `http://localhost:8080`.
 Documentação Swagger/OpenAPI: `http://localhost:8080/swagger-ui.html`.
 

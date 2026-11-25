@@ -30,13 +30,19 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import javax.crypto.spec.SecretKeySpec;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -52,6 +58,7 @@ public class SecurityConfig {
     private final byte[] jwtSecretBytes;
     private final String jwtIssuer;
     private final String jwtAudience;
+    private final List<String> corsAllowedOrigins;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -68,7 +75,8 @@ public class SecurityConfig {
             @Value("${rewit.datasource.moderation.password:}") String modDbPassword,
             @Value("${spring.flyway.password:}") String flywayDbPassword,
             @Value("${rewit.security.jwt-issuer:rewit-api}") String jwtIssuer,
-            @Value("${rewit.security.jwt-audience:rewit-clients}") String jwtAudience
+            @Value("${rewit.security.jwt-audience:rewit-clients}") String jwtAudience,
+            @Value("${rewit.security.cors.allowed-origins:}") String corsAllowedOrigins
     ) {
         this.jwtSecretBytes = SecuritySecretValidator.decodeSecret("JWT_SECRET", jwtSecret);
         SecuritySecretValidator.validateSecret("PASSWORD_PEPPER_SECRET", passwordPepper);
@@ -109,6 +117,40 @@ public class SecurityConfig {
 
         this.jwtIssuer = jwtIssuer;
         this.jwtAudience = jwtAudience;
+        this.corsAllowedOrigins = parseCorsAllowedOrigins(corsAllowedOrigins);
+    }
+
+    public SecurityConfig(
+            String jwtSecret,
+            String passwordPepper,
+            String passwordPepperPrevious,
+            String refreshTokenSecret,
+            String refreshTokenSecretPrevious,
+            String moderationAuditSecret,
+            String moderationAuditSecretPrevious,
+            String appDbPassword,
+            String mediaDbPassword,
+            String modDbPassword,
+            String flywayDbPassword,
+            String jwtIssuer,
+            String jwtAudience
+    ) {
+        this(
+                jwtSecret,
+                passwordPepper,
+                passwordPepperPrevious,
+                refreshTokenSecret,
+                refreshTokenSecretPrevious,
+                moderationAuditSecret,
+                moderationAuditSecretPrevious,
+                appDbPassword,
+                mediaDbPassword,
+                modDbPassword,
+                flywayDbPassword,
+                jwtIssuer,
+                jwtAudience,
+                ""
+        );
     }
 
     public SecurityConfig(
@@ -175,6 +217,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(SecurityConfig::disableCsrf)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(SecurityConfig::disableFormLogin)
@@ -265,6 +308,109 @@ public class SecurityConfig {
 
             response.getWriter().write(objectMapper.writeValueAsString(errorBody));
         };
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        if (corsAllowedOrigins.isEmpty()) {
+            return source;
+        }
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(corsAllowedOrigins);
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        config.setAllowCredentials(false);
+        config.setMaxAge(3600L);
+        source.registerCorsConfiguration("/api/**", config);
+        return source;
+    }
+
+    private static List<String> parseCorsAllowedOrigins(String rawOrigins) {
+        if (rawOrigins == null || rawOrigins.isBlank()) {
+            return List.of();
+        }
+        List<String> origins = new ArrayList<>();
+        for (String raw : rawOrigins.split(",")) {
+            String origin = raw.trim();
+            if (origin.isEmpty()) {
+                continue;
+            }
+            if (origin.contains("*")) {
+                throw new IllegalArgumentException(
+                        "rewit.security.cors.allowed-origins não pode conter wildcard '*'.");
+            }
+            URI uri;
+            try {
+                uri = URI.create(origin);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "rewit.security.cors.allowed-origins contém origem com URI inválida.");
+            }
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            if (!("http".equals(scheme) || "https".equals(scheme))
+                    || uri.getHost() == null || uri.getHost().isBlank()
+                    || uri.getRawUserInfo() != null
+                    || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())
+                    || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                throw new IllegalArgumentException(
+                        "rewit.security.cors.allowed-origins exige origens no formato scheme://host[:porta] sem path, query, fragmento ou userinfo.");
+            }
+            if (!hasValidOptionalPort(uri)) {
+                throw new IllegalArgumentException(
+                        "rewit.security.cors.allowed-origins contém porta inválida (use 1-65535 ou omita a porta).");
+            }
+            origins.add(origin);
+        }
+        return List.copyOf(origins);
+    }
+
+    private static boolean hasValidOptionalPort(URI uri) {
+        String authority = uri.getRawAuthority();
+        if (authority == null || authority.isBlank()) {
+            return false;
+        }
+        String hostAndPort = authority;
+        if (hostAndPort.startsWith("[")) {
+            int closeBracket = hostAndPort.indexOf(']');
+            if (closeBracket <= 1) {
+                return false;
+            }
+            String remainder = hostAndPort.substring(closeBracket + 1);
+            if (remainder.isEmpty()) {
+                return true;
+            }
+            if (!remainder.startsWith(":")) {
+                return false;
+            }
+            return isValidPortText(remainder.substring(1));
+        }
+        int colonIdx = hostAndPort.indexOf(':');
+        if (colonIdx < 0) {
+            return true;
+        }
+        if (hostAndPort.indexOf(':', colonIdx + 1) >= 0) {
+            return false;
+        }
+        return isValidPortText(hostAndPort.substring(colonIdx + 1));
+    }
+
+    private static boolean isValidPortText(String rawPort) {
+        if (rawPort == null || rawPort.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < rawPort.length(); i++) {
+            if (!Character.isDigit(rawPort.charAt(i))) {
+                return false;
+            }
+        }
+        try {
+            int port = Integer.parseInt(rawPort);
+            return port >= 1 && port <= 65535;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private static void disableCsrf(CsrfConfigurer<HttpSecurity> configurer) {

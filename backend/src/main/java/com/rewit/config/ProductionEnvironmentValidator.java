@@ -1,0 +1,1353 @@
+package com.rewit.config;
+
+import com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy;
+import com.rewit.infrastructure.security.SecuritySecretValidator;
+import org.springframework.boot.autoconfigure.web.ErrorProperties;
+import org.springframework.boot.context.properties.bind.BindException;
+import org.springframework.boot.context.properties.bind.BindResult;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.data.redis.autoconfigure.DataRedisProperties;
+import org.springframework.context.ApplicationContextInitializer;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.core.Ordered;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.Profiles;
+
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Pattern;
+
+/**
+ * Validação fail-closed do perfil {@code prod} (homologação e produção, F2-DEPLOY-03.3 / R1).
+ *
+ * <p>Registrado em {@code META-INF/spring.factories} como {@link ApplicationContextInitializer},
+ * executa somente quando o perfil {@code prod} está ativo e antes da criação de DataSources,
+ * da execução do Flyway e da abertura das portas HTTP.
+ *
+ * <p>Reutiliza integralmente {@link RuntimeDatabaseRolePolicy} e {@link SecuritySecretValidator},
+ * sem duplicar regras nem enfraquecer requisitos de segurança. As mensagens citam apenas nomes de
+ * propriedades e variáveis de ambiente, nunca valores reais, URLs completas ou segredos.
+ */
+public class ProductionEnvironmentValidator
+        implements ApplicationContextInitializer<ConfigurableApplicationContext>, Ordered {
+
+    public static final String PROFILE = RuntimeProfileEnvironmentValidator.PROFILE_PROD;
+
+    private static final Pattern KEY_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{1,32}$");
+    private static final Pattern STRICT_POSTGRES_URL_PATTERN = Pattern.compile("^jdbc:postgresql://[^/?#]+/[^/?#]+.*$");
+    private static final Pattern CANONICAL_IPV4_PATTERN = Pattern.compile(
+            "^(0|[1-9]\\d{0,2})\\.(0|[1-9]\\d{0,2})\\.(0|[1-9]\\d{0,2})\\.(0|[1-9]\\d{0,2})$");
+    private static final Pattern NUMERIC_OR_HEX_LABEL_PATTERN = Pattern.compile("^(0x[0-9a-f]+|\\d+)$");
+    private static final Pattern DIGITS_ONLY_PATTERN = Pattern.compile("^\\d+$");
+
+    private static final String REQUIRED_PG_SSL_MODE = "verify-full";
+    private static final int DEFAULT_PG_PORT = 5432;
+
+    private static final Set<String> FORBIDDEN_PG_TLS_OVERRIDE_PARAMS = Set.of(
+            "sslfactory",
+            "sslfactoryarg",
+            "sslhostnameverifier"
+    );
+
+    private static final Set<String> LOCAL_OR_DEV_HOSTNAMES = Set.of(
+            "localhost",
+            "host.docker.internal",
+            "seaweedfs",
+            "minio"
+    );
+
+    private static final Set<String> INSECURE_PLACEHOLDERS = Set.of(
+            "change-me",
+            "change_me",
+            "changeme",
+            "placeholder",
+            "default",
+            "rewit_local_password",
+            "rewit_local_access",
+            "rewit_local_secret",
+            "rewit-local",
+            "exemplo_chave_maps_api"
+    );
+
+    private static final Set<String> WILDCARD_PROXY_PATTERNS = Set.of(".*", ".+", "*");
+
+    @Override
+    public int getOrder() {
+        return Ordered.HIGHEST_PRECEDENCE + 15;
+    }
+
+    @Override
+    public void initialize(ConfigurableApplicationContext applicationContext) {
+        validate(applicationContext.getEnvironment());
+    }
+
+    public static void validate(ConfigurableEnvironment env) {
+        if (!env.acceptsProfiles(Profiles.of(PROFILE))) {
+            return;
+        }
+
+        List<String> errors = new ArrayList<>();
+
+        validateHttpAndRuntimeHardening(env, errors);
+        validateDatabaseAndFlyway(env, errors);
+        validateCryptographicSecrets(env, errors);
+        validateRedis(env, errors);
+        validateObjectStorage(env, errors);
+        validateOptionalIntegrations(env, errors);
+
+        if (!errors.isEmpty()) {
+            throw new InvalidConfigurationException(errors);
+        }
+    }
+
+    private static void validateHttpAndRuntimeHardening(ConfigurableEnvironment env, List<String> errors) {
+        Binder binder = Binder.get(env);
+
+        // R1-05: valida o objeto ErrorProperties efetivamente vinculado pelo Spring Boot 4.1.1 (relaxed binding:
+        // kebab-case, camelCase, variáveis de ambiente, CLI e SPRING_APPLICATION_JSON)
+        try {
+            ErrorProperties errorProperties = binder.bind("spring.web.error", ErrorProperties.class)
+                    .orElseGet(ErrorProperties::new);
+            if (errorProperties.getIncludeMessage() != ErrorProperties.IncludeAttribute.NEVER) {
+                errors.add("spring.web.error.include-message deve ser 'never' em produção.");
+            }
+            if (errorProperties.getIncludeBindingErrors() != ErrorProperties.IncludeAttribute.NEVER) {
+                errors.add("spring.web.error.include-binding-errors deve ser 'never' em produção.");
+            }
+            if (errorProperties.getIncludeStacktrace() != ErrorProperties.IncludeAttribute.NEVER) {
+                errors.add("spring.web.error.include-stacktrace deve ser 'never' em produção.");
+            }
+            if (errorProperties.isIncludeException()) {
+                errors.add("spring.web.error.include-exception deve ser 'false' em produção.");
+            }
+        } catch (BindException e) {
+            errors.add("spring.web.error possui configuração inválida em produção.");
+        }
+
+        if (bindBoolean(binder, "springdoc.api-docs.enabled", false, errors)) {
+            errors.add("springdoc.api-docs.enabled deve ser 'false' em produção.");
+        }
+        if (bindBoolean(binder, "springdoc.swagger-ui.enabled", false, errors)) {
+            errors.add("springdoc.swagger-ui.enabled deve ser 'false' em produção.");
+        }
+        if (bindBoolean(binder, "spring.jpa.show-sql", false, errors)) {
+            errors.add("spring.jpa.show-sql deve ser 'false' em produção.");
+        }
+
+        String ddlAuto = bindOptionalString(binder, "spring.jpa.hibernate.ddl-auto");
+        if (!"validate".equalsIgnoreCase(trimOrEmpty(ddlAuto))) {
+            errors.add("spring.jpa.hibernate.ddl-auto deve ser 'validate' em produção.");
+        }
+
+        String serverPort = bindOptionalString(binder, "server.port");
+        String managementPort = bindOptionalString(binder, "management.server.port");
+        if (isPresent(serverPort) && isPresent(managementPort)
+                && serverPort.trim().equals(managementPort.trim())) {
+            errors.add("management.server.port deve ser distinta de server.port em produção.");
+        }
+
+        String corsOrigins = resolveOptional(env, "rewit.security.cors.allowed-origins");
+        if (!isPresent(corsOrigins)) {
+            corsOrigins = resolveOptional(env, "CORS_ALLOWED_ORIGINS");
+        }
+        if (isPresent(corsOrigins)) {
+            validateCorsAllowedOrigins(corsOrigins, errors);
+        }
+
+        String forwardStrategy = bindOptionalString(binder, "server.forward-headers-strategy");
+        if ("native".equalsIgnoreCase(trimOrEmpty(forwardStrategy))) {
+            String internalProxies = bindOptionalString(binder, "server.tomcat.remoteip.internal-proxies");
+            if (!isPresent(internalProxies) || WILDCARD_PROXY_PATTERNS.contains(internalProxies.trim())) {
+                errors.add("server.tomcat.remoteip.internal-proxies (SERVER_INTERNAL_PROXIES) deve definir proxies confiáveis explícitos sem wildcard irrestrito.");
+            }
+        }
+    }
+
+    private static void validateCorsAllowedOrigins(String corsOrigins, List<String> errors) {
+        for (String rawOrigin : corsOrigins.split(",")) {
+            String origin = rawOrigin.trim();
+            if (origin.isEmpty()) {
+                continue;
+            }
+            if (origin.contains("*")) {
+                errors.add("rewit.security.cors.allowed-origins (CORS_ALLOWED_ORIGINS) não pode usar wildcard '*' em produção.");
+                return;
+            }
+            URI uri;
+            try {
+                uri = URI.create(origin);
+            } catch (IllegalArgumentException e) {
+                errors.add("rewit.security.cors.allowed-origins (CORS_ALLOWED_ORIGINS) contém origem inválida.");
+                return;
+            }
+            if (!"https".equalsIgnoreCase(uri.getScheme())) {
+                errors.add("rewit.security.cors.allowed-origins (CORS_ALLOWED_ORIGINS) deve conter somente origens HTTPS em produção.");
+                return;
+            }
+            if (!isPresent(uri.getHost())
+                    || uri.getRawUserInfo() != null
+                    || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())
+                    || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                errors.add("rewit.security.cors.allowed-origins (CORS_ALLOWED_ORIGINS) exige origens puras (https://host[:porta]) sem path, query, fragmento ou userinfo.");
+                return;
+            }
+            if (!hasValidOptionalPort(uri)) {
+                errors.add("rewit.security.cors.allowed-origins (CORS_ALLOWED_ORIGINS) contém porta inválida (use 1-65535 ou omita a porta).");
+                return;
+            }
+        }
+    }
+
+    private static void validateDatabaseAndFlyway(ConfigurableEnvironment env, List<String> errors) {
+        Binder binder = Binder.get(env);
+
+        // Reutiliza integralmente a política canônica F2-DEPLOY-02 das 3 roles runtime e isolamento do migrator
+        errors.addAll(RuntimeDatabaseRolePolicy.validateEnvironment(env));
+
+        String datasourceUrl = resolveRequired(env, "spring.datasource.url", "DATABASE_URL", errors);
+        PostgresTarget datasourceTarget = null;
+        if (datasourceUrl != null) {
+            datasourceTarget = validatePostgresProductionUrl(
+                    datasourceUrl.trim(), "spring.datasource.url", "DATABASE_URL", errors);
+        }
+
+        boolean flywayEnabled = bindBoolean(binder, "spring.flyway.enabled", true, errors);
+        if (flywayEnabled) {
+            if (bindBoolean(binder, "spring.flyway.baseline-on-migrate", false, errors)) {
+                errors.add("spring.flyway.baseline-on-migrate deve ser 'false' em produção.");
+            }
+            if (bindBoolean(binder, "spring.flyway.postgresql.transactional-lock", true, errors)) {
+                errors.add("spring.flyway.postgresql.transactional-lock deve ser 'false' em produção.");
+            }
+
+            // AUDIT-02: validar spring.flyway.url independentemente (via Binder) quando configurada
+            String flywayUrl = bindOptionalString(binder, "spring.flyway.url");
+            if (isPresent(flywayUrl)) {
+                PostgresTarget flywayTarget = validatePostgresProductionUrl(
+                        flywayUrl.trim(), "spring.flyway.url", "SPRING_FLYWAY_URL", errors);
+                if (datasourceTarget != null && flywayTarget != null && !datasourceTarget.equals(flywayTarget)) {
+                    errors.add("spring.flyway.url deve apontar para o mesmo destino lógico (host, porta e database) de spring.datasource.url.");
+                }
+            }
+
+            resolveRequired(env, "spring.flyway.user", "FLYWAY_DB_USER ou POSTGRES_USER", errors);
+            String flywayPassword = resolveRequired(env, "spring.flyway.password", "FLYWAY_DB_PASSWORD ou POSTGRES_PASSWORD", errors);
+            if (flywayPassword != null && RuntimeDatabaseRolePolicy.isForbiddenPassword(flywayPassword)) {
+                errors.add("spring.flyway.password (FLYWAY_DB_PASSWORD / POSTGRES_PASSWORD) usa valor de exemplo proibido.");
+            }
+        }
+    }
+
+    /**
+     * Valida uma URL JDBC PostgreSQL em produção (AUDIT-02 / AUDIT-03):
+     * - formato canônico {@code jdbc:postgresql://host[:porta]/database}
+     * - ausência de userinfo na authority e de parâmetros {@code user}/{@code password}
+     * - hosts não locais/loopback/não especificados (sem consulta DNS)
+     * - {@code sslmode=verify-full} estritamente case-sensitive, sem duplicatas ou encoding ambíguo
+     * - rejeita {@code ssl=false} em qualquer capitalização/encoding
+     */
+    private static PostgresTarget validatePostgresProductionUrl(
+            String url,
+            String propertyName,
+            String envVarName,
+            List<String> errors
+    ) {
+        String label = propertyName + " (" + envVarName + ")";
+        if (!STRICT_POSTGRES_URL_PATTERN.matcher(url).matches()) {
+            errors.add(label + " deve seguir o formato jdbc:postgresql://host:porta/database.");
+            return null;
+        }
+
+        String withoutJdbc = url.substring("jdbc:".length());
+        int schemeEnd = withoutJdbc.indexOf("://");
+        int authorityStart = schemeEnd + 3;
+        int slashIdx = withoutJdbc.indexOf('/', authorityStart);
+        if (slashIdx <= authorityStart) {
+            errors.add(label + " possui formato JDBC PostgreSQL inválido.");
+            return null;
+        }
+
+        String authority = withoutJdbc.substring(authorityStart, slashIdx);
+        if (authority.contains("@")) {
+            errors.add(label + " não pode embutir userinfo/credenciais na URL JDBC.");
+            return null;
+        }
+
+        int qIdx = withoutJdbc.indexOf('?', slashIdx);
+        int hashIdx = withoutJdbc.indexOf('#', slashIdx);
+        int dbEnd = withoutJdbc.length();
+        if (qIdx >= 0) {
+            dbEnd = Math.min(dbEnd, qIdx);
+        }
+        if (hashIdx >= 0) {
+            dbEnd = Math.min(dbEnd, hashIdx);
+        }
+        String databaseName = withoutJdbc.substring(slashIdx + 1, dbEnd).trim();
+        if (databaseName.isEmpty()) {
+            errors.add(label + " deve informar o nome do database.");
+            return null;
+        }
+
+        List<HostPort> endpoints = new ArrayList<>();
+        boolean hostError = false;
+        for (String rawHostPort : authority.split(",")) {
+            HostPort hp = parseHostPort(rawHostPort.trim(), DEFAULT_PG_PORT);
+            if (hp == null) {
+                errors.add(label + " possui host ou porta inválidos.");
+                hostError = true;
+                break;
+            }
+            if (isLocalOrDevHost(hp.host())) {
+                errors.add(label + " não pode apontar para host local/loopback em produção.");
+                hostError = true;
+                break;
+            }
+            endpoints.add(hp);
+        }
+
+        // AUDIT-03: parsing sequencial case-sensitive preservando chaves originais e detectando duplicatas
+        validatePostgresTlsQueryParameters(url, label, errors);
+
+        return hostError ? null : new PostgresTarget(endpoints, databaseName);
+    }
+
+    private static void validatePostgresTlsQueryParameters(String url, String label, List<String> errors) {
+        int qIdx = url.indexOf('?');
+        if (qIdx < 0 || qIdx + 1 >= url.length()) {
+            errors.add(label + " exige TLS estrito com sslmode=" + REQUIRED_PG_SSL_MODE + ".");
+            return;
+        }
+        String query = url.substring(qIdx + 1);
+        int hashIdx = query.indexOf('#');
+        if (hashIdx >= 0) {
+            query = query.substring(0, hashIdx);
+        }
+
+        int sslModeCount = 0;
+        String effectiveSslMode = null;
+        boolean sslModeSyntaxError = false;
+        int sslFlagCount = 0;
+        boolean embeddedCredError = false;
+        boolean tlsOverrideParamError = false;
+
+        for (String pair : query.split("&")) {
+            if (pair.isEmpty()) {
+                continue;
+            }
+            int eq = pair.indexOf('=');
+            String rawKey = eq >= 0 ? pair.substring(0, eq) : pair;
+            String rawVal = eq >= 0 ? pair.substring(eq + 1) : "";
+
+            String decodedKey;
+            String decodedVal;
+            try {
+                decodedKey = URLDecoder.decode(rawKey, StandardCharsets.UTF_8);
+                decodedVal = URLDecoder.decode(rawVal, StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                errors.add(label + " contém parâmetro de query com percent-encoding inválido.");
+                return;
+            }
+
+            String lowerKey = decodedKey.trim().toLowerCase(Locale.ROOT);
+            if ("user".equals(lowerKey) || "password".equals(lowerKey)) {
+                embeddedCredError = true;
+                continue;
+            }
+
+            // R1-03: bloqueia substituição de SSLSocketFactory ou HostnameVerifier (ex.: NonValidatingFactory)
+            if (FORBIDDEN_PG_TLS_OVERRIDE_PARAMS.contains(lowerKey)) {
+                tlsOverrideParamError = true;
+                continue;
+            }
+
+            if ("sslmode".equals(lowerKey)) {
+                sslModeCount++;
+                if (!"sslmode".equals(rawKey)) {
+                    sslModeSyntaxError = true;
+                } else {
+                    effectiveSslMode = decodedVal;
+                }
+            } else if ("ssl".equals(lowerKey)) {
+                sslFlagCount++;
+                String trimmedSsl = decodedVal.trim().toLowerCase(Locale.ROOT);
+                if (!"ssl".equals(rawKey) || "false".equals(trimmedSsl) || "0".equals(trimmedSsl) || trimmedSsl.isEmpty()) {
+                    errors.add(label + " contém parâmetro 'ssl' inválido ou desabilitado (use exclusivamente sslmode=" + REQUIRED_PG_SSL_MODE + ").");
+                }
+            }
+        }
+
+        if (embeddedCredError) {
+            errors.add(label + " não pode embutir parâmetros 'user' ou 'password' na URL JDBC.");
+        }
+        if (tlsOverrideParamError) {
+            errors.add(label + " não permite sobrescrever validação TLS com 'sslfactory', 'sslfactoryarg' ou 'sslhostnameverifier'.");
+        }
+        if (sslFlagCount > 1) {
+            errors.add(label + " contém parâmetros 'ssl' duplicados.");
+        }
+        if (sslModeSyntaxError) {
+            errors.add(label + " deve declarar 'sslmode' exatamente em minúsculas e sem percent-encoding.");
+        } else if (sslModeCount == 0) {
+            errors.add(label + " exige TLS estrito com sslmode=" + REQUIRED_PG_SSL_MODE + ".");
+        } else if (sslModeCount > 1) {
+            errors.add(label + " não permite parâmetros 'sslmode' duplicados.");
+        } else if (!REQUIRED_PG_SSL_MODE.equals(effectiveSslMode)) {
+            errors.add(label + " exige exclusivamente sslmode=" + REQUIRED_PG_SSL_MODE + " em produção (require/verify-ca/prefer/allow/disable não são aceitos).");
+        }
+    }
+
+    private static void validateCryptographicSecrets(ConfigurableEnvironment env, List<String> errors) {
+        Map<String, String> allSecrets = new LinkedHashMap<>();
+
+        validateRequiredSecret(env, "rewit.security.jwt-secret", "JWT_SECRET", allSecrets, errors);
+        validateRequiredSecret(env, "rewit.security.password-pepper", "PASSWORD_PEPPER_SECRET", allSecrets, errors);
+        String pepperKeyId = validateRequiredKeyId(env, "rewit.security.password-pepper-key-id", "PASSWORD_PEPPER_KEY_ID", errors);
+        validateOptionalRotationPair(
+                env,
+                "rewit.security.password-pepper-previous", "PASSWORD_PEPPER_SECRET_PREVIOUS",
+                "rewit.security.password-pepper-previous-key-id", "PASSWORD_PEPPER_PREVIOUS_KEY_ID",
+                pepperKeyId,
+                allSecrets,
+                errors
+        );
+
+        validateRequiredSecret(env, "rewit.security.refresh-token-secret", "REFRESH_TOKEN_SECRET", allSecrets, errors);
+        validateOptionalSecret(env, "rewit.security.refresh-token-secret-previous", "REFRESH_TOKEN_SECRET_PREVIOUS", allSecrets, errors);
+
+        validateRequiredSecret(env, "rewit.security.moderation-audit-secret", "MODERATION_AUDIT_SECRET", allSecrets, errors);
+        String modAuditKeyId = validateRequiredKeyId(env, "rewit.security.moderation-audit-key-id", "MODERATION_AUDIT_KEY_ID", errors);
+        validateOptionalRotationPair(
+                env,
+                "rewit.security.moderation-audit-secret-previous", "MODERATION_AUDIT_SECRET_PREVIOUS",
+                "rewit.security.moderation-audit-previous-key-id", "MODERATION_AUDIT_PREVIOUS_KEY_ID",
+                modAuditKeyId,
+                allSecrets,
+                errors
+        );
+
+        boolean rateLimitEnabled = isTrue(env, "rewit.rate-limit.enabled", true);
+        if (rateLimitEnabled) {
+            validateRequiredSecret(env, "rewit.rate-limit.key-secret", "RATE_LIMIT_KEY_SECRET", allSecrets, errors);
+        } else {
+            validateOptionalSecret(env, "rewit.rate-limit.key-secret", "RATE_LIMIT_KEY_SECRET", allSecrets, errors);
+        }
+
+        // F2-DEPLOY-03.3 §6.3: ACCOUNT_EMAIL_RESERVATION_SECRET obrigatório quando ACCOUNT_PURGE_ENABLED=true
+        boolean accountPurgeEnabled = isTrue(env, "rewit.account.purge.enabled", true);
+        if (accountPurgeEnabled) {
+            validateRequiredSecret(env, "rewit.account.email-reservation-secret", "ACCOUNT_EMAIL_RESERVATION_SECRET", allSecrets, errors);
+        } else {
+            validateOptionalSecret(env, "rewit.account.email-reservation-secret", "ACCOUNT_EMAIL_RESERVATION_SECRET", allSecrets, errors);
+        }
+
+        if (allSecrets.size() >= 2) {
+            try {
+                SecuritySecretValidator.validateDistinct(allSecrets);
+            } catch (IllegalArgumentException e) {
+                errors.add(e.getMessage());
+            }
+        }
+
+        Map<String, String> dbPasswords = new LinkedHashMap<>();
+        putIfPresent(dbPasswords, "APP_DB_PASSWORD", resolveOptional(env, "spring.datasource.password"));
+        putIfPresent(dbPasswords, "MEDIA_DB_PASSWORD", resolveOptional(env, "rewit.datasource.media.password"));
+        putIfPresent(dbPasswords, "MOD_DB_PASSWORD", resolveOptional(env, "rewit.datasource.moderation.password"));
+        putIfPresent(dbPasswords, "FLYWAY_DB_PASSWORD", resolveOptional(env, "spring.flyway.password"));
+
+        for (Map.Entry<String, String> secretEntry : allSecrets.entrySet()) {
+            byte[] secretBytes;
+            try {
+                secretBytes = SecuritySecretValidator.decodeSecret(secretEntry.getKey(), secretEntry.getValue());
+            } catch (IllegalArgumentException ignored) {
+                continue;
+            }
+            for (Map.Entry<String, String> dbEntry : dbPasswords.entrySet()) {
+                String dbPass = dbEntry.getValue();
+                if (secretEntry.getValue().trim().equals(dbPass.trim())
+                        || MessageDigest.isEqual(secretBytes, dbPass.trim().getBytes(StandardCharsets.UTF_8))) {
+                    errors.add("Reutilização de credencial proibida: '" + secretEntry.getKey()
+                            + "' não pode coincidir com '" + dbEntry.getKey() + "'.");
+                }
+            }
+        }
+    }
+
+    private static void validateRedis(ConfigurableEnvironment env, List<String> errors) {
+        Binder binder = Binder.get(env);
+
+        // R1-01 & R1-02: validar topologias efetivamente vinculadas via Binder/DataRedisProperties
+        // (cobre relaxed binding indexado como SPRING_DATA_REDIS_CLUSTER_NODES_0,
+        // SPRING_DATA_REDIS_SENTINEL_NODES_0, SPRING_DATA_REDIS_MASTERREPLICA_NODES_0, CLI e JSON).
+        validateForbiddenRedisTopologies(binder, errors);
+
+        Boolean sslEnabledExplicit = null;
+        boolean sslBindError = false;
+        try {
+            BindResult<Boolean> boundSsl = binder.bind("spring.data.redis.ssl.enabled", Boolean.class);
+            if (boundSsl.isBound()) {
+                sslEnabledExplicit = boundSsl.get();
+            }
+        } catch (BindException e) {
+            sslBindError = true;
+            errors.add("spring.data.redis.ssl.enabled (REDIS_SSL_ENABLED) possui valor inválido em produção: TLS é obrigatório para Redis.");
+        }
+        if (!sslBindError && Boolean.FALSE.equals(sslEnabledExplicit)) {
+            errors.add("spring.data.redis.ssl.enabled (REDIS_SSL_ENABLED) não pode ser 'false' em produção: TLS é obrigatório para Redis.");
+        }
+
+        String redisUrl = bindOptionalString(binder, "spring.data.redis.url");
+        if (isPresent(redisUrl)) {
+            validateRedisUrl(redisUrl.trim(), binder, errors);
+            verifyBoundRedisPropertiesCoherence(binder, true, errors);
+            return;
+        }
+
+        String host = bindRequiredString(binder, "spring.data.redis.host", "REDIS_HOST", errors);
+        if (host != null && isLocalOrDevHost(host)) {
+            errors.add("spring.data.redis.host (REDIS_HOST) não pode apontar para localhost/desenvolvimento em produção.");
+        }
+
+        String portStr = bindRequiredString(binder, "spring.data.redis.port", "REDIS_PORT", errors);
+        if (portStr != null) {
+            if (parseValidPort(portStr) < 1) {
+                errors.add("spring.data.redis.port (REDIS_PORT) deve ser uma porta TCP válida (1-65535).");
+            }
+        }
+
+        String password = bindRequiredString(binder, "spring.data.redis.password", "REDIS_PASSWORD", errors);
+        if (password != null && isInsecurePlaceholder(password)) {
+            errors.add("spring.data.redis.password (REDIS_PASSWORD) usa valor de exemplo proibido.");
+        }
+
+        if (!sslBindError && !Boolean.TRUE.equals(sslEnabledExplicit)) {
+            errors.add("spring.data.redis.ssl.enabled (REDIS_SSL_ENABLED) deve ser 'true' em produção: TLS é obrigatório para Redis.");
+        }
+
+        verifyBoundRedisPropertiesCoherence(binder, false, errors);
+    }
+
+    private static void validateForbiddenRedisTopologies(Binder binder, List<String> errors) {
+        try {
+            DataRedisProperties.Cluster cluster = binder
+                    .bind("spring.data.redis.cluster", DataRedisProperties.Cluster.class)
+                    .orElse(null);
+            if (cluster != null && (hasNonBlankItems(cluster.getNodes()) || cluster.getMaxRedirects() != null)) {
+                errors.add("spring.data.redis.cluster.nodes não é permitido em produção nesta etapa (use Redis standalone com TLS).");
+            }
+        } catch (BindException e) {
+            errors.add("spring.data.redis.cluster.* contém configuração inválida ou não permitida em produção.");
+        }
+
+        try {
+            DataRedisProperties.Sentinel sentinel = binder
+                    .bind("spring.data.redis.sentinel", DataRedisProperties.Sentinel.class)
+                    .orElse(null);
+            if (sentinel != null && (hasNonBlankItems(sentinel.getNodes())
+                    || isPresent(sentinel.getMaster())
+                    || isPresent(sentinel.getUsername())
+                    || isPresent(sentinel.getPassword()))) {
+                errors.add("spring.data.redis.sentinel.* não é permitido em produção nesta etapa (use Redis standalone com TLS).");
+            }
+        } catch (BindException e) {
+            errors.add("spring.data.redis.sentinel.* contém configuração inválida ou não permitida em produção.");
+        }
+
+        try {
+            DataRedisProperties.Masterreplica masterreplica = binder
+                    .bind("spring.data.redis.masterreplica", DataRedisProperties.Masterreplica.class)
+                    .orElse(null);
+            if (masterreplica != null && hasNonBlankItems(masterreplica.getNodes())) {
+                errors.add("spring.data.redis.masterreplica.nodes não é permitido em produção nesta etapa (use Redis standalone com TLS).");
+            }
+        } catch (BindException e) {
+            errors.add("spring.data.redis.masterreplica.* contém configuração inválida ou não permitida em produção.");
+        }
+    }
+
+    private static void verifyBoundRedisPropertiesCoherence(Binder binder, boolean usingUrl, List<String> errors) {
+        if (!errors.isEmpty()) {
+            return;
+        }
+        try {
+            DataRedisProperties bound = binder.bind("spring.data.redis", DataRedisProperties.class).orElse(null);
+            if (bound == null) {
+                return;
+            }
+            if (bound.getCluster() != null && hasNonBlankItems(bound.getCluster().getNodes())) {
+                errors.add("spring.data.redis.cluster.nodes não é permitido em produção nesta etapa (use Redis standalone com TLS).");
+            }
+            if (bound.getSentinel() != null
+                    && (hasNonBlankItems(bound.getSentinel().getNodes()) || isPresent(bound.getSentinel().getMaster()))) {
+                errors.add("spring.data.redis.sentinel.* não é permitido em produção nesta etapa (use Redis standalone com TLS).");
+            }
+            if (bound.getMasterreplica() != null && hasNonBlankItems(bound.getMasterreplica().getNodes())) {
+                errors.add("spring.data.redis.masterreplica.nodes não é permitido em produção nesta etapa (use Redis standalone com TLS).");
+            }
+            if (!usingUrl) {
+                if (isLocalOrDevHost(bound.getHost())) {
+                    errors.add("spring.data.redis.host (REDIS_HOST) não pode apontar para localhost/desenvolvimento em produção.");
+                }
+                if (bound.getPort() < 1 || bound.getPort() > 65535) {
+                    errors.add("spring.data.redis.port (REDIS_PORT) deve ser uma porta TCP válida (1-65535).");
+                }
+                if (!bound.getSsl().isEnabled()) {
+                    errors.add("spring.data.redis.ssl.enabled (REDIS_SSL_ENABLED) deve ser 'true' em produção: TLS é obrigatório para Redis.");
+                }
+            }
+        } catch (BindException e) {
+            if (!usingUrl) {
+                errors.add("spring.data.redis contém propriedades inválidas em produção.");
+            }
+        }
+    }
+
+    private static void validateRedisUrl(String redisUrl, Binder binder, List<String> errors) {
+        URI uri;
+        try {
+            uri = URI.create(redisUrl);
+        } catch (IllegalArgumentException e) {
+            errors.add("spring.data.redis.url possui formato inválido.");
+            return;
+        }
+        if (!"rediss".equalsIgnoreCase(uri.getScheme())) {
+            errors.add("spring.data.redis.url exige esquema 'rediss://' (TLS obrigatório) em produção.");
+        }
+        if (!isPresent(uri.getHost()) || isLocalOrDevHost(uri.getHost())) {
+            errors.add("spring.data.redis.url exige host não local explícito em produção.");
+        }
+        if (!hasValidRequiredPort(uri)) {
+            errors.add("spring.data.redis.url exige porta explícita válida (1-65535) em produção.");
+        }
+
+        // AUDIT-04A: extrai e valida senha embutida na URL ou fallback REDIS_PASSWORD contra placeholders
+        String rawUserInfo = uri.getRawUserInfo();
+        String fallbackPassword = bindOptionalString(binder, "spring.data.redis.password");
+        if (rawUserInfo != null) {
+            String decodedUserInfo;
+            try {
+                decodedUserInfo = URLDecoder.decode(rawUserInfo, StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                errors.add("spring.data.redis.url possui userinfo com encoding inválido.");
+                return;
+            }
+            int colonIdx = decodedUserInfo.indexOf(':');
+            if (colonIdx < 0) {
+                errors.add("spring.data.redis.url possui userinfo malformado: use 'rediss://:senha@host:porta' ou 'rediss://usuario:senha@host:porta'.");
+            } else {
+                String urlPassword = decodedUserInfo.substring(colonIdx + 1);
+                if (urlPassword.isBlank()) {
+                    errors.add("spring.data.redis.url exige senha não vazia em produção.");
+                } else if (isInsecurePlaceholder(urlPassword)) {
+                    errors.add("spring.data.redis.url utiliza senha de exemplo proibida em produção.");
+                }
+            }
+        } else {
+            if (!isPresent(fallbackPassword)) {
+                errors.add("Redis exige autenticação explícita (senha na URL rediss:// ou REDIS_PASSWORD) em produção.");
+            } else if (isInsecurePlaceholder(fallbackPassword)) {
+                errors.add("spring.data.redis.password (REDIS_PASSWORD) usa valor de exemplo proibido.");
+            }
+        }
+
+        // AUDIT-04B: rejeitar conflito entre spring.data.redis.url e host/port individuais quando ambos definidos
+        String configuredHost = bindOptionalString(binder, "spring.data.redis.host");
+        if (isPresent(configuredHost) && isPresent(uri.getHost())
+                && !stripBrackets(configuredHost).equalsIgnoreCase(stripBrackets(uri.getHost()))) {
+            errors.add("Configuração conflitante de Redis: spring.data.redis.url diverge de spring.data.redis.host.");
+        }
+        String configuredPort = bindOptionalString(binder, "spring.data.redis.port");
+        if (isPresent(configuredPort) && uri.getPort() > 0
+                && !configuredPort.trim().equals(String.valueOf(uri.getPort()))) {
+            errors.add("Configuração conflitante de Redis: spring.data.redis.url diverge de spring.data.redis.port.");
+        }
+    }
+
+    private static void validateObjectStorage(ConfigurableEnvironment env, List<String> errors) {
+        String endpoint = resolveRequired(env, "rewit.minio.endpoint", "OBJECT_STORAGE_ENDPOINT", errors);
+        if (endpoint != null) {
+            try {
+                URI uri = URI.create(endpoint.trim());
+                if (!"https".equalsIgnoreCase(uri.getScheme())) {
+                    errors.add("rewit.minio.endpoint (OBJECT_STORAGE_ENDPOINT) exige HTTPS em produção.");
+                }
+                if (!isPresent(uri.getHost()) || isLocalOrDevHost(uri.getHost())) {
+                    errors.add("rewit.minio.endpoint (OBJECT_STORAGE_ENDPOINT) não pode apontar para localhost, loopback ou endereço de desenvolvimento em produção.");
+                }
+                if (!hasValidOptionalPort(uri)) {
+                    errors.add("rewit.minio.endpoint (OBJECT_STORAGE_ENDPOINT) possui porta inválida (use 1-65535 ou omita a porta).");
+                }
+                if (uri.getRawUserInfo() != null) {
+                    errors.add("rewit.minio.endpoint (OBJECT_STORAGE_ENDPOINT) não pode conter userinfo.");
+                }
+                if (uri.getRawQuery() != null) {
+                    errors.add("rewit.minio.endpoint (OBJECT_STORAGE_ENDPOINT) não pode conter query string.");
+                }
+                if (uri.getRawFragment() != null) {
+                    errors.add("rewit.minio.endpoint (OBJECT_STORAGE_ENDPOINT) não pode conter fragmento.");
+                }
+            } catch (IllegalArgumentException e) {
+                errors.add("rewit.minio.endpoint (OBJECT_STORAGE_ENDPOINT) possui formato de URL inválido.");
+            }
+        }
+
+        String accessKey = resolveRequired(env, "rewit.minio.access-key", "OBJECT_STORAGE_ACCESS_KEY", errors);
+        if (accessKey != null && isInsecurePlaceholder(accessKey)) {
+            errors.add("rewit.minio.access-key (OBJECT_STORAGE_ACCESS_KEY) usa valor de exemplo ou desenvolvimento proibido.");
+        }
+
+        String secretKey = resolveRequired(env, "rewit.minio.secret-key", "OBJECT_STORAGE_SECRET_KEY", errors);
+        if (secretKey != null && isInsecurePlaceholder(secretKey)) {
+            errors.add("rewit.minio.secret-key (OBJECT_STORAGE_SECRET_KEY) usa valor de exemplo ou desenvolvimento proibido.");
+        }
+
+        String bucket = resolveRequired(env, "rewit.minio.bucket-name", "OBJECT_STORAGE_BUCKET", errors);
+        if (bucket != null && isInsecurePlaceholder(bucket)) {
+            errors.add("rewit.minio.bucket-name (OBJECT_STORAGE_BUCKET) não pode usar bucket default de desenvolvimento em produção.");
+        }
+
+        String region = resolveOptional(env, "rewit.minio.region");
+        if (isPresent(region) && isInsecurePlaceholder(region)) {
+            errors.add("rewit.minio.region (OBJECT_STORAGE_REGION) usa valor de exemplo proibido.");
+        }
+
+        if (isTrue(env, "rewit.minio.auto-create-bucket", false)) {
+            errors.add("rewit.minio.auto-create-bucket (OBJECT_STORAGE_AUTO_CREATE_BUCKET) deve ser 'false' em produção: o bucket deve ser provisionado previamente.");
+        }
+    }
+
+    private static void validateOptionalIntegrations(ConfigurableEnvironment env, List<String> errors) {
+        String googleClientIds = resolveOptional(env, "rewit.social-auth.google.client-ids");
+        if (isPresent(googleClientIds)) {
+            if (isInsecurePlaceholder(googleClientIds)) {
+                errors.add("rewit.social-auth.google.client-ids (GOOGLE_SIGNIN_CLIENT_IDS) usa valor de exemplo proibido.");
+            }
+            String googleJwks = resolveOptional(env, "rewit.social-auth.google.jwks-uri");
+            if (isPresent(googleJwks) && !googleJwks.trim().toLowerCase(Locale.ROOT).startsWith("https://")) {
+                errors.add("rewit.social-auth.google.jwks-uri deve usar HTTPS em produção.");
+            }
+        }
+
+        String appleClientIds = resolveOptional(env, "rewit.social-auth.apple.client-ids");
+        if (isPresent(appleClientIds)) {
+            if (isInsecurePlaceholder(appleClientIds)) {
+                errors.add("rewit.social-auth.apple.client-ids (APPLE_SIGNIN_CLIENT_IDS) usa valor de exemplo proibido.");
+            }
+            String applePackage = resolveOptional(env, "rewit.social-auth.apple-android-package");
+            if (applePackage != null && applePackage.isBlank()) {
+                errors.add("rewit.social-auth.apple-android-package (APPLE_SIGNIN_ANDROID_PACKAGE) não pode ser vazio quando Apple Sign-In estiver ativo.");
+            }
+            String appleJwks = resolveOptional(env, "rewit.social-auth.apple.jwks-uri");
+            if (isPresent(appleJwks) && !appleJwks.trim().toLowerCase(Locale.ROOT).startsWith("https://")) {
+                errors.add("rewit.social-auth.apple.jwks-uri deve usar HTTPS em produção.");
+            }
+        }
+
+        String discoveryProvider = resolveOptional(env, "rewit.place-discovery.provider");
+        if (isPresent(discoveryProvider)) {
+            String normalized = discoveryProvider.trim().toUpperCase(Locale.ROOT);
+            if (!"GOOGLE".equals(normalized) && !"GEOAPIFY".equals(normalized)) {
+                errors.add("rewit.place-discovery.provider (PLACE_DISCOVERY_PROVIDER) inválido: use GOOGLE ou GEOAPIFY.");
+            }
+        }
+        String googlePlacesKey = resolveOptional(env, "rewit.google.places.api-key");
+        if (isPresent(googlePlacesKey)) {
+            if (isInsecurePlaceholder(googlePlacesKey)) {
+                errors.add("rewit.google.places.api-key (GOOGLE_PLACES_API_KEY) usa valor de exemplo proibido.");
+            }
+            String googlePlacesBaseUrl = resolveOptional(env, "rewit.google.places.base-url");
+            if (isPresent(googlePlacesBaseUrl) && !googlePlacesBaseUrl.trim().toLowerCase(Locale.ROOT).startsWith("https://")) {
+                errors.add("rewit.google.places.base-url (GOOGLE_PLACES_BASE_URL) deve usar HTTPS em produção.");
+            }
+        }
+        String geoapifyKey = resolveOptional(env, "rewit.geoapify.api-key");
+        if (isPresent(geoapifyKey)) {
+            if (isInsecurePlaceholder(geoapifyKey)) {
+                errors.add("rewit.geoapify.api-key (GEOAPIFY_API_KEY) usa valor de exemplo proibido.");
+            }
+            String geoapifyBaseUrl = resolveOptional(env, "rewit.geoapify.base-url");
+            if (isPresent(geoapifyBaseUrl) && !geoapifyBaseUrl.trim().toLowerCase(Locale.ROOT).startsWith("https://")) {
+                errors.add("rewit.geoapify.base-url (GEOAPIFY_BASE_URL) deve usar HTTPS em produção.");
+            }
+        }
+
+        String otlpEndpoint = resolveOptional(env, "management.opentelemetry.tracing.export.otlp.endpoint");
+        if (isPresent(otlpEndpoint)) {
+            try {
+                URI uri = URI.create(otlpEndpoint.trim());
+                String scheme = uri.getScheme();
+                if (!isPresent(uri.getHost()) || !("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))) {
+                    errors.add("management.opentelemetry.tracing.export.otlp.endpoint (MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT) deve ser uma URL http(s) válida.");
+                }
+            } catch (IllegalArgumentException e) {
+                errors.add("management.opentelemetry.tracing.export.otlp.endpoint (MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT) possui formato inválido.");
+            }
+            String samplingStr = resolveOptional(env, "management.tracing.sampling.probability");
+            if (isPresent(samplingStr)) {
+                try {
+                    double prob = Double.parseDouble(samplingStr.trim());
+                    if (prob < 0.0 || prob > 1.0) {
+                        errors.add("management.tracing.sampling.probability (TRACING_SAMPLING_PROBABILITY) deve estar entre 0.0 e 1.0.");
+                    }
+                } catch (NumberFormatException e) {
+                    errors.add("management.tracing.sampling.probability (TRACING_SAMPLING_PROBABILITY) deve ser numérico.");
+                }
+            }
+        }
+    }
+
+    private static void validateRequiredSecret(
+            ConfigurableEnvironment env,
+            String property,
+            String envVar,
+            Map<String, String> collector,
+            List<String> errors
+    ) {
+        String value = resolveRequired(env, property, envVar, errors);
+        if (value == null) {
+            return;
+        }
+        try {
+            SecuritySecretValidator.decodeSecret(envVar, value);
+            collector.put(envVar, value);
+        } catch (IllegalArgumentException e) {
+            errors.add(e.getMessage());
+        }
+    }
+
+    private static void validateOptionalSecret(
+            ConfigurableEnvironment env,
+            String property,
+            String envVar,
+            Map<String, String> collector,
+            List<String> errors
+    ) {
+        String value = resolveOptional(env, property);
+        if (!isPresent(value)) {
+            return;
+        }
+        try {
+            SecuritySecretValidator.decodeSecret(envVar, value);
+            collector.put(envVar, value);
+        } catch (IllegalArgumentException e) {
+            errors.add(e.getMessage());
+        }
+    }
+
+    private static String validateRequiredKeyId(
+            ConfigurableEnvironment env,
+            String property,
+            String envVar,
+            List<String> errors
+    ) {
+        String keyId = resolveRequired(env, property, envVar, errors);
+        if (keyId == null) {
+            return null;
+        }
+        String trimmed = keyId.trim();
+        if (!KEY_ID_PATTERN.matcher(trimmed).matches()) {
+            errors.add(property + " (" + envVar + ") inválido: use [A-Za-z0-9_-]{1,32}.");
+            return null;
+        }
+        return trimmed;
+    }
+
+    private static void validateOptionalRotationPair(
+            ConfigurableEnvironment env,
+            String secretProperty, String secretEnvVar,
+            String keyIdProperty, String keyIdEnvVar,
+            String activeKeyId,
+            Map<String, String> collector,
+            List<String> errors
+    ) {
+        String prevSecret = resolveOptional(env, secretProperty);
+        String prevKeyId = resolveOptional(env, keyIdProperty);
+        boolean hasSecret = isPresent(prevSecret);
+        boolean hasKeyId = isPresent(prevKeyId);
+
+        if (!hasSecret && !hasKeyId) {
+            return;
+        }
+        if (hasSecret != hasKeyId) {
+            errors.add("Configuração inconsistente de rotação: " + secretEnvVar + " e " + keyIdEnvVar
+                    + " devem ser configurados juntos.");
+            return;
+        }
+        try {
+            SecuritySecretValidator.decodeSecret(secretEnvVar, prevSecret);
+            collector.put(secretEnvVar, prevSecret);
+        } catch (IllegalArgumentException e) {
+            errors.add(e.getMessage());
+        }
+        String trimmedPrevKeyId = prevKeyId.trim();
+        if (!KEY_ID_PATTERN.matcher(trimmedPrevKeyId).matches()) {
+            errors.add(keyIdProperty + " (" + keyIdEnvVar + ") inválido: use [A-Za-z0-9_-]{1,32}.");
+        } else if (activeKeyId != null && activeKeyId.equals(trimmedPrevKeyId)) {
+            errors.add(keyIdEnvVar + " não pode ser igual ao key ID ativo.");
+        }
+    }
+
+    /**
+     * Detecta hosts locais, loopback IPv4/IPv6 (incluindo expandido, IPv4-mapped e IPv4-compatible),
+     * notações IPv4 ambíguas (octal, hexadecimal, inteiro decimal, abreviada), trailing dot DNS e
+     * endereços não especificados ({@code 0.0.0.0/8}, {@code ::}) de forma estritamente léxica, sem
+     * consulta DNS. Permite redes privadas RFC1918 (ex.: {@code 10.x.x.x}, {@code 192.168.x.x}).
+     */
+    static boolean isLocalOrDevHost(String host) {
+        if (!isPresent(host)) {
+            return true;
+        }
+        String normalized = host.trim().toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("[") && normalized.endsWith("]")) {
+            normalized = normalized.substring(1, normalized.length() - 1);
+        }
+
+        if (normalized.contains(":")) {
+            // Remove eventual zone index IPv6 (ex.: fe80::1%eth0)
+            int zoneIdx = normalized.indexOf('%');
+            if (zoneIdx >= 0) {
+                normalized = normalized.substring(0, zoneIdx);
+            }
+            byte[] ipv6 = parseIpv6Literal(normalized);
+            if (ipv6 == null) {
+                return true;
+            }
+            return isLoopbackOrUnspecifiedIpv6(ipv6);
+        }
+
+        // Percent-encoding ou caracteres de controle em hostname não-IPv6 são rejeitados (fail-closed)
+        if (normalized.contains("%") || containsWhitespaceOrControl(normalized)) {
+            return true;
+        }
+
+        // Remove pontos finais de FQDN (ex.: localhost., sub.localhost.)
+        while (normalized.endsWith(".")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (normalized.isEmpty() || normalized.startsWith(".") || normalized.contains("..")) {
+            return true;
+        }
+
+        if (LOCAL_OR_DEV_HOSTNAMES.contains(normalized)
+                || normalized.endsWith(".local")
+                || normalized.endsWith(".localhost")) {
+            return true;
+        }
+
+        byte[] canonicalIpv4 = parseCanonicalIpv4Literal(normalized);
+        if (canonicalIpv4 != null) {
+            return isLoopbackOrUnspecifiedIpv4(canonicalIpv4);
+        }
+
+        // Rejeita notações IPv4 alternativas/ambíguas (0177.0.0.1, 000.000.000.000, 2130706433, 0x7f000001, 127.1)
+        if (isAmbiguousNumericHost(normalized)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static boolean containsWhitespaceOrControl(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c) || Character.isISOControl(c)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static byte[] parseCanonicalIpv4Literal(String text) {
+        var matcher = CANONICAL_IPV4_PATTERN.matcher(text);
+        if (!matcher.matches()) {
+            return null;
+        }
+        byte[] bytes = new byte[4];
+        for (int i = 0; i < 4; i++) {
+            int octet = Integer.parseInt(matcher.group(i + 1));
+            if (octet < 0 || octet > 255) {
+                return null;
+            }
+            bytes[i] = (byte) octet;
+        }
+        return bytes;
+    }
+
+    private static boolean isAmbiguousNumericHost(String host) {
+        String[] labels = host.split("\\.", -1);
+        if (labels.length == 0) {
+            return true;
+        }
+        boolean allNumericOrHex = true;
+        for (String label : labels) {
+            if (label.isEmpty()) {
+                return true;
+            }
+            if (!NUMERIC_OR_HEX_LABEL_PATTERN.matcher(label).matches()) {
+                allNumericOrHex = false;
+                break;
+            }
+        }
+        if (allNumericOrHex) {
+            return true;
+        }
+        // TLD estritamente numérico não existe no DNS (RFC 1123/ICANN) e pode mascarar IPv4 malformado
+        return DIGITS_ONLY_PATTERN.matcher(labels[labels.length - 1]).matches();
+    }
+
+    private static boolean isLoopbackOrUnspecifiedIpv4(byte[] ipv4) {
+        int b0 = ipv4[0] & 0xFF;
+        // 127.0.0.0/8 (loopback) e 0.0.0.0/8 ("this network" / unspecified)
+        return b0 == 127 || b0 == 0;
+    }
+
+    private static byte[] parseIpv6Literal(String text) {
+        String working = text;
+        // Trata IPv4 embutido no final (ex.: ::ffff:127.0.0.1 ou ::127.0.0.1)
+        int lastColon = working.lastIndexOf(':');
+        if (lastColon >= 0 && working.substring(lastColon + 1).contains(".")) {
+            byte[] embeddedV4 = parseCanonicalIpv4Literal(working.substring(lastColon + 1));
+            if (embeddedV4 == null) {
+                return null;
+            }
+            int hi = ((embeddedV4[0] & 0xFF) << 8) | (embeddedV4[1] & 0xFF);
+            int lo = ((embeddedV4[2] & 0xFF) << 8) | (embeddedV4[3] & 0xFF);
+            working = working.substring(0, lastColon + 1) + Integer.toHexString(hi) + ":" + Integer.toHexString(lo);
+        }
+
+        int doubleColon = working.indexOf("::");
+        if (doubleColon >= 0 && working.indexOf("::", doubleColon + 2) >= 0) {
+            return null;
+        }
+
+        String[] leftParts;
+        String[] rightParts;
+        if (doubleColon >= 0) {
+            String left = working.substring(0, doubleColon);
+            String right = working.substring(doubleColon + 2);
+            leftParts = left.isEmpty() ? new String[0] : left.split(":", -1);
+            rightParts = right.isEmpty() ? new String[0] : right.split(":", -1);
+            if (leftParts.length + rightParts.length > 7) {
+                return null;
+            }
+        } else {
+            leftParts = working.split(":", -1);
+            rightParts = new String[0];
+            if (leftParts.length != 8) {
+                return null;
+            }
+        }
+
+        int[] groups = new int[8];
+        try {
+            for (int i = 0; i < leftParts.length; i++) {
+                groups[i] = parseHexGroup(leftParts[i]);
+            }
+            int rightStart = 8 - rightParts.length;
+            for (int i = 0; i < rightParts.length; i++) {
+                groups[rightStart + i] = parseHexGroup(rightParts[i]);
+            }
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+
+        byte[] bytes = new byte[16];
+        for (int i = 0; i < 8; i++) {
+            bytes[i * 2] = (byte) ((groups[i] >> 8) & 0xFF);
+            bytes[i * 2 + 1] = (byte) (groups[i] & 0xFF);
+        }
+        return bytes;
+    }
+
+    private static int parseHexGroup(String group) {
+        if (group.isEmpty() || group.length() > 4) {
+            throw new IllegalArgumentException("Grupo IPv6 inválido");
+        }
+        for (int i = 0; i < group.length(); i++) {
+            char c = group.charAt(i);
+            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+            if (!hex) {
+                throw new IllegalArgumentException("Grupo IPv6 inválido");
+            }
+        }
+        return Integer.parseInt(group, 16);
+    }
+
+    private static boolean isLoopbackOrUnspecifiedIpv6(byte[] ipv6) {
+        // Rejeita IPv4-mapped IPv6 (::ffff:a.b.c.d) apontando para loopback/unspecified
+        boolean firstTenZero = true;
+        for (int i = 0; i < 10; i++) {
+            if (ipv6[i] != 0) {
+                firstTenZero = false;
+                break;
+            }
+        }
+        if (firstTenZero && (ipv6[10] & 0xFF) == 0xFF && (ipv6[11] & 0xFF) == 0xFF) {
+            byte[] mappedV4 = new byte[]{ipv6[12], ipv6[13], ipv6[14], ipv6[15]};
+            return isLoopbackOrUnspecifiedIpv4(mappedV4);
+        }
+        // Rejeita ::, ::1 e todas as formas IPv4-compatible IPv6 depreciadas (::a.b.c.d / 0:0:0:0:0:0:xxxx:xxxx)
+        if (firstTenZero && ipv6[10] == 0 && ipv6[11] == 0) {
+            return true;
+        }
+        try {
+            InetAddress addr = InetAddress.getByAddress(ipv6);
+            return addr.isLoopbackAddress() || addr.isAnyLocalAddress();
+        } catch (UnknownHostException e) {
+            return true;
+        }
+    }
+
+    private static HostPort parseHostPort(String hostPort, int defaultPort) {
+        if (hostPort.isEmpty()) {
+            return null;
+        }
+        String host;
+        int port = defaultPort;
+        if (hostPort.startsWith("[")) {
+            int closeBracket = hostPort.indexOf(']');
+            if (closeBracket <= 1) {
+                return null;
+            }
+            host = hostPort.substring(1, closeBracket).trim().toLowerCase(Locale.ROOT);
+            String remainder = hostPort.substring(closeBracket + 1);
+            if (!remainder.isEmpty()) {
+                if (!remainder.startsWith(":")) {
+                    return null;
+                }
+                port = parseValidPort(remainder.substring(1));
+                if (port < 1) {
+                    return null;
+                }
+            }
+        } else {
+            int firstColon = hostPort.indexOf(':');
+            int lastColon = hostPort.lastIndexOf(':');
+            if (firstColon >= 0) {
+                // Múltiplos ':' fora de colchetes indicam IPv6 não delimitado ou porta malformada
+                if (firstColon != lastColon) {
+                    return null;
+                }
+                host = hostPort.substring(0, firstColon).trim().toLowerCase(Locale.ROOT);
+                port = parseValidPort(hostPort.substring(firstColon + 1));
+                if (port < 1) {
+                    return null;
+                }
+            } else {
+                host = hostPort.trim().toLowerCase(Locale.ROOT);
+            }
+        }
+        if (host.isEmpty()) {
+            return null;
+        }
+        return new HostPort(host, port);
+    }
+
+    private static int parseValidPort(String raw) {
+        if (raw == null) {
+            return -1;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty() || !DIGITS_ONLY_PATTERN.matcher(trimmed).matches()) {
+            return -1;
+        }
+        try {
+            int port = Integer.parseInt(trimmed);
+            return (port >= 1 && port <= 65535) ? port : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static boolean hasValidOptionalPort(URI uri) {
+        return validateUriPort(uri, false);
+    }
+
+    private static boolean hasValidRequiredPort(URI uri) {
+        return validateUriPort(uri, true);
+    }
+
+    private static boolean validateUriPort(URI uri, boolean required) {
+        String authority = uri.getRawAuthority();
+        if (authority == null || authority.isBlank()) {
+            return false;
+        }
+        int atIdx = authority.lastIndexOf('@');
+        String hostAndPort = atIdx >= 0 ? authority.substring(atIdx + 1) : authority;
+        if (hostAndPort.startsWith("[")) {
+            int closeBracket = hostAndPort.indexOf(']');
+            if (closeBracket <= 1) {
+                return false;
+            }
+            String remainder = hostAndPort.substring(closeBracket + 1);
+            if (remainder.isEmpty()) {
+                return !required;
+            }
+            if (!remainder.startsWith(":")) {
+                return false;
+            }
+            return parseValidPort(remainder.substring(1)) >= 1;
+        }
+        int colonIdx = hostAndPort.indexOf(':');
+        if (colonIdx < 0) {
+            return !required;
+        }
+        if (hostAndPort.indexOf(':', colonIdx + 1) >= 0) {
+            return false;
+        }
+        return parseValidPort(hostAndPort.substring(colonIdx + 1)) >= 1;
+    }
+
+    private static String stripBrackets(String host) {
+        String trimmed = host.trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            return trimmed.substring(1, trimmed.length() - 1);
+        }
+        return trimmed;
+    }
+
+    private static boolean hasNonBlankItems(List<String> items) {
+        if (items == null || items.isEmpty()) {
+            return false;
+        }
+        for (String item : items) {
+            if (isPresent(item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String bindOptionalString(Binder binder, String property) {
+        try {
+            return binder.bind(property, String.class).orElse(null);
+        } catch (BindException | IllegalArgumentException unresolved) {
+            return null;
+        }
+    }
+
+    private static String bindRequiredString(
+            Binder binder,
+            String property,
+            String envVar,
+            List<String> errors
+    ) {
+        String value;
+        try {
+            value = binder.bind(property, String.class).orElse(null);
+        } catch (BindException | IllegalArgumentException unresolved) {
+            errors.add(property + " sem valor: defina " + envVar + ".");
+            return null;
+        }
+        if (value == null || value.isBlank()) {
+            errors.add(property + " ausente ou vazio: defina " + envVar + ".");
+            return null;
+        }
+        return value;
+    }
+
+    private static boolean bindBoolean(
+            Binder binder,
+            String property,
+            boolean defaultValue,
+            List<String> errors
+    ) {
+        try {
+            return binder.bind(property, Boolean.class).orElse(defaultValue);
+        } catch (BindException e) {
+            errors.add(property + " possui valor booleano inválido em produção.");
+            return defaultValue;
+        }
+    }
+
+    private record HostPort(String host, int port) {}
+
+    private record PostgresTarget(List<HostPort> endpoints, String databaseName) {
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof PostgresTarget other)) return false;
+            return Objects.equals(endpoints, other.endpoints)
+                    && Objects.equals(databaseName, other.databaseName);
+        }
+    }
+
+    private static String resolveRequired(
+            ConfigurableEnvironment env,
+            String property,
+            String envVar,
+            List<String> errors
+    ) {
+        String value;
+        try {
+            value = env.getProperty(property);
+        } catch (IllegalArgumentException unresolved) {
+            errors.add(property + " sem valor: defina " + envVar + ".");
+            return null;
+        }
+        if (value == null || value.isBlank()) {
+            errors.add(property + " ausente ou vazio: defina " + envVar + ".");
+            return null;
+        }
+        return value;
+    }
+
+    private static String resolveOptional(ConfigurableEnvironment env, String property) {
+        try {
+            return env.getProperty(property);
+        } catch (IllegalArgumentException unresolved) {
+            return null;
+        }
+    }
+
+    private static boolean isTrue(ConfigurableEnvironment env, String property, boolean defaultValue) {
+        String value = resolveOptional(env, property);
+        if (!isPresent(value)) {
+            return defaultValue;
+        }
+        return Boolean.parseBoolean(value.trim());
+    }
+
+    private static boolean isInsecurePlaceholder(String value) {
+        return INSECURE_PLACEHOLDERS.contains(value.trim().toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean isPresent(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String trimOrEmpty(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static void putIfPresent(Map<String, String> target, String key, String value) {
+        if (isPresent(value)) {
+            target.put(key, value);
+        }
+    }
+
+    public static final class InvalidConfigurationException extends IllegalStateException {
+
+        private final List<String> errors;
+
+        InvalidConfigurationException(List<String> errors) {
+            super("Perfil " + PROFILE + " recusou a inicialização (fail-closed): " + String.join("; ", errors));
+            this.errors = List.copyOf(errors);
+        }
+
+        public List<String> getErrors() {
+            return errors;
+        }
+    }
+}

@@ -84,6 +84,8 @@ rewit:
     access-key: ${OBJECT_STORAGE_ACCESS_KEY}
     secret-key: ${OBJECT_STORAGE_SECRET_KEY}
     bucket-name: ${OBJECT_STORAGE_BUCKET}
+    region: ${OBJECT_STORAGE_REGION:}
+    auto-create-bucket: ${OBJECT_STORAGE_AUTO_CREATE_BUCKET:true}
   security:
     jwt-secret: ${JWT_SECRET}
     password-pepper: ${PASSWORD_PEPPER_SECRET}

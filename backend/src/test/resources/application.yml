@@ -77,6 +77,8 @@ rewit:
     access-key: ${TEST_STORAGE_ACCESS_KEY}
     secret-key: ${TEST_STORAGE_SECRET_KEY}
     bucket-name: ${TEST_STORAGE_BUCKET}
+    region: ${TEST_STORAGE_REGION:}
+    auto-create-bucket: true
   security:
     # Segredo fixo de teste: não herda JWT_SECRET do ambiente de desenvolvimento
     jwt-secret: test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!

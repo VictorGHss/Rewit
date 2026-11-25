@@ -1,8 +1,6 @@
 spring:
   application:
     name: rewit-backend
-  profiles:
-    active: ${SPRING_PROFILES_ACTIVE:local}
   threads:
     virtual:
       enabled: true
@@ -66,6 +64,7 @@ logging:
         max-throwable-depth: 30
 
 rewit:
+  environment: ${ENVIRONMENT:}
   security:
     jwt-secret: ${JWT_SECRET:}
     password-pepper: ${PASSWORD_PEPPER_SECRET:}

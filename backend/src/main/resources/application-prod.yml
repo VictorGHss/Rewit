@@ -1,0 +1,130 @@
+# Perfil de produção e homologação (SPRING_PROFILES_ACTIVE=prod).
+# Fail-closed: nenhuma credencial, endpoint ou senha possui valor padrão.
+# Validado antes da criação de DataSources, execução do Flyway e abertura das portas HTTP por
+# RuntimeProfileEnvironmentValidator, ProductionEnvironmentValidator e RuntimeDatabaseRoleEnvironmentValidator.
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${APP_DB_USER}
+    password: ${APP_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_APP_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_APP_POOL_MIN_IDLE:2}
+      connection-timeout: ${DB_APP_POOL_CONNECTION_TIMEOUT_MS:30000}
+
+  # Flyway ainda executa no startup nesta etapa (F2-DEPLOY-03.3); risco residual registrado em docs/deployment/overview.md.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    url: ${spring.datasource.url}
+    user: ${FLYWAY_DB_USER:${POSTGRES_USER}}
+    password: ${FLYWAY_DB_PASSWORD:${POSTGRES_PASSWORD}}
+    baseline-on-migrate: false
+    validate-on-migrate: true
+    # Lock de sessão: migrations não transacionais (CREATE INDEX CONCURRENTLY, V16) exigem transactional-lock=false
+    postgresql:
+      transactional-lock: false
+
+  jpa:
+    open-in-view: false
+    database-platform: org.hibernate.spatial.dialect.postgis.PostgisPG95Dialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  web:
+    error:
+      include-message: never
+      include-binding-errors: never
+      include-stacktrace: never
+      include-exception: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD}
+      timeout: ${REDIS_TIMEOUT:3000ms}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:true}
+
+server:
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  # Política explícita de proxy reverso: confia somente em proxies internos configurados
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:native}
+  tomcat:
+    remoteip:
+      remote-ip-header: ${SERVER_REMOTE_IP_HEADER:X-Forwarded-For}
+      protocol-header: ${SERVER_PROTOCOL_HEADER:X-Forwarded-Proto}
+      internal-proxies: ${SERVER_INTERNAL_PROXIES:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.1[6-9]{1}\.\d{1,3}\.\d{1,3}|172\.2[0-9]{1}\.\d{1,3}\.\d{1,3}|172\.3[0-1]{1}\.\d{1,3}\.\d{1,3}|0:0:0:0:0:0:0:1|::1}
+
+# Porta de management separada (8081 herdada do base), restrita por padrão a loopback/rede interna
+management:
+  server:
+    address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}
+
+# Swagger UI e OpenAPI estritamente desligados em produção
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+# Logs JSON estruturados sem SQL binding nem payloads sensíveis
+logging:
+  structured:
+    format:
+      console: ${LOG_STRUCTURED_FORMAT:logstash}
+  level:
+    org.hibernate.SQL: WARN
+    org.hibernate.orm.jdbc.bind: WARN
+    org.springframework.jdbc.core: WARN
+
+rewit:
+  datasource:
+    media:
+      username: ${MEDIA_DB_USER}
+      password: ${MEDIA_DB_PASSWORD}
+      hikari:
+        maximum-pool-size: ${DB_MEDIA_POOL_MAX_SIZE:5}
+        minimum-idle: ${DB_MEDIA_POOL_MIN_IDLE:1}
+        connection-timeout: ${DB_MEDIA_POOL_CONNECTION_TIMEOUT_MS:30000}
+    moderation:
+      username: ${MOD_DB_USER}
+      password: ${MOD_DB_PASSWORD}
+      hikari:
+        maximum-pool-size: ${DB_MOD_POOL_MAX_SIZE:5}
+        minimum-idle: ${DB_MOD_POOL_MIN_IDLE:1}
+        connection-timeout: ${DB_MOD_POOL_CONNECTION_TIMEOUT_MS:30000}
+  minio:
+    endpoint: ${OBJECT_STORAGE_ENDPOINT}
+    access-key: ${OBJECT_STORAGE_ACCESS_KEY}
+    secret-key: ${OBJECT_STORAGE_SECRET_KEY}
+    bucket-name: ${OBJECT_STORAGE_BUCKET}
+    region: ${OBJECT_STORAGE_REGION:}
+    # Bucket deve ser provisionado previamente; backend runtime não precisa de CreateBucket
+    auto-create-bucket: ${OBJECT_STORAGE_AUTO_CREATE_BUCKET:false}
+  security:
+    jwt-secret: ${JWT_SECRET}
+    password-pepper: ${PASSWORD_PEPPER_SECRET}
+    password-pepper-previous: ${PASSWORD_PEPPER_SECRET_PREVIOUS:}
+    password-pepper-key-id: ${PASSWORD_PEPPER_KEY_ID:v1}
+    password-pepper-previous-key-id: ${PASSWORD_PEPPER_PREVIOUS_KEY_ID:}
+    refresh-token-secret: ${REFRESH_TOKEN_SECRET}
+    refresh-token-secret-previous: ${REFRESH_TOKEN_SECRET_PREVIOUS:}
+    moderation-audit-secret: ${MODERATION_AUDIT_SECRET}
+    moderation-audit-key-id: ${MODERATION_AUDIT_KEY_ID:v1}
+    moderation-audit-secret-previous: ${MODERATION_AUDIT_SECRET_PREVIOUS:}
+    moderation-audit-previous-key-id: ${MODERATION_AUDIT_PREVIOUS_KEY_ID:}
+    cors:
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+  rate-limit:
+    key-secret: ${RATE_LIMIT_KEY_SECRET}
+  account:
+    email-reservation-secret: ${ACCOUNT_EMAIL_RESERVATION_SECRET:}
+    purge:
+      enabled: ${ACCOUNT_PURGE_ENABLED:true}
+  spatial:
+    default-validation-radius-meters: 50
