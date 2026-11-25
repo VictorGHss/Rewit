@@ -34,6 +34,31 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+        add-additional-paths: true
+      group:
+        liveness:
+          include: livenessState
+          show-details: never
+          show-components: never
+        readiness:
+          include: readinessState,db,redis,objectStorage
+          show-details: never
+          show-components: never
+          status:
+            order: DOWN,OUT_OF_SERVICE,UNKNOWN,UP
+            http-mapping:
+              DOWN: 503
+              OUT_OF_SERVICE: 503
+              UNKNOWN: 503
+  health:
+    db:
+      ignore-routing-data-sources: true
   observations:
     enable:
       # Os quatro jobs já têm métricas rewit.* próprias; sem observação, também não há spans de @Scheduled

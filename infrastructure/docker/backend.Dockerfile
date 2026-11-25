@@ -55,10 +55,13 @@ ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+ExitOnOutOfMemoryErro
 
 STOPSIGNAL SIGTERM
 
-# Verifica o endpoint agregado atual do Actuator na porta interna de management (ADR-012).
-# A separação entre /actuator/health/liveness e /readiness pertence às etapas F2-DEPLOY-03.3/03.4.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD ["sh", "-c", "curl -fsS \"http://127.0.0.1:${MANAGEMENT_SERVER_PORT:-8081}/actuator/health\" >/dev/null || exit 1"]
+# Verifica a prontidão (readiness) na porta interna de management (F2-DEPLOY-03.4 / R1).
+# Orçamento de timeout: sem OBJECT_STORAGE_REGION o bucketExists() pode executar até 2 chamadas HTTP (GET ?location + HEAD),
+# cada uma limitada a 3s (callTimeout) => até 6s + margem para DB/Redis => curl --max-time 8 < HEALTHCHECK --timeout=10s.
+# O HEALTHCHECK apenas reporta o estado do container (não reinicia o processo em falha externa);
+# futuras probes de orquestração podem consultar /actuator/health/{liveness,readiness} ou /livez e /readyz.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["sh", "-c", "curl -fsS --max-time 8 \"http://127.0.0.1:${MANAGEMENT_SERVER_PORT:-8081}/actuator/health/readiness\" >/dev/null || exit 1"]
 
 # exec substitui o processo sh pela JVM como PID 1, garantindo entrega direta de SIGTERM para graceful shutdown
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

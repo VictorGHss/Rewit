@@ -60,10 +60,48 @@ server:
       protocol-header: ${SERVER_PROTOCOL_HEADER:X-Forwarded-Proto}
       internal-proxies: ${SERVER_INTERNAL_PROXIES:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.1[6-9]{1}\.\d{1,3}\.\d{1,3}|172\.2[0-9]{1}\.\d{1,3}\.\d{1,3}|172\.3[0-1]{1}\.\d{1,3}\.\d{1,3}|0:0:0:0:0:0:0:1|::1}
 
-# Porta de management separada (8081 herdada do base), restrita por padrão a loopback/rede interna
+# Porta de management separada (8081 herdada do base), restrita por padrão a loopback/rede interna.
+# Probes explícitas (F2-DEPLOY-03.4): liveness isolada ao processo JVM; readiness verifica DB, Redis e bucket S3 (HEAD).
 management:
   server:
     address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}
+  endpoint:
+    health:
+      access: read_only
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+        add-additional-paths: true
+      group:
+        liveness:
+          include: livenessState
+          show-details: never
+          show-components: never
+        readiness:
+          include: readinessState,db,redis,objectStorage
+          show-details: never
+          show-components: never
+          status:
+            order: DOWN,OUT_OF_SERVICE,UNKNOWN,UP
+            http-mapping:
+              DOWN: 503
+              OUT_OF_SERVICE: 503
+              UNKNOWN: 503
+  health:
+    defaults:
+      enabled: true
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    db:
+      enabled: true
+      ignore-routing-data-sources: true
+    redis:
+      enabled: true
+    object-storage:
+      enabled: true
 
 # Swagger UI e OpenAPI estritamente desligados em produção
 springdoc:
@@ -106,6 +144,9 @@ rewit:
     region: ${OBJECT_STORAGE_REGION:}
     # Bucket deve ser provisionado previamente; backend runtime não precisa de CreateBucket
     auto-create-bucket: ${OBJECT_STORAGE_AUTO_CREATE_BUCKET:false}
+    health:
+      timeout: ${OBJECT_STORAGE_HEALTH_TIMEOUT:3s}
+      cache-ttl: ${OBJECT_STORAGE_HEALTH_CACHE_TTL:5s}
   security:
     jwt-secret: ${JWT_SECRET}
     password-pepper: ${PASSWORD_PEPPER_SECRET}
@@ -121,7 +162,10 @@ rewit:
     cors:
       allowed-origins: ${CORS_ALLOWED_ORIGINS:}
   rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
     key-secret: ${RATE_LIMIT_KEY_SECRET}
+    backend:
+      failure-mode: ${RATE_LIMIT_BACKEND_FAILURE_MODE:LOCAL_FALLBACK}
   account:
     email-reservation-secret: ${ACCOUNT_EMAIL_RESERVATION_SECRET:}
     purge:

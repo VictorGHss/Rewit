@@ -5,6 +5,7 @@ import com.rewit.domain.enums.Role;
 import com.rewit.infrastructure.security.SecuritySecretValidator;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.actuate.endpoint.web.WebServerNamespace;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -223,9 +224,12 @@ public class SecurityConfig {
                 .formLogin(SecurityConfig::disableFormLogin)
                 .httpBasic(SecurityConfig::disableHttpBasic)
                 .authorizeHttpRequests(auth -> auth
-                        // Actuator (ADR-012): esta chain também protege a porta de management. Só health, info e
-                        // prometheus, sem credencial (o isolamento é a porta interna); qualquer outro endpoint é negado
+                        // Actuator (ADR-012 / F2-DEPLOY-03.4): esta chain protege a porta de management e a API.
+                        // Na porta de management: somente health (incluindo /liveness e /readiness), info e prometheus.
+                        // Na porta da API: somente os caminhos adicionais de probes (/livez e /readyz) quando ativos.
+                        // Qualquer outro endpoint do Actuator continua explicitamente negado.
                         .requestMatchers(EndpointRequest.to("health", "info", "prometheus")).permitAll()
+                        .requestMatchers(EndpointRequest.toAdditionalPaths(WebServerNamespace.SERVER, "health")).permitAll()
                         .requestMatchers(EndpointRequest.toAnyEndpoint()).denyAll()
                         // Endpoints públicos de autenticação e documentação
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",

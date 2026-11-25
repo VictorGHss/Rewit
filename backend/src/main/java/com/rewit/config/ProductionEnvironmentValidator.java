@@ -1,17 +1,31 @@
 package com.rewit.config;
 
 import com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy;
+import com.rewit.infrastructure.ratelimit.RateLimitBackendFailureMode;
+import com.rewit.infrastructure.ratelimit.RateLimitProperties;
 import com.rewit.infrastructure.security.SecuritySecretValidator;
+import org.springframework.boot.actuate.autoconfigure.endpoint.PropertiesEndpointAccessResolver;
+import org.springframework.boot.actuate.autoconfigure.endpoint.web.WebEndpointProperties;
+import org.springframework.boot.actuate.endpoint.Access;
+import org.springframework.boot.actuate.endpoint.EndpointId;
+import org.springframework.boot.actuate.endpoint.Show;
 import org.springframework.boot.autoconfigure.web.ErrorProperties;
 import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.boot.context.properties.bind.BindResult;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisProperties;
+import org.springframework.boot.health.actuate.endpoint.HttpCodeStatusMapper;
+import org.springframework.boot.health.actuate.endpoint.StatusAggregator;
+import org.springframework.boot.health.autoconfigure.actuate.endpoint.HealthEndpointProperties;
+import org.springframework.boot.health.autoconfigure.actuate.endpoint.HealthProperties;
+import org.springframework.boot.health.contributor.Status;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Profiles;
+import org.springframework.core.env.PropertySourcesPropertyResolver;
 
 import java.net.InetAddress;
 import java.net.URI;
@@ -81,6 +95,28 @@ public class ProductionEnvironmentValidator
     );
 
     private static final Set<String> WILDCARD_PROXY_PATTERNS = Set.of(".*", ".+", "*");
+
+    private static final Set<String> ALLOWED_ACTUATOR_ENDPOINTS = Set.of(
+            "health",
+            "info",
+            "prometheus"
+    );
+
+    private static final Set<String> REQUIRED_LIVENESS_MEMBERS = Set.of(
+            "livenessstate"
+    );
+
+    private static final Set<String> REQUIRED_READINESS_MEMBERS = Set.of(
+            "readinessstate",
+            "db",
+            "redis",
+            "objectstorage"
+    );
+
+    private static final Set<String> UNHEALTHY_STATUS_KEYS = Set.of(
+            "DOWN",
+            "OUT_OF_SERVICE"
+    );
 
     @Override
     public int getOrder() {
@@ -172,6 +208,445 @@ public class ProductionEnvironmentValidator
                 errors.add("server.tomcat.remoteip.internal-proxies (SERVER_INTERNAL_PROXIES) deve definir proxies confiáveis explícitos sem wildcard irrestrito.");
             }
         }
+
+        validateHealthProbesAndActuatorHardening(env, binder, errors);
+        validateRateLimitProductionPolicy(env, binder, errors);
+    }
+
+    private static void validateRateLimitProductionPolicy(
+            ConfigurableEnvironment env,
+            Binder binder,
+            List<String> errors
+    ) {
+        // R304-01: rate limiting é obrigatório em produção (enabled=true) e failure-mode=ALLOW é proibido
+        try {
+            BindResult<Boolean> boundEnabled = binder.bind("rewit.rate-limit.enabled", Boolean.class);
+            if (boundEnabled.isBound()) {
+                if (!Boolean.TRUE.equals(boundEnabled.get())) {
+                    errors.add("rewit.rate-limit.enabled (RATE_LIMIT_ENABLED) deve ser 'true' em produção.");
+                }
+            } else {
+                String rawEnvEnabled = resolveOptional(env, "RATE_LIMIT_ENABLED");
+                if (isPresent(rawEnvEnabled) && !"true".equalsIgnoreCase(rawEnvEnabled.trim())) {
+                    errors.add("rewit.rate-limit.enabled (RATE_LIMIT_ENABLED) deve ser 'true' em produção.");
+                }
+            }
+        } catch (BindException e) {
+            errors.add("rewit.rate-limit.enabled (RATE_LIMIT_ENABLED) possui valor booleano inválido em produção.");
+        }
+
+        try {
+            BindResult<RateLimitProperties.Backend> boundBackend =
+                    binder.bind("rewit.rate-limit.backend", RateLimitProperties.Backend.class);
+            if (boundBackend.isBound()) {
+                RateLimitBackendFailureMode mode = boundBackend.get().getFailureMode();
+                if (mode == null) {
+                    errors.add("rewit.rate-limit.backend.failure-mode (RATE_LIMIT_BACKEND_FAILURE_MODE) não pode ser nulo em produção.");
+                } else if (mode == RateLimitBackendFailureMode.ALLOW) {
+                    errors.add("rewit.rate-limit.backend.failure-mode (RATE_LIMIT_BACKEND_FAILURE_MODE) não pode ser 'ALLOW' em produção (use LOCAL_FALLBACK ou DENY).");
+                }
+            } else {
+                String rawEnvMode = resolveOptional(env, "RATE_LIMIT_BACKEND_FAILURE_MODE");
+                if (isPresent(rawEnvMode)) {
+                    try {
+                        RateLimitBackendFailureMode parsed = RateLimitBackendFailureMode.valueOf(
+                                rawEnvMode.trim().toUpperCase(Locale.ROOT).replace('-', '_'));
+                        if (parsed == RateLimitBackendFailureMode.ALLOW) {
+                            errors.add("rewit.rate-limit.backend.failure-mode (RATE_LIMIT_BACKEND_FAILURE_MODE) não pode ser 'ALLOW' em produção (use LOCAL_FALLBACK ou DENY).");
+                        }
+                    } catch (IllegalArgumentException invalid) {
+                        errors.add("rewit.rate-limit.backend.failure-mode (RATE_LIMIT_BACKEND_FAILURE_MODE) possui valor inválido em produção (use LOCAL_FALLBACK ou DENY).");
+                    }
+                }
+            }
+        } catch (BindException e) {
+            errors.add("rewit.rate-limit.backend.failure-mode (RATE_LIMIT_BACKEND_FAILURE_MODE) possui valor inválido em produção (use LOCAL_FALLBACK ou DENY).");
+        }
+    }
+
+    private static void validateHealthProbesAndActuatorHardening(
+            ConfigurableEnvironment env,
+            Binder binder,
+            List<String> errors
+    ) {
+        // R304-R1-02: garante que o endpoint health esteja efetivamente acessível para probes (READ_ONLY ou UNRESTRICTED),
+        // respeitando max-permitted, access.default, enabled-by-default, health.access e health.enabled.
+        validateHealthEndpointEffectiveAccess(env, binder, errors);
+
+        // R304-02 & R304-R1-02: allowlist estrita de endpoints Actuator e integridade dos caminhos base/path-mapping
+        try {
+            WebEndpointProperties webEndpointProps = binder
+                    .bind("management.endpoints.web", WebEndpointProperties.class)
+                    .orElseGet(WebEndpointProperties::new);
+            Set<String> included = webEndpointProps.getExposure().getInclude();
+            if (included != null) {
+                for (String endpoint : included) {
+                    if (!isPresent(endpoint)) {
+                        continue;
+                    }
+                    String normalized = endpoint.trim().toLowerCase(Locale.ROOT);
+                    if (!ALLOWED_ACTUATOR_ENDPOINTS.contains(normalized)) {
+                        errors.add("management.endpoints.web.exposure.include permite exclusivamente health, info e prometheus em produção.");
+                        break;
+                    }
+                }
+            }
+            Set<String> excluded = webEndpointProps.getExposure().getExclude();
+            if (excluded != null) {
+                for (String endpoint : excluded) {
+                    if (!isPresent(endpoint)) {
+                        continue;
+                    }
+                    String normalized = endpoint.trim().toLowerCase(Locale.ROOT);
+                    if ("health".equals(normalized) || "*".equals(normalized)) {
+                        errors.add("management.endpoints.web.exposure.exclude não pode remover 'health' em produção.");
+                        break;
+                    }
+                }
+            }
+            String basePath = webEndpointProps.getBasePath();
+            if (basePath != null && !"/actuator".equals(basePath.trim())) {
+                errors.add("management.endpoints.web.base-path deve permanecer '/actuator' em produção para preservar os caminhos de probes.");
+            }
+            Map<String, String> pathMapping = webEndpointProps.getPathMapping();
+            if (pathMapping != null) {
+                for (Map.Entry<String, String> entry : pathMapping.entrySet()) {
+                    if (entry.getKey() != null && "health".equalsIgnoreCase(entry.getKey().trim())) {
+                        String mapped = entry.getValue() == null ? "" : entry.getValue().trim();
+                        if (!mapped.isEmpty() && !"health".equals(mapped) && !"/health".equals(mapped)) {
+                            errors.add("management.endpoints.web.path-mapping não pode deslocar o endpoint 'health' em produção.");
+                        }
+                    }
+                }
+            }
+        } catch (BindException e) {
+            errors.add("management.endpoints.web possui configuração inválida em produção.");
+        }
+
+        String managementServerBasePath = bindOptionalString(binder, "management.server.base-path");
+        if (isPresent(managementServerBasePath) && !"/".equals(managementServerBasePath.trim())) {
+            errors.add("management.server.base-path não pode deslocar os endpoints de probes em produção.");
+        }
+
+        if (!bindBoolean(binder, "management.endpoint.health.probes.enabled", true, errors)) {
+            errors.add("management.endpoint.health.probes.enabled deve ser 'true' em produção.");
+        }
+        // R304-R1-02: /livez e /readyz na porta principal são obrigatórios no contrato de produção
+        if (!bindBoolean(binder, "management.endpoint.health.probes.add-additional-paths", false, errors)) {
+            errors.add("management.endpoint.health.probes.add-additional-paths deve ser 'true' em produção para disponibilizar /livez e /readyz.");
+        }
+        if (!bindBoolean(binder, "management.health.defaults.enabled", true, errors)) {
+            errors.add("management.health.defaults.enabled deve ser 'true' em produção.");
+        }
+        if (!bindBoolean(binder, "management.health.livenessstate.enabled", false, errors)) {
+            errors.add("management.health.livenessstate.enabled deve ser 'true' em produção.");
+        }
+        if (!bindBoolean(binder, "management.health.readinessstate.enabled", false, errors)) {
+            errors.add("management.health.readinessstate.enabled deve ser 'true' em produção.");
+        }
+        if (!bindBoolean(binder, "management.health.db.enabled", true, errors)) {
+            errors.add("management.health.db.enabled deve ser 'true' em produção.");
+        }
+        if (!bindBoolean(binder, "management.health.redis.enabled", true, errors)) {
+            errors.add("management.health.redis.enabled deve ser 'true' em produção.");
+        }
+        if (!bindBoolean(binder, "management.health.object-storage.enabled", true, errors)) {
+            errors.add("management.health.object-storage.enabled deve ser 'true' em produção.");
+        }
+
+        try {
+            HealthEndpointProperties healthProps = binder
+                    .bind("management.endpoint.health", HealthEndpointProperties.class)
+                    .orElseGet(HealthEndpointProperties::new);
+
+            if (healthProps.getShowDetails() != null && healthProps.getShowDetails() != Show.NEVER) {
+                errors.add("management.endpoint.health.show-details deve ser 'never' em produção.");
+            }
+            if (healthProps.getShowComponents() != null && healthProps.getShowComponents() != Show.NEVER) {
+                errors.add("management.endpoint.health.show-components deve ser 'never' em produção.");
+            }
+
+            // R304-R1-01: valida status.order e status.http-mapping globais usando os agregadores reais do Spring Boot 4.1.1
+            List<String> globalOrder = healthProps.getStatus().getOrder();
+            StatusAggregator globalAggregator = buildEffectiveStatusAggregator(globalOrder, null);
+            HttpCodeStatusMapper globalHttpMapper = buildEffectiveHttpCodeStatusMapper(healthProps.getStatus().getHttpMapping(), null);
+            validateStatusOrderAndHttpMapping(
+                    globalOrder,
+                    healthProps.getStatus().getHttpMapping(),
+                    globalAggregator,
+                    globalHttpMapper,
+                    "management.endpoint.health.status",
+                    false,
+                    errors
+            );
+
+            Map<String, HealthEndpointProperties.Group> groups = healthProps.getGroup();
+            if (groups != null) {
+                for (Map.Entry<String, HealthEndpointProperties.Group> entry : groups.entrySet()) {
+                    HealthEndpointProperties.Group group = entry.getValue();
+                    if (group == null) {
+                        continue;
+                    }
+                    if (group.getShowDetails() != null && group.getShowDetails() != Show.NEVER) {
+                        errors.add("management.endpoint.health.group." + entry.getKey()
+                                + ".show-details deve ser 'never' em produção.");
+                    }
+                    if (group.getShowComponents() != null && group.getShowComponents() != Show.NEVER) {
+                        errors.add("management.endpoint.health.group." + entry.getKey()
+                                + ".show-components deve ser 'never' em produção.");
+                    }
+                }
+
+                // R304-02 & R304-R1-01: liveness exige inclusão exclusiva de livenessState, sem exclusões e com /livez preservado
+                HealthEndpointProperties.Group liveness = groups.get("liveness");
+                if (liveness == null || liveness.getInclude() == null || liveness.getInclude().isEmpty()) {
+                    errors.add("management.endpoint.health.group.liveness.include deve declarar exclusivamente 'livenessState' em produção.");
+                } else {
+                    Set<String> normalizedLiveness = normalizeMembers(liveness.getInclude());
+                    if (!normalizedLiveness.equals(REQUIRED_LIVENESS_MEMBERS)) {
+                        errors.add("management.endpoint.health.group.liveness.include deve conter exclusivamente 'livenessState' (sem '*', db, redis, objectStorage ou outros contributors).");
+                    }
+                }
+                if (liveness != null) {
+                    if (liveness.getExclude() != null && !liveness.getExclude().isEmpty()) {
+                        Set<String> normalizedLivenessExclude = normalizeMembers(liveness.getExclude());
+                        if (normalizedLivenessExclude.contains("*") || normalizedLivenessExclude.contains("livenessstate")) {
+                            errors.add("management.endpoint.health.group.liveness.exclude não pode excluir 'livenessState' em produção.");
+                        }
+                    }
+                    if (isPresent(liveness.getAdditionalPath())
+                            && !"server:/livez".equals(liveness.getAdditionalPath().trim())) {
+                        errors.add("management.endpoint.health.group.liveness.additional-path não pode deslocar 'server:/livez' em produção.");
+                    }
+                    StatusAggregator livenessAggregator = buildEffectiveStatusAggregator(liveness.getStatus().getOrder(), globalAggregator);
+                    HttpCodeStatusMapper livenessHttpMapper = buildEffectiveHttpCodeStatusMapper(liveness.getStatus().getHttpMapping(), globalHttpMapper);
+                    validateStatusOrderAndHttpMapping(
+                            liveness.getStatus().getOrder(),
+                            liveness.getStatus().getHttpMapping(),
+                            livenessAggregator,
+                            livenessHttpMapper,
+                            "management.endpoint.health.group.liveness.status",
+                            false,
+                            errors
+                    );
+                }
+
+                // R304-02 & R304-R1-01: readiness exige exatamente readinessState, db, redis e objectStorage, sem exclusões,
+                // com /readyz preservado e com DOWN, OUT_OF_SERVICE e UNKNOWN sempre resultando em HTTP não saudável (>= 400).
+                HealthEndpointProperties.Group readiness = groups.get("readiness");
+                if (readiness == null || readiness.getInclude() == null || readiness.getInclude().isEmpty()) {
+                    errors.add("management.endpoint.health.group.readiness.include deve declarar exatamente readinessState, db, redis e objectStorage em produção.");
+                } else {
+                    Set<String> normalizedReadiness = normalizeMembers(readiness.getInclude());
+                    if (!normalizedReadiness.equals(REQUIRED_READINESS_MEMBERS)) {
+                        errors.add("management.endpoint.health.group.readiness.include deve conter exatamente readinessState, db, redis e objectStorage em produção.");
+                    }
+                }
+                if (readiness != null) {
+                    if (readiness.getExclude() != null && !readiness.getExclude().isEmpty()) {
+                        Set<String> normalizedReadinessExclude = normalizeMembers(readiness.getExclude());
+                        boolean removesRequired = normalizedReadinessExclude.contains("*");
+                        if (!removesRequired) {
+                            for (String excludedMember : normalizedReadinessExclude) {
+                                if (REQUIRED_READINESS_MEMBERS.contains(excludedMember)) {
+                                    removesRequired = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (removesRequired) {
+                            errors.add("management.endpoint.health.group.readiness.exclude não pode remover readinessState, db, redis ou objectStorage em produção.");
+                        }
+                    }
+                    if (isPresent(readiness.getAdditionalPath())
+                            && !"server:/readyz".equals(readiness.getAdditionalPath().trim())) {
+                        errors.add("management.endpoint.health.group.readiness.additional-path não pode deslocar 'server:/readyz' em produção.");
+                    }
+                    StatusAggregator readinessAggregator = buildEffectiveStatusAggregator(readiness.getStatus().getOrder(), globalAggregator);
+                    HttpCodeStatusMapper readinessHttpMapper = buildEffectiveHttpCodeStatusMapper(readiness.getStatus().getHttpMapping(), globalHttpMapper);
+                    validateStatusOrderAndHttpMapping(
+                            readiness.getStatus().getOrder(),
+                            readiness.getStatus().getHttpMapping(),
+                            readinessAggregator,
+                            readinessHttpMapper,
+                            "management.endpoint.health.group.readiness.status",
+                            true,
+                            errors
+                    );
+                }
+            } else {
+                errors.add("management.endpoint.health.group.liveness.include deve declarar exclusivamente 'livenessState' em produção.");
+                errors.add("management.endpoint.health.group.readiness.include deve declarar exatamente readinessState, db, redis e objectStorage em produção.");
+            }
+        } catch (BindException e) {
+            errors.add("management.endpoint.health possui configuração inválida em produção.");
+        }
+    }
+
+    private static void validateHealthEndpointEffectiveAccess(
+            ConfigurableEnvironment env,
+            Binder binder,
+            List<String> errors
+    ) {
+        // 1. Consulta o PropertiesEndpointAccessResolver real do Spring Boot 4.1.1 com ApplicationConversionService
+        //    (mesmo serviço de conversão leniente usado pelo SpringApplication em runtime para read_only/read-only/none)
+        try {
+            PropertySourcesPropertyResolver accessPropertyResolver =
+                    new PropertySourcesPropertyResolver(env.getPropertySources());
+            accessPropertyResolver.setConversionService(new ApplicationConversionService());
+            PropertiesEndpointAccessResolver resolver = new PropertiesEndpointAccessResolver(accessPropertyResolver);
+            Access resolved = resolver.accessFor(EndpointId.of("health"), Access.UNRESTRICTED);
+            if (resolved == Access.NONE) {
+                errors.add("O endpoint 'health' está desabilitado ou com acesso NONE em produção (verifique management.endpoint.health.access, management.endpoints.access.default, management.endpoints.access.max-permitted e enabled-by-default).");
+                return;
+            }
+        } catch (RuntimeException e) {
+            errors.add("Configuração de acesso do endpoint 'health' é inválida ou mutuamente exclusiva em produção.");
+            return;
+        }
+
+        // 2. Validação complementar via Binder (cobre sobrescritas camelCase / relaxed binding)
+        try {
+            Access maxPermitted = binder.bind("management.endpoints.access.max-permitted", Access.class)
+                    .orElse(Access.UNRESTRICTED);
+            BindResult<Access> defaultAccess = binder.bind("management.endpoints.access.default", Access.class);
+            BindResult<Boolean> enabledByDefault = binder.bind("management.endpoints.enabled-by-default", Boolean.class);
+            BindResult<Access> healthAccess = binder.bind("management.endpoint.health.access", Access.class);
+            BindResult<Boolean> healthEnabled = binder.bind("management.endpoint.health.enabled", Boolean.class);
+
+            if (defaultAccess.isBound() && enabledByDefault.isBound()) {
+                errors.add("management.endpoints.access.default e management.endpoints.enabled-by-default são mutuamente exclusivos em produção.");
+                return;
+            }
+            if (healthAccess.isBound() && healthEnabled.isBound()) {
+                errors.add("management.endpoint.health.access e management.endpoint.health.enabled são mutuamente exclusivos em produção.");
+                return;
+            }
+
+            Access effectiveDefault = Access.UNRESTRICTED;
+            if (defaultAccess.isBound()) {
+                effectiveDefault = defaultAccess.get();
+            } else if (enabledByDefault.isBound()) {
+                effectiveDefault = Boolean.TRUE.equals(enabledByDefault.get()) ? Access.UNRESTRICTED : Access.NONE;
+            }
+
+            Access effectiveHealth;
+            if (healthAccess.isBound()) {
+                effectiveHealth = healthAccess.get();
+            } else if (healthEnabled.isBound()) {
+                effectiveHealth = Boolean.TRUE.equals(healthEnabled.get()) ? Access.UNRESTRICTED : Access.NONE;
+            } else {
+                effectiveHealth = effectiveDefault;
+            }
+
+            Access capped = effectiveHealth.cap(maxPermitted);
+            if (capped == Access.NONE) {
+                errors.add("O endpoint 'health' está desabilitado ou com acesso NONE em produção (verifique management.endpoint.health.access, management.endpoints.access.default, management.endpoints.access.max-permitted e enabled-by-default).");
+            }
+        } catch (BindException e) {
+            errors.add("Configuração de acesso do endpoint 'health' contém valor inválido em produção.");
+        }
+    }
+
+    private static StatusAggregator buildEffectiveStatusAggregator(List<String> order, StatusAggregator fallback) {
+        if (order != null && !order.isEmpty()) {
+            return StatusAggregator.of(order);
+        }
+        return fallback != null ? fallback : StatusAggregator.getDefault();
+    }
+
+    private static HttpCodeStatusMapper buildEffectiveHttpCodeStatusMapper(
+            Map<String, Integer> httpMapping,
+            HttpCodeStatusMapper fallback
+    ) {
+        if (httpMapping != null && !httpMapping.isEmpty()) {
+            return HttpCodeStatusMapper.of(httpMapping);
+        }
+        return fallback != null ? fallback : HttpCodeStatusMapper.getDefault();
+    }
+
+    private static void validateStatusOrderAndHttpMapping(
+            List<String> explicitOrder,
+            Map<String, Integer> explicitHttpMapping,
+            StatusAggregator effectiveAggregator,
+            HttpCodeStatusMapper effectiveHttpMapper,
+            String propertyPrefix,
+            boolean strictUnknownUnhealthy,
+            List<String> errors
+    ) {
+        // 1. Se uma ordem explícita foi fornecida, DOWN e OUT_OF_SERVICE precisam constar nela (não podem cair em UNKNOWN)
+        if (explicitOrder != null && !explicitOrder.isEmpty()) {
+            Set<String> normalizedOrder = new java.util.LinkedHashSet<>();
+            for (String item : explicitOrder) {
+                if (isPresent(item)) {
+                    normalizedOrder.add(item.trim().toUpperCase(Locale.ROOT).replace('-', '_'));
+                }
+            }
+            if (!normalizedOrder.contains("DOWN") || !normalizedOrder.contains("OUT_OF_SERVICE")) {
+                errors.add(propertyPrefix + ".order deve incluir obrigatoriamente 'DOWN' e 'OUT_OF_SERVICE' em produção.");
+            }
+            if (strictUnknownUnhealthy && !normalizedOrder.contains("UNKNOWN")) {
+                errors.add(propertyPrefix + ".order deve incluir 'UNKNOWN' antes de 'UP' na readiness em produção.");
+            }
+        }
+
+        // 2. Comprova via SimpleStatusAggregator real que DOWN e OUT_OF_SERVICE prevalecem sobre UP e UNKNOWN
+        if (!Status.DOWN.equals(effectiveAggregator.getAggregateStatus(Set.of(Status.UP, Status.DOWN)))
+                || !Status.DOWN.equals(effectiveAggregator.getAggregateStatus(Set.of(Status.UNKNOWN, Status.DOWN)))) {
+            errors.add(propertyPrefix + ".order não pode atribuir prioridade igual ou superior de UP/UNKNOWN sobre DOWN em produção.");
+        }
+        if (!Status.OUT_OF_SERVICE.equals(effectiveAggregator.getAggregateStatus(Set.of(Status.UP, Status.OUT_OF_SERVICE)))
+                || !Status.OUT_OF_SERVICE.equals(effectiveAggregator.getAggregateStatus(Set.of(Status.UNKNOWN, Status.OUT_OF_SERVICE)))) {
+            errors.add(propertyPrefix + ".order não pode atribuir prioridade igual ou superior de UP/UNKNOWN sobre OUT_OF_SERVICE em produção.");
+        }
+        if (strictUnknownUnhealthy
+                && !Status.UNKNOWN.equals(effectiveAggregator.getAggregateStatus(Set.of(Status.UP, Status.UNKNOWN)))) {
+            errors.add(propertyPrefix + ".order deve priorizar UNKNOWN acima de UP na readiness para não mascarar dependência desconhecida como saudável.");
+        }
+
+        // 3. Comprova via SimpleHttpCodeStatusMapper real que estados não saudáveis nunca retornam HTTP 2xx/3xx
+        if (explicitHttpMapping != null) {
+            for (Map.Entry<String, Integer> entry : explicitHttpMapping.entrySet()) {
+                if (entry.getKey() == null) {
+                    continue;
+                }
+                String normalizedStatus = entry.getKey().trim().toUpperCase(Locale.ROOT).replace('-', '_');
+                boolean mustBeUnhealthy = UNHEALTHY_STATUS_KEYS.contains(normalizedStatus)
+                        || (strictUnknownUnhealthy && "UNKNOWN".equals(normalizedStatus));
+                if (mustBeUnhealthy) {
+                    Integer httpCode = entry.getValue();
+                    if (httpCode == null || httpCode < 400 || httpCode > 599) {
+                        errors.add(propertyPrefix + ".http-mapping não pode mapear '" + normalizedStatus
+                                + "' para código HTTP de sucesso em produção (exige status não saudável >= 400).");
+                    }
+                }
+            }
+        }
+
+        int downCode = effectiveHttpMapper.getStatusCode(Status.DOWN);
+        if (downCode < 400 || downCode > 599) {
+            errors.add(propertyPrefix + ".http-mapping efetivo deve mapear DOWN para código HTTP não saudável (>= 400).");
+        }
+        int oosCode = effectiveHttpMapper.getStatusCode(Status.OUT_OF_SERVICE);
+        if (oosCode < 400 || oosCode > 599) {
+            errors.add(propertyPrefix + ".http-mapping efetivo deve mapear OUT_OF_SERVICE para código HTTP não saudável (>= 400).");
+        }
+        if (strictUnknownUnhealthy) {
+            int unknownCode = effectiveHttpMapper.getStatusCode(Status.UNKNOWN);
+            if (unknownCode < 400 || unknownCode > 599) {
+                errors.add(propertyPrefix + ".http-mapping efetivo na readiness deve mapear UNKNOWN para código HTTP não saudável (ex.: 503).");
+            }
+        }
+    }
+
+    private static Set<String> normalizeMembers(Set<String> members) {
+        Set<String> normalized = new java.util.LinkedHashSet<>();
+        for (String member : members) {
+            if (isPresent(member)) {
+                normalized.add(member.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return normalized;
     }
 
     private static void validateCorsAllowedOrigins(String corsOrigins, List<String> errors) {
@@ -437,12 +912,8 @@ public class ProductionEnvironmentValidator
                 errors
         );
 
-        boolean rateLimitEnabled = isTrue(env, "rewit.rate-limit.enabled", true);
-        if (rateLimitEnabled) {
-            validateRequiredSecret(env, "rewit.rate-limit.key-secret", "RATE_LIMIT_KEY_SECRET", allSecrets, errors);
-        } else {
-            validateOptionalSecret(env, "rewit.rate-limit.key-secret", "RATE_LIMIT_KEY_SECRET", allSecrets, errors);
-        }
+        // R304-01: em produção o rate limiting é sempre obrigatório, logo RATE_LIMIT_KEY_SECRET é sempre exigido
+        validateRequiredSecret(env, "rewit.rate-limit.key-secret", "RATE_LIMIT_KEY_SECRET", allSecrets, errors);
 
         // F2-DEPLOY-03.3 §6.3: ACCOUNT_EMAIL_RESERVATION_SECRET obrigatório quando ACCOUNT_PURGE_ENABLED=true
         boolean accountPurgeEnabled = isTrue(env, "rewit.account.purge.enabled", true);

@@ -151,6 +151,58 @@ class ProductionProfileConfigurationTest {
     }
 
     @Test
+    @DisplayName("F2-DEPLOY-03.4. Contrato YAML de liveness/readiness, show-details=never, additional paths e Docker HEALTHCHECK")
+    void healthProbesContractInBaseProdAndDockerfile() throws IOException {
+        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
+        PropertySource<?> mainBaseConfig = loader.load(
+                "main-base", new org.springframework.core.io.FileSystemResource("src/main/resources/application.yml")
+        ).getFirst();
+
+        for (PropertySource<?> source : List.of(mainBaseConfig, prodProfile)) {
+            assertEquals("never", String.valueOf(source.getProperty("management.endpoint.health.show-details")));
+            assertEquals("never", String.valueOf(source.getProperty("management.endpoint.health.show-components")));
+            assertEquals("true", String.valueOf(source.getProperty("management.endpoint.health.probes.enabled")));
+            assertEquals("true", String.valueOf(source.getProperty("management.endpoint.health.probes.add-additional-paths")));
+            assertEquals("livenessState", String.valueOf(source.getProperty("management.endpoint.health.group.liveness.include")));
+            assertEquals("readinessState,db,redis,objectStorage",
+                    String.valueOf(source.getProperty("management.endpoint.health.group.readiness.include")));
+            assertEquals("never", String.valueOf(source.getProperty("management.endpoint.health.group.liveness.show-details")));
+            assertEquals("never", String.valueOf(source.getProperty("management.endpoint.health.group.readiness.show-details")));
+            assertEquals("DOWN,OUT_OF_SERVICE,UNKNOWN,UP",
+                    String.valueOf(source.getProperty("management.endpoint.health.group.readiness.status.order")));
+            assertEquals("503",
+                    String.valueOf(source.getProperty("management.endpoint.health.group.readiness.status.http-mapping.DOWN")));
+            assertEquals("503",
+                    String.valueOf(source.getProperty("management.endpoint.health.group.readiness.status.http-mapping.OUT_OF_SERVICE")));
+            assertEquals("503",
+                    String.valueOf(source.getProperty("management.endpoint.health.group.readiness.status.http-mapping.UNKNOWN")));
+        }
+
+        assertEquals("read_only", rawProd("management.endpoint.health.access"));
+        assertEquals("true", rawProd("management.health.defaults.enabled"));
+        assertEquals("true", rawProd("management.health.livenessstate.enabled"));
+        assertEquals("true", rawProd("management.health.readinessstate.enabled"));
+        assertEquals("true", rawProd("management.health.db.enabled"));
+        assertEquals("true", rawProd("management.health.db.ignore-routing-data-sources"));
+        assertEquals("true", String.valueOf(mainBaseConfig.getProperty("management.health.db.ignore-routing-data-sources")));
+        assertEquals("true", rawProd("management.health.redis.enabled"));
+        assertEquals("true", rawProd("management.health.object-storage.enabled"));
+        assertEquals("${RATE_LIMIT_ENABLED:true}", rawProd("rewit.rate-limit.enabled"));
+        assertEquals("${RATE_LIMIT_BACKEND_FAILURE_MODE:LOCAL_FALLBACK}",
+                rawProd("rewit.rate-limit.backend.failure-mode"));
+
+        java.nio.file.Path dockerfile = java.nio.file.Path.of("../infrastructure/docker/backend.Dockerfile");
+        assertTrue(java.nio.file.Files.exists(dockerfile), "backend.Dockerfile deve existir");
+        String content = java.nio.file.Files.readString(dockerfile);
+        assertTrue(content.contains("/actuator/health/readiness"),
+                "Docker HEALTHCHECK deve consultar /actuator/health/readiness na porta de management");
+        assertTrue(content.contains("MANAGEMENT_SERVER_PORT:-8081"),
+                "Docker HEALTHCHECK deve preservar a porta de management");
+        assertTrue(content.contains("--timeout=10s") && content.contains("--max-time 8"),
+                "Orçamento de timeout do Docker HEALTHCHECK (10s / curl 8s) deve comportar pior caso S3 sem região (2x3s)");
+    }
+
+    @Test
     @DisplayName("AUDIT-04. Propriedades Redis aprovadas pelo validador vinculam TLS efetivamente em DataRedisProperties")
     void validatedRedisConfigBindsEffectiveTlsProperties() {
         MockEnvironment env = ProductionEnvironmentValidatorTest.validProdEnvironment();

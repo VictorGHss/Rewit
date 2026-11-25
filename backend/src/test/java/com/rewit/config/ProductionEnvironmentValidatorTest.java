@@ -48,6 +48,25 @@ class ProductionEnvironmentValidatorTest {
         // HTTP & runtime hardening
         env.setProperty("server.port", "8080");
         env.setProperty("management.server.port", "8081");
+        env.setProperty("management.endpoints.web.exposure.include", "health,info,prometheus");
+        env.setProperty("management.endpoint.health.access", "read_only");
+        env.setProperty("management.endpoint.health.show-details", "never");
+        env.setProperty("management.endpoint.health.show-components", "never");
+        env.setProperty("management.endpoint.health.probes.enabled", "true");
+        env.setProperty("management.endpoint.health.probes.add-additional-paths", "true");
+        env.setProperty("management.endpoint.health.group.liveness.include", "livenessState");
+        env.setProperty("management.endpoint.health.group.readiness.include", "readinessState,db,redis,objectStorage");
+        env.setProperty("management.endpoint.health.group.readiness.status.order", "DOWN,OUT_OF_SERVICE,UNKNOWN,UP");
+        env.setProperty("management.endpoint.health.group.readiness.status.http-mapping.DOWN", "503");
+        env.setProperty("management.endpoint.health.group.readiness.status.http-mapping.OUT_OF_SERVICE", "503");
+        env.setProperty("management.endpoint.health.group.readiness.status.http-mapping.UNKNOWN", "503");
+        env.setProperty("management.health.defaults.enabled", "true");
+        env.setProperty("management.health.livenessstate.enabled", "true");
+        env.setProperty("management.health.readinessstate.enabled", "true");
+        env.setProperty("management.health.db.enabled", "true");
+        env.setProperty("management.health.redis.enabled", "true");
+        env.setProperty("management.health.object-storage.enabled", "true");
+        env.setProperty("rewit.rate-limit.backend.failure-mode", "LOCAL_FALLBACK");
         env.setProperty("spring.web.error.include-message", "never");
         env.setProperty("spring.web.error.include-binding-errors", "never");
         env.setProperty("spring.web.error.include-stacktrace", "never");
@@ -764,5 +783,378 @@ class ProductionEnvironmentValidatorTest {
                     () -> ProductionEnvironmentValidator.validate(env),
                     "CORS deve rejeitar porta inválida: " + badPortOrigin);
         }
+    }
+
+    @Test
+    @DisplayName("F2-DEPLOY-03.4: Bloqueia show-details/show-components públicos, endpoints administrativos, probes desligadas e composição insegura de liveness/readiness")
+    void validatesHealthProbesAndActuatorHardeningInProd() {
+        // show-details / show-components públicos (inclusive camelCase)
+        for (Map.Entry<String, String> bad : Map.of(
+                "management.endpoint.health.show-details", "always",
+                "management.endpoint.health.showDetails", "when_authorized",
+                "management.endpoint.health.show-components", "always",
+                "management.endpoint.health.group.readiness.show-details", "always",
+                "management.endpoint.health.group.liveness.show-components", "always"
+        ).entrySet()) {
+            MockEnvironment env = validProdEnvironment();
+            env.getPropertySources().addFirst(new MapPropertySource("cli", Map.of(bad.getKey(), bad.getValue())));
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Deve rejeitar: " + bad.getKey() + "=" + bad.getValue());
+        }
+
+        // Probes ou indicadores obrigatórios desligados (inclusive livenessstate e readinessstate)
+        for (String prop : new String[]{
+                "management.endpoint.health.probes.enabled",
+                "management.health.defaults.enabled",
+                "management.health.livenessstate.enabled",
+                "management.health.readinessstate.enabled",
+                "management.health.db.enabled",
+                "management.health.redis.enabled",
+                "management.health.object-storage.enabled"
+        }) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty(prop, "false");
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Deve rejeitar " + prop + "=false");
+        }
+
+        // R304-02: Liveness exige exclusivamente livenessState (rejeita dependências externas, '*' ou exclusões)
+        for (String badLiveness : new String[]{
+                "livenessState,redis",
+                "livenessState,db",
+                "livenessState,objectStorage",
+                "livenessState,*",
+                "livenessState,ping",
+                "*"
+        }) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty("management.endpoint.health.group.liveness.include", badLiveness);
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Liveness não pode incluir: " + badLiveness);
+        }
+
+        MockEnvironment excludedLiveness = validProdEnvironment();
+        excludedLiveness.setProperty("management.endpoint.health.group.liveness.exclude", "livenessState");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(excludedLiveness));
+
+        // R304-02: Readiness exige exatamente readinessState, db, redis e objectStorage e proíbe exclude
+        for (String badReadiness : new String[]{
+                "readinessState,db,redis",
+                "readinessState,db,objectStorage",
+                "readinessState,redis,objectStorage",
+                "db,redis,objectStorage",
+                "readinessState,db,redis,objectStorage,*"
+        }) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty("management.endpoint.health.group.readiness.include", badReadiness);
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Readiness inválida deve ser rejeitada: " + badReadiness);
+        }
+
+        for (String badExclude : new String[]{"redis", "db", "objectStorage", "readinessState", "*"}) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty("management.endpoint.health.group.readiness.exclude", badExclude);
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "readiness.exclude não pode remover " + badExclude);
+        }
+
+        // R304-02: Mapeamento HTTP de DOWN/OUT_OF_SERVICE para código de sucesso (ex.: 200) é rejeitado
+        for (Map.Entry<String, String> badMapping : Map.of(
+                "management.endpoint.health.group.readiness.status.http-mapping.DOWN", "200",
+                "management.endpoint.health.group.readiness.status.http-mapping.OUT_OF_SERVICE", "200",
+                "management.endpoint.health.group.readiness.status.http-mapping.down", "204",
+                "management.endpoint.health.group.readiness.status.http-mapping.out-of-service", "200",
+                "management.endpoint.health.status.http-mapping.DOWN", "200",
+                "management.endpoint.health.status.http-mapping.OUT_OF_SERVICE", "200"
+        ).entrySet()) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty(badMapping.getKey(), badMapping.getValue());
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Mapeamento HTTP inseguro deve ser rejeitado: " + badMapping.getKey() + "=" + badMapping.getValue());
+        }
+
+        // Mapeamento não saudável explícito (503) continua aceito
+        MockEnvironment valid503Mapping = validProdEnvironment();
+        valid503Mapping.setProperty("management.endpoint.health.group.readiness.status.http-mapping.DOWN", "503");
+        valid503Mapping.setProperty("management.endpoint.health.group.readiness.status.http-mapping.OUT_OF_SERVICE", "503");
+        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(valid503Mapping));
+
+        // R304-02: Allowlist estrita de exposição Actuator (rejeita scheduledtasks, env, beans, heapdump, *, etc.)
+        for (String badExposure : new String[]{
+                "health,info,prometheus,scheduledtasks",
+                "health,env",
+                "health,beans",
+                "health,heapdump",
+                "health,threaddump",
+                "*"
+        }) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty("management.endpoints.web.exposure.include", badExposure);
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Exposição fora da allowlist deve ser rejeitada: " + badExposure);
+        }
+
+        MockEnvironment excludedHealthExposure = validProdEnvironment();
+        excludedHealthExposure.setProperty("management.endpoints.web.exposure.exclude", "health");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(excludedHealthExposure));
+
+        // R304-02: Variações via variáveis de ambiente (SystemEnvironmentPropertySource real)
+        for (Map.Entry<String, String> envBypass : Map.of(
+                "MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_EXCLUDE", "redis",
+                "MANAGEMENT_HEALTH_LIVENESSSTATE_ENABLED", "false",
+                "MANAGEMENT_HEALTH_READINESSSTATE_ENABLED", "false",
+                "MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_STATUS_HTTPMAPPING_DOWN", "200",
+                "MANAGEMENT_ENDPOINT_HEALTH_STATUS_HTTPMAPPING_DOWN", "200",
+                "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE", "health,info,prometheus,scheduledtasks"
+        ).entrySet()) {
+            MockEnvironment env = validProdEnvironment();
+            env.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                    "systemEnvironment", Map.of(envBypass.getKey(), envBypass.getValue())));
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Env var bypass deve ser rejeitado: " + envBypass.getKey());
+        }
+    }
+
+    @Test
+    @DisplayName("R304-01: Rate limiting é obrigatório em prod (enabled=true) e failure-mode=ALLOW é proibido; LOCAL_FALLBACK e DENY aceitos")
+    void enforcesMandatoryRateLimitAndBlocksAllowFailureModeInProd() {
+        // LOCAL_FALLBACK aceito
+        MockEnvironment localFallback = validProdEnvironment();
+        localFallback.setProperty("rewit.rate-limit.enabled", "true");
+        localFallback.setProperty("rewit.rate-limit.backend.failure-mode", "LOCAL_FALLBACK");
+        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(localFallback));
+
+        // DENY aceito
+        MockEnvironment denyMode = validProdEnvironment();
+        denyMode.setProperty("rewit.rate-limit.enabled", "true");
+        denyMode.setProperty("rewit.rate-limit.backend.failure-mode", "DENY");
+        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(denyMode));
+
+        // rewit.rate-limit.enabled=false rejeitado
+        MockEnvironment disabledProp = validProdEnvironment();
+        disabledProp.setProperty("rewit.rate-limit.enabled", "false");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(disabledProp));
+
+        // RATE_LIMIT_ENABLED=false via env var rejeitado
+        MockEnvironment disabledEnv = validProdEnvironment();
+        disabledEnv.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                "systemEnvironment", Map.of("REWIT_RATE_LIMIT_ENABLED", "false")));
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(disabledEnv));
+
+        MockEnvironment envFallbackCheck = validProdEnvironment();
+        // Simula resolução YAML ${RATE_LIMIT_ENABLED:true} quando RATE_LIMIT_ENABLED=false
+        envFallbackCheck.setProperty("rewit.rate-limit.enabled", "${RATE_LIMIT_ENABLED:true}");
+        envFallbackCheck.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                "systemEnvironment", Map.of("RATE_LIMIT_ENABLED", "false")));
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(envFallbackCheck));
+
+        // rewit.rate-limit.backend.failure-mode=ALLOW (kebab e camelCase) rejeitado
+        MockEnvironment allowProp = validProdEnvironment();
+        allowProp.setProperty("rewit.rate-limit.backend.failure-mode", "ALLOW");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(allowProp));
+
+        MockEnvironment allowCamelCase = validProdEnvironment();
+        allowCamelCase.getPropertySources().addFirst(new MapPropertySource(
+                "cli", Map.of("rewit.rateLimit.backend.failureMode", "ALLOW")));
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(allowCamelCase));
+
+        // RATE_LIMIT_BACKEND_FAILURE_MODE=ALLOW via env var + placeholder YAML rejeitado
+        MockEnvironment allowEnv = validProdEnvironment();
+        allowEnv.setProperty("rewit.rate-limit.backend.failure-mode", "${RATE_LIMIT_BACKEND_FAILURE_MODE:LOCAL_FALLBACK}");
+        allowEnv.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                "systemEnvironment", Map.of("RATE_LIMIT_BACKEND_FAILURE_MODE", "ALLOW")));
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(allowEnv));
+
+        // Valor inválido de failure-mode rejeitado fail-closed
+        MockEnvironment invalidMode = validProdEnvironment();
+        invalidMode.setProperty("rewit.rate-limit.backend.failure-mode", "INVALID_MODE");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(invalidMode));
+    }
+
+    @Test
+    @DisplayName("R304-R1-01: Valida status.order global/liveness/readiness e mapeamento não saudável de UNKNOWN na readiness")
+    void validatesHealthStatusOrderAndUnknownPolicyAcrossGlobalAndProbeGroups() {
+        // Ordem padrão global (sem override) + readiness segura -> aceita
+        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(validProdEnvironment()));
+
+        // Ordem customizada segura com status adicional preservando prioridade de DOWN/OUT_OF_SERVICE/UNKNOWN sobre UP -> aceita
+        MockEnvironment customSafeOrder = validProdEnvironment();
+        customSafeOrder.setProperty("management.endpoint.health.group.readiness.status.order",
+                "DOWN,OUT_OF_SERVICE,DEGRADED,UNKNOWN,UP");
+        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(customSafeOrder));
+
+        // 1. Global status.order promovendo UP acima de DOWN ou omitindo DOWN/OUT_OF_SERVICE -> rejeitado
+        for (String badGlobalOrder : new String[]{
+                "UP,DOWN,OUT_OF_SERVICE,UNKNOWN",
+                "UP",
+                "DOWN,UP,UNKNOWN",
+                "OUT_OF_SERVICE,UP,UNKNOWN",
+                "UNKNOWN,DOWN,OUT_OF_SERVICE,UP"
+        }) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty("management.endpoint.health.status.order", badGlobalOrder);
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Global status.order insegura deve ser rejeitada: " + badGlobalOrder);
+        }
+
+        // 2. Readiness status.order com UP antes de DOWN, omitindo DOWN/OUT_OF_SERVICE ou UP antes de UNKNOWN -> rejeitado
+        for (String badReadinessOrder : new String[]{
+                "UP,DOWN,OUT_OF_SERVICE,UNKNOWN",
+                "UP",
+                "OUT_OF_SERVICE,UNKNOWN,UP",
+                "DOWN,UNKNOWN,UP",
+                "DOWN,OUT_OF_SERVICE,UP,UNKNOWN",
+                "UNKNOWN,DOWN,OUT_OF_SERVICE,UP"
+        }) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty("management.endpoint.health.group.readiness.status.order", badReadinessOrder);
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Readiness status.order insegura deve ser rejeitada: " + badReadinessOrder);
+        }
+
+        // 3. Liveness status.order promovendo UP acima de DOWN -> rejeitado
+        MockEnvironment badLivenessOrder = validProdEnvironment();
+        badLivenessOrder.setProperty("management.endpoint.health.group.liveness.status.order",
+                "UP,DOWN,OUT_OF_SERVICE,UNKNOWN");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(badLivenessOrder));
+
+        // 4. UNKNOWN mapeado para 200 na readiness -> rejeitado; mapeado para 500/503 -> aceito
+        MockEnvironment unknown200 = validProdEnvironment();
+        unknown200.setProperty("management.endpoint.health.group.readiness.status.http-mapping.UNKNOWN", "200");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(unknown200));
+
+        MockEnvironment unknown500 = validProdEnvironment();
+        unknown500.setProperty("management.endpoint.health.group.readiness.status.http-mapping.UNKNOWN", "500");
+        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(unknown500));
+
+        // 5. Variações via variáveis de ambiente (SystemEnvironmentPropertySource real)
+        for (Map.Entry<String, String> envBypass : Map.of(
+                "MANAGEMENT_ENDPOINT_HEALTH_STATUS_ORDER", "UP,DOWN,OUT_OF_SERVICE,UNKNOWN",
+                "MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_STATUS_ORDER", "UP,DOWN,OUT_OF_SERVICE,UNKNOWN",
+                "MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_STATUS_HTTPMAPPING_UNKNOWN", "200"
+        ).entrySet()) {
+            MockEnvironment env = validProdEnvironment();
+            env.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                    "systemEnvironment", Map.of(envBypass.getKey(), envBypass.getValue())));
+            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Env var bypass de status.order/UNKNOWN deve ser rejeitado: " + envBypass.getKey());
+        }
+    }
+
+    @Test
+    @DisplayName("R304-R1-02: Protege acesso efetivo do endpoint health, probes.add-additional-paths=true e integridade de path-mapping")
+    void validatesHealthEndpointEffectiveAccessAndAdditionalPathsInProd() {
+        // 1. health.access=none -> rejeitado
+        MockEnvironment healthAccessNone = validProdEnvironment();
+        healthAccessNone.setProperty("management.endpoint.health.access", "none");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(healthAccessNone));
+
+        // 2. access.default=none SEM override de health -> rejeitado
+        MockEnvironment defaultNoneClean = validProdEnvironmentWithoutHealthAccess();
+        defaultNoneClean.setProperty("management.endpoints.access.default", "none");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(defaultNoneClean));
+
+        // 3. access.default=none COM override explícito read_only em health -> ACEITO!
+        MockEnvironment defaultNoneWithReadOnlyHealth = validProdEnvironmentWithoutHealthAccess();
+        defaultNoneWithReadOnlyHealth.setProperty("management.endpoints.access.default", "none");
+        defaultNoneWithReadOnlyHealth.setProperty("management.endpoint.health.access", "read_only");
+        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(defaultNoneWithReadOnlyHealth));
+
+        // 4. access.max-permitted=none (mesmo com health.access=read_only) -> rejeitado
+        MockEnvironment maxPermittedNone = validProdEnvironment();
+        maxPermittedNone.setProperty("management.endpoints.access.max-permitted", "none");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(maxPermittedNone));
+
+        // 5. enabled-by-default=false sem health habilitado -> rejeitado
+        MockEnvironment disabledByDefault = validProdEnvironmentWithoutHealthAccess();
+        disabledByDefault.setProperty("management.endpoints.enabled-by-default", "false");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(disabledByDefault));
+
+        // 6. health.enabled=false -> rejeitado
+        MockEnvironment healthEnabledFalse = validProdEnvironmentWithoutHealthAccess();
+        healthEnabledFalse.setProperty("management.endpoint.health.enabled", "false");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(healthEnabledFalse));
+
+        // 7. probes.add-additional-paths=false -> rejeitado; true -> aceito
+        MockEnvironment additionalPathsFalse = validProdEnvironment();
+        additionalPathsFalse.setProperty("management.endpoint.health.probes.add-additional-paths", "false");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(additionalPathsFalse));
+
+        // 8. Deslocamento de caminhos (base-path, path-mapping, additional-path) -> rejeitado
+        MockEnvironment customBasePath = validProdEnvironment();
+        customBasePath.setProperty("management.endpoints.web.base-path", "/internal");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(customBasePath));
+
+        MockEnvironment remappedHealth = validProdEnvironment();
+        remappedHealth.setProperty("management.endpoints.web.path-mapping.health", "status");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(remappedHealth));
+
+        MockEnvironment shiftedReadyz = validProdEnvironment();
+        shiftedReadyz.setProperty("management.endpoint.health.group.readiness.additional-path", "server:/custom-ready");
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(shiftedReadyz));
+
+        // 9. Variações via variáveis de ambiente (SystemEnvironmentPropertySource real)
+        MockEnvironment envAccessNone = validProdEnvironment();
+        envAccessNone.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                "systemEnvironment", Map.of("MANAGEMENT_ENDPOINT_HEALTH_ACCESS", "none")));
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(envAccessNone));
+
+        MockEnvironment envDefaultNone = validProdEnvironmentWithoutHealthAccess();
+        envDefaultNone.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                "systemEnvironment", Map.of("MANAGEMENT_ENDPOINTS_ACCESS_DEFAULT", "none")));
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(envDefaultNone));
+
+        MockEnvironment envAddPathsFalse = validProdEnvironment();
+        envAddPathsFalse.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                "systemEnvironment", Map.of("MANAGEMENT_ENDPOINT_HEALTH_PROBES_ADD_ADDITIONAL_PATHS", "false")));
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(envAddPathsFalse));
+    }
+
+    private static MockEnvironment validProdEnvironmentWithoutHealthAccess() {
+        MockEnvironment source = validProdEnvironment();
+        MockEnvironment copy = new MockEnvironment();
+        copy.setActiveProfiles(source.getActiveProfiles());
+        Map<String, Object> props = ((org.springframework.core.env.MapPropertySource)
+                source.getPropertySources().get("mockProperties")).getSource();
+        for (Map.Entry<String, Object> entry : props.entrySet()) {
+            if (!"management.endpoint.health.access".equals(entry.getKey())) {
+                copy.setProperty(entry.getKey(), String.valueOf(entry.getValue()));
+            }
+        }
+        return copy;
     }
 }

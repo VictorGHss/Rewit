@@ -270,6 +270,139 @@ class ProductionFailClosedStartupIntegrationTest {
         assertPortNotListening(port);
     }
 
+    @Test
+    @DisplayName("R304-01 & R304-02. Sobrescritas CLI e SPRING_APPLICATION_JSON de rate-limit, probes e Actuator abortam antes do Flyway e HTTP")
+    void r304RateLimitAndHealthProbeOverridesViaCliAndJsonAbortBeforeStartup() throws Exception {
+        int port = findFreePort();
+        AtomicBoolean beanFactoryPostProcessed = new AtomicBoolean(false);
+
+        SpringApplication app = new SpringApplication(RewitApplication.class);
+        app.setWebApplicationType(WebApplicationType.SERVLET);
+        app.setAdditionalProfiles("prod");
+        app.addInitializers(ctx -> ctx.addBeanFactoryPostProcessor(bf -> beanFactoryPostProcessed.set(true)));
+
+        List<String> args = new ArrayList<>();
+        args.add("--server.port=" + port);
+        args.add("--rewit.environment=production");
+        args.add("--spring.datasource.url=jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full");
+        args.add("--spring.datasource.username=rewit_app");
+        args.add("--spring.datasource.password=app-prod-pass-Xq7#kP2v!9z");
+        args.add("--rewit.datasource.media.username=rewit_media");
+        args.add("--rewit.datasource.media.password=media-prod-pass-Kp4!xV7s#3w");
+        args.add("--rewit.datasource.moderation.username=rewit_mod");
+        args.add("--rewit.datasource.moderation.password=mod-prod-pass-Yr8#mN4q!6t");
+        args.add("--spring.flyway.user=rewit_migrator");
+        args.add("--spring.flyway.password=flyway-prod-pass-Lw3!rT9d#5y");
+        args.add("--spring.data.redis.host=redis.rewit.internal");
+        args.add("--spring.data.redis.port=6380");
+        args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
+        args.add("--spring.data.redis.ssl.enabled=true");
+        args.add("--rewit.minio.endpoint=https://s3.us-east-1.amazonaws.com");
+        args.add("--rewit.minio.access-key=AKIAIOSFODNN7PRODKEY");
+        args.add("--rewit.minio.secret-key=storage-prod-secret-9fT2mQ8z!7p");
+        args.add("--rewit.minio.bucket-name=rewit-prod-media");
+        args.add("--rewit.security.jwt-secret=prod-jwt-secret-entropia-csprng-Zp4!Qw8@Lk2#9x");
+        args.add("--rewit.security.password-pepper=prod-pepper-secret-entropia-csprng-Rm7!Vx2@Np9#");
+        args.add("--rewit.security.refresh-token-secret=prod-refresh-secret-entropia-csprng-Tk5!Bj8@Wd3#");
+        args.add("--rewit.security.moderation-audit-secret=prod-mod-audit-secret-entropia-csprng-Kp9!Zx4@Qc1#");
+        args.add("--rewit.rate-limit.key-secret=prod-rate-limit-secret-entropia-Hy6$Vb3%Nm1&8z");
+        args.add("--rewit.account.purge.enabled=true");
+        args.add("--rewit.account.email-reservation-secret=prod-email-reservation-secret-csprng-Gf2!Rt7@Jk4#");
+        // R304-01 & R304-02 sobrescritas adversariais via CLI + SPRING_APPLICATION_JSON
+        args.add("--rewit.rate-limit.enabled=false");
+        args.add("--rewit.rate-limit.backend.failure-mode=ALLOW");
+        args.add("--management.endpoint.health.group.readiness.exclude=redis");
+        args.add("--management.endpoint.health.group.readiness.status.http-mapping.DOWN=200");
+        args.add("--management.endpoint.health.group.liveness.include=livenessState,*");
+        args.add("--management.endpoints.web.exposure.include=health,info,prometheus,scheduledtasks");
+        args.add("--spring.application.json={\"management\":{\"health\":{\"livenessstate\":{\"enabled\":false},\"readinessstate\":{\"enabled\":false}}}}");
+
+        ProductionEnvironmentValidator.InvalidConfigurationException ex = assertThrows(
+                ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> {
+                    try (ConfigurableApplicationContext ignored = app.run(args.toArray(String[]::new))) {
+                        // Nunca deve subir
+                    }
+                }
+        );
+
+        assertTrue(ex.getMessage().contains("rewit.rate-limit.enabled"));
+        assertTrue(ex.getMessage().contains("rewit.rate-limit.backend.failure-mode"));
+        assertTrue(ex.getMessage().contains("management.endpoint.health.group.readiness.exclude"));
+        assertTrue(ex.getMessage().contains("management.endpoint.health.group.readiness.status.http-mapping"));
+        assertTrue(ex.getMessage().contains("management.endpoint.health.group.liveness.include"));
+        assertTrue(ex.getMessage().contains("management.endpoints.web.exposure.include"));
+        assertTrue(ex.getMessage().contains("management.health.livenessstate.enabled"));
+        assertTrue(ex.getMessage().contains("management.health.readinessstate.enabled"));
+        assertFalse(beanFactoryPostProcessed.get(),
+                "Validação R304 deve falhar antes do refresh/Flyway/DataSource");
+        assertPortNotListening(port);
+    }
+
+    @Test
+    @DisplayName("R304-R1-01 & R304-R1-02. Sobrescritas CLI e SPRING_APPLICATION_JSON de status.order, UNKNOWN=200, health.access=none e add-additional-paths=false abortam antes de Flyway e HTTP")
+    void r304R1StatusOrderHealthAccessAndAdditionalPathsOverridesAbortBeforeStartup() throws Exception {
+        int port = findFreePort();
+        AtomicBoolean beanFactoryPostProcessed = new AtomicBoolean(false);
+
+        SpringApplication app = new SpringApplication(RewitApplication.class);
+        app.setWebApplicationType(WebApplicationType.SERVLET);
+        app.setAdditionalProfiles("prod");
+        app.addInitializers(ctx -> ctx.addBeanFactoryPostProcessor(bf -> beanFactoryPostProcessed.set(true)));
+
+        List<String> args = new ArrayList<>();
+        args.add("--server.port=" + port);
+        args.add("--rewit.environment=production");
+        args.add("--spring.datasource.url=jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full");
+        args.add("--spring.datasource.username=rewit_app");
+        args.add("--spring.datasource.password=app-prod-pass-Xq7#kP2v!9z");
+        args.add("--rewit.datasource.media.username=rewit_media");
+        args.add("--rewit.datasource.media.password=media-prod-pass-Kp4!xV7s#3w");
+        args.add("--rewit.datasource.moderation.username=rewit_mod");
+        args.add("--rewit.datasource.moderation.password=mod-prod-pass-Yr8#mN4q!6t");
+        args.add("--spring.flyway.user=rewit_migrator");
+        args.add("--spring.flyway.password=flyway-prod-pass-Lw3!rT9d#5y");
+        args.add("--spring.data.redis.host=redis.rewit.internal");
+        args.add("--spring.data.redis.port=6380");
+        args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
+        args.add("--spring.data.redis.ssl.enabled=true");
+        args.add("--rewit.minio.endpoint=https://s3.us-east-1.amazonaws.com");
+        args.add("--rewit.minio.access-key=AKIAIOSFODNN7PRODKEY");
+        args.add("--rewit.minio.secret-key=storage-prod-secret-9fT2mQ8z!7p");
+        args.add("--rewit.minio.bucket-name=rewit-prod-media");
+        args.add("--rewit.security.jwt-secret=prod-jwt-secret-entropia-csprng-Zp4!Qw8@Lk2#9x");
+        args.add("--rewit.security.password-pepper=prod-pepper-secret-entropia-csprng-Rm7!Vx2@Np9#");
+        args.add("--rewit.security.refresh-token-secret=prod-refresh-secret-entropia-csprng-Tk5!Bj8@Wd3#");
+        args.add("--rewit.security.moderation-audit-secret=prod-mod-audit-secret-entropia-csprng-Kp9!Zx4@Qc1#");
+        args.add("--rewit.rate-limit.key-secret=prod-rate-limit-secret-entropia-Hy6$Vb3%Nm1&8z");
+        args.add("--rewit.account.purge.enabled=true");
+        args.add("--rewit.account.email-reservation-secret=prod-email-reservation-secret-csprng-Gf2!Rt7@Jk4#");
+        // R304-R1-01 & R304-R1-02 via CLI + SPRING_APPLICATION_JSON
+        args.add("--management.endpoint.health.status.order=UP,DOWN,OUT_OF_SERVICE,UNKNOWN");
+        args.add("--management.endpoint.health.group.readiness.status.order=UP,DOWN");
+        args.add("--management.endpoint.health.group.readiness.status.http-mapping.UNKNOWN=200");
+        args.add("--management.endpoint.health.access=none");
+        args.add("--spring.application.json={\"management\":{\"endpoint\":{\"health\":{\"probes\":{\"add-additional-paths\":false}}}}}");
+
+        ProductionEnvironmentValidator.InvalidConfigurationException ex = assertThrows(
+                ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> {
+                    try (ConfigurableApplicationContext ignored = app.run(args.toArray(String[]::new))) {
+                        // Nunca deve subir
+                    }
+                }
+        );
+
+        assertTrue(ex.getMessage().contains("management.endpoint.health.status.order"));
+        assertTrue(ex.getMessage().contains("management.endpoint.health.group.readiness.status.order"));
+        assertTrue(ex.getMessage().contains("management.endpoint.health.group.readiness.status.http-mapping"));
+        assertTrue(ex.getMessage().contains("endpoint 'health'"));
+        assertTrue(ex.getMessage().contains("management.endpoint.health.probes.add-additional-paths"));
+        assertFalse(beanFactoryPostProcessed.get(),
+                "Validação R304-R1 deve falhar antes do refresh/Flyway/DataSource");
+        assertPortNotListening(port);
+    }
+
     private static int findFreePort() throws IOException {
         try (ServerSocket socket = new ServerSocket(0)) {
             return socket.getLocalPort();
