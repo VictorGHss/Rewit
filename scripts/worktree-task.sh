@@ -561,7 +561,7 @@ inspect_worktree_status() {
   STATUS_UNTRACKED_PATHS=()
   LAST_INSPECT_ERROR=""
 
-  local entry="" x="" y="" path="" skip_old_path=""
+  local entry="" x="" y="" path=""
   local fd="" pid="" rc=0
 
   exec {fd}< <(trap - ERR; git_c -C "$wt_path" status --porcelain=v1 -z --untracked-files=all 2>/dev/null)
@@ -581,7 +581,7 @@ inspect_worktree_status() {
 
     # Em rename/copy no índice (R ou C), o Git emite o caminho original logo em seguida
     if [[ "$x" == "R" || "$x" == "C" ]]; then
-      IFS= read -r -u "$fd" -d '' skip_old_path || true
+      IFS= read -r -u "$fd" -d '' _ || true
     fi
 
     if [[ "$x" == "?" && "$y" == "?" ]]; then

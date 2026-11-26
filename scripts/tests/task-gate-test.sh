@@ -997,6 +997,39 @@ PYEOF
   assert_rc 3 "arquivo sensível em --file deve bloquear sem leitura (3)"
   assert_not_contains "$LAST_OUT$LAST_ERR" "$file_secret"
 
+  # Retrocompatibilidade de --file (COMMIT_EDITMSG ignora comentários '#')
+  local editmsg_file="${CASE_DIR}/commit-editmsg.txt"
+  printf '# Comentário de editor Git\n\nfeat(gate): preservar modo COMMIT_EDITMSG\n# Rodapé comentado\n' > "$editmsg_file"
+  run_gate_in "$CASE_REPO" check-commit-msg --file "$editmsg_file"
+  assert_rc 0 "--file padrão deve preservar compatibilidade com comentários '#' de COMMIT_EDITMSG (0)"
+
+  # Modo literal (--file --no-strip-comments): subject iniciado por '#' NÃO pode ser truncado
+  local hash_subject_file="${CASE_DIR}/hash-subject.txt"
+  printf '#123 ajuste sem formato\n\nfeat(gate): linha posterior que nao pode mascarar o subject\n' > "$hash_subject_file"
+  run_gate_in "$CASE_REPO" check-commit-msg --file "$hash_subject_file" --no-strip-comments
+  assert_rc 3 "--no-strip-comments deve bloquear subject iniciado por '#' mesmo com linha posterior válida (3)"
+
+  local leading_blank_file="${CASE_DIR}/leading-blank.txt"
+  printf '\nfeat(gate): linha vazia inicial nao pode ser ignorada em modo literal\n' > "$leading_blank_file"
+  run_gate_in "$CASE_REPO" check-commit-msg --file "$leading_blank_file" --no-strip-comments
+  assert_rc 3 "--no-strip-comments deve bloquear linha inicial vazia em mensagem literal (3)"
+
+  local literal_multiline_file="${CASE_DIR}/literal-multiline.txt"
+  printf 'feat(ci): validar mensagem multilinha literal\n\nCorpo explicativo.\n# Linha iniciada por cerquilha no corpo\n\nBREAKING CHANGE: contrato atualizado\n' > "$literal_multiline_file"
+  run_gate_in "$CASE_REPO" check-commit-msg --file "$literal_multiline_file" --no-strip-comments
+  assert_rc 0 "--no-strip-comments deve aprovar mensagem multilinha válida com '#' no corpo e BREAKING CHANGE (0)"
+  assert_contains "$LAST_OUT" "Breaking change : sim"
+
+  local literal_empty_bc_file="${CASE_DIR}/literal-empty-bc.txt"
+  printf 'fix(ci): validar rodape vazio\n\nBREAKING CHANGE:   \n' > "$literal_empty_bc_file"
+  run_gate_in "$CASE_REPO" check-commit-msg --file "$literal_empty_bc_file" --no-strip-comments
+  assert_rc 3 "--no-strip-comments deve bloquear BREAKING CHANGE vazio (3)"
+
+  run_gate_in "$CASE_REPO" check-commit-msg --message "feat: teste" --no-strip-comments
+  assert_rc 2 "--no-strip-comments combinado com --message deve retornar erro de uso (2)"
+  run_gate_in "$CASE_REPO" check-commit-msg --file "$literal_multiline_file" --no-strip-comments --no-strip-comments
+  assert_rc 2 "--no-strip-comments duplicado deve retornar erro de uso (2)"
+
   # Formatos inválidos e argumentos inválidos
   run_gate_in "$CASE_REPO" check-commit-msg --message "feat: "
   assert_rc 3 "descrição ausente deve bloquear (3)"

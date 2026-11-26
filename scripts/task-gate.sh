@@ -47,7 +47,6 @@ readonly BRANCH_PREFIX="agent/neon/"
 readonly WORKTREE_SUBDIR="source/rewit-worktrees"
 
 # Variáveis de contexto do repositório
-REPO_COMMON_DIR=""
 MAIN_WORKTREE_PATH=""
 MAIN_WORKTREE_REALPATH=""
 CURRENT_TOPLEVEL=""
@@ -220,11 +219,14 @@ Comandos disponíveis (todos estritamente READ-ONLY):
       históricas, novas ocorrências de supressão de diagnósticos fora de `.md`,
       validação do subconjunto documentado de links Markdown e resumo de módulos.
 
-  check-commit-msg (--message "<mensagem>" | --file <arquivo>)
+  check-commit-msg (--message "<mensagem>" | --file <arquivo> [--no-strip-comments])
       Valida estruturalmente a mensagem segundo Conventional Commits (tipos
       permitidos: feat, fix, docs, style, refactor, perf, test, chore).
       A abertura de `--file` usa descritor seguro (O_NOFOLLOW | O_NONBLOCK,
       fstat S_ISREG, limite estrito de 64 KiB) sem imprimir conteúdo bruto.
+      Por padrão `--file` ignora comentários iniciados por `#` (compatível com
+      COMMIT_EDITMSG); use `--no-strip-comments` para validar mensagens literais
+      extraídas de `git log` sem descartar linhas iniciadas por `#`.
       A conformidade com português brasileiro exige revisão humana.
 
   pre-merge --slug <slug>
@@ -488,7 +490,7 @@ resolve_repo_context() {
   common_raw="$(git_ro rev-parse --path-format=absolute --git-common-dir)" || die_env "Falha ao resolver o diretório Git comum."
 
   CURRENT_TOPLEVEL="$(realpath -e -- "$toplevel_raw")" || die_env "Falha ao normalizar a raiz da worktree atual."
-  REPO_COMMON_DIR="$(realpath -e -- "$common_raw")" || die_env "Falha ao normalizar o diretório Git comum."
+  realpath -e -- "$common_raw" >/dev/null || die_env "Falha ao normalizar o diretório Git comum."
 
   load_worktrees_list
 
@@ -510,7 +512,7 @@ inspect_worktree_status() {
   STATUS_UNTRACKED_PATHS=()
   LAST_INSPECT_ERROR=""
 
-  local entry="" x="" y="" path="" skip_old_path=""
+  local entry="" x="" y="" path=""
   local fd="" pid="" rc=0
 
   exec {fd}< <(trap - ERR; git_ro -C "$wt_path" status --porcelain=v1 -z --untracked-files=all 2>/dev/null)
@@ -529,7 +531,7 @@ inspect_worktree_status() {
     path="${entry:3}"
 
     if [[ "$x" == "R" || "$x" == "C" ]]; then
-      IFS= read -r -u "$fd" -d '' skip_old_path || true
+      IFS= read -r -u "$fd" -d '' _ || true
     fi
 
     if [[ "$x" == "?" && "$y" == "?" ]]; then
@@ -1912,7 +1914,7 @@ if not any_mod:
 print("")
 print("Recomendações de validação manual (não executadas pelo gate):")
 if modules["backend"]:
-    print("  - backend     : executar testes em infraestrutura descartável TEST_* (ex.: cd backend && ./mvnw test)")
+    print("  - backend     : executar testes em infraestrutura descartável TEST_* (Linux: ./scripts/test-infra.sh run | Windows: .\\scripts\\test-infra.ps1 run)")
 if modules["apps/mobile"]:
     print("  - apps/mobile : executar análise estática e testes Flutter (cd apps/mobile && flutter analyze && flutter test)")
 if modules["apps/admin"]:
@@ -1958,7 +1960,7 @@ PYEOF
 
 cmd_check_commit_msg() {
   local message="" file_path=""
-  local msg_set=0 file_set=0
+  local msg_set=0 file_set=0 no_strip_comments=0
 
   while (( $# > 0 )); do
     case "$1" in
@@ -1977,6 +1979,9 @@ cmd_check_commit_msg() {
       --file=*)
         (( file_set == 0 )) || die_usage "Opção --file informada mais de uma vez."
         file_path="${1#--file=}"; file_set=1; shift ;;
+      --no-strip-comments)
+        (( no_strip_comments == 0 )) || die_usage "Opção --no-strip-comments informada mais de uma vez."
+        no_strip_comments=1; shift ;;
       *)
         die_usage "Argumento ou opção desconhecida em 'check-commit-msg': $1" ;;
     esac
@@ -1987,6 +1992,9 @@ cmd_check_commit_msg() {
   fi
   if (( msg_set == 1 && file_set == 1 )); then
     die_usage "Não combine --message com --file em 'check-commit-msg'."
+  fi
+  if (( no_strip_comments == 1 && file_set == 0 )); then
+    die_usage "A opção --no-strip-comments exige --file <arquivo>."
   fi
 
   local mode="message"
@@ -2004,7 +2012,7 @@ cmd_check_commit_msg() {
   fi
 
   local py_rc=0
-  python3 - "$mode" "$input_arg" <<'PYEOF' || py_rc=$?
+  python3 - "$mode" "$input_arg" "$no_strip_comments" <<'PYEOF' || py_rc=$?
 import errno
 import os
 import re
@@ -2013,6 +2021,7 @@ import sys
 
 mode = sys.argv[1]
 arg = sys.argv[2]
+no_strip_comments = (sys.argv[3] == "1")
 
 EXIT_OK = 0
 EXIT_BLOCKED = 3
@@ -2086,15 +2095,20 @@ else:
     full_text = arg
 
 lines = full_text.splitlines()
-if mode == "file":
+if mode == "file" and not no_strip_comments:
     non_comment = [ln for ln in lines if not ln.startswith("#")]
+    while non_comment and not non_comment[0].strip():
+        non_comment.pop(0)
+elif mode == "message":
+    non_comment = lines
+    while non_comment and not non_comment[0].strip():
+        non_comment.pop(0)
 else:
+    # Modo literal (--file --no-strip-comments): preserva integralmente o subject
+    # real do commit, sem descartar linhas iniciadas por '#' nem linhas iniciais.
     non_comment = lines
 
-while non_comment and not non_comment[0].strip():
-    non_comment.pop(0)
-
-if not non_comment:
+if not non_comment or all(not ln.strip() for ln in non_comment):
     sys.stderr.write("[BLOQUEADO] Mensagem de commit vazia.\n")
     sys.exit(EXIT_BLOCKED)
 

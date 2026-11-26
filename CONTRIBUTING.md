@@ -44,7 +44,12 @@ A branch **`main`** é a única base canônica de integração do repositório.
 2. **Implemente respeitando a Clean Architecture** (`domain` puro, portas em `application`, adaptadores em `infrastructure`/`integrations`, contratos HTTP em `presentation`).
 3. **Execute o gate local e os testes automatizados**:
    - Execute `./scripts/task-gate.sh check` (verificação READ-ONLY de diff, caminhos sensíveis, padrões de credenciais, migrations Flyway históricas, anotações de supressão e links Markdown) e valide a mensagem com `./scripts/task-gate.sh check-commit-msg --message "<mensagem>"`.
-   - Execute os testes e análises estáticas dos módulos alterados utilizando exclusivamente infraestrutura descartável (`TEST_*`).
+   - Execute os testes e análises estáticas dos módulos alterados utilizando exclusivamente infraestrutura descartável (`TEST_*`):
+     - Backend: `./scripts/test-infra.sh run` (Linux) ou `.\scripts\test-infra.ps1 run` (Windows).
+     - Admin Web (`apps/admin`): `npm ci && npm run lint && npm test && npm run build` (Node.js 24 LTS).
+     - Mobile (`apps/mobile`): `flutter pub get --enforce-lockfile && dart analyze && flutter test --no-pub` (Flutter `3.47.6` stable).
+     - Scripts de governança/infraestrutura/CI: `bash -n`, `shellcheck -S warning` e `./scripts/tests/*.sh`.
+   - Em Pull Requests e pushes para `main`, o workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) executa automaticamente essas validações em `ubuntu-24.04` sobre o SHA imutável do commit (incluindo `actionlint`, detecção NUL-safe de escopo e validação literal de mensagens de commit; detalhes de jobs condicionais, status checks recomendados e validações estritamente locais em [`docs/development/agent-workflow.md`](docs/development/agent-workflow.md) §2.4).
 4. **Atualize a documentação canônica afetada** e valide os links relativos.
 5. **Escreva mensagens de commit em PT-BR** seguindo **Conventional Commits** (preservando tipos padronizados como `feat`, `fix`, `docs`, `refactor`, `test`, `chore`):
    ```text

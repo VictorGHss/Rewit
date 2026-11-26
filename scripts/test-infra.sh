@@ -1820,7 +1820,7 @@ cmd_status() {
     exit "$EXIT_OK"
   fi
 
-  local line cid cname cstatus cports meta m_id m_name m_state m_owner ownership
+  local line cid cname cstatus cports meta m_name m_owner ownership
   local shown=0
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
@@ -1832,7 +1832,7 @@ cmd_status() {
     m_owner=""
     m_name="$cname"
     if [[ "$meta" == PRESENT\|* ]]; then
-      IFS='|' read -r _ m_id m_name m_state m_owner _ <<< "$meta"
+      IFS='|' read -r _ _ m_name _ m_owner _ <<< "$meta"
     fi
 
     ownership="inválida/desconhecida"

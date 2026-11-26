@@ -2,7 +2,7 @@
 
 Este runbook detalha o ciclo de vida operacional de tarefas executadas por agentes no **Rewit**, complementando o contrato obrigatório em [`AGENTS.md`](../../AGENTS.md) e os 31 princípios arquiteturais em [`PROJECT_RULES.md`](../../PROJECT_RULES.md).
 
-> **Nota de estado operacional:** o fluxo operacional dispõe de dois utilitários complementares (Linux / Bash): [`scripts/worktree-task.sh`](../../scripts/worktree-task.sh) para o ciclo de vida seguro de worktrees (`create`, `status`, `close`) e [`scripts/task-gate.sh`](../../scripts/task-gate.sh) para verificações determinísticas e estritamente READ-ONLY de governança local (`preflight`, `check`, `check-commit-msg`, `pre-merge`). O procedimento manual com comandos Git explícitos permanece documentado na Seção 1.4 e na Seção 3 como referência canônica de recuperação. Nenhuma operação remota (`fetch`, `pull`, `push`), merge ou exclusão de branch local é automatizada por esses utilitários.
+> **Nota de estado operacional:** o fluxo operacional dispõe de três utilitários locais complementares (Linux / Bash) e de um pipeline contínuo no GitHub Actions: [`scripts/worktree-task.sh`](../../scripts/worktree-task.sh) para o ciclo de vida seguro de worktrees (`create`, `status`, `close`), [`scripts/task-gate.sh`](../../scripts/task-gate.sh) para verificações determinísticas e estritamente READ-ONLY de governança local (`preflight`, `check`, `check-commit-msg`, `pre-merge`), [`scripts/test-infra.sh`](../../scripts/test-infra.sh) para infraestrutura descartável de testes backend em Linux e [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) para execução contínua em Pull Requests e pushes na `main`. O procedimento manual com comandos Git explícitos permanece documentado na Seção 1.4 e na Seção 3 como referência canônica de recuperação. Nenhuma operação remota (`fetch`, `pull`, `push`), merge ou exclusão de branch local é automatizada pelos utilitários locais.
 
 ---
 
@@ -205,8 +205,10 @@ Para o estado protegido atual do projeto, os três caminhos esperados são:
    ./scripts/task-gate.sh check-commit-msg --message "feat(worktrees): adicionar verificação local"
    # Ou a partir de um arquivo regular UTF-8 (<= 64 KiB, aberto via O_NOFOLLOW | O_NONBLOCK):
    ./scripts/task-gate.sh check-commit-msg --file /tmp/mensagem.txt
+   # Modo literal (para mensagens extraídas de `git log`, sem descartar linhas iniciadas por `#`):
+   ./scripts/task-gate.sh check-commit-msg --file /tmp/mensagem-commit.txt --no-strip-comments
    ```
-   Valida estruturalmente Conventional Commits (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, escopo opcional não vazio, `!` e rodapé `BREAKING CHANGE:` consistentes, descrição obrigatória) usando abertura segura por descritor (`os.open` com `O_NOFOLLOW | O_NONBLOCK`, `fstat`/`S_ISREG`, leitura limitada a `64 KiB + 1` com recusa de symlinks, FIFOs, diretórios, binários e caminhos sensíveis) sem exibir conteúdo bruto. **A conformidade com português brasileiro (PT-BR) exige revisão humana** (explicitada em `[AVISO]`).
+   Valida estruturalmente Conventional Commits (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, escopo opcional não vazio, `!` e rodapé `BREAKING CHANGE:` consistentes, descrição obrigatória) usando abertura segura por descritor (`os.open` com `O_NOFOLLOW | O_NONBLOCK`, `fstat`/`S_ISREG`, leitura limitada a `64 KiB + 1` com recusa de symlinks, FIFOs, diretórios, binários e caminhos sensíveis) sem exibir conteúdo bruto. Por padrão `--file` preserva compatibilidade com `COMMIT_EDITMSG` ignorando comentários `#`; `--no-strip-comments` preserva integralmente o subject literal do commit (evitando truncamento de subjects iniciados por `#`). **A conformidade com português brasileiro (PT-BR) exige revisão humana** (explicitada em `[AVISO]`).
 
 4. **`pre-merge`** — antes de solicitar/executar integração local por fast-forward na `main`:
    ```bash
@@ -242,7 +244,67 @@ Para o estado protegido atual do projeto, os três caminhos esperados são:
   - A detecção de arquivos sensíveis e padrões de credenciais é heurística/conservadora e **não garante** identificação de todos os segredos possíveis.
   - O parser de links Markdown cobre exclusivamente o subconjunto documentado acima (não implementa CommonMark/GFM completo, não valida URLs HTTP/HTTPS externas e marca sintaxes não suportadas ou fences sem fechamento como `[NAO_VERIFICAVEL]`).
   - O resultado de `pre-merge` reflete exclusivamente a elegibilidade observada no instante da execução e não garante que o estado não mude antes da integração manual.
-  - Compatibilidade com **Bash 4.4** e **Git 2.36** foi verificada **estaticamente** quanto aos recursos empregados (com checagem de versão Git testada via wrapper simulado); a validação empírica ocorreu em Linux com **Bash 5.3.0**, **Git 2.56.1** e **Python 3.14.10**, sem execução de `shellcheck` (ausente no ambiente).
+  - Compatibilidade com **Bash 4.4** e **Git 2.36** foi verificada **estaticamente** quanto aos recursos empregados (com checagem de versão Git testada via wrapper simulado); a validação empírica ocorreu em Linux com **Bash 5.3.0**, **Git 2.56.1** e **Python 3.14.10**, complementada por `shellcheck -S warning` (executado no CI e localmente via container descartável `shellcheck`).
+
+### 2.4 CI e Governança Contínua (`.github/workflows/ci.yml`)
+
+O repositório mantém um único workflow consolidado em [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) (`CI e Governança`), apoiado por três helpers focados em `scripts/ci/` ([`verify-head-sha.sh`](../../scripts/ci/verify-head-sha.sh), [`detect-changes.sh`](../../scripts/ci/detect-changes.sh) e [`validate-pr-commits.sh`](../../scripts/ci/validate-pr-commits.sh)), que leva as validações locais das Fases 1–4 para execução automática no GitHub Actions em runners explicitamente versionados (`ubuntu-24.04`), com permissões mínimas (`contents: read`), sem `pull_request_target`, sem exposição de segredos em PRs e com todas as Actions efetivamente executadas fixadas por SHA completo de commit (sem dependência transitiva executada por tag mutável).
+
+#### Triggers, Consistência do SHA e Concorrência
+- **`pull_request` (alvo `main`)**: todos os jobs de código (`changes`, `governance`, `backend`, `admin` e `mobile`) fazem checkout diretamente do SHA imutável `github.event.pull_request.head.sha` e confirmam `HEAD == EXPECTED_SHA` via [`scripts/ci/verify-head-sha.sh`](../../scripts/ci/verify-head-sha.sh) antes de qualquer validação — eliminando a janela TOCTOU de referências mutáveis (`refs/pull/<n>/head`) sem depender apenas de `concurrency` e sem interpolar valores de eventos diretamente em scripts shell. Execuções redundantes do mesmo PR são canceladas via `concurrency` (`cancel-in-progress: true`).
+- **`push` (`main`)**: todos os jobs fazem checkout e verificam exatamente `github.sha`, executando governança e todos os módulos (`backend`, `postgres_provisioning`, `admin` e `mobile`), preservando execuções sequenciais na `main` (`cancel-in-progress: false`).
+- Não há filtro `paths:` no nível do workflow para impedir que status checks obrigatórios fiquem permanentemente pendentes.
+
+#### Jobs do Workflow e Condições de Execução
+
+| Job (`id`) | Nome do Status Check | Quando executa | Escopo validado |
+| :--- | :--- | :--- | :--- |
+| `changes` | `Detectar escopo alterado` | Sempre | Em `push` na `main`, valida `HEAD == github.sha` e habilita todos os módulos. Em `pull_request`, executa [`scripts/ci/detect-changes.sh`](../../scripts/ci/detect-changes.sh): valida `HEAD == PR_HEAD_SHA`, calcula `git merge-base` e coleta `git diff --no-renames -z --name-only` por redirecionamento direto para arquivo temporário com `trap` (propagando qualquer falha Git e tratando renomeações origem/destino e caminhos com espaços/tabs/Unicode/quebras de linha com segurança via NUL). Alterações em `.github/workflows/ci.yml` ou `scripts/ci/*` ativam todos os módulos; alterações em `.gitattributes` ou `infrastructure/postgres/*` ativam `backend` e `postgres_provisioning`. |
+| `governance` | `Governança e scripts` | Sempre | Validação do SHA checked out; `bash -n` / `sh -n` e `shellcheck -S warning` (sem exclusões genéricas) em `scripts/*.sh`, `scripts/ci/*.sh`, `scripts/tests/*.sh` e `infrastructure/postgres/`; validação de `.github/workflows/*.yml` com `actionlint` `v1.7.12` baixado com verificação explícita de digest SHA-256; suítes descartáveis `worktree-task-test.sh`, `task-gate-test.sh`, `test-infra-test.sh` e `ci-workflow-test.sh`; e, em `pull_request`, `scripts/task-gate.sh check --base <base-sha>` + [`scripts/ci/validate-pr-commits.sh`](../../scripts/ci/validate-pr-commits.sh) (sem process substitution, com `--no-strip-comments` para validar o subject literal de cada commit não-merge e aviso explícito quando o intervalo contém apenas commits de merge, higienizando eventuais variáveis `GIT_*` do runner fora da allowlist sem enfraquecer o gate). |
+| `backend` | `Backend (Java 25 + infra descartável)` | `push` em `main` ou PR tocando `backend/`, `infrastructure/postgres/`, `.gitattributes`, `infrastructure/docker/backend.Dockerfile`, `docker-compose*.yml`, `scripts/test-infra.sh`, `scripts/ci/*` ou `ci.yml` | Validação do SHA checked out, Java 25 LTS (Temurin) + cache Maven, `TEST_INFRA_RUNTIME=docker ./scripts/test-infra.sh doctor --instance ci` e `TEST_INFRA_RUNTIME=docker ./scripts/test-infra.sh run --instance ci` (sem duplicar infraestrutura no YAML). Quando `postgres_provisioning` está ativo (`.gitattributes`, `infrastructure/postgres/*`, `scripts/ci/*`, `ci.yml` ou `push`), executa `PROVISIONING_TEST_RUNTIME=docker bash infrastructure/postgres/tests/provisioning-test.sh "$EXPECTED_SHA"`, exercitando o fluxo padrão de clone limpo com `core.autocrlf=true`, `.gitattributes` e bit `100755` sobre o commit exato testado. |
+| `admin` | `Admin Web (Node 24 + Vitest)` | `push` em `main` ou PR tocando `apps/admin/`, `infrastructure/docker/admin.Dockerfile`, `scripts/ci/*` ou `ci.yml` | Validação do SHA checked out, Node.js 24 LTS + cache npm, `npm ci`, `npm run lint`, `npm test` e `npm run build` em `apps/admin`. |
+| `mobile` | `Mobile (Flutter 3.47.6)` | `push` em `main` ou PR tocando `apps/mobile/`, `scripts/ci/*` ou `ci.yml` | Validação do SHA checked out, cache explícito de `pub-cache` via `actions/cache` fixada por SHA (`v6.1.0`), `subosito/flutter-action` fixada por SHA (`v2.23.0`) com `cache: false` e `pub-cache: false` (impedindo a execução transitiva da tag mutável `actions/cache@v5`; custo de desempenho restrito ao download limpo do SDK Flutter ~20–40s quando o job mobile executa), `flutter pub get --enforce-lockfile`, `dart analyze` e `flutter test --no-pub` em `apps/mobile` (sem build Android completo nem emulador). |
+| `ci-gate` | `Status consolidado de CI` | Sempre (`if: always()`) | Consolida todos os jobs acima: exige `success` em `changes` e `governance`, e exige `success` ou `skipped` em `backend`, `admin` e `mobile` — garantindo conclusão determinística mesmo em PRs de documentação. |
+
+#### Status Checks Obrigatórios Recomendados (Configuração Posterior na `main`)
+A proteção de branch / rulesets no GitHub permanece configuração manual posterior do mantenedor. Quando habilitada para `main`, exija os dois status checks determinísticos abaixo (que executam em 100% dos PRs sem risco de pendência eterna):
+1. **`Governança e scripts`** (`governance`)
+2. **`Status consolidado de CI`** (`ci-gate`)
+
+#### O que Permanece Estritamente Local
+O CI complementa — e **não substitui** — as etapas locais sob controle do mantenedor e dos agentes:
+- Criação, inspeção e encerramento de worktrees ([`scripts/worktree-task.sh`](../../scripts/worktree-task.sh)).
+- `preflight` e `pre-merge` ([`scripts/task-gate.sh`](../../scripts/task-gate.sh)), incluindo validação do hash e da lista exata das alterações locais protegidas na `main`.
+- Revisão adversarial estritamente READ-ONLY do Neon Medium na worktree da tarefa.
+- Revisão humana de clareza em PT-BR das mensagens de commit e documentação.
+- Autorizações independentes para commit, integração local (`git merge --ff-only`), push, remoção de worktree e remoção de branch.
+
+#### Reprodução Local das Validações do CI
+Execute na worktree da tarefa:
+```bash
+# 1) Sintaxe e ShellCheck (se instalado localmente; ou via container descartável shellcheck)
+for s in scripts/*.sh scripts/ci/*.sh scripts/tests/*.sh infrastructure/postgres/tests/provisioning-test.sh; do bash -n "$s"; done
+sh -n infrastructure/postgres/init/02-create-app-role.sh
+shellcheck -S warning scripts/*.sh scripts/ci/*.sh scripts/tests/*.sh infrastructure/postgres/init/02-create-app-role.sh infrastructure/postgres/tests/provisioning-test.sh
+
+# 2) Suítes de governança, CI e gate local
+./scripts/tests/worktree-task-test.sh
+./scripts/tests/task-gate-test.sh
+./scripts/tests/test-infra-test.sh
+./scripts/tests/ci-workflow-test.sh
+./scripts/task-gate.sh check --base main
+
+# 3) Backend (infraestrutura descartável Docker/Podman)
+./scripts/test-infra.sh run
+# Opcional quando alterar infrastructure/postgres/ ou .gitattributes:
+bash infrastructure/postgres/tests/provisioning-test.sh HEAD
+
+# 4) Admin Web (Node 24 LTS; compatível também com Node 22.22.2+)
+(cd apps/admin && npm ci && npm run lint && npm test && npm run build)
+
+# 5) Mobile (Flutter 3.47.6 stable)
+(cd apps/mobile && flutter pub get --enforce-lockfile && dart analyze && flutter test --no-pub)
+```
 
 ---
 

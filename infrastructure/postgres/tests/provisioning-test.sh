@@ -102,8 +102,8 @@ start_pg() {
 
 # wait_pg <nome> -> 0 quando healthy após o init completo; 1 se o container terminar
 wait_pg() {
-    local name="$1" i state health
-    for i in $(seq 1 120); do
+    local name="$1" state health
+    for _ in $(seq 1 120); do
         state=$("$RUNTIME" inspect -f '{{.State.Status}}' "$name")
         if [ "$state" = "exited" ] || [ "$state" = "dead" ] || [ "$state" = "stopped" ]; then return 1; fi
         health=$("$RUNTIME" inspect -f '{{.State.Health.Status}}' "$name" 2>/dev/null || echo "")
