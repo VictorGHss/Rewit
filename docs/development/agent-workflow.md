@@ -2,7 +2,7 @@
 
 Este runbook detalha o ciclo de vida operacional de tarefas executadas por agentes no **Rewit**, complementando o contrato obrigatório em [`AGENTS.md`](../../AGENTS.md) e os 31 princípios arquiteturais em [`PROJECT_RULES.md`](../../PROJECT_RULES.md).
 
-> **Nota de estado operacional:** o ciclo de vida de worktrees conta com o utilitário conservador [`scripts/worktree-task.sh`](../../scripts/worktree-task.sh) (Linux / Bash) para criação (`create`), inspeção READ-ONLY (`status`) e encerramento seguro (`close`). O procedimento manual com comandos Git explícitos permanece documentado na Seção 1.4 e na Seção 3 como referência canônica de recuperação. Nenhuma operação remota (`fetch`, `pull`, `push`) ou exclusão de branch local é automatizada pelo utilitário.
+> **Nota de estado operacional:** o fluxo operacional dispõe de dois utilitários complementares (Linux / Bash): [`scripts/worktree-task.sh`](../../scripts/worktree-task.sh) para o ciclo de vida seguro de worktrees (`create`, `status`, `close`) e [`scripts/task-gate.sh`](../../scripts/task-gate.sh) para verificações determinísticas e estritamente READ-ONLY de governança local (`preflight`, `check`, `check-commit-msg`, `pre-merge`). O procedimento manual com comandos Git explícitos permanece documentado na Seção 1.4 e na Seção 3 como referência canônica de recuperação. Nenhuma operação remota (`fetch`, `pull`, `push`), merge ou exclusão de branch local é automatizada por esses utilitários.
 
 ---
 
@@ -89,7 +89,7 @@ O subcomando `status` consulta todas as worktrees registradas sem alterar arquiv
 | `4` | Erro de ambiente, dependência ou falha inesperada de comando Git/sistema | Execução fora de repositório Git; Bash `< 4.4` ou Git `< 2.36`; utilitário obrigatório ausente no `PATH`; falha de `mkdir`, `git worktree add`, `git worktree remove` ou comando Git global/auxiliar inesperado. |
 
 ### 1.3 Preflight Obrigatório Antes de Qualquer Edição
-Antes de alterar qualquer arquivo na worktree atribuída, confirme com comandos reais:
+Antes de alterar qualquer arquivo na worktree atribuída, confirme com comandos reais (preferencialmente via `./scripts/task-gate.sh preflight`, descrito na Seção 2.3):
 
 1. Diretório real (`pwd` / `realpath .`) corresponde à worktree atribuída.
 2. Branch atual (`git rev-parse --abbrev-ref HEAD`) corresponde à branch autorizada.
@@ -131,11 +131,118 @@ git worktree remove "$HOME/source/rewit-worktrees/<slug>"
 3. Implementar estritamente o escopo autorizado, respeitando idioma PT-BR em documentação, comentários explicativos e mensagens de commit.
 4. Executar validações apropriadas ao escopo:
    - Testes de integração backend **exclusivamente** em infraestrutura descartável (`TEST_*`, conforme [`docs/development/local-setup.md`](local-setup.md)); nunca rodar migrations ou testes contra bancos persistentes.
-   - Para alterações em [`scripts/worktree-task.sh`](../../scripts/worktree-task.sh), executar `bash -n` e a suíte descartável [`./scripts/tests/worktree-task-test.sh`](../../scripts/tests/worktree-task-test.sh) (nunca executar `close --execute` contra worktrees reais do repositório durante testes).
+   - Para alterações em [`scripts/worktree-task.sh`](../../scripts/worktree-task.sh) ou [`scripts/task-gate.sh`](../../scripts/task-gate.sh), executar `bash -n` e as suítes descartáveis [`./scripts/tests/worktree-task-test.sh`](../../scripts/tests/worktree-task-test.sh) e [`./scripts/tests/task-gate-test.sh`](../../scripts/tests/task-gate-test.sh) (nunca executar `close --execute` contra worktrees reais do repositório durante testes).
+   - Executar `./scripts/task-gate.sh check` em modo READ-ONLY antes de encerrar a entrega para auditar o conjunto integral de alterações.
    - Preferir testes reais (Spring Security, PostgreSQL/PostGIS, Flyway, HTTP/RFC 7807, transações, canais nativos Android/iOS) em vez de mocks enganosos.
    - Em tarefas exclusivamente documentais, executar verificações documentais, links e `git diff --check` sem rodar suítes de aplicação ou migrations desnecessariamente.
 5. Manter a documentação canônica sincronizada junto da implementação (Seção 4 abaixo).
 6. Nunca inspecionar ou expor `.env`, tokens, chaves ou credenciais.
+
+### 2.3 Gate Local de Governança (`scripts/task-gate.sh`)
+
+O utilitário [`scripts/task-gate.sh`](../../scripts/task-gate.sh) transforma verificações recorrentes de governança em checagens locais determinísticas, *fail-closed* e **estritamente READ-ONLY** (usa `GIT_OPTIONAL_LOCKS=0`, isola configurações externas com `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null` e `GIT_CONFIG_NOSYSTEM=1`, neutraliza `diff.external` e cores, não escreve no índice nem em referências, não cria arquivos temporários no repositório, não instala hooks nem dependências e não executa builds pesados).
+
+#### Relação entre `worktree-task.sh` e `task-gate.sh`
+- [`scripts/worktree-task.sh`](../../scripts/worktree-task.sh) gerencia o **ciclo de vida das worktrees** (`create`, `status`, `close`).
+- [`scripts/task-gate.sh`](../../scripts/task-gate.sh) audita a **conformidade e a integridade da tarefa** antes de editar (`preflight`), antes da entrega (`check`), antes do commit (`check-commit-msg`) e antes da integração manual (`pre-merge`).
+
+#### Segurança de Ambiente (`GIT_*`)
+- Antes da primeira invocação do `git` (inclusive em `--help` e na checagem de versão), o gate inspeciona todas as variáveis de ambiente `GIT_*` exportadas e **rejeita com código `3`** qualquer variável fora da allowlist estrita de UX/lock (`GIT_OPTIONAL_LOCKS`, `GIT_PAGER`, `GIT_EDITOR`, `GIT_TERMINAL_PROMPT` — todas neutralizadas internamente em cada chamada Git).
+- Essa proteção bloqueia tentativas de redirecionamento de repositório/índice (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`), injeção de configuração (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG`) e efeitos colaterais de tracing (`GIT_TRACE*`, `GIT_TRACE2*`). Apenas o nome da variável bloqueada é exibido, nunca seu valor.
+
+#### Requisitos Efetivos e Verificação em Runtime
+- **Sistema operacional**: Linux.
+- **Shell**: Bash **4.4 ou superior** (verificado numericamente via `BASH_VERSINFO`).
+- **Git**: **2.36 ou superior** (verificado numericamente via `git --version`).
+- **Python 3**: obrigatório para análise estrutural de diffs, redação de padrões de credenciais, abertura segura por descritor (`O_NOFOLLOW | O_NONBLOCK`, `fstat`/`S_ISREG`) e validação do subconjunto documentado de links Markdown; verificado explicitamente no `PATH` (falha com código `4` quando indisponível).
+- **Utilitários padrão**: `realpath`, `stat`, `id` e `sha256sum`.
+- **Suíte adversarial descartável**: [`scripts/tests/task-gate-test.sh`](../../scripts/tests/task-gate-test.sh) (executa exclusivamente em repositórios temporários em `/tmp`, validando snapshots READ-ONLY antes/depois — incluindo índice Git, `st_mode`, `symbolic-ref HEAD` e metadados do `git-dir` — e snapshot do repositório hospedeiro sem ler conteúdo de arquivos protegidos).
+
+#### Validação de Arquivos Locais Protegidos na `main`
+Quando a `main` possui modificações locais protegidas unstaged (` M`), um SHA-256 isolado **não** é aceito como prova suficiente: `preflight` (quando `--protected-hash` é informado) e `pre-merge` exigem a combinação explícita de:
+- `--protected-hash <sha256>` — hash determinístico de `git diff --no-ext-diff --no-color` (imune a `diff.external` e `color.diff=always`).
+- `--protected-file <caminho>` (repetível) — identidade e quantidade exata de cada caminho relativo modificado unstaged na `main` (nenhum arquivo ausente, nenhum adicional, nenhum staged, nenhum untracked e nenhum rename/deleção).
+
+Para o estado protegido atual do projeto, os três caminhos esperados são:
+- `apps/mobile/android/app/src/main/AndroidManifest.xml`
+- `apps/mobile/android/gradle.properties`
+- `apps/mobile/lib/app/config/app_config.dart`
+
+#### Quando Executar Cada Subcomando e Exemplos Completos
+
+1. **`preflight`** — imediatamente após abrir a worktree e antes de editar qualquer arquivo:
+   ```bash
+   cd "$HOME/source/rewit-worktrees/<slug>"
+   ./scripts/task-gate.sh preflight \
+     --slug <slug> \
+     --expected-base <sha> \
+     --protected-hash 997473beef188c9021bc63bed60b0f88177155c6683821573d9421613188826f \
+     --protected-file apps/mobile/android/app/src/main/AndroidManifest.xml \
+     --protected-file apps/mobile/android/gradle.properties \
+     --protected-file apps/mobile/lib/app/config/app_config.dart
+   ```
+   Valida caminho centralizado, ausência de symlinks, metadados reais do Git (recusa clones independentes com mesmo nome de pasta e worktrees `prunable`), branch `agent/neon/<slug>`, `HEAD` exato, árvore limpa, staging vazio, ausência de `untracked`, identificação inequívoca da `main` e, quando informados, hash e conjunto exato de arquivos protegidos na `main` (sem exibir conteúdo).
+
+2. **`check`** — após implementar e testar, antes de entregar para auditoria do Neon Medium:
+   ```bash
+   ./scripts/task-gate.sh check
+   # Ou especificando explicitamente a referência-base:
+   ./scripts/task-gate.sh check --base main
+   ```
+   Inspeciona todas as alterações simultaneamente (**commitadas desde o merge-base**, **staged**, **unstaged**, **untracked não ignorados**, **renames** e **deleções**):
+   - **Integridade do diff**: executa `git diff --no-ext-diff --no-color --check` nas três camadas com parser compatível com caminhos contendo `:`, espaços e Unicode (bloqueando genericamente sem vazar conteúdo caso alguma linha não seja parseável e retornando `4` em falhas inesperadas do Git) + verificação de trailing whitespace e marcadores de conflito em `untracked`; binários e symlinks são reportados como `[NAO_VERIFICAVEL]` (sem seguir symlinks para leitura de conteúdo).
+   - **Caminhos sensíveis**: bloqueia pelo nome/extensão sem abrir o arquivo (`.env`, `.env.*` exceto `.env.example`/`.env.sample`/`.env.template`, `.envrc`, keystores, chaves privadas, certificados, credenciais conhecidas, `local.properties`, `key.properties`), inclusive caminhos normalmente ignorados forçados no staging.
+   - **Padrões conservadores de credenciais**: analisa linhas adicionadas e arquivos `untracked` comuns com **redação total** (`[REDIGIDO]`), sem imprimir valores suspeitos.
+   - **Imutabilidade de migrations Flyway históricas**: compara `backend/src/main/resources/db/migration/` contra o `merge-base`, bloqueando modificação, remoção ou renomeação de migrations históricas e permitindo apenas migrations realmente novas.
+   - **Supressão de diagnósticos**: bloqueia novas ocorrências de `@SuppressWarnings` adicionadas em arquivos de código/texto fora de documentação Markdown (`*.md`), preservando ocorrências preexistentes e permitindo menções documentais explícitas em arquivos `.md`.
+   - **Subconjunto suportado de links Markdown**:
+     - *Suportado*: links e imagens inline em linha única (`[texto](dest)`, `![alt](dest)`), badges com imagem inline aninhada (`[![alt](img)](dest)`), destinos com espaços via `<...>` ou `%20`, destinos com parênteses balanceados (ex.: `doc_(v1).md`), títulos opcionais e âncoras GFM de cabeçalhos ATX (`# ...`); ignora blocos de código cercados (respeitando caractere e comprimento do delimitador de abertura/fechamento), spans de código inline com um ou múltiplos backticks e URLs externas (`http://`, `https://`, `mailto:`, `tel:`).
+     - *Não suportado (reportado como `[NAO_VERIFICAVEL]`, código `3`)*: links por referência (`[a][b]`, `[id]: url`), tags HTML (`<a href=...>` / `<img src=...>`), links multilinhas ou com parênteses desbalanceados, code fences sem fechamento e âncoras em arquivos não-Markdown fora do padrão `#L<n>`/`#L<n>-L<m>`.
+   - **Resumo por módulos**: identifica módulos afetados (`backend`, `apps/mobile`, `apps/admin`, `scripts`, `docs`, `outros`) e recomenda as validações manuais correspondentes (sem executá-las).
+
+3. **`check-commit-msg`** — antes de executar um commit autorizado:
+   ```bash
+   ./scripts/task-gate.sh check-commit-msg --message "feat(worktrees): adicionar verificação local"
+   # Ou a partir de um arquivo regular UTF-8 (<= 64 KiB, aberto via O_NOFOLLOW | O_NONBLOCK):
+   ./scripts/task-gate.sh check-commit-msg --file /tmp/mensagem.txt
+   ```
+   Valida estruturalmente Conventional Commits (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, escopo opcional não vazio, `!` e rodapé `BREAKING CHANGE:` consistentes, descrição obrigatória) usando abertura segura por descritor (`os.open` com `O_NOFOLLOW | O_NONBLOCK`, `fstat`/`S_ISREG`, leitura limitada a `64 KiB + 1` com recusa de symlinks, FIFOs, diretórios, binários e caminhos sensíveis) sem exibir conteúdo bruto. **A conformidade com português brasileiro (PT-BR) exige revisão humana** (explicitada em `[AVISO]`).
+
+4. **`pre-merge`** — antes de solicitar/executar integração local por fast-forward na `main`:
+   ```bash
+   ./scripts/task-gate.sh pre-merge \
+     --slug <slug> \
+     --protected-hash 997473beef188c9021bc63bed60b0f88177155c6683821573d9421613188826f \
+     --protected-file apps/mobile/android/app/src/main/AndroidManifest.xml \
+     --protected-file apps/mobile/android/gradle.properties \
+     --protected-file apps/mobile/lib/app/config/app_config.dart
+   ```
+   Estritamente informativo (READ-ONLY; **nunca executa `git merge`**): verifica existência da branch `agent/neon/<slug>`, identificação inequívoca da `main`, existência de commits candidatos, ausência de divergência, ausência de arquivos `staged`/`untracked`/renames na `main`, ausência de colisões de caminho com alterações locais da `main` e validação explícita do hash protegido + conjunto exato de `--protected-file` quando a `main` estiver suja.
+
+#### Interpretação dos Códigos de Saída e Rótulos de `scripts/task-gate.sh`
+- Rótulos de saída: `[APROVADO]`, `[BLOQUEADO]`, `[NAO_VERIFICAVEL]` e `[AVISO]`. Qualquer item `[BLOQUEADO]` ou `[NAO_VERIFICAVEL]` resulta em falha *fail-closed* (`código 3`); condições não verificáveis nunca são convertidas em aprovação.
+- `0`: verificação aprovada (ou `--help`).
+- `2`: erro de uso ou argumentos inválidos/duplicados/conflitantes.
+- `3`: bloqueio de governança, integridade, variável `GIT_*` bloqueada ou item obrigatório não verificável.
+- `4`: erro de ambiente, dependência ausente (ex.: `python3`, `git`), versão incompatível (`Bash < 4.4` ou `Git < 2.36`) ou falha inesperada de comando Git.
+
+#### Sequência Recomendada Durante uma Tarefa
+1. Mantenedor (ou tarefa autorizada) cria a worktree: `./scripts/worktree-task.sh create --slug <slug> --base <sha> [--allow-dirty-main]`.
+2. Neon High executa `./scripts/task-gate.sh preflight --slug <slug> --expected-base <sha> [--protected-hash <sha256> --protected-file <caminho>...]` na nova worktree.
+3. Neon High implementa código, testes descartáveis e documentação canônica.
+4. Neon High executa `./scripts/task-gate.sh check` e as suítes recomendadas para os módulos afetados.
+5. Neon Medium executa auditoria adversarial READ-ONLY na mesma worktree.
+6. Com autorização de commit do mantenedor: validar a mensagem com `./scripts/task-gate.sh check-commit-msg` e criar o commit local.
+7. Com autorização de integração do mantenedor: conferir elegibilidade com `./scripts/task-gate.sh pre-merge --slug <slug> [--protected-hash <sha256> --protected-file <caminho>...]` e integrar manualmente via `git merge --ff-only <SHA>`.
+8. Com autorização independente de encerramento: simular e encerrar a worktree com `./scripts/worktree-task.sh close --slug <slug>` (preservando a branch local até autorização separada).
+
+#### Responsabilidades Manuais do Mantenedor e Limitações Conhecidas
+- **Responsabilidades manuais**: autorizar separadamente criação de worktree, commit, integração (`git merge --ff-only`), push, remoção de worktree e remoção de branch; revisar conformidade textual em PT-BR das mensagens de commit e documentação; executar suítes de build/teste dos módulos afetados; auditar arquivos reportados como `[NAO_VERIFICAVEL]` (como binários esperados).
+- **Limitações conhecidas**:
+  - A detecção de arquivos sensíveis e padrões de credenciais é heurística/conservadora e **não garante** identificação de todos os segredos possíveis.
+  - O parser de links Markdown cobre exclusivamente o subconjunto documentado acima (não implementa CommonMark/GFM completo, não valida URLs HTTP/HTTPS externas e marca sintaxes não suportadas ou fences sem fechamento como `[NAO_VERIFICAVEL]`).
+  - O resultado de `pre-merge` reflete exclusivamente a elegibilidade observada no instante da execução e não garante que o estado não mude antes da integração manual.
+  - Compatibilidade com **Bash 4.4** e **Git 2.36** foi verificada **estaticamente** quanto aos recursos empregados (com checagem de versão Git testada via wrapper simulado); a validação empírica ocorreu em Linux com **Bash 5.3.0**, **Git 2.56.1** e **Python 3.14.10**, sem execução de `shellcheck` (ausente no ambiente).
 
 ---
 
