@@ -172,6 +172,55 @@ Execute o script diretamente (não com dot-source `.`), na mesma sessão do Powe
 
 `.\scripts\test-infra.ps1 status` lista os containers de todas as instâncias desta infraestrutura.
 
+### 5.2 Infraestrutura descartável no Linux com `scripts/test-infra.sh`
+
+Em ambientes Linux (sem alterar ou substituir o script Windows `scripts/test-infra.ps1`), utilize [`scripts/test-infra.sh`](../../scripts/test-infra.sh) para provisionar os mesmos três serviços descartáveis (`postgis/postgis:18-3.6` com as três roles `rewit_app`, `rewit_media` e `rewit_mod`, `redis:8-alpine` sem senha e `chrislusf/seaweedfs:4.47`), injetar as variáveis `TEST_*` exclusivamente no processo Maven e remover seletivamente apenas os containers e recursos temporários criados pela execução.
+
+**Pré-requisitos**: Linux, Bash `4.4+`, `python3` (CSPRNG via `secrets`, parsing JSON estruturado de `inspect` e probes TCP/HTTP), `setsid` (`util-linux`, obrigatório para isolar o *process group* do Maven), Java JDK 25, `./backend/mvnw` executável e um runtime de containers acessível (**Docker** ou **Podman**). O script não depende de Git em runtime, não executa `sudo` e não altera permissões do daemon Docker.
+
+#### Comandos disponíveis
+
+```bash
+# 1) Diagnosticar ambiente, runtime, permissões de daemon, setsid, dependências e portas (READ-ONLY)
+./scripts/test-infra.sh doctor
+
+# 2) Provisionar infraestrutura descartável, executar ./backend/mvnw e limpar ao final
+./scripts/test-infra.sh run
+# Passando argumentos específicos do Maven após '--':
+./scripts/test-infra.sh run -- test -Dtest=AuthenticationIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false
+# Instância e portas customizadas:
+./scripts/test-infra.sh run --instance ci01 --postgres-port 35532 --redis-port 36479 --storage-port 38433 --ready-timeout 180
+
+# 3) Inspecionar containers da infraestrutura de teste (READ-ONLY; sem expor env/segredos)
+./scripts/test-infra.sh status
+./scripts/test-infra.sh status --instance ci01
+
+# 4) Remover seletivamente containers da instância (exige validação integral por nome e rótulo rewit.test-infra=<instance>)
+./scripts/test-infra.sh down
+./scripts/test-infra.sh down --instance ci01
+```
+
+> **Sem subcomando `up` no Linux/Bash:** diferentemente do PowerShell, um processo filho Bash não exporta variáveis de ambiente para o shell chamador sem gravá-las em arquivo ou exibi-las. Para preservar a regra de que os segredos CSPRNG nunca são gravados em disco nem impressos, o fluxo Linux usa `run` (mantendo as variáveis `TEST_*` apenas em memória no processo do script e no processo filho `./backend/mvnw`).
+
+#### Seleção de runtime (`docker` / `podman`), portas compatíveis e SELinux
+- Variável opcional: `TEST_INFRA_RUNTIME=docker` ou `TEST_INFRA_RUNTIME=podman` (valores diferentes retornam código `2`).
+- Sem `TEST_INFRA_RUNTIME`, a detecção é determinística: verifica `docker` primeiro; se `docker` estiver ausente ou sem permissão no socket (ex.: `permission denied while trying to connect to the Docker API`), registra o diagnóstico claro e utiliza `podman` caso esteja instalado e acessível.
+- **Consulta de portas publicadas compatível com Docker e Podman**: o script **não** usa `--filter publish=` (que não é suportado no Podman 5.x e retorna erro `125`). Em vez disso, lista IDs via `<runtime> ps -a -q` e lê os campos JSON estruturados `HostConfig.PortBindings` e `NetworkSettings.Ports` de `<runtime> container inspect`, detectando conflitos em containers em execução ou parados, múltiplos bindings, wildcards (`0.0.0.0`, vazio e `::`), faixas de portas e rejeitando saídas malformadas ou erros de runtime com código `4`.
+- **SELinux no Podman via staging temporário descartável**: para evitar que a opção `:ro,z` do Podman aplique relabel recursivo SELinux (`security.selinux`) nos arquivos do repositório no host, o script cria um diretório temporário isolado fora do repositório (`mktemp -d "${TMPDIR:-/tmp}/rewit-testinfra-pg-staging.XXXXXX"`), copia somente os assets regulares necessários de `infrastructure/postgres/init/` (`.sql`/`.sh`, rejeitando symlinks) e `infrastructure/postgres/provision-runtime-role.sql` (sem `.env`, credenciais ou testes) e monta exclusivamente esse staging com `:ro,z`. O staging é removido automaticamente em todos os caminhos de saída (sucesso, falha parcial, timeout, `SIGINT`, `SIGTERM`), somente após os containers que o utilizam terem sido parados e removidos. No **Docker**, permanecem os bind mounts `:ro` sem relabel.
+
+#### Alcance exato das verificações de readiness
+- **PostgreSQL**: verifica se o container permanece em estado `running`, ausência de `02-create-app-role: ERRO` nos logs, conclusão do bootstrap (`>= 2` ocorrências de `ready to accept connections`) e existência das três roles (`rewit_app`, `rewit_media`, `rewit_mod`) via `psql` local dentro do container (socket Unix `trust`). Essa checagem **não comprova isoladamente** autenticação TCP/SCRAM-SHA-256 — a autenticação com as senhas CSPRNG em `TEST_*` é validada quando o backend e o Flyway conectam via JDBC.
+- **Redis**: executa `redis-cli ping` e exige resposta exata `PONG`, comprovando prontidão do servidor na configuração efêmera sem senha (não exercita `AUTH`).
+- **SeaweedFS S3**: realiza `GET http://127.0.0.1:<porta>/` aceitando qualquer resposta HTTP, o que comprova apenas disponibilidade HTTP do servidor S3 — **não** comprova autenticação S3, autorização nem existência prévia do bucket `rewit-test`. No perfil de testes do backend (`backend/src/test/resources/application.yml`), `rewit.minio.auto-create-bucket: true` faz o `MinioStorageAdapter` criar o bucket sob demanda (enquanto `application-prod.yml` exige `false`).
+
+#### Portas, isolamento, sinais, ownership e limitações
+- **Portas padrão, reservadas e probe IPv4/IPv6**: mesmos padrões (`35432`, `36379`, `38333`, timeout `180s`) e mesmas 11 portas reservadas recusadas (`5432, 5433, 6379, 8333, 8888, 9333, 15432, 16379, 18333, 8080, 8081`). O probe de disponibilidade no host verifica `127.0.0.1` (detectando listeners em `127.0.0.1`, `0.0.0.0` e `::` dual-stack com `IPV6_V6ONLY=0`, bloqueando com código `3`) e também sonda `::1` com `IPV6_V6ONLY=1` (emitindo `[AVISO]` sem falso positivo bloqueante quando há listener IPv6-only, pois os containers publicam exclusivamente em `127.0.0.1`, e degradando graciosamente quando IPv6 está desabilitado). *Limite:* a verificação é instantânea e existe *race* residual entre o probe e o bind real pelo runtime, que permanece a autoridade final.
+- **Isolamento do process group Maven (`setsid`)**: `./backend/mvnw` é iniciado em sessão/process group exclusivo via `setsid`, com confirmação do PGID real distinto do script. Em `SIGINT` (`130`) ou `SIGTERM` (`143`), o script envia `SIGTERM` para **todo o process group** do Maven (wrapper, JVM, Surefire e demais descendentes), aguarda *grace period* de 3s monitorando processos vivos em `/proc` (ignorando *zombies*), escala para `SIGKILL` no grupo caso algum descendente ignore `SIGTERM`, recolhe o wrapper e só então executa a limpeza seletiva dos containers e do staging temporário.
+- **Inspeção fail-closed, ownership e limpeza seletiva**: `inspect` distingue explicitamente `PRESENT`, `ABSENT` (comprovado via `ps -a`) e `ERROR` (daemon inacessível, permissão, timeout ou JSON malformado — nunca convertido em `ABSENT`, retornando código `4`). Todos os containers recebem `--label rewit.test-infra=<instance>` e `--label rewit.test-infra.run-id=<id>`. Em `down`, são validados tanto os três nomes esperados quanto qualquer container listado com o rótulo `rewit.test-infra=<instance>`: nome inesperado ou rótulo divergente bloqueia todo o conjunto sem remoção parcial (`código 3`); falha de inspeção bloqueia com `código 4`. Em `run`, apenas os IDs criados pela própria execução são removidos com `rm -f -v` (volumes anônimos). Nunca executa `docker compose down -v` nem `prune`, e nunca toca em containers ou volumes persistentes de desenvolvimento (`rewit-postgres`, `rewit_postgres_data`, etc.).
+- **Concorrência**: não utiliza lock files persistentes; a unicidade de nomes por instância bloqueia uma segunda execução simultânea na mesma `--instance` (`código 3`) sem remover containers da primeira. Para execuções paralelas, use valores distintos de `--instance` e portas próprias.
+- **Segredos CSPRNG e limite de visibilidade no daemon**: os seis segredos (`POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `MEDIA_DB_PASSWORD`, `MOD_DB_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) são gerados via `python3` (`secrets`), passados ao runtime por `-e NOME` (nunca `NOME=VALOR` em argv) e nunca impressos nem gravados em arquivo. *Limite conhecido:* variáveis de ambiente passadas a containers podem ser inspecionadas por usuários com permissão administrativa no daemon (`docker inspect` / `podman inspect`) enquanto o container existir.
+- **Códigos de saída**: `0` (sucesso), `2` (uso/argumentos ou `TEST_INFRA_RUNTIME` inválido), `3` (bloqueio de segurança ou conflito de porta/ownership), `4` (dependência ausente como `python3`/`setsid`, runtime/daemon inacessível, erro de `inspect`, timeout ou falha de cleanup), `130` (`SIGINT`), `143` (`SIGTERM`). Em `run`, quando a execução chega ao Maven e o cleanup conclui sem erros, o código de saída original do Maven é preservado.
+
 Sem o script, a infraestrutura pode ser criada manualmente nas mesmas condições (PostgreSQL com os scripts de init, Redis e S3 próprios, portas fora das recusadas) e as variáveis da tabela acima definidas na sessão antes de:
 ```powershell
 cd backend
