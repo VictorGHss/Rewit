@@ -106,17 +106,19 @@ if (( head_set == 0 )) || [[ -z "$expected_head" ]]; then
 fi
 
 emit_outputs() {
-  local b="$1" p="$2" a="$3" m="$4"
+  local b="$1" p="$2" mc="$3" a="$4" m="$5"
   if [[ -n "$output_file" ]]; then
     {
       printf 'backend=%s\n' "$b"
       printf 'postgres_provisioning=%s\n' "$p"
+      printf 'migration_container=%s\n' "$mc"
       printf 'admin=%s\n' "$a"
       printf 'mobile=%s\n' "$m"
     } >> "$output_file"
   else
     printf 'backend=%s\n' "$b"
     printf 'postgres_provisioning=%s\n' "$p"
+    printf 'migration_container=%s\n' "$mc"
     printf 'admin=%s\n' "$a"
     printf 'mobile=%s\n' "$m"
   fi
@@ -126,7 +128,7 @@ emit_outputs() {
 "${SCRIPT_DIR}/verify-head-sha.sh" --expected "$expected_head" >&2
 
 if [[ "$event_name" == "push" ]]; then
-  emit_outputs "true" "true" "true" "true"
+  emit_outputs "true" "true" "true" "true" "true"
   echo "Evento push em main: todos os módulos serão validados." >&2
   exit 0
 fi
@@ -171,6 +173,7 @@ fi
 
 backend=false
 postgres_provisioning=false
+migration_container=false
 admin=false
 mobile=false
 
@@ -180,14 +183,33 @@ while IFS= read -r -d '' path; do
     .github/workflows/ci.yml|scripts/ci/*)
       backend=true
       postgres_provisioning=true
+      migration_container=true
       admin=true
       mobile=true
       ;;
     .gitattributes|infrastructure/postgres/*)
       backend=true
       postgres_provisioning=true
+      migration_container=true
       ;;
-    backend/*|infrastructure/docker/backend.Dockerfile|docker-compose.yml|docker-compose.external-test.yml|scripts/test-infra.sh)
+    backend/pom.xml|\
+    backend/src/main/java/com/rewit/migration/*|\
+    backend/src/main/java/com/rewit/infrastructure/persistence/schema/*|\
+    backend/src/main/java/com/rewit/infrastructure/persistence/PostgresProductionJdbcUrlValidator.java|\
+    backend/src/main/java/com/rewit/infrastructure/persistence/DatabaseRoleSecurityConstants.java|\
+    backend/src/main/java/com/rewit/infrastructure/persistence/routing/*|\
+    backend/src/main/java/com/rewit/config/ProductionEnvironmentValidator.java|\
+    backend/src/main/resources/application-prod.yml|\
+    backend/src/main/resources/META-INF/spring.factories|\
+    backend/src/main/resources/db/migration/*|\
+    infrastructure/docker/backend.Dockerfile|\
+    infrastructure/docker/docker-compose.prod.yml|\
+    infrastructure/docker/tests/*|\
+    scripts/deploy/*)
+      backend=true
+      migration_container=true
+      ;;
+    backend/*|docker-compose.yml|docker-compose.external-test.yml|scripts/test-infra.sh)
       backend=true
       ;;
     apps/admin/*|infrastructure/docker/admin.Dockerfile)
@@ -199,5 +221,5 @@ while IFS= read -r -d '' path; do
   esac
 done < "$diff_file"
 
-emit_outputs "$backend" "$postgres_provisioning" "$admin" "$mobile"
-echo "Escopo detectado (merge-base=${merge_base}): backend=${backend}, postgres_provisioning=${postgres_provisioning}, admin=${admin}, mobile=${mobile}" >&2
+emit_outputs "$backend" "$postgres_provisioning" "$migration_container" "$admin" "$mobile"
+echo "Escopo detectado (merge-base=${merge_base}): backend=${backend}, postgres_provisioning=${postgres_provisioning}, migration_container=${migration_container}, admin=${admin}, mobile=${mobile}" >&2
