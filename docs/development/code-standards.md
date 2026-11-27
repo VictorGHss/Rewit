@@ -49,7 +49,9 @@ Exemplo: `feat(deploy): adicionar provisionamento do PostgreSQL gerenciado`.
 - `refactor`: Refatoração interna que não altera o comportamento externo;
 - `perf`: Melhoria de desempenho;
 - `test`: Criação ou ajuste de testes automatizados;
-- `chore`: Atualização de dependências, scripts de build ou ferramentas.
+- `build`: Alterações no sistema de build, empacotamento, Dockerfiles ou dependências externas;
+- `ci`: Alterações nos arquivos e scripts de configuração de integração contínua (GitHub Actions);
+- `chore`: Manutenção geral, scripts auxiliares ou tarefas operacionais que não alteram código de produção.
 
 ---
 

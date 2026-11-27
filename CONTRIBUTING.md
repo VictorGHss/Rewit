@@ -51,7 +51,7 @@ A branch **`main`** é a única base canônica de integração do repositório.
      - Scripts de governança/infraestrutura/CI: `bash -n`, `shellcheck -S warning` e `./scripts/tests/*.sh`.
    - Em Pull Requests e pushes para `main`, o workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) executa automaticamente essas validações em `ubuntu-24.04` sobre o SHA imutável do commit (incluindo `actionlint`, detecção NUL-safe de escopo e validação literal de mensagens de commit; detalhes de jobs condicionais, status checks recomendados e validações estritamente locais em [`docs/development/agent-workflow.md`](docs/development/agent-workflow.md) §2.4).
 4. **Atualize a documentação canônica afetada** e valide os links relativos.
-5. **Escreva mensagens de commit em PT-BR** seguindo **Conventional Commits** (preservando tipos padronizados como `feat`, `fix`, `docs`, `refactor`, `test`, `chore`):
+5. **Escreva mensagens de commit em PT-BR** seguindo **Conventional Commits** (preservando tipos padronizados como `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`):
    ```text
    feat(deploy): adicionar provisionamento do PostgreSQL gerenciado
    ```

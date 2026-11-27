@@ -221,7 +221,7 @@ Comandos disponíveis (todos estritamente READ-ONLY):
 
   check-commit-msg (--message "<mensagem>" | --file <arquivo> [--no-strip-comments])
       Valida estruturalmente a mensagem segundo Conventional Commits (tipos
-      permitidos: feat, fix, docs, style, refactor, perf, test, chore).
+      permitidos: feat, fix, docs, style, refactor, perf, test, build, ci, chore).
       A abertura de `--file` usa descritor seguro (O_NOFOLLOW | O_NONBLOCK,
       fstat S_ISREG, limite estrito de 64 KiB) sem imprimir conteúdo bruto.
       Por padrão `--file` ignora comentários iniciados por `#` (compatível com
@@ -2116,7 +2116,7 @@ header = non_comment[0]
 body_lines = non_comment[1:]
 
 HEADER_RE = re.compile(
-    r"^(feat|fix|docs|style|refactor|perf|test|chore)"
+    r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)"
     r"(?:\(([a-z0-9][a-z0-9._/-]*)\))?"
     r"(!)?:\s(.+)$"
 )
@@ -2126,7 +2126,7 @@ if not m:
     sys.stderr.write(
         "[BLOQUEADO] Cabeçalho fora do padrão Conventional Commits.\n"
         "  Esperado: <tipo>[(<escopo>)][!]: <descrição>\n"
-        "  Tipos permitidos: feat, fix, docs, style, refactor, perf, test, chore\n"
+        "  Tipos permitidos: feat, fix, docs, style, refactor, perf, test, build, ci, chore\n"
     )
     sys.exit(EXIT_BLOCKED)
 

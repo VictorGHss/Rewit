@@ -931,7 +931,7 @@ test_check_does_not_follow_symlinks_and_handles_adversarial_names() {
 # ==============================================================================
 
 test_check_commit_msg_full_matrix_and_f3_s2_safe_fd() {
-  local tipos=(feat fix docs style refactor perf test chore)
+  local tipos=(feat fix docs style refactor perf test build ci chore)
   local t
   for t in "${tipos[@]}"; do
     run_gate_in "$CASE_REPO" check-commit-msg --message "${t}: adicionar verificação em português"
