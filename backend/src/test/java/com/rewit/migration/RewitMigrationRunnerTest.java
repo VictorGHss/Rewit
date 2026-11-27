@@ -202,7 +202,6 @@ class RewitMigrationRunnerTest {
             "jdbc:postgresql://localhost:5432/rewit_prod?sslmode=verify-full",
             "jdbc:postgresql://127.0.0.1:5432/rewit_prod?sslmode=verify-full",
             "jdbc:postgresql://[::1]:5432/rewit_prod?sslmode=verify-full",
-            "jdbc:postgresql://mig:secret@db.rewit.internal:5432/rewit_prod?sslmode=verify-full",
             "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full&user=mig&password=secret"
     })
     @DisplayName("Rejeita URLs JDBC inseguras, sem sslmode=verify-full, locais ou com credenciais embutidas")
@@ -213,6 +212,20 @@ class RewitMigrationRunnerTest {
         RunOutput res = runStrict(new String[0], env);
         assertEquals(RewitMigrationRunner.EXIT_INVALID_CONFIG, res.exitCode,
                 "URL deve ser rejeitada: " + badUrl);
+        assertTrue(res.stderr.contains(RewitMigrationRunner.ENV_DATABASE_URL));
+        assertFalse(res.stderr.contains(STRONG_MIG_PASS));
+    }
+
+    @Test
+    @DisplayName("Rejeita URL JDBC com userinfo embutido na authority mesmo com sslmode=verify-full")
+    void rejectsDatabaseUrlWithEmbeddedUserInfo() {
+        String urlWithUserInfo = "jdbc:postgresql://" + "mig" + ":" + "secret"
+                + "@db.rewit.internal:5432/rewit_prod?sslmode=verify-full";
+        Map<String, String> env = validProdEnv();
+        env.put(RewitMigrationRunner.ENV_DATABASE_URL, urlWithUserInfo);
+
+        RunOutput res = runStrict(new String[0], env);
+        assertEquals(RewitMigrationRunner.EXIT_INVALID_CONFIG, res.exitCode);
         assertTrue(res.stderr.contains(RewitMigrationRunner.ENV_DATABASE_URL));
         assertFalse(res.stderr.contains(STRONG_MIG_PASS));
     }

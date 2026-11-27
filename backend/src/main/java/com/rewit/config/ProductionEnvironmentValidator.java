@@ -751,7 +751,6 @@ public class ProductionEnvironmentValidator
         }
     }
 
-    @SuppressWarnings("unchecked")
     private static void collectNonEmptyNestedKeys(String prefix, Map<?, ?> map, Set<String> collector) {
         if (map == null || map.isEmpty()) {
             return;
