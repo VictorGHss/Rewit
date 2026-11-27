@@ -1,5 +1,6 @@
 package com.rewit.config;
 
+import com.rewit.infrastructure.persistence.PostgresProductionJdbcUrlValidator;
 import com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy;
 import com.rewit.infrastructure.ratelimit.RateLimitBackendFailureMode;
 import com.rewit.infrastructure.ratelimit.RateLimitProperties;
@@ -12,6 +13,7 @@ import org.springframework.boot.actuate.endpoint.Show;
 import org.springframework.boot.autoconfigure.web.ErrorProperties;
 import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.boot.context.properties.bind.BindResult;
+import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisProperties;
@@ -24,33 +26,36 @@ import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.EnumerablePropertySource;
 import org.springframework.core.env.Profiles;
+import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.PropertySourcesPropertyResolver;
 
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.URLDecoder;
-import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
- * Validação fail-closed do perfil {@code prod} (homologação e produção, F2-DEPLOY-03.3 / R1).
+ * Validação fail-closed do perfil {@code prod} (homologação e produção, F2-DEPLOY-03.3 / R1 / 03.5.2A).
  *
  * <p>Registrado em {@code META-INF/spring.factories} como {@link ApplicationContextInitializer},
  * executa somente quando o perfil {@code prod} está ativo e antes da criação de DataSources,
- * da execução do Flyway e da abertura das portas HTTP.
+ * da validação somente leitura do schema e da abertura das portas HTTP.
  *
- * <p>Reutiliza integralmente {@link RuntimeDatabaseRolePolicy} e {@link SecuritySecretValidator},
- * sem duplicar regras nem enfraquecer requisitos de segurança. As mensagens citam apenas nomes de
+ * <p>Reutiliza integralmente {@link RuntimeDatabaseRolePolicy}, {@link PostgresProductionJdbcUrlValidator}
+ * e {@link SecuritySecretValidator}, sem duplicar regras nem enfraquecer requisitos de segurança.
+ * Em {@code prod}, exige {@code spring.flyway.enabled=false} e proíbe qualquer credencial migrator ou
+ * configuração incompatível do Flyway no processo da API. As mensagens citam apenas nomes de
  * propriedades e variáveis de ambiente, nunca valores reais, URLs completas ou segredos.
  */
 public class ProductionEnvironmentValidator
@@ -59,26 +64,12 @@ public class ProductionEnvironmentValidator
     public static final String PROFILE = RuntimeProfileEnvironmentValidator.PROFILE_PROD;
 
     private static final Pattern KEY_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{1,32}$");
-    private static final Pattern STRICT_POSTGRES_URL_PATTERN = Pattern.compile("^jdbc:postgresql://[^/?#]+/[^/?#]+.*$");
-    private static final Pattern CANONICAL_IPV4_PATTERN = Pattern.compile(
-            "^(0|[1-9]\\d{0,2})\\.(0|[1-9]\\d{0,2})\\.(0|[1-9]\\d{0,2})\\.(0|[1-9]\\d{0,2})$");
-    private static final Pattern NUMERIC_OR_HEX_LABEL_PATTERN = Pattern.compile("^(0x[0-9a-f]+|\\d+)$");
-    private static final Pattern DIGITS_ONLY_PATTERN = Pattern.compile("^\\d+$");
 
-    private static final String REQUIRED_PG_SSL_MODE = "verify-full";
-    private static final int DEFAULT_PG_PORT = 5432;
-
-    private static final Set<String> FORBIDDEN_PG_TLS_OVERRIDE_PARAMS = Set.of(
-            "sslfactory",
-            "sslfactoryarg",
-            "sslhostnameverifier"
-    );
-
-    private static final Set<String> LOCAL_OR_DEV_HOSTNAMES = Set.of(
-            "localhost",
-            "host.docker.internal",
-            "seaweedfs",
-            "minio"
+    private static final Set<String> FORBIDDEN_PROD_MIGRATOR_ENV_VARS = Set.of(
+            "FLYWAY_DB_USER",
+            "FLYWAY_DB_PASSWORD",
+            "POSTGRES_USER",
+            "POSTGRES_PASSWORD"
     );
 
     private static final Set<String> INSECURE_PLACEHOLDERS = Set.of(
@@ -688,198 +679,101 @@ public class ProductionEnvironmentValidator
     private static void validateDatabaseAndFlyway(ConfigurableEnvironment env, List<String> errors) {
         Binder binder = Binder.get(env);
 
-        // Reutiliza integralmente a política canônica F2-DEPLOY-02 das 3 roles runtime e isolamento do migrator
+        // Reutiliza integralmente a política canônica F2-DEPLOY-02 das 3 roles runtime
         errors.addAll(RuntimeDatabaseRolePolicy.validateEnvironment(env));
 
         String datasourceUrl = resolveRequired(env, "spring.datasource.url", "DATABASE_URL", errors);
-        PostgresTarget datasourceTarget = null;
         if (datasourceUrl != null) {
-            datasourceTarget = validatePostgresProductionUrl(
-                    datasourceUrl.trim(), "spring.datasource.url", "DATABASE_URL", errors);
+            PostgresProductionJdbcUrlValidator.validateProductionUrl(
+                    datasourceUrl.trim(), "spring.datasource.url (DATABASE_URL)", errors);
         }
 
-        boolean flywayEnabled = bindBoolean(binder, "spring.flyway.enabled", true, errors);
-        if (flywayEnabled) {
-            if (bindBoolean(binder, "spring.flyway.baseline-on-migrate", false, errors)) {
-                errors.add("spring.flyway.baseline-on-migrate deve ser 'false' em produção.");
+        // F2-DEPLOY-03.5.2A: Flyway no runtime da API é estritamente proibido em produção.
+        // Exige spring.flyway.enabled=false explícito (cobrindo YAML, env var, CLI e SPRING_APPLICATION_JSON).
+        try {
+            BindResult<Boolean> boundEnabled = binder.bind("spring.flyway.enabled", Boolean.class);
+            if (!boundEnabled.isBound() || !Boolean.FALSE.equals(boundEnabled.get())) {
+                errors.add("spring.flyway.enabled (SPRING_FLYWAY_ENABLED) deve ser 'false' em produção: "
+                        + "migrations Flyway executam exclusivamente no runner pré-deploy isolado.");
             }
-            if (bindBoolean(binder, "spring.flyway.postgresql.transactional-lock", true, errors)) {
-                errors.add("spring.flyway.postgresql.transactional-lock deve ser 'false' em produção.");
-            }
+        } catch (BindException e) {
+            errors.add("spring.flyway.enabled (SPRING_FLYWAY_ENABLED) possui valor inválido em produção (deve ser 'false').");
+        }
 
-            // AUDIT-02: validar spring.flyway.url independentemente (via Binder) quando configurada
-            String flywayUrl = bindOptionalString(binder, "spring.flyway.url");
-            if (isPresent(flywayUrl)) {
-                PostgresTarget flywayTarget = validatePostgresProductionUrl(
-                        flywayUrl.trim(), "spring.flyway.url", "SPRING_FLYWAY_URL", errors);
-                if (datasourceTarget != null && flywayTarget != null && !datasourceTarget.equals(flywayTarget)) {
-                    errors.add("spring.flyway.url deve apontar para o mesmo destino lógico (host, porta e database) de spring.datasource.url.");
+        // Proíbe presença de credenciais migrator (FLYWAY_DB_* / POSTGRES_*) e overrides FLYWAY_* na API de produção
+        Set<String> forbiddenMigratorVars = new TreeSet<>();
+        for (String varName : FORBIDDEN_PROD_MIGRATOR_ENV_VARS) {
+            if (isPresent(resolveOptional(env, varName))) {
+                forbiddenMigratorVars.add(varName);
+            }
+        }
+        for (PropertySource<?> propertySource : env.getPropertySources()) {
+            if (!(propertySource instanceof EnumerablePropertySource<?> enumerable)) {
+                continue;
+            }
+            for (String propName : enumerable.getPropertyNames()) {
+                if (propName == null) {
+                    continue;
+                }
+                String upper = propName.trim().toUpperCase(Locale.ROOT);
+                if (FORBIDDEN_PROD_MIGRATOR_ENV_VARS.contains(upper)
+                        || upper.startsWith("FLYWAY_")) {
+                    Object rawVal = enumerable.getProperty(propName);
+                    if (rawVal != null && isPresent(String.valueOf(rawVal))) {
+                        forbiddenMigratorVars.add(propName);
+                    }
                 }
             }
+        }
+        for (String forbiddenVar : forbiddenMigratorVars) {
+            errors.add("Credencial/variável migrator proibida no processo da API em produção: " + forbiddenVar
+                    + " (remova da API e injete somente no runner pré-deploy).");
+        }
 
-            resolveRequired(env, "spring.flyway.user", "FLYWAY_DB_USER ou POSTGRES_USER", errors);
-            String flywayPassword = resolveRequired(env, "spring.flyway.password", "FLYWAY_DB_PASSWORD ou POSTGRES_PASSWORD", errors);
-            if (flywayPassword != null && RuntimeDatabaseRolePolicy.isForbiddenPassword(flywayPassword)) {
-                errors.add("spring.flyway.password (FLYWAY_DB_PASSWORD / POSTGRES_PASSWORD) usa valor de exemplo proibido.");
+        // Proíbe qualquer propriedade spring.flyway.* diferente de spring.flyway.enabled=false
+        // (cobre relaxed binding via SPRING_FLYWAY_*, CLI, camelCase e SPRING_APPLICATION_JSON)
+        Set<String> forbiddenFlywayKeys = new LinkedHashSet<>();
+        try {
+            Map<String, Object> boundFlyway = binder
+                    .bind("spring.flyway", Bindable.mapOf(String.class, Object.class))
+                    .orElse(Map.of());
+            collectNonEmptyNestedKeys("spring.flyway", boundFlyway, forbiddenFlywayKeys);
+        } catch (BindException e) {
+            errors.add("spring.flyway contém propriedades incompatíveis ou inválidas no runtime de produção.");
+        }
+        for (String key : forbiddenFlywayKeys) {
+            String normalizedKey = key.toLowerCase(Locale.ROOT).replace("-", "").replace("_", "");
+            if ("spring.flyway.enabled".equals(normalizedKey)) {
+                continue;
             }
+            errors.add("Propriedade Flyway proibida no runtime da API em produção: " + key
+                    + " (apenas spring.flyway.enabled=false é permitido).");
         }
     }
 
-    /**
-     * Valida uma URL JDBC PostgreSQL em produção (AUDIT-02 / AUDIT-03):
-     * - formato canônico {@code jdbc:postgresql://host[:porta]/database}
-     * - ausência de userinfo na authority e de parâmetros {@code user}/{@code password}
-     * - hosts não locais/loopback/não especificados (sem consulta DNS)
-     * - {@code sslmode=verify-full} estritamente case-sensitive, sem duplicatas ou encoding ambíguo
-     * - rejeita {@code ssl=false} em qualquer capitalização/encoding
-     */
-    private static PostgresTarget validatePostgresProductionUrl(
-            String url,
-            String propertyName,
-            String envVarName,
-            List<String> errors
-    ) {
-        String label = propertyName + " (" + envVarName + ")";
-        if (!STRICT_POSTGRES_URL_PATTERN.matcher(url).matches()) {
-            errors.add(label + " deve seguir o formato jdbc:postgresql://host:porta/database.");
-            return null;
-        }
-
-        String withoutJdbc = url.substring("jdbc:".length());
-        int schemeEnd = withoutJdbc.indexOf("://");
-        int authorityStart = schemeEnd + 3;
-        int slashIdx = withoutJdbc.indexOf('/', authorityStart);
-        if (slashIdx <= authorityStart) {
-            errors.add(label + " possui formato JDBC PostgreSQL inválido.");
-            return null;
-        }
-
-        String authority = withoutJdbc.substring(authorityStart, slashIdx);
-        if (authority.contains("@")) {
-            errors.add(label + " não pode embutir userinfo/credenciais na URL JDBC.");
-            return null;
-        }
-
-        int qIdx = withoutJdbc.indexOf('?', slashIdx);
-        int hashIdx = withoutJdbc.indexOf('#', slashIdx);
-        int dbEnd = withoutJdbc.length();
-        if (qIdx >= 0) {
-            dbEnd = Math.min(dbEnd, qIdx);
-        }
-        if (hashIdx >= 0) {
-            dbEnd = Math.min(dbEnd, hashIdx);
-        }
-        String databaseName = withoutJdbc.substring(slashIdx + 1, dbEnd).trim();
-        if (databaseName.isEmpty()) {
-            errors.add(label + " deve informar o nome do database.");
-            return null;
-        }
-
-        List<HostPort> endpoints = new ArrayList<>();
-        boolean hostError = false;
-        for (String rawHostPort : authority.split(",")) {
-            HostPort hp = parseHostPort(rawHostPort.trim(), DEFAULT_PG_PORT);
-            if (hp == null) {
-                errors.add(label + " possui host ou porta inválidos.");
-                hostError = true;
-                break;
-            }
-            if (isLocalOrDevHost(hp.host())) {
-                errors.add(label + " não pode apontar para host local/loopback em produção.");
-                hostError = true;
-                break;
-            }
-            endpoints.add(hp);
-        }
-
-        // AUDIT-03: parsing sequencial case-sensitive preservando chaves originais e detectando duplicatas
-        validatePostgresTlsQueryParameters(url, label, errors);
-
-        return hostError ? null : new PostgresTarget(endpoints, databaseName);
-    }
-
-    private static void validatePostgresTlsQueryParameters(String url, String label, List<String> errors) {
-        int qIdx = url.indexOf('?');
-        if (qIdx < 0 || qIdx + 1 >= url.length()) {
-            errors.add(label + " exige TLS estrito com sslmode=" + REQUIRED_PG_SSL_MODE + ".");
+    @SuppressWarnings("unchecked")
+    private static void collectNonEmptyNestedKeys(String prefix, Map<?, ?> map, Set<String> collector) {
+        if (map == null || map.isEmpty()) {
             return;
         }
-        String query = url.substring(qIdx + 1);
-        int hashIdx = query.indexOf('#');
-        if (hashIdx >= 0) {
-            query = query.substring(0, hashIdx);
-        }
-
-        int sslModeCount = 0;
-        String effectiveSslMode = null;
-        boolean sslModeSyntaxError = false;
-        int sslFlagCount = 0;
-        boolean embeddedCredError = false;
-        boolean tlsOverrideParamError = false;
-
-        for (String pair : query.split("&")) {
-            if (pair.isEmpty()) {
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) {
                 continue;
             }
-            int eq = pair.indexOf('=');
-            String rawKey = eq >= 0 ? pair.substring(0, eq) : pair;
-            String rawVal = eq >= 0 ? pair.substring(eq + 1) : "";
-
-            String decodedKey;
-            String decodedVal;
-            try {
-                decodedKey = URLDecoder.decode(rawKey, StandardCharsets.UTF_8);
-                decodedVal = URLDecoder.decode(rawVal, StandardCharsets.UTF_8);
-            } catch (IllegalArgumentException e) {
-                errors.add(label + " contém parâmetro de query com percent-encoding inválido.");
-                return;
-            }
-
-            String lowerKey = decodedKey.trim().toLowerCase(Locale.ROOT);
-            if ("user".equals(lowerKey) || "password".equals(lowerKey)) {
-                embeddedCredError = true;
-                continue;
-            }
-
-            // R1-03: bloqueia substituição de SSLSocketFactory ou HostnameVerifier (ex.: NonValidatingFactory)
-            if (FORBIDDEN_PG_TLS_OVERRIDE_PARAMS.contains(lowerKey)) {
-                tlsOverrideParamError = true;
-                continue;
-            }
-
-            if ("sslmode".equals(lowerKey)) {
-                sslModeCount++;
-                if (!"sslmode".equals(rawKey)) {
-                    sslModeSyntaxError = true;
-                } else {
-                    effectiveSslMode = decodedVal;
+            String fullKey = prefix + "." + entry.getKey();
+            Object val = entry.getValue();
+            if (val instanceof Map<?, ?> nested) {
+                collectNonEmptyNestedKeys(fullKey, nested, collector);
+            } else if (val instanceof List<?> list) {
+                for (Object item : list) {
+                    if (item != null && isPresent(String.valueOf(item))) {
+                        collector.add(fullKey);
+                        break;
+                    }
                 }
-            } else if ("ssl".equals(lowerKey)) {
-                sslFlagCount++;
-                String trimmedSsl = decodedVal.trim().toLowerCase(Locale.ROOT);
-                if (!"ssl".equals(rawKey) || "false".equals(trimmedSsl) || "0".equals(trimmedSsl) || trimmedSsl.isEmpty()) {
-                    errors.add(label + " contém parâmetro 'ssl' inválido ou desabilitado (use exclusivamente sslmode=" + REQUIRED_PG_SSL_MODE + ").");
-                }
+            } else if (isPresent(String.valueOf(val))) {
+                collector.add(fullKey);
             }
-        }
-
-        if (embeddedCredError) {
-            errors.add(label + " não pode embutir parâmetros 'user' ou 'password' na URL JDBC.");
-        }
-        if (tlsOverrideParamError) {
-            errors.add(label + " não permite sobrescrever validação TLS com 'sslfactory', 'sslfactoryarg' ou 'sslhostnameverifier'.");
-        }
-        if (sslFlagCount > 1) {
-            errors.add(label + " contém parâmetros 'ssl' duplicados.");
-        }
-        if (sslModeSyntaxError) {
-            errors.add(label + " deve declarar 'sslmode' exatamente em minúsculas e sem percent-encoding.");
-        } else if (sslModeCount == 0) {
-            errors.add(label + " exige TLS estrito com sslmode=" + REQUIRED_PG_SSL_MODE + ".");
-        } else if (sslModeCount > 1) {
-            errors.add(label + " não permite parâmetros 'sslmode' duplicados.");
-        } else if (!REQUIRED_PG_SSL_MODE.equals(effectiveSslMode)) {
-            errors.add(label + " exige exclusivamente sslmode=" + REQUIRED_PG_SSL_MODE + " em produção (require/verify-ca/prefer/allow/disable não são aceitos).");
         }
     }
 
@@ -935,7 +829,6 @@ public class ProductionEnvironmentValidator
         putIfPresent(dbPasswords, "APP_DB_PASSWORD", resolveOptional(env, "spring.datasource.password"));
         putIfPresent(dbPasswords, "MEDIA_DB_PASSWORD", resolveOptional(env, "rewit.datasource.media.password"));
         putIfPresent(dbPasswords, "MOD_DB_PASSWORD", resolveOptional(env, "rewit.datasource.moderation.password"));
-        putIfPresent(dbPasswords, "FLYWAY_DB_PASSWORD", resolveOptional(env, "spring.flyway.password"));
 
         for (Map.Entry<String, String> secretEntry : allSecrets.entrySet()) {
             byte[] secretBytes;
@@ -1370,275 +1263,14 @@ public class ProductionEnvironmentValidator
     }
 
     /**
-     * Detecta hosts locais, loopback IPv4/IPv6 (incluindo expandido, IPv4-mapped e IPv4-compatible),
-     * notações IPv4 ambíguas (octal, hexadecimal, inteiro decimal, abreviada), trailing dot DNS e
-     * endereços não especificados ({@code 0.0.0.0/8}, {@code ::}) de forma estritamente léxica, sem
-     * consulta DNS. Permite redes privadas RFC1918 (ex.: {@code 10.x.x.x}, {@code 192.168.x.x}).
+     * Delega para {@link PostgresProductionJdbcUrlValidator#isLocalOrDevHost(String)}.
      */
     static boolean isLocalOrDevHost(String host) {
-        if (!isPresent(host)) {
-            return true;
-        }
-        String normalized = host.trim().toLowerCase(Locale.ROOT);
-        if (normalized.startsWith("[") && normalized.endsWith("]")) {
-            normalized = normalized.substring(1, normalized.length() - 1);
-        }
-
-        if (normalized.contains(":")) {
-            // Remove eventual zone index IPv6 (ex.: fe80::1%eth0)
-            int zoneIdx = normalized.indexOf('%');
-            if (zoneIdx >= 0) {
-                normalized = normalized.substring(0, zoneIdx);
-            }
-            byte[] ipv6 = parseIpv6Literal(normalized);
-            if (ipv6 == null) {
-                return true;
-            }
-            return isLoopbackOrUnspecifiedIpv6(ipv6);
-        }
-
-        // Percent-encoding ou caracteres de controle em hostname não-IPv6 são rejeitados (fail-closed)
-        if (normalized.contains("%") || containsWhitespaceOrControl(normalized)) {
-            return true;
-        }
-
-        // Remove pontos finais de FQDN (ex.: localhost., sub.localhost.)
-        while (normalized.endsWith(".")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        if (normalized.isEmpty() || normalized.startsWith(".") || normalized.contains("..")) {
-            return true;
-        }
-
-        if (LOCAL_OR_DEV_HOSTNAMES.contains(normalized)
-                || normalized.endsWith(".local")
-                || normalized.endsWith(".localhost")) {
-            return true;
-        }
-
-        byte[] canonicalIpv4 = parseCanonicalIpv4Literal(normalized);
-        if (canonicalIpv4 != null) {
-            return isLoopbackOrUnspecifiedIpv4(canonicalIpv4);
-        }
-
-        // Rejeita notações IPv4 alternativas/ambíguas (0177.0.0.1, 000.000.000.000, 2130706433, 0x7f000001, 127.1)
-        if (isAmbiguousNumericHost(normalized)) {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static boolean containsWhitespaceOrControl(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (Character.isWhitespace(c) || Character.isISOControl(c)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static byte[] parseCanonicalIpv4Literal(String text) {
-        var matcher = CANONICAL_IPV4_PATTERN.matcher(text);
-        if (!matcher.matches()) {
-            return null;
-        }
-        byte[] bytes = new byte[4];
-        for (int i = 0; i < 4; i++) {
-            int octet = Integer.parseInt(matcher.group(i + 1));
-            if (octet < 0 || octet > 255) {
-                return null;
-            }
-            bytes[i] = (byte) octet;
-        }
-        return bytes;
-    }
-
-    private static boolean isAmbiguousNumericHost(String host) {
-        String[] labels = host.split("\\.", -1);
-        if (labels.length == 0) {
-            return true;
-        }
-        boolean allNumericOrHex = true;
-        for (String label : labels) {
-            if (label.isEmpty()) {
-                return true;
-            }
-            if (!NUMERIC_OR_HEX_LABEL_PATTERN.matcher(label).matches()) {
-                allNumericOrHex = false;
-                break;
-            }
-        }
-        if (allNumericOrHex) {
-            return true;
-        }
-        // TLD estritamente numérico não existe no DNS (RFC 1123/ICANN) e pode mascarar IPv4 malformado
-        return DIGITS_ONLY_PATTERN.matcher(labels[labels.length - 1]).matches();
-    }
-
-    private static boolean isLoopbackOrUnspecifiedIpv4(byte[] ipv4) {
-        int b0 = ipv4[0] & 0xFF;
-        // 127.0.0.0/8 (loopback) e 0.0.0.0/8 ("this network" / unspecified)
-        return b0 == 127 || b0 == 0;
-    }
-
-    private static byte[] parseIpv6Literal(String text) {
-        String working = text;
-        // Trata IPv4 embutido no final (ex.: ::ffff:127.0.0.1 ou ::127.0.0.1)
-        int lastColon = working.lastIndexOf(':');
-        if (lastColon >= 0 && working.substring(lastColon + 1).contains(".")) {
-            byte[] embeddedV4 = parseCanonicalIpv4Literal(working.substring(lastColon + 1));
-            if (embeddedV4 == null) {
-                return null;
-            }
-            int hi = ((embeddedV4[0] & 0xFF) << 8) | (embeddedV4[1] & 0xFF);
-            int lo = ((embeddedV4[2] & 0xFF) << 8) | (embeddedV4[3] & 0xFF);
-            working = working.substring(0, lastColon + 1) + Integer.toHexString(hi) + ":" + Integer.toHexString(lo);
-        }
-
-        int doubleColon = working.indexOf("::");
-        if (doubleColon >= 0 && working.indexOf("::", doubleColon + 2) >= 0) {
-            return null;
-        }
-
-        String[] leftParts;
-        String[] rightParts;
-        if (doubleColon >= 0) {
-            String left = working.substring(0, doubleColon);
-            String right = working.substring(doubleColon + 2);
-            leftParts = left.isEmpty() ? new String[0] : left.split(":", -1);
-            rightParts = right.isEmpty() ? new String[0] : right.split(":", -1);
-            if (leftParts.length + rightParts.length > 7) {
-                return null;
-            }
-        } else {
-            leftParts = working.split(":", -1);
-            rightParts = new String[0];
-            if (leftParts.length != 8) {
-                return null;
-            }
-        }
-
-        int[] groups = new int[8];
-        try {
-            for (int i = 0; i < leftParts.length; i++) {
-                groups[i] = parseHexGroup(leftParts[i]);
-            }
-            int rightStart = 8 - rightParts.length;
-            for (int i = 0; i < rightParts.length; i++) {
-                groups[rightStart + i] = parseHexGroup(rightParts[i]);
-            }
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-
-        byte[] bytes = new byte[16];
-        for (int i = 0; i < 8; i++) {
-            bytes[i * 2] = (byte) ((groups[i] >> 8) & 0xFF);
-            bytes[i * 2 + 1] = (byte) (groups[i] & 0xFF);
-        }
-        return bytes;
-    }
-
-    private static int parseHexGroup(String group) {
-        if (group.isEmpty() || group.length() > 4) {
-            throw new IllegalArgumentException("Grupo IPv6 inválido");
-        }
-        for (int i = 0; i < group.length(); i++) {
-            char c = group.charAt(i);
-            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-            if (!hex) {
-                throw new IllegalArgumentException("Grupo IPv6 inválido");
-            }
-        }
-        return Integer.parseInt(group, 16);
-    }
-
-    private static boolean isLoopbackOrUnspecifiedIpv6(byte[] ipv6) {
-        // Rejeita IPv4-mapped IPv6 (::ffff:a.b.c.d) apontando para loopback/unspecified
-        boolean firstTenZero = true;
-        for (int i = 0; i < 10; i++) {
-            if (ipv6[i] != 0) {
-                firstTenZero = false;
-                break;
-            }
-        }
-        if (firstTenZero && (ipv6[10] & 0xFF) == 0xFF && (ipv6[11] & 0xFF) == 0xFF) {
-            byte[] mappedV4 = new byte[]{ipv6[12], ipv6[13], ipv6[14], ipv6[15]};
-            return isLoopbackOrUnspecifiedIpv4(mappedV4);
-        }
-        // Rejeita ::, ::1 e todas as formas IPv4-compatible IPv6 depreciadas (::a.b.c.d / 0:0:0:0:0:0:xxxx:xxxx)
-        if (firstTenZero && ipv6[10] == 0 && ipv6[11] == 0) {
-            return true;
-        }
-        try {
-            InetAddress addr = InetAddress.getByAddress(ipv6);
-            return addr.isLoopbackAddress() || addr.isAnyLocalAddress();
-        } catch (UnknownHostException e) {
-            return true;
-        }
-    }
-
-    private static HostPort parseHostPort(String hostPort, int defaultPort) {
-        if (hostPort.isEmpty()) {
-            return null;
-        }
-        String host;
-        int port = defaultPort;
-        if (hostPort.startsWith("[")) {
-            int closeBracket = hostPort.indexOf(']');
-            if (closeBracket <= 1) {
-                return null;
-            }
-            host = hostPort.substring(1, closeBracket).trim().toLowerCase(Locale.ROOT);
-            String remainder = hostPort.substring(closeBracket + 1);
-            if (!remainder.isEmpty()) {
-                if (!remainder.startsWith(":")) {
-                    return null;
-                }
-                port = parseValidPort(remainder.substring(1));
-                if (port < 1) {
-                    return null;
-                }
-            }
-        } else {
-            int firstColon = hostPort.indexOf(':');
-            int lastColon = hostPort.lastIndexOf(':');
-            if (firstColon >= 0) {
-                // Múltiplos ':' fora de colchetes indicam IPv6 não delimitado ou porta malformada
-                if (firstColon != lastColon) {
-                    return null;
-                }
-                host = hostPort.substring(0, firstColon).trim().toLowerCase(Locale.ROOT);
-                port = parseValidPort(hostPort.substring(firstColon + 1));
-                if (port < 1) {
-                    return null;
-                }
-            } else {
-                host = hostPort.trim().toLowerCase(Locale.ROOT);
-            }
-        }
-        if (host.isEmpty()) {
-            return null;
-        }
-        return new HostPort(host, port);
+        return PostgresProductionJdbcUrlValidator.isLocalOrDevHost(host);
     }
 
     private static int parseValidPort(String raw) {
-        if (raw == null) {
-            return -1;
-        }
-        String trimmed = raw.trim();
-        if (trimmed.isEmpty() || !DIGITS_ONLY_PATTERN.matcher(trimmed).matches()) {
-            return -1;
-        }
-        try {
-            int port = Integer.parseInt(trimmed);
-            return (port >= 1 && port <= 65535) ? port : -1;
-        } catch (NumberFormatException e) {
-            return -1;
-        }
+        return PostgresProductionJdbcUrlValidator.parseValidPort(raw);
     }
 
     private static boolean hasValidOptionalPort(URI uri) {
@@ -1739,18 +1371,6 @@ public class ProductionEnvironmentValidator
         } catch (BindException e) {
             errors.add(property + " possui valor booleano inválido em produção.");
             return defaultValue;
-        }
-    }
-
-    private record HostPort(String host, int port) {}
-
-    private record PostgresTarget(List<HostPort> endpoints, String databaseName) {
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof PostgresTarget other)) return false;
-            return Objects.equals(endpoints, other.endpoints)
-                    && Objects.equals(databaseName, other.databaseName);
         }
     }
 

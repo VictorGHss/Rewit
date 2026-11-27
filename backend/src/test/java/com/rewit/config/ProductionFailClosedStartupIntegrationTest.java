@@ -163,8 +163,6 @@ class ProductionFailClosedStartupIntegrationTest {
         args.add("--rewit.datasource.media.password=media-prod-pass-Kp4!xV7s#3w");
         args.add("--rewit.datasource.moderation.username=rewit_mod");
         args.add("--rewit.datasource.moderation.password=mod-prod-pass-Yr8#mN4q!6t");
-        args.add("--spring.flyway.user=rewit_migrator");
-        args.add("--spring.flyway.password=flyway-prod-pass-Lw3!rT9d#5y");
         args.add("--spring.data.redis.host=redis.rewit.internal");
         args.add("--spring.data.redis.port=6380");
         args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
@@ -227,8 +225,6 @@ class ProductionFailClosedStartupIntegrationTest {
         args.add("--rewit.datasource.media.password=media-prod-pass-Kp4!xV7s#3w");
         args.add("--rewit.datasource.moderation.username=rewit_mod");
         args.add("--rewit.datasource.moderation.password=mod-prod-pass-Yr8#mN4q!6t");
-        args.add("--spring.flyway.user=rewit_migrator");
-        args.add("--spring.flyway.password=flyway-prod-pass-Lw3!rT9d#5y");
         args.add("--spring.data.redis.host=redis.rewit.internal");
         args.add("--spring.data.redis.port=6380");
         args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
@@ -291,8 +287,6 @@ class ProductionFailClosedStartupIntegrationTest {
         args.add("--rewit.datasource.media.password=media-prod-pass-Kp4!xV7s#3w");
         args.add("--rewit.datasource.moderation.username=rewit_mod");
         args.add("--rewit.datasource.moderation.password=mod-prod-pass-Yr8#mN4q!6t");
-        args.add("--spring.flyway.user=rewit_migrator");
-        args.add("--spring.flyway.password=flyway-prod-pass-Lw3!rT9d#5y");
         args.add("--spring.data.redis.host=redis.rewit.internal");
         args.add("--spring.data.redis.port=6380");
         args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
@@ -360,8 +354,6 @@ class ProductionFailClosedStartupIntegrationTest {
         args.add("--rewit.datasource.media.password=media-prod-pass-Kp4!xV7s#3w");
         args.add("--rewit.datasource.moderation.username=rewit_mod");
         args.add("--rewit.datasource.moderation.password=mod-prod-pass-Yr8#mN4q!6t");
-        args.add("--spring.flyway.user=rewit_migrator");
-        args.add("--spring.flyway.password=flyway-prod-pass-Lw3!rT9d#5y");
         args.add("--spring.data.redis.host=redis.rewit.internal");
         args.add("--spring.data.redis.port=6380");
         args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
@@ -400,6 +392,64 @@ class ProductionFailClosedStartupIntegrationTest {
         assertTrue(ex.getMessage().contains("management.endpoint.health.probes.add-additional-paths"));
         assertFalse(beanFactoryPostProcessed.get(),
                 "Validação R304-R1 deve falhar antes do refresh/Flyway/DataSource");
+        assertPortNotListening(port);
+    }
+
+    @Test
+    @DisplayName("F2-DEPLOY-03.5.2A. Sobrescrita CLI/JSON tentando habilitar Flyway ou injetar credencial migrator em prod aborta antes de DataSource e HTTP")
+    void prodRejectsFlywayEnableAndMigratorCredentialsViaCliAndJsonBeforeStartup() throws Exception {
+        int port = findFreePort();
+        AtomicBoolean beanFactoryPostProcessed = new AtomicBoolean(false);
+
+        SpringApplication app = new SpringApplication(RewitApplication.class);
+        app.setWebApplicationType(WebApplicationType.SERVLET);
+        app.setAdditionalProfiles("prod");
+        app.addInitializers(ctx -> ctx.addBeanFactoryPostProcessor(bf -> beanFactoryPostProcessed.set(true)));
+
+        String secretMigratorPass = "never-leak-migrator-secret-8821!#";
+        List<String> args = new ArrayList<>();
+        args.add("--server.port=" + port);
+        args.add("--rewit.environment=production");
+        args.add("--spring.datasource.url=jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full");
+        args.add("--spring.datasource.username=rewit_app");
+        args.add("--spring.datasource.password=app-prod-pass-Xq7#kP2v!9z");
+        args.add("--rewit.datasource.media.username=rewit_media");
+        args.add("--rewit.datasource.media.password=media-prod-pass-Kp4!xV7s#3w");
+        args.add("--rewit.datasource.moderation.username=rewit_mod");
+        args.add("--rewit.datasource.moderation.password=mod-prod-pass-Yr8#mN4q!6t");
+        args.add("--spring.data.redis.host=redis.rewit.internal");
+        args.add("--spring.data.redis.port=6380");
+        args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
+        args.add("--spring.data.redis.ssl.enabled=true");
+        args.add("--rewit.minio.endpoint=https://s3.us-east-1.amazonaws.com");
+        args.add("--rewit.minio.access-key=s3-prod-access-key-fixture-001");
+        args.add("--rewit.minio.secret-key=storage-prod-secret-9fT2mQ8z!7p");
+        args.add("--rewit.minio.bucket-name=rewit-prod-media");
+        args.add("--rewit.security.jwt-secret=prod-jwt-secret-entropia-csprng-Zp4!Qw8@Lk2#9x");
+        args.add("--rewit.security.password-pepper=prod-pepper-secret-entropia-csprng-Rm7!Vx2@Np9#");
+        args.add("--rewit.security.refresh-token-secret=prod-refresh-secret-entropia-csprng-Tk5!Bj8@Wd3#");
+        args.add("--rewit.security.moderation-audit-secret=prod-mod-audit-secret-entropia-csprng-Kp9!Zx4@Qc1#");
+        args.add("--rewit.rate-limit.key-secret=prod-rate-limit-secret-entropia-Hy6$Vb3%Nm1&8z");
+        args.add("--rewit.account.purge.enabled=true");
+        args.add("--rewit.account.email-reservation-secret=prod-email-reservation-secret-csprng-Gf2!Rt7@Jk4#");
+        // Tentativa adversarial de reabilitar Flyway e injetar credenciais migrator
+        args.add("--spring.application.json={\"spring\":{\"flyway\":{\"enabled\":true,\"user\":\"rewit_migrator\",\"password\":\"" + secretMigratorPass + "\"}}}");
+
+        ProductionEnvironmentValidator.InvalidConfigurationException ex = assertThrows(
+                ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> {
+                    try (ConfigurableApplicationContext ignored = app.run(args.toArray(String[]::new))) {
+                        // Nunca deve subir
+                    }
+                }
+        );
+
+        assertTrue(ex.getMessage().contains("spring.flyway.enabled"));
+        assertTrue(ex.getMessage().contains("spring.flyway.user"));
+        assertTrue(ex.getMessage().contains("spring.flyway.password"));
+        assertFalse(ex.getMessage().contains(secretMigratorPass), "Nunca expor senha migrator");
+        assertFalse(beanFactoryPostProcessed.get(),
+                "Validação deve falhar na fase de ApplicationContextInitializer, antes de DataSource/HTTP");
         assertPortNotListening(port);
     }
 
