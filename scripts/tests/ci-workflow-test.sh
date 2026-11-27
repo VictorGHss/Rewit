@@ -514,6 +514,68 @@ test_migration_container_scope_detection() {
   assert_contains "$out_content" "migration_container=false" "alteração comum de backend não deve duplicar build Docker de migration_container"
 }
 
+# ==============================================================================
+# 10. Regressão M-01: caminhos de produção ativam `migration_container=true`
+# ==============================================================================
+
+test_m01_production_contract_paths_trigger_migration_container() {
+  local prod_paths=(
+    "backend/src/main/java/com/rewit/infrastructure/persistence/PostgresProductionJdbcUrlValidator.java"
+    "backend/src/main/java/com/rewit/infrastructure/persistence/DatabaseRoleSecurityConstants.java"
+    "backend/src/main/java/com/rewit/config/ProductionEnvironmentValidator.java"
+    "backend/src/main/java/com/rewit/infrastructure/persistence/routing/PostgresRuntimeRoleIdentityValidator.java"
+    "backend/src/main/java/com/rewit/infrastructure/persistence/routing/nested/RoutingHelper.java"
+    "backend/src/main/resources/META-INF/spring.factories"
+  )
+
+  local rel_path head_sha gh_out out_content
+  local failures=0
+  for rel_path in "${prod_paths[@]}"; do
+    # 1) Adição de arquivo novo no caminho protegido de produção
+    init_case_repo
+    mkdir -p -- "$(dirname "${CASE_REPO}/${rel_path}")"
+    printf '// fixture m01 %s\n' "$rel_path" > "${CASE_REPO}/${rel_path}"
+    LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" add "$rel_path"
+    LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" commit -q -m "feat(backend): adicionar caminho do contrato de producao"
+    head_sha="$(LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" rev-parse HEAD)"
+
+    gh_out="${CASE_DIR}/m01-add.out"
+    run_cmd_in "$CASE_REPO" "$PATH" \
+      "$DETECT_CHANGES_BIN" \
+      --event pull_request \
+      --expected-head "$head_sha" \
+      --base "$BASE_SHA" \
+      --output "$gh_out"
+
+    assert_eq "0" "$LAST_RC" "detect-changes em adição de ${rel_path} deve concluir com 0" || failures=$((failures + 1))
+    out_content="$(cat "$gh_out")"
+    assert_contains "$out_content" "backend=true" "adição de ${rel_path} deve ativar backend=true" || failures=$((failures + 1))
+    assert_contains "$out_content" "migration_container=true" "adição de ${rel_path} deve ativar migration_container=true" || failures=$((failures + 1))
+    assert_contains "$out_content" "admin=false" "adição de ${rel_path} não deve ativar admin" || failures=$((failures + 1))
+    assert_contains "$out_content" "mobile=false" "adição de ${rel_path} não deve ativar mobile" || failures=$((failures + 1))
+
+    # 2) Remoção do arquivo a partir da nova base também deve ativar migration_container=true
+    local prev_base="$head_sha"
+    LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" rm -q "$rel_path"
+    LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" commit -q -m "refactor(backend): remover caminho do contrato de producao"
+    head_sha="$(LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" rev-parse HEAD)"
+
+    gh_out="${CASE_DIR}/m01-rm.out"
+    run_cmd_in "$CASE_REPO" "$PATH" \
+      "$DETECT_CHANGES_BIN" \
+      --event pull_request \
+      --expected-head "$head_sha" \
+      --base "$prev_base" \
+      --output "$gh_out"
+
+    assert_eq "0" "$LAST_RC" "detect-changes em remoção de ${rel_path} deve concluir com 0" || failures=$((failures + 1))
+    out_content="$(cat "$gh_out")"
+    assert_contains "$out_content" "backend=true" "remoção de ${rel_path} deve ativar backend=true" || failures=$((failures + 1))
+    assert_contains "$out_content" "migration_container=true" "remoção de ${rel_path} deve ativar migration_container=true" || failures=$((failures + 1))
+  done
+  (( failures == 0 ))
+}
+
 printf '=== Executando suíte descartável de regressão dos helpers de CI (Fase 5 R1) ===\n'
 printf 'Diretório temporário isolado: %s\n\n' "$TEST_ROOT"
 
@@ -526,6 +588,7 @@ run_test "6. Commit subject iniciado por '#' é rejeitado sem truncamento" test_
 run_test "7. Mensagens multilinha preservam semântica de check-commit-msg e merge-only explícito" test_multiline_commit_messages_and_merge_only_range
 run_test "8. Caminhos com espaços, tab, aspas, Unicode e quebra de linha são tratados via -z" test_special_filenames_handled_safely_with_nul_output
 run_test "9. Escopo migration_container ativa para scripts/deploy/* sem duplicar PRs comuns" test_migration_container_scope_detection
+run_test "10. Regressão M-01: caminhos do contrato de produção ativam migration_container (adição e remoção)" test_m01_production_contract_paths_trigger_migration_container
 
 printf '\n=== Resumo da Suíte (ci-workflow) ===\n'
 printf 'Total executados : %d\n' "$TESTS_RUN"

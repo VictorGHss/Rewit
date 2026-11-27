@@ -192,7 +192,20 @@ while IFS= read -r -d '' path; do
       postgres_provisioning=true
       migration_container=true
       ;;
-    backend/pom.xml|backend/src/main/java/com/rewit/migration/*|backend/src/main/java/com/rewit/infrastructure/persistence/schema/*|backend/src/main/resources/application-prod.yml|backend/src/main/resources/db/migration/*|infrastructure/docker/backend.Dockerfile|infrastructure/docker/docker-compose.prod.yml|infrastructure/docker/tests/*|scripts/deploy/*)
+    backend/pom.xml|\
+    backend/src/main/java/com/rewit/migration/*|\
+    backend/src/main/java/com/rewit/infrastructure/persistence/schema/*|\
+    backend/src/main/java/com/rewit/infrastructure/persistence/PostgresProductionJdbcUrlValidator.java|\
+    backend/src/main/java/com/rewit/infrastructure/persistence/DatabaseRoleSecurityConstants.java|\
+    backend/src/main/java/com/rewit/infrastructure/persistence/routing/*|\
+    backend/src/main/java/com/rewit/config/ProductionEnvironmentValidator.java|\
+    backend/src/main/resources/application-prod.yml|\
+    backend/src/main/resources/META-INF/spring.factories|\
+    backend/src/main/resources/db/migration/*|\
+    infrastructure/docker/backend.Dockerfile|\
+    infrastructure/docker/docker-compose.prod.yml|\
+    infrastructure/docker/tests/*|\
+    scripts/deploy/*)
       backend=true
       migration_container=true
       ;;
