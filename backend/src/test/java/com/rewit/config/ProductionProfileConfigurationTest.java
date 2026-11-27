@@ -383,7 +383,7 @@ class ProductionProfileConfigurationTest {
     void minioConfigLoadsRegionAndRejectsBlankCredentials() {
         MinioConfig valid = new MinioConfig(
                 "https://s3.us-east-1.amazonaws.com",
-                "AKIAIOSFODNN7PRODKEY",
+                "s3-prod-access-key-fixture-001",
                 "super-secret-prod-storage-key",
                 "us-east-1"
         );

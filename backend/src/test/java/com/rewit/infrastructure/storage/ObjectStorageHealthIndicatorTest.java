@@ -194,7 +194,7 @@ class ObjectStorageHealthIndicatorTest {
 
         MinioConfig config = new MinioConfig(
                 "https://s3.us-east-1.amazonaws.com",
-                "AKIAIOSFODNN7PRODKEY",
+                "s3-prod-access-key-fixture-001",
                 "super-secret-prod-storage-key",
                 "us-east-1",
                 Duration.ofSeconds(2)

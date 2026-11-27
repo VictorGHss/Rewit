@@ -11,6 +11,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -163,17 +164,21 @@ public class PlaceMediaReportRepositoryAdapter implements PlaceMediaReportReposi
         if (placeMediaId == null) {
             return List.of();
         }
-        @SuppressWarnings("unchecked")
-        List<Object[]> rows = entityManager.createNativeQuery(
+        List<?> rawRows = entityManager.createNativeQuery(
                         "SELECT report_id, reason FROM public.rewit_auto_resolve_removed_place_media_reports(:placeMediaId, :decisionNotes)")
                 .setParameter("placeMediaId", placeMediaId)
                 .setParameter("decisionNotes", decisionNotes)
                 .getResultList();
-        return rows.stream()
-                .map(row -> new AutoResolvedReport(
-                        row[0] instanceof UUID u ? u : UUID.fromString(row[0].toString()),
-                        row[1] != null ? row[1].toString() : null))
-                .toList();
+        List<AutoResolvedReport> resolved = new ArrayList<>(rawRows.size());
+        for (Object entry : rawRows) {
+            if (!(entry instanceof Object[] row) || row.length < 2) {
+                throw new IllegalStateException("Retorno inesperado de rewit_auto_resolve_removed_place_media_reports.");
+            }
+            resolved.add(new AutoResolvedReport(
+                    row[0] instanceof UUID u ? u : UUID.fromString(row[0].toString()),
+                    row[1] != null ? row[1].toString() : null));
+        }
+        return List.copyOf(resolved);
     }
 
     private static String normalizeStatusFilter(String status) {

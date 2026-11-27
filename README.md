@@ -2,7 +2,7 @@
 
 > Uma rede social geográfica onde a comunidade descobre, avalia e debate sobre o mundo físico (locais, produtos e serviços) com verificação presencial autêntica (**Check-in Verificado**), scanners inteligentes e feeds contextuais.
 
-[![Licença](https://img.shields.io/badge/license-Proprietary-blue.svg)](LICENSE)
+![Licença](https://img.shields.io/badge/license-Proprietary-blue.svg)
 [![Java](https://img.shields.io/badge/Java-25%20LTS-orange.svg)](https://openjdk.org/projects/jdk/25/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.x-green.svg)](https://spring.io/projects/spring-boot)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-blue.svg)](https://www.postgresql.org/)

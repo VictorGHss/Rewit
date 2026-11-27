@@ -237,7 +237,7 @@ class ProductionFailClosedStartupIntegrationTest {
         args.add("--spring.web.error.includeStacktrace=always");
         args.add("--spring.application.json={\"spring\":{\"web\":{\"error\":{\"includeException\":true,\"includeMessage\":\"always\"}},\"data\":{\"redis\":{\"sentinel\":{\"nodes\":[\"localhost:26379\"]}}}}}");
         args.add("--rewit.minio.endpoint=https://localhost.:8333");
-        args.add("--rewit.minio.access-key=AKIAIOSFODNN7PRODKEY");
+        args.add("--rewit.minio.access-key=s3-prod-access-key-fixture-001");
         args.add("--rewit.minio.secret-key=storage-prod-secret-9fT2mQ8z!7p");
         args.add("--rewit.minio.bucket-name=rewit-prod-media");
         args.add("--rewit.security.jwt-secret=prod-jwt-secret-entropia-csprng-Zp4!Qw8@Lk2#9x");
@@ -298,7 +298,7 @@ class ProductionFailClosedStartupIntegrationTest {
         args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
         args.add("--spring.data.redis.ssl.enabled=true");
         args.add("--rewit.minio.endpoint=https://s3.us-east-1.amazonaws.com");
-        args.add("--rewit.minio.access-key=AKIAIOSFODNN7PRODKEY");
+        args.add("--rewit.minio.access-key=s3-prod-access-key-fixture-001");
         args.add("--rewit.minio.secret-key=storage-prod-secret-9fT2mQ8z!7p");
         args.add("--rewit.minio.bucket-name=rewit-prod-media");
         args.add("--rewit.security.jwt-secret=prod-jwt-secret-entropia-csprng-Zp4!Qw8@Lk2#9x");
@@ -367,7 +367,7 @@ class ProductionFailClosedStartupIntegrationTest {
         args.add("--spring.data.redis.password=redis-prod-pass-Bn2Hj8k4m");
         args.add("--spring.data.redis.ssl.enabled=true");
         args.add("--rewit.minio.endpoint=https://s3.us-east-1.amazonaws.com");
-        args.add("--rewit.minio.access-key=AKIAIOSFODNN7PRODKEY");
+        args.add("--rewit.minio.access-key=s3-prod-access-key-fixture-001");
         args.add("--rewit.minio.secret-key=storage-prod-secret-9fT2mQ8z!7p");
         args.add("--rewit.minio.bucket-name=rewit-prod-media");
         args.add("--rewit.security.jwt-secret=prod-jwt-secret-entropia-csprng-Zp4!Qw8@Lk2#9x");

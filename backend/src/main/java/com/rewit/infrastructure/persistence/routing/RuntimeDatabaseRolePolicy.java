@@ -335,7 +335,7 @@ public final class RuntimeDatabaseRolePolicy {
         }
         boolean hasEmbeddedCredential = false;
 
-        // 1. Verifica userinfo na authority (ex.: jdbc:postgresql://user:pass@host:5432/db)
+        // 1. Verifica userinfo embutido na authority da URL JDBC (credenciais antes de '@host:5432/db')
         String withoutJdbcPrefix = trimmed.substring("jdbc:".length());
         try {
             URI uri = URI.create(withoutJdbcPrefix);

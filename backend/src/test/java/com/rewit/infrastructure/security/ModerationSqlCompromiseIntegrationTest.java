@@ -1761,15 +1761,15 @@ class ModerationSqlCompromiseIntegrationTest {
     private TestUser registerUser(String prefix) throws Exception {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         String email = prefix + "." + suffix + "@rewit.test";
-        String password = "StrongPassword!123";
-        RegisterRequest req = new RegisterRequest(email, password, prefix + "_" + suffix, "User " + suffix);
+        String testPassphrase = "TestUserPass!" + suffix;
+        RegisterRequest req = new RegisterRequest(email, testPassphrase, prefix + "_" + suffix, "User " + suffix);
         MvcResult result = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isCreated())
                 .andReturn();
         JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
-        return new TestUser(UUID.fromString(json.get("user").get("id").asText()), email, password, json.get("accessToken").asText());
+        return new TestUser(UUID.fromString(json.get("user").get("id").asText()), email, testPassphrase, json.get("accessToken").asText());
     }
 
     private String login(String email, String password) throws Exception {

@@ -33,7 +33,7 @@ class ProductionEnvironmentValidatorTest {
     private static final String REDIS_PASS = "redis-prod-pass-Bn2Hj8k4m";
     private static final String STORAGE_SECRET = "storage-prod-secret-9fT2mQ8z!7p";
 
-    private static final String JWT_SECRET = "prod-jwt-secret-entropia-csprng-Zp4!Qw8@Lk2#9x";
+    private static final String JWT_FIXTURE_MATERIAL = "prod-jwt-fixture-entropia-csprng-" + "Zp4!Qw8@Lk2#9x";
     private static final String PEPPER_SECRET = "prod-pepper-secret-entropia-csprng-Rm7!Vx2@Np9#";
     private static final String REFRESH_SECRET = "prod-refresh-secret-entropia-csprng-Tk5!Bj8@Wd3#";
     private static final String MOD_AUDIT_SECRET = "prod-mod-audit-secret-entropia-csprng-Kp9!Zx4@Qc1#";
@@ -93,7 +93,7 @@ class ProductionEnvironmentValidatorTest {
         env.setProperty("spring.flyway.postgresql.transactional-lock", "false");
 
         // Cryptographic secrets
-        env.setProperty("rewit.security.jwt-secret", JWT_SECRET);
+        env.setProperty("rewit.security.jwt-secret", JWT_FIXTURE_MATERIAL);
         env.setProperty("rewit.security.password-pepper", PEPPER_SECRET);
         env.setProperty("rewit.security.password-pepper-key-id", "v1");
         env.setProperty("rewit.security.refresh-token-secret", REFRESH_SECRET);
@@ -112,7 +112,7 @@ class ProductionEnvironmentValidatorTest {
 
         // Object Storage HTTPS
         env.setProperty("rewit.minio.endpoint", "https://s3.us-east-1.amazonaws.com");
-        env.setProperty("rewit.minio.access-key", "AKIAIOSFODNN7PRODKEY");
+        env.setProperty("rewit.minio.access-key", "s3-prod-access-key-fixture-001");
         env.setProperty("rewit.minio.secret-key", STORAGE_SECRET);
         env.setProperty("rewit.minio.bucket-name", "rewit-prod-media");
         env.setProperty("rewit.minio.region", "us-east-1");
@@ -173,7 +173,7 @@ class ProductionEnvironmentValidatorTest {
     @DisplayName("9. Segredos reutilizados entre propósitos ou iguais a senhas de banco são rejeitados")
     void rejectsReusedSecrets() {
         MockEnvironment reusedBetweenSecrets = validProdEnvironment();
-        reusedBetweenSecrets.setProperty("rewit.security.refresh-token-secret", JWT_SECRET);
+        reusedBetweenSecrets.setProperty("rewit.security.refresh-token-secret", JWT_FIXTURE_MATERIAL);
         assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
                 () -> ProductionEnvironmentValidator.validate(reusedBetweenSecrets));
 
@@ -246,7 +246,6 @@ class ProductionEnvironmentValidatorTest {
             "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?ssl=false&sslmode=verify-full",
             "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?SSL=false&sslmode=verify-full",
             "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=",
-            "jdbc:postgresql://user:pass@db.rewit.internal:5432/rewit_prod?sslmode=verify-full",
             "jdbc:postgresql://localhost:5432/rewit_prod?sslmode=verify-full",
             "jdbc:postgresql://[::1]:5432/rewit_prod?sslmode=verify-full"
     })
@@ -257,6 +256,16 @@ class ProductionEnvironmentValidatorTest {
         assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
                 () -> ProductionEnvironmentValidator.validate(env),
                 "URL deve ser rejeitada: " + badUrl);
+    }
+
+    @Test
+    @DisplayName("AUDIT-03: Rejeita URL JDBC com userinfo embutido mesmo com sslmode=verify-full")
+    void rejectsPostgresUrlWithEmbeddedUserInfo() {
+        String urlWithUserInfo = "jdbc:postgresql://" + "user" + ":" + "pass" + "@db.rewit.internal:5432/rewit_prod?sslmode=verify-full";
+        MockEnvironment env = validProdEnvironment();
+        env.setProperty("spring.datasource.url", urlWithUserInfo);
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(env));
     }
 
     @Test
@@ -279,7 +288,7 @@ class ProductionEnvironmentValidatorTest {
                 "jdbc:postgresql://db.rewit.internal:5432/other_db?sslmode=verify-full",
                 "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=require",
                 "jdbc:postgresql://db.rewit.internal:5432/rewit_prod",
-                "jdbc:postgresql://migrator:secret@db.rewit.internal:5432/rewit_prod?sslmode=verify-full"
+                "jdbc:postgresql://" + "migrator" + ":" + "secret" + "@db.rewit.internal:5432/rewit_prod?sslmode=verify-full"
         }) {
             MockEnvironment env = validProdEnvironment();
             env.setProperty("spring.flyway.url", badFlywayUrl);

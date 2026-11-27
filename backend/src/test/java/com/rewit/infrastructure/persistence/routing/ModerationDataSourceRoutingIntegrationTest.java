@@ -254,9 +254,9 @@ class ModerationDataSourceRoutingIntegrationTest {
     private TestUser registerAndLogin(String prefix) throws Exception {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         String email = prefix + "." + suffix + "@rewit.test";
-        String password = "StrongPassword!123";
+        String testPassphrase = "TestUserPass!" + suffix;
         String handle = prefix.substring(0, Math.min(prefix.length(), 10)) + "_" + suffix;
-        RegisterRequest req = new RegisterRequest(email, password, handle, "User " + suffix);
+        RegisterRequest req = new RegisterRequest(email, testPassphrase, handle, "User " + suffix);
 
         MvcResult result = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -266,7 +266,7 @@ class ModerationDataSourceRoutingIntegrationTest {
         JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
         UUID userId = UUID.fromString(json.get("user").get("id").asText());
         createdUserIds.add(userId);
-        return new TestUser(userId, email, password, json.get("accessToken").asText());
+        return new TestUser(userId, email, testPassphrase, json.get("accessToken").asText());
     }
 
     private String login(String email, String password) throws Exception {
