@@ -1,0 +1,93 @@
+# ==============================================================================
+# REWIT - ORQUESTRAÇÃO PRÉ-DEPLOY DE PRODUÇÃO (F2-DEPLOY-03.5.2B)
+# ==============================================================================
+# Separação estrita entre o job one-shot de migrations (`rewit-migrate`) e o
+# serviço da API (`rewit-api`), reutilizando exatamente a mesma imagem imutável
+# construída a partir de `infrastructure/docker/backend.Dockerfile`.
+#
+# Garantias:
+#   1. `rewit-migrate` sobrescreve o ENTRYPOINT para executar exclusivamente
+#      `com.rewit.migration.RewitMigrationRunner` (zero Spring Context) e recebe
+#      apenas `DATABASE_URL`, `FLYWAY_DB_USER` e `FLYWAY_DB_PASSWORD`.
+#   2. `rewit-api` depende de `rewit-migrate` com `condition: service_completed_successfully`:
+#      qualquer saída diferente de zero no job bloqueia a subida/rollout da API.
+#   3. `rewit-api` executa em `SPRING_PROFILES_ACTIVE=prod` com zero credenciais
+#      migrator (`FLYWAY_DB_*` / `POSTGRES_*` / `SPRING_FLYWAY_*`), validando o
+#      schema em modo estritamente somente leitura (`ReadOnlyFlywaySchemaValidator`).
+#   4. A porta de management (`8081`) permanece restrita à rede/loopback interno
+#      e nunca é publicada externamente.
+#
+# Uso (Docker Compose v2):
+#   REWIT_BACKEND_IMAGE=rewit-backend:<sha-ou-tag> \
+#     docker compose -f infrastructure/docker/docker-compose.prod.yml up -d
+# ==============================================================================
+
+services:
+  rewit-migrate:
+    image: ${REWIT_BACKEND_IMAGE:?Defina REWIT_BACKEND_IMAGE com a imagem imutavel do backend}
+    restart: "no"
+    entrypoint:
+      - sh
+      - -c
+      - exec java $${JAVA_OPTS} -Dloader.main=com.rewit.migration.RewitMigrationRunner -jar /app/app.jar
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL com sslmode=verify-full}
+      FLYWAY_DB_USER: ${FLYWAY_DB_USER:?Defina FLYWAY_DB_USER (role migrator dedicada sem SUPERUSER)}
+      FLYWAY_DB_PASSWORD: ${FLYWAY_DB_PASSWORD:?Defina FLYWAY_DB_PASSWORD}
+      JAVA_OPTS: ${MIGRATE_JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError}
+      TZ: ${TZ:-UTC}
+
+  rewit-api:
+    image: ${REWIT_BACKEND_IMAGE:?Defina REWIT_BACKEND_IMAGE com a imagem imutavel do backend}
+    restart: unless-stopped
+    depends_on:
+      rewit-migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${SERVER_BIND_HOST:-127.0.0.1}:${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      ENVIRONMENT: ${ENVIRONMENT:-prod}
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      MANAGEMENT_SERVER_PORT: ${MANAGEMENT_SERVER_PORT:-8081}
+      MANAGEMENT_SERVER_ADDRESS: ${MANAGEMENT_SERVER_ADDRESS:-127.0.0.1}
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL com sslmode=verify-full}
+      APP_DB_USER: rewit_app
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Defina APP_DB_PASSWORD}
+      MEDIA_DB_USER: rewit_media
+      MEDIA_DB_PASSWORD: ${MEDIA_DB_PASSWORD:?Defina MEDIA_DB_PASSWORD}
+      MOD_DB_USER: rewit_mod
+      MOD_DB_PASSWORD: ${MOD_DB_PASSWORD:?Defina MOD_DB_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST:?Defina REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT:-6380}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Defina REDIS_PASSWORD}
+      REDIS_SSL_ENABLED: "true"
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:?Defina OBJECT_STORAGE_ENDPOINT (https://)}
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:?Defina OBJECT_STORAGE_ACCESS_KEY}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:?Defina OBJECT_STORAGE_SECRET_KEY}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:?Defina OBJECT_STORAGE_BUCKET}
+      OBJECT_STORAGE_AUTO_CREATE_BUCKET: "false"
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET}
+      PASSWORD_PEPPER_SECRET: ${PASSWORD_PEPPER_SECRET:?Defina PASSWORD_PEPPER_SECRET}
+      PASSWORD_PEPPER_KEY_ID: ${PASSWORD_PEPPER_KEY_ID:-v1}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?Defina REFRESH_TOKEN_SECRET}
+      MODERATION_AUDIT_SECRET: ${MODERATION_AUDIT_SECRET:?Defina MODERATION_AUDIT_SECRET}
+      MODERATION_AUDIT_KEY_ID: ${MODERATION_AUDIT_KEY_ID:-v1}
+      RATE_LIMIT_KEY_SECRET: ${RATE_LIMIT_KEY_SECRET:?Defina RATE_LIMIT_KEY_SECRET}
+      ACCOUNT_EMAIL_RESERVATION_SECRET: ${ACCOUNT_EMAIL_RESERVATION_SECRET:?Defina ACCOUNT_EMAIL_RESERVATION_SECRET}
+      JAVA_OPTS: ${API_JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError}
+      TZ: ${TZ:-UTC}
