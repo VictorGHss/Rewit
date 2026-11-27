@@ -23,6 +23,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       postgres_provisioning: ${{ steps.filter.outputs.postgres_provisioning }}
+      migration_container: ${{ steps.filter.outputs.migration_container }}
       admin: ${{ steps.filter.outputs.admin }}
       mobile: ${{ steps.filter.outputs.mobile }}
     steps:
@@ -90,6 +91,8 @@ jobs:
             scripts/tests/task-gate-test.sh \
             scripts/tests/test-infra-test.sh \
             scripts/tests/ci-workflow-test.sh \
+            scripts/deploy/run-predeploy-migrations.sh \
+            infrastructure/docker/tests/migration-orchestration-test.sh \
             infrastructure/postgres/tests/provisioning-test.sh; do
             bash -n "$script"
             echo "[OK] bash -n ${script}"
@@ -117,6 +120,8 @@ jobs:
             scripts/tests/task-gate-test.sh \
             scripts/tests/test-infra-test.sh \
             scripts/tests/ci-workflow-test.sh \
+            scripts/deploy/run-predeploy-migrations.sh \
+            infrastructure/docker/tests/migration-orchestration-test.sh \
             infrastructure/postgres/init/02-create-app-role.sh \
             infrastructure/postgres/tests/provisioning-test.sh
 
@@ -243,6 +248,15 @@ jobs:
         run: |
           set -euo pipefail
           bash infrastructure/postgres/tests/provisioning-test.sh "$EXPECTED_SHA"
+
+      - name: Validar container real, concorrência e orquestração pré-deploy (migration-orchestration-test.sh)
+        if: ${{ needs.changes.outputs.migration_container == 'true' }}
+        shell: bash
+        env:
+          MIGRATION_ORCH_TEST_RUNTIME: docker
+        run: |
+          set -euo pipefail
+          bash infrastructure/docker/tests/migration-orchestration-test.sh
 
   admin:
     name: Admin Web (Node 24 + Vitest)

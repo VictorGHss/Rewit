@@ -465,6 +465,55 @@ linha2.txt"
   assert_contains "$out_content" "mobile=false" "mobile deve permanecer false"
 }
 
+# ==============================================================================
+# 9. Escopo `migration_container` ativado para orquestração pré-deploy / Docker
+# ==============================================================================
+
+test_migration_container_scope_detection() {
+  mkdir -p -- "${CASE_REPO}/scripts/deploy" "${CASE_REPO}/infrastructure/docker"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "${CASE_REPO}/scripts/deploy/run-predeploy-migrations.sh"
+  LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" add scripts/deploy/run-predeploy-migrations.sh
+  LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" commit -q -m "feat(deploy): adicionar script de migrations pre-deploy"
+  local head_sha
+  head_sha="$(LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" rev-parse HEAD)"
+
+  local gh_out="${CASE_DIR}/mig-container.out"
+  run_cmd_in "$CASE_REPO" "$PATH" \
+    "$DETECT_CHANGES_BIN" \
+    --event pull_request \
+    --expected-head "$head_sha" \
+    --base "$BASE_SHA" \
+    --output "$gh_out"
+
+  assert_eq "0" "$LAST_RC" "detect-changes em scripts/deploy/* deve concluir com 0"
+  local out_content
+  out_content="$(cat "$gh_out")"
+  assert_contains "$out_content" "backend=true" "scripts/deploy/* deve ativar backend=true"
+  assert_contains "$out_content" "migration_container=true" "scripts/deploy/* deve ativar migration_container=true"
+  assert_contains "$out_content" "admin=false" "admin deve permanecer false"
+  assert_contains "$out_content" "mobile=false" "mobile deve permanecer false"
+
+  # Alteração comum de backend fora de migration/schema/prod não deve ativar migration_container
+  init_case_repo
+  printf '// ajuste comum\n' >> "${CASE_REPO}/backend/src/App.java"
+  LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" add backend/src/App.java
+  LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" commit -q -m "fix(backend): ajuste fora de migrations"
+  head_sha="$(LC_ALL=C "$REAL_GIT_BIN" -C "$CASE_REPO" rev-parse HEAD)"
+
+  gh_out="${CASE_DIR}/backend-only.out"
+  run_cmd_in "$CASE_REPO" "$PATH" \
+    "$DETECT_CHANGES_BIN" \
+    --event pull_request \
+    --expected-head "$head_sha" \
+    --base "$BASE_SHA" \
+    --output "$gh_out"
+
+  assert_eq "0" "$LAST_RC" "detect-changes em backend/src/App.java deve concluir com 0"
+  out_content="$(cat "$gh_out")"
+  assert_contains "$out_content" "backend=true" "backend/src/App.java deve ativar backend=true"
+  assert_contains "$out_content" "migration_container=false" "alteração comum de backend não deve duplicar build Docker de migration_container"
+}
+
 printf '=== Executando suíte descartável de regressão dos helpers de CI (Fase 5 R1) ===\n'
 printf 'Diretório temporário isolado: %s\n\n' "$TEST_ROOT"
 
@@ -476,6 +525,7 @@ run_test "5. SHA divergente no checkout falha imediatamente em todos os helpers"
 run_test "6. Commit subject iniciado por '#' é rejeitado sem truncamento" test_hash_prefixed_commit_subject_is_rejected
 run_test "7. Mensagens multilinha preservam semântica de check-commit-msg e merge-only explícito" test_multiline_commit_messages_and_merge_only_range
 run_test "8. Caminhos com espaços, tab, aspas, Unicode e quebra de linha são tratados via -z" test_special_filenames_handled_safely_with_nul_output
+run_test "9. Escopo migration_container ativa para scripts/deploy/* sem duplicar PRs comuns" test_migration_container_scope_detection
 
 printf '\n=== Resumo da Suíte (ci-workflow) ===\n'
 printf 'Total executados : %d\n' "$TESTS_RUN"
