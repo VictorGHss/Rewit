@@ -20,6 +20,7 @@ import com.rewit.application.service.ReviewService;
 import com.rewit.application.storage.FixedStorageQuarantineGracePolicy;
 import com.rewit.application.usecase.PurgeConfirmedOrphanStorageObjectUseCase;
 import com.rewit.application.usecase.RecheckQuarantinedStorageObjectUseCase;
+import com.rewit.config.PrivilegedTestDatabase;
 import com.rewit.domain.enums.AuthProvider;
 import com.rewit.domain.enums.ReviewMediaStatus;
 import com.rewit.domain.enums.ReviewMediaType;
@@ -243,10 +244,14 @@ class StorageOrphanPurgeIntegrationTest {
 
     // Caminho real até CONFIRMED_ORPHAN: observação persistida + rechecagem após o grace period
     private void confirmOrphan(String key) {
-        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 16, null, T0)));
+        quarantineRepository.recordObservations(List.of(new OrphanCandidate(key, 16, null, Instant.now())));
+        // Simula transcurso legítimo do grace period de 24h na fixture administrativa (owner)
+        PrivilegedTestDatabase.jdbc().update(
+                "UPDATE storage_object_quarantine SET first_observed_at = clock_timestamp() - INTERVAL '25 hours', last_observed_at = clock_timestamp() - INTERVAL '25 hours' WHERE object_key = ?",
+                key);
         assertEquals(QuarantineRecheckOutcome.CONFIRMED_ORPHAN,
-                new RecheckQuarantinedStorageObjectUseCase(quarantineRepository, new FixedStorageQuarantineGracePolicy(GRACE))
-                        .recheck(key, T0.plus(GRACE)).outcome());
+                new RecheckQuarantinedStorageObjectUseCase(quarantineRepository, new FixedStorageQuarantineGracePolicy(Duration.ofHours(24)))
+                        .recheck(key, Instant.now()).outcome());
     }
 
     private String putManagedObject(UUID reviewId) {
@@ -262,10 +267,11 @@ class StorageOrphanPurgeIntegrationTest {
 
     private void saveMedia(UUID reviewId, UUID userId, UUID mediaId, String key, boolean removed) {
         ReviewMedia media = new ReviewMedia(mediaId, reviewId, userId, key, ReviewMediaType.IMAGE, "image/jpeg", 1024, 10, 10);
+        reviewMediaRepository.save(media);
         if (removed) {
             media.markRemoved();
+            reviewMediaRepository.save(media);
         }
-        reviewMediaRepository.save(media);
     }
 
     private static void await(CountDownLatch latch) {

@@ -162,7 +162,7 @@ class ModerateDiscussionIntegrationTest {
     @DisplayName("Moderador com conta inativa não modera (401 ACCOUNT_DISABLED)")
     void inactiveModeratorIsRejected() {
         ReviewDiscussion comment = quarantinedComment();
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?", moderator.getId());
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(moderator.getId(), "SUSPENDED");
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> moderate(comment, moderator, DiscussionModerationAction.REMOVE_DISCUSSION));
@@ -285,7 +285,7 @@ class ModerateDiscussionIntegrationTest {
 
         assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
                 "UPDATE discussion_moderation_audit_logs SET justification = 'adulterada' WHERE discussion_id = ?", comment.getId()));
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+        assertThrows(DataIntegrityViolationException.class, () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                 "INSERT INTO discussion_moderation_audit_logs (discussion_id, moderator_user_id, action, decision, reason_code, "
                         + "justification, previous_status, new_status) VALUES (?, ?, 'DELETE_ALL', 'ACCEPTED', 'X', 'Justificativa', 'UNDER_REVIEW', 'REMOVED')",
                 comment.getId(), moderator.getId()));

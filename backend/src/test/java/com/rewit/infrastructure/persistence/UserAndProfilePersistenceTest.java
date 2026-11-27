@@ -139,15 +139,13 @@ class UserAndProfilePersistenceTest {
 
     @Test
     @DisplayName("Soft-delete: Usuário soft-deleted não deve aparecer em buscas ativas, mas e-mail permanece reservado")
-    @Transactional
     void shouldExcludeSoftDeletedUserFromActiveQueriesWhileEmailRemainsReserved() {
-        String email = "soft.delete.test@rewit.com";
+        String email = "soft.delete." + UUID.randomUUID() + "@rewit.com";
         User user = new User(null, email, "hash", AuthProvider.LOCAL, null);
         userRepository.save(user);
 
-        // Soft delete
-        user.softDelete();
-        userRepository.save(user);
+        // Soft delete administrativo em fixture
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(user.getId(), "DELETED");
 
         // Usuário não deve aparecer em buscas ativas normais
         Optional<User> activeUserById = userRepository.findById(user.getId());

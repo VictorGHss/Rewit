@@ -216,8 +216,7 @@ class SocialAuthenticationIntegrationTest {
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
 
         User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, subject).orElseThrow();
-        user.suspend();
-        userRepository.save(user);
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(user.getId(), "SUSPENDED");
 
         appleLogin(subject, email)
                 .andExpect(status().isUnauthorized())
@@ -343,8 +342,7 @@ class SocialAuthenticationIntegrationTest {
         String email = UUID.randomUUID().toString().substring(0, 10) + "@privaterelay.appleid.com";
         appleLogin(subject, email).andExpect(status().isOk());
         User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, subject).orElseThrow();
-        user.suspend();
-        userRepository.save(user);
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(user.getId(), "SUSPENDED");
 
         String nonce = issueNonce();
         socialReactivate("apple", tokens.sign(appleClaims(subject, email, SocialAuthService.hashNonce(nonce), Instant.now()).build()), nonce)

@@ -14,10 +14,15 @@ Este documento estabelece as diretrizes de proteção de dados, privacidade por 
 ## 2. Política Estrita de Geolocalização
 
 - **Proibição de Rastreamento Contínuo**: O Rewit **não** possui recursos de gravação de rotas, trilhas de GPS em segundo plano ou telemetria de tráfego contínua.
-- **Localização Sob Demanda**:
-  - As coordenadas geográficas do usuário só são lidas no instante da submissão de uma ação que requer geolocalização.
-  - Uma vez calculada a distância em relação ao estabelecimento para fins de verificação do check-in, as coordenadas da residência ou do trânsito do usuário são descartadas da memória de trabalho.
-  - Apenas as coordenadas do evento de check-in (atestando que o usuário esteve no estabelecimento comercial) são persistidas.
+- **Localização Sob Demanda e Validação Transitória**:
+  - As coordenadas geográficas do usuário só são lidas no instante da submissão de uma ação que requer geolocalização (busca por proximidade ou publicação de avaliação com verificação de presença).
+  - Na validação de presença (`ReviewService.createReviewWithPresence`), latitude, longitude e acurácia recebidas na requisição são usadas **exclusivamente de forma transitória** em memória e na consulta espacial PostGIS (`ST_DWithin` / `ST_Distance`) contra as coordenadas do estabelecimento, sendo descartadas ao término da requisição.
+  - **Ausência de retenção de coordenadas em `check_ins`**: nenhuma coordenada GPS exata do usuário é persistida em `check_ins` (nem em `reviews.user_coordinates`), independentemente do resultado (`VERIFIED` ou `REJECTED`). Essa política é imposta estruturalmente na camada JPA (`CheckInJpaEntity.fromDomain()` nunca converte nem grava coordenadas) e no PostgreSQL pela constraint `chk_checkin_coordinates_null` (`CHECK (coordinates IS NULL)`).
+  - **Dados efetivamente persistidos em `check_ins`**:
+    - Quando **`VERIFIED`**: identificadores (`id`, `review_id`, `user_id`, `place_id`), `status = 'VERIFIED'`, `verification_method`, `verified_at` e `distance_to_centroid_meters` (dentro do raio do estabelecimento, limitado a 250 m), com `coordinates = NULL` e `rejection_reason = NULL`.
+    - Quando **`REJECTED`**: identificadores (`id`, `review_id`, `user_id`, `place_id`), `status = 'REJECTED'`, `verification_method` e `rejection_reason` restrito aos motivos reais de `PresenceVerificationOutcome` (`ACCURACY_UNAVAILABLE`, `ACCURACY_TOO_LOW`, `OUTSIDE_RADIUS`, `RECENT_CHECK_IN`), com `coordinates = NULL`, `distance_to_centroid_meters = NULL` (sem distância residencial/de trânsito; regra uniforme garantida por `CheckIn`, `CheckInJpaEntity.fromDomain()` e pela constraint `chk_checkin_distance_only_verified`, segundo a qual somente `VERIFIED` pode manter distância) e `verified_at = NULL`.
+  - **Política aplicada aos registros históricos**: a migração `V43` descartou imediatamente `coordinates` de todos os registros históricos de `check_ins` (`VERIFIED`, `REJECTED` e `PENDING`) e limpou `distance_to_centroid_meters` dos registros históricos não verificados (`REJECTED` e `PENDING`), preservando todas as linhas, seus estados, a invariante `reviews.is_verified_on_site` mantida pelas triggers da `V3` e os timestamps `reviews.updated_at` originais.
+  - **Limites de retenção, auditoria e alinhamento técnico**: os registros de check-in permanecem vinculados às avaliações para preservar integridade referencial, `reviews.is_verified_on_site` e a janela antifraude de 24 horas (sem gravação de coordenadas brutas em logs, traces ou auditorias). A implementação técnica está alinhada à política de minimização de dados, permanecendo sujeita à validação jurídica apropriada quanto à conformidade com a LGPD.
 - **Dependência de Geolocalização Mobile (`geolocator: ^14.1.1`)**:
   - **Necessidade**: obtenção de coordenadas exclusivamente em primeiro plano, sob demanda e com consentimento explícito do usuário, estritamente para validação de presença no local avaliado (check-in verificado).
   - **Compatibilidade**: Android (SDK >= 21) e iOS (iOS >= 12.0).
@@ -53,11 +58,20 @@ Toda foto capturada por smartphones modernos embute metadados EXIF detalhados no
 
 ## 5. Proteção de Credenciais e Tratamento de Logs
 
-1. **Hashing de Senhas**: Utilização obrigatória de algoritmo moderno de derivação de chaves: **BCrypt** com fator de trabalho (cost) 12 ou **Argon2id**.
-2. **Tokens JWT de Sessão**:
-   - Assinatura com algoritmo assimétrico ou chave secreta forte (mínimo 256 bits via variável `JWT_SECRET`).
-   - Tempo de expiração curto para access tokens (ex: 15 a 60 minutos) com refresh token opaco, rotacionado a cada uso e persistido no PostgreSQL apenas como hash SHA-256 (tabela `auth_sessions`), com detecção de reúso. Não há estado de sessão em Redis.
-3. **Prevenção de Vazamento em Logs**:
+1. **Hashing de Senhas com Password Pepper Vinculado à Identidade (Argon2id + HMAC)**:
+   - Utilização obrigatória de **Argon2id** precedido por derivação HMAC-SHA256 (`PASSWORD_PEPPER_SECRET`) vinculada aos 16 bytes do UUID estável da conta (envelope canônico `pw2`).
+   - Mitigação contra comprometimento de credencial SQL de runtime (S3-A13-F1): sem a chave externa, hashes não podem ser forjados nem transplantados entre usuários. Hashes crus sem autenticação são estritamente rejeitados.
+2. **Tokens JWT e Refresh Tokens com Vínculo Criptográfico**:
+   - Assinatura JWT com algoritmo simétrico forte (mínimo 256 bits via variável `JWT_SECRET`).
+   - Tempo de expiração curto para access tokens (15 minutos).
+   - Refresh token opaco de 56 bytes (16 do UUID do usuário, 8 da expiração em epoch seconds e 32 de CSPRNG), em Base64URL canônico de 75 caracteres; para os clientes é só uma string.
+   - Hash persistido exclusivamente como HMAC-SHA256 via segredo dedicado `REFRESH_TOKEN_SECRET` (tabela `auth_sessions`), rotacionado a cada uso, com detecção de reúso e lock pessimista.
+   - Integridade das sessões no banco: trigger `trg_guard_auth_session_integrity` (V44) e `rewit_app` sem `DELETE` em `auth_sessions`; a remoção legítima (cleanup e purge LGPD) ocorre por funções `SECURITY DEFINER` restritas.
+3. **Separação de Credenciais de Moderação e Autenticidade de Auditoria (S3-A13-F2 / ADR-018)**:
+   - Operações administrativas de moderação, reivindicações comerciais e ciclo de vida de contas operam sob a credencial PostgreSQL isolada `rewit_mod` (`MOD_DB_PASSWORD`), separada de `rewit_app` (`APP_DB_PASSWORD`), via roteamento transacional `@ModerationTransactional`.
+   - As 6 trilhas append-only de auditoria e as decisões persistidas em `place_media_reports` e `place_claim_requests` recebem `authenticity_mac` (`HMAC-SHA256` canônico `aud1$<keyId>$<hex>` via `MODERATION_AUDIT_SECRET` externo ao banco, independente de senhas de banco e demais segredos), garantindo autenticidade de origem da aplicação e integridade criptográfica do payload.
+   - O purge LGPD (`PurgeDeletedAccountUseCase`) permanece integralmente compatível com os guards da V45: `rewit_app` continua podendo minimizar dados de contas já em `DELETED`, sem permissão para suspender, excluir ou reintegrar contas.
+4. **Prevenção de Vazamento em Logs**:
    - É terminantemente proibido registrar em logs de aplicação (SLF4J/Logback):
      - Senhas ou hashes;
      - Cabeçalhos `Authorization`;
@@ -85,10 +99,10 @@ Registro técnico do que o código faz; não é parecer jurídico.
 - **Leitura pública (C2.2)**: a identidade de uma conta excluída não aparece em nenhuma projeção pública; perfil, follows e reputação respondem como um identificador inexistente.
 - **Purge (`PurgeDeletedAccountUseCase`)**, idempotente e restrito a contas `DELETED` elegíveis:
   - **Removido**: sessões, follows (nos dois sentidos), itens salvos, interesses, atividades, notificações da conta e snapshot de reputação.
-  - **Minimizado**: e-mail (HMAC-SHA256 com o segredo `ACCOUNT_EMAIL_RESERVATION_SECRET` no domínio `deleted.invalid`: a reserva contra novo cadastro continua sem guardar o endereço; ver `architecture/persistence.md`), senha e id do provedor externo; perfil (handle reservado, nome "Usuário excluído", sem bio, avatar e reputação); coordenadas informadas nas avaliações (`reviews.user_coordinates`, `location_accuracy_meters`); o ator excluído nas notificações de outros usuários e o autor de presenças de produto.
-  - **Preservado**: a linha de `users` (com `account_status = DELETED` e `deleted_at`), avaliações, notas, helpful, comentários, mídia, denúncias e auditoria de moderação. A linha de `user_interest_profiles` (V40) também permanece: guarda só as datas do questionário inicial, sem interesses, e o runtime não tem `DELETE` nela.
+  - **Minimizado**: e-mail (HMAC-SHA256 com o segredo `ACCOUNT_EMAIL_RESERVATION_SECRET` no domínio `deleted.invalid`: a reserva contra novo cadastro continua sem guardar o endereço; ver `architecture/persistence.md`), senha e id do provedor externo (`provider_user_id = NULL`); perfil (handle reservado, nome "Usuário excluído", sem bio, avatar e reputação); coordenadas informadas nas avaliações (`reviews.user_coordinates`, `location_accuracy_meters`) e eventuais coordenadas residuais em `check_ins` (além de `distance_to_centroid_meters` em linhas `REJECTED`), sem excluir registros de check-in; o ator excluído nas notificações de outros usuários e o autor de presenças de produto.
+    - *Compatibilidade com guards de integridade (V44)*: A trigger `trg_guard_user_role_assignment` (`fn_guard_user_role_assignment`) restringe alterações em `provider_user_id` pela credencial de runtime, mas contempla explicitamente a exceção para quando o novo valor é `NULL` e a conta já se encontra no estado `DELETED` (`NEW.provider_user_id IS NULL AND OLD.account_status = 'DELETED'`), compatível com a minimização de identidade do expurgo LGPD. O purge de sessões da conta passou a usar `rewit_purge_deleted_user_auth_sessions`, que só age sobre conta `DELETED` com `deleted_at` preenchido; o runtime não apaga sessões livremente.
+  - **Preservado**: a linha de `users` (com `account_status = DELETED` e `deleted_at`), avaliações, notas, helpful, comentários, mídia, denúncias, auditoria de moderação e os registros de check-in (sem coordenadas, mantendo a invariante `reviews.is_verified_on_site`). A linha de `user_interest_profiles` (V40) também permanece: guarda só as datas do questionário inicial, sem interesses, e o runtime não tem `DELETE` nela.
 - **Preservado nesta etapa (decisão; pendência futura de retenção/minimização)**:
-  - **Check-ins**: `check_ins.coordinates` é `NOT NULL` e o check-in sustenta `is_verified_on_site` da avaliação (trigger). Schema, triggers e check-ins não mudam; a localização do check-in é uma pendência de política de retenção.
   - **Contas empresariais** (`business_accounts`: razão social e documento fiscal): preservadas integralmente; exigem política e fluxo próprios (transferência, encerramento) antes de qualquer purge adicional.
   - **Mídia**: linhas e objetos no storage permanecem ligados às avaliações históricas; sem deleção física, síncrona ou assíncrona, até a política de retenção de storage (ADR-010).
 - **Disparo (job diário)**: `AccountPurgeJobScheduler` (mesmo mecanismo `@Scheduled` do cleanup de `auth_sessions` e do purge do Outbox), uma passada a cada 24 horas, sem endpoint. A passada (`PurgeEligibleAccountsUseCase`) busca em lotes as contas `DELETED` com `deleted_at <= agora - 30 dias` ainda não minimizadas (`UserRepository.findDeletedUserIdsPendingPurge`, das mais antigas para as mais novas) e executa `PurgeDeletedAccountUseCase` para cada uma, **uma transação por conta**; a validação final (estado, prazo, idempotência, lock da conta) continua no caso de uso.

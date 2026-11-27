@@ -138,7 +138,7 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         Review review = new Review(
                 reviewId, author.getId(), place.getId(),
                 "Texto feed v2 " + reviewId, anonymous, false,
-                status, visibility,
+                ReviewStatus.ACTIVE, visibility,
                 -23.55, -46.63, 10.0,
                 createdAt != null ? createdAt : Instant.now(),
                 Instant.now()
@@ -147,6 +147,9 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
                 BigDecimal.valueOf(4.0), "ok");
         review.addTarget(rt);
         Review saved = reviewRepository.save(review);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
         reviewTargetRepository.save(rt);
         createdReviewIds.add(saved.getId());
         return saved;

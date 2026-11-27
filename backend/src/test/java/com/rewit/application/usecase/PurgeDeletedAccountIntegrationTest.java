@@ -338,6 +338,64 @@ class PurgeDeletedAccountIntegrationTest {
                 "já minimizada: não volta ao lote");
     }
 
+    @Test
+    @DisplayName("Purge preserva linhas VERIFIED/REJECTED de check_ins, mantém invariantes e respeita constraints estruturais de minimização")
+    void purgeClearsResidualCheckInCoordinatesWithoutDeletingVerifiedRows() throws Exception {
+        // Cria conta com check-in VERIFIED (no local) e check-in REJECTED (fora do raio) pelo fluxo real HTTP
+        TestUser deleted = register("purgada_chk");
+        UUID d = deleted.id();
+        Place nearPlace = placeRepository.save(new Place(null, "Local Perto Purge " + suffix(), "local-perto-" + suffix(),
+                "RESTAURANTE", "Desc", "Rua Perto, 1", "1", "Centro", "Curitiba", "PR", "BR",
+                -25.43, -49.27, 50, "USER", false, null, "ACTIVE"));
+        Place farPlace = placeRepository.save(new Place(null, "Local Longe Purge " + suffix(), "local-longe-" + suffix(),
+                "RESTAURANTE", "Desc", "Rua Longe, 2", "2", "Centro", "Curitiba", "PR", "BR",
+                -25.40, -49.25, 50, "USER", false, null, "ACTIVE"));
+        UUID targetId = rateableTargetRepository.save(new RateableTarget(UUID.randomUUID(), TargetType.PLACE)).getId();
+
+        UUID verifiedReviewId = UUID.fromString(read(post("/api/v1/reviews").contentType(MediaType.APPLICATION_JSON)
+                .content(json(new CreateReviewRequest(nearPlace.getId(), "No local", false, "PUBLIC",
+                        -25.43, -49.27, 5.0, List.of(new CreateReviewTargetRequest(targetId, new BigDecimal("5.0"), null))))),
+                deleted, 201).get("id").asText());
+        UUID rejectedReviewId = UUID.fromString(read(post("/api/v1/reviews").contentType(MediaType.APPLICATION_JSON)
+                .content(json(new CreateReviewRequest(farPlace.getId(), "Fora do raio", false, "PUBLIC",
+                        -25.43, -49.27, 5.0, List.of(new CreateReviewTargetRequest(targetId, new BigDecimal("4.0"), null))))),
+                deleted, 201).get("id").asText());
+
+        // Constraints da V43 impedem estruturalmente a gravação de coordenadas em check_ins ou distância em não verificados
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+                "UPDATE check_ins SET coordinates = ST_SetSRID(ST_MakePoint(-49.27, -25.43), 4326)::geography WHERE review_id = ?",
+                verifiedReviewId));
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+                "UPDATE check_ins SET distance_to_centroid_meters = 1500.00 WHERE review_id = ?",
+                rejectedReviewId));
+
+        TestUser admin = admin();
+        perform(delete("/api/v1/admin/users/{id}", d), admin, 204);
+
+        PurgeResult first = purgeAfterGrace(d);
+        assertTrue(first.changedAnything());
+
+        // Nenhuma coordenada permanece em check_ins; distância de REJECTED permanece NULL
+        assertEquals(0, count("SELECT count(*) FROM check_ins WHERE user_id = ? AND coordinates IS NOT NULL", d));
+        assertEquals(0, count("SELECT count(*) FROM check_ins WHERE user_id = ? AND status = 'REJECTED' "
+                + "AND distance_to_centroid_meters IS NOT NULL", d));
+
+        // Linhas históricas permanecem e reviews.is_verified_on_site continua verdadeiro para VERIFIED
+        assertEquals(2, count("SELECT count(*) FROM check_ins WHERE user_id = ?", d));
+        assertEquals("VERIFIED", jdbcTemplate.queryForObject(
+                "SELECT status FROM check_ins WHERE review_id = ?", String.class, verifiedReviewId));
+        assertEquals("OUTSIDE_RADIUS", jdbcTemplate.queryForObject(
+                "SELECT rejection_reason FROM check_ins WHERE review_id = ?", String.class, rejectedReviewId));
+        assertEquals(Boolean.TRUE, jdbcTemplate.queryForObject(
+                "SELECT is_verified_on_site FROM reviews WHERE id = ?", Boolean.class, verifiedReviewId));
+        assertEquals(Boolean.FALSE, jdbcTemplate.queryForObject(
+                "SELECT is_verified_on_site FROM reviews WHERE id = ?", Boolean.class, rejectedReviewId));
+
+        // Segunda execução é estritamente idempotente
+        PurgeResult second = purgeAfterGrace(d);
+        assertFalse(second.changedAnything(), second.toString());
+    }
+
     // ---------------------------------------------------------------------------------------------------------
     // Leituras públicas depois do purge
     // ---------------------------------------------------------------------------------------------------------
@@ -365,7 +423,7 @@ class PurgeDeletedAccountIntegrationTest {
         assertTrue(detail.get("author").get("id").isNull());
         assertEquals("Avaliação histórica da conta excluída", detail.get("experienceText").asText());
         assertEquals(1, detail.get("helpfulCount").asLong());
-        assertTrue(detail.get("isVerifiedOnSite").asBoolean(), "o check-in verificado continua (decisão pendente)");
+        assertTrue(detail.get("isVerifiedOnSite").asBoolean(), "o check-in verificado continua sem coordenadas");
 
         JsonNode stats = read(get("/api/v1/targets/{id}/stats", s.targetId()), s.viewer());
         assertEquals(2, stats.get("reviewsCount").asInt());
@@ -440,7 +498,7 @@ class PurgeDeletedAccountIntegrationTest {
                 + "VALUES (?, 'VIEW', 'PLACE', ?)", d, targetId);
         jdbcTemplate.update("INSERT INTO business_accounts (user_id, corporate_name, tax_id) VALUES (?, ?, ?)",
                 d, "Empresa " + suffix(), UUID.randomUUID().toString().replace("-", ""));
-        jdbcTemplate.update("INSERT INTO moderation_audit_logs (review_id, moderator_user_id, action, decision, reason_code, "
+        PrivilegedTestDatabase.jdbc().update("INSERT INTO moderation_audit_logs (review_id, moderator_user_id, action, decision, reason_code, "
                 + "justification, previous_review_status, new_review_status) "
                 + "VALUES (?, ?, 'REMOVE_REVIEW', 'REJECTED', 'SPAM', 'Decisão histórica tomada pela conta', 'ACTIVE', 'ACTIVE')",
                 activeReviewId, d);

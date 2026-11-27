@@ -247,11 +247,11 @@ class DatabaseDomainIntegrityTest {
                 ps.executeUpdate();
             }
 
-            // 4. Inserção de CheckIn consistente deve suceder
+            // 4. Inserção de CheckIn consistente deve suceder (sem coordenadas nem distância em PENDING desde V43)
             UUID validCheckInId = UUID.randomUUID();
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                            "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 15.0, 'PENDING')")) {
+                            "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                 ps.setObject(1, validCheckInId);
                 ps.setObject(2, reviewId);
                 ps.setObject(3, userId);
@@ -273,7 +273,7 @@ class DatabaseDomainIntegrityTest {
             assertThrows(SQLException.class, () -> {
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                                "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 15.0, 'PENDING')")) {
+                                "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                     ps.setObject(1, wrongUserCheckInId);
                     ps.setObject(2, review2Id);
                     ps.setObject(3, anotherUserId); // Usuário diferente da review!
@@ -287,7 +287,7 @@ class DatabaseDomainIntegrityTest {
             assertThrows(SQLException.class, () -> {
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                                "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 15.0, 'PENDING')")) {
+                                "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                     ps.setObject(1, wrongPlaceCheckInId);
                     ps.setObject(2, review2Id);
                     ps.setObject(3, userId);
@@ -308,7 +308,7 @@ class DatabaseDomainIntegrityTest {
             assertThrows(SQLException.class, () -> {
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                                "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 15.0, 'PENDING')")) {
+                                "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                     ps.setObject(1, UUID.randomUUID());
                     ps.setObject(2, orphanReviewId);
                     ps.setObject(3, userId);
@@ -316,6 +316,46 @@ class DatabaseDomainIntegrityTest {
                     ps.executeUpdate();
                 }
             });
+
+            // 8. Banco rejeita coordenadas não nulas e distância em REJECTED ou PENDING (V43)
+            SQLException exCoords = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
+                                "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), NULL, 'PENDING')")) {
+                    ps.setObject(1, UUID.randomUUID());
+                    ps.setObject(2, review2Id);
+                    ps.setObject(3, userId);
+                    ps.setObject(4, placeTargetId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exCoords.getMessage().contains("chk_checkin_coordinates_null"), exCoords.getMessage());
+
+            SQLException exRejectedDist = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status, rejection_reason) " +
+                                "VALUES (?, ?, ?, ?, NULL, 150.0, 'REJECTED', 'OUTSIDE_RADIUS')")) {
+                    ps.setObject(1, UUID.randomUUID());
+                    ps.setObject(2, review2Id);
+                    ps.setObject(3, userId);
+                    ps.setObject(4, placeTargetId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exRejectedDist.getMessage().contains("chk_checkin_distance_only_verified"), exRejectedDist.getMessage());
+
+            SQLException exPendingDist = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
+                                "VALUES (?, ?, ?, ?, NULL, 15.0, 'PENDING')")) {
+                    ps.setObject(1, UUID.randomUUID());
+                    ps.setObject(2, review2Id);
+                    ps.setObject(3, userId);
+                    ps.setObject(4, placeTargetId);
+                    ps.executeUpdate();
+                }
+            });
+            assertTrue(exPendingDist.getMessage().contains("chk_checkin_distance_only_verified"), exPendingDist.getMessage());
         }
     }
 
@@ -371,7 +411,7 @@ class DatabaseDomainIntegrityTest {
             // 2. Inserir CheckIn PENDING: Review deve continuar FALSE
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) " +
-                            "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.27, -25.42), 4326), 10.0, 'PENDING')")) {
+                            "VALUES (?, ?, ?, ?, NULL, NULL, 'PENDING')")) {
                 ps.setObject(1, checkInId);
                 ps.setObject(2, reviewId);
                 ps.setObject(3, userId);
@@ -389,7 +429,7 @@ class DatabaseDomainIntegrityTest {
 
             // 3. Atualizar CheckIn para VERIFIED: Trigger deve sincronizar reviews.is_verified_on_site para TRUE
             try (PreparedStatement ps = conn.prepareStatement(
-                    "UPDATE check_ins SET status = 'VERIFIED', verified_at = NOW() WHERE id = ?")) {
+                    "UPDATE check_ins SET status = 'VERIFIED', verified_at = NOW(), distance_to_centroid_meters = 10.0 WHERE id = ?")) {
                 ps.setObject(1, checkInId);
                 ps.executeUpdate();
             }
@@ -404,7 +444,7 @@ class DatabaseDomainIntegrityTest {
 
             // 4. Atualizar CheckIn para REJECTED: Trigger deve sincronizar reviews.is_verified_on_site para FALSE
             try (PreparedStatement ps = conn.prepareStatement(
-                    "UPDATE check_ins SET status = 'REJECTED', verified_at = NULL WHERE id = ?")) {
+                    "UPDATE check_ins SET status = 'REJECTED', verified_at = NULL, distance_to_centroid_meters = NULL WHERE id = ?")) {
                 ps.setObject(1, checkInId);
                 ps.executeUpdate();
             }
@@ -534,15 +574,59 @@ class DatabaseDomainIntegrityTest {
             UUID mediaId = f.media();
             UUID placeId = f.place();
 
-            // 1. rewit_app consegue inserir registros de auditoria (DML INSERT permitido)
-            try (PreparedStatement ps = appConn.prepareStatement(
-                    "INSERT INTO place_media_moderation_audit_logs " +
-                            "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at) " +
-                            "VALUES (?, ?, ?, NULL, 'SYSTEM', 'RELEASE_REVIEW', 'Análise aprovada', 'Sem denúncias ativas', NOW())")) {
-                ps.setObject(1, auditId);
-                ps.setObject(2, mediaId);
-                ps.setObject(3, placeId);
-                assertEquals(1, ps.executeUpdate(), "rewit_app deve conseguir inserir na trilha de auditoria");
+            // 1. SEC-F2-03: rewit_app é bloqueada de atualizar place_media ou inserir em place_media_moderation_audit_logs;
+            //    o fluxo público de ciclo de vida executa sob rewit_media em transação atômica com MAC.
+            String testMac = "aud1$v1$" + "b".repeat(64);
+            assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement(
+                        "UPDATE place_media SET status = 'REMOVED', removal_source = 'AUTHOR', removed_at = NOW(), is_primary = FALSE WHERE id = ?")) {
+                    ps.setObject(1, mediaId);
+                    ps.executeUpdate();
+                }
+            });
+            UUID authorId;
+            try (PreparedStatement ps = appConn.prepareStatement("SELECT user_id FROM place_media WHERE id = ?")) {
+                ps.setObject(1, mediaId);
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    authorId = rs.getObject(1, UUID.class);
+                }
+            }
+            assertThrows(SQLException.class, () -> {
+                try (PreparedStatement ps = appConn.prepareStatement(
+                        "INSERT INTO place_media_moderation_audit_logs " +
+                                "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at, authenticity_mac) " +
+                                "VALUES (?, ?, ?, ?, 'USER', 'AUTHOR_REMOVE', 'Remoção pelo próprio autor', NULL, NOW(), ?)")) {
+                    ps.setObject(1, auditId);
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, placeId);
+                    ps.setObject(4, authorId);
+                    ps.setString(5, testMac);
+                    ps.executeUpdate();
+                }
+            });
+
+            var infra = com.rewit.config.TestInfrastructureConfig.current();
+            try (Connection mediaConn = java.sql.DriverManager.getConnection(
+                    infra.datasourceUrl(), infra.mediaDbUser(), infra.mediaDbPassword())) {
+                mediaConn.setAutoCommit(false);
+                try (PreparedStatement ps = mediaConn.prepareStatement(
+                        "UPDATE place_media SET status = 'REMOVED', removal_source = 'AUTHOR', removed_at = NOW(), is_primary = FALSE WHERE id = ?")) {
+                    ps.setObject(1, mediaId);
+                    assertEquals(1, ps.executeUpdate());
+                }
+                try (PreparedStatement ps = mediaConn.prepareStatement(
+                        "INSERT INTO place_media_moderation_audit_logs " +
+                                "(id, place_media_id, place_id, actor_user_id, actor_type, action, reason, notes, created_at, authenticity_mac) " +
+                                "VALUES (?, ?, ?, ?, 'USER', 'AUTHOR_REMOVE', 'Remoção pelo próprio autor', NULL, NOW(), ?)")) {
+                    ps.setObject(1, auditId);
+                    ps.setObject(2, mediaId);
+                    ps.setObject(3, placeId);
+                    ps.setObject(4, authorId);
+                    ps.setString(5, testMac);
+                    assertEquals(1, ps.executeUpdate(), "rewit_media deve conseguir inserir AUTHOR_REMOVE coerente com MAC");
+                }
+                mediaConn.commit();
             }
 
             // 2. rewit_app NÃO é owner da tabela e o PostgreSQL recusa qualquer comando de DDL

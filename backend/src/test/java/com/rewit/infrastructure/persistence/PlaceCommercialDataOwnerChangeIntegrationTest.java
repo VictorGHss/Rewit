@@ -176,17 +176,17 @@ class PlaceCommercialDataOwnerChangeIntegrationTest {
         configure(admin, placeId, accountId);
         Map<String, List<Map<String, Object>>> before = snapshot(placeId);
 
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = claimed_by_business_id WHERE id = ?", placeId);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
-        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
-        jdbcTemplate.update("UPDATE places SET status = 'ACTIVE', name = name || ' (renomeado)' WHERE id = ?", placeId);
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", admin.id());
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
+        PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = claimed_by_business_id WHERE id = ?", placeId);
+        PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'ACTIVE', name = name || ' (renomeado)' WHERE id = ?", placeId);
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", admin.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", accountId);
         assertNotConfigured(registerUser("v29_keep_viewer"), placeId);
 
         assertEquals(before, snapshot(placeId));
-        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", admin.id());
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", admin.id());
+        PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
         assertConfigured(admin, placeId);
         assertEquals(before, snapshot(placeId));
     }
@@ -201,10 +201,14 @@ class PlaceCommercialDataOwnerChangeIntegrationTest {
         configure(admin, placeId, accountA);
         Map<String, List<Map<String, Object>>> before = snapshot(placeId);
 
-        TransactionTemplate tx = new TransactionTemplate(transactionManager);
-        assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> {
-            changeOwner(placeId, accountB);
-            assertEquals(Counts.NONE, counts(placeId), "dentro da transação a troca já apagou as configurações");
+        var ownerDs = PrivilegedTestDatabase.jdbc().getDataSource();
+        var ownerTx = new TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(ownerDs));
+        var ownerJdbc = new JdbcTemplate(ownerDs);
+        assertThrows(IllegalStateException.class, () -> ownerTx.executeWithoutResult(status -> {
+            assertEquals(1, ownerJdbc.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId));
+            assertEquals(0, ownerJdbc.queryForObject("SELECT count(*) FROM place_opening_hours_schedules WHERE place_id = ?", Integer.class, placeId),
+                    "dentro da transação a troca já apagou as configurações");
+            assertEquals(0, ownerJdbc.queryForObject("SELECT count(*) FROM place_amenity_configurations WHERE place_id = ?", Integer.class, placeId));
             throw new IllegalStateException("falha depois da troca de titular");
         }));
 
@@ -221,7 +225,9 @@ class PlaceCommercialDataOwnerChangeIntegrationTest {
                 .stream().collect(Collectors.toSet());
         assertEquals(Set.of("trg_validate_place_specialization", "trg_places_owner_change_invalidates_offers",
                 "trg_places_owner_change_invalidates_commercial_data",
-                "trg_places_owner_change_clears_business_contacts"), triggers);
+                "trg_places_owner_change_clears_business_contacts",
+                "trg_a_guard_places_governance",
+                "trg_require_place_owner_claim_audit"), triggers);
 
         // V39: zera só os contatos da própria linha; não apaga tabelas nem toca na descrição
         String contacts = functionDefinition("fn_clear_place_business_contacts_on_owner_change");
@@ -286,7 +292,7 @@ class PlaceCommercialDataOwnerChangeIntegrationTest {
     }
 
     private void changeOwner(UUID placeId, UUID accountId) {
-        assertEquals(1, jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+        assertEquals(1, PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
                 accountId, placeId));
     }
 
@@ -378,7 +384,7 @@ class PlaceCommercialDataOwnerChangeIntegrationTest {
 
     private UUID approvedAccount(TestUser user) throws Exception {
         UUID accountId = createAccount(user);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
         return accountId;
     }
 

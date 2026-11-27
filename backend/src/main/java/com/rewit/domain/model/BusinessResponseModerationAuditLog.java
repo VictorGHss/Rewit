@@ -24,11 +24,20 @@ public final class BusinessResponseModerationAuditLog {
     private final BusinessResponseStatus previousStatus;
     private final BusinessResponseStatus newStatus;
     private final Instant createdAt;
+    private final String authenticityMac;
 
     public BusinessResponseModerationAuditLog(UUID id, UUID responseId, UUID moderatorUserId,
                                               BusinessResponseModerationAction action, String reasonCode,
                                               String justification, BusinessResponseStatus previousStatus,
                                               BusinessResponseStatus newStatus, Instant createdAt) {
+        this(id, responseId, moderatorUserId, action, reasonCode, justification, previousStatus, newStatus, createdAt, null);
+    }
+
+    public BusinessResponseModerationAuditLog(UUID id, UUID responseId, UUID moderatorUserId,
+                                              BusinessResponseModerationAction action, String reasonCode,
+                                              String justification, BusinessResponseStatus previousStatus,
+                                              BusinessResponseStatus newStatus, Instant createdAt,
+                                              String authenticityMac) {
         if (responseId == null) {
             throw new BusinessException("O identificador da resposta auditada é obrigatório", "MISSING_BUSINESS_RESPONSE_ID");
         }
@@ -59,6 +68,7 @@ public final class BusinessResponseModerationAuditLog {
         this.previousStatus = previousStatus;
         this.newStatus = newStatus;
         this.createdAt = createdAt != null ? createdAt : Instant.now();
+        this.authenticityMac = authenticityMac;
     }
 
     public UUID getId() {
@@ -95,5 +105,9 @@ public final class BusinessResponseModerationAuditLog {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getAuthenticityMac() {
+        return authenticityMac;
     }
 }

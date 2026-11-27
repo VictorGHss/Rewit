@@ -51,13 +51,46 @@ class FakeLocationService implements LocationService {
       accuracyMeters: 15.0,
     ),
   );
+  LocationReadiness? readinessToReturn;
   bool openSettingsResult = true;
   bool openLocationSettingsResult = true;
   int callCount = 0;
+  int readinessCallCount = 0;
   LocationPurpose? lastPurpose;
+  LocationPurpose? lastReadinessPurpose;
   Duration? lastTimeout;
   Duration? simulatedDelay;
   Completer<LocationResult>? pendingCompleter;
+  Completer<LocationReadiness>? pendingReadinessCompleter;
+
+  @override
+  Future<LocationReadiness> checkReadiness({
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
+    readinessCallCount++;
+    lastReadinessPurpose = purpose;
+    if (pendingReadinessCompleter != null) {
+      return pendingReadinessCompleter!.future;
+    }
+    if (readinessToReturn != null) {
+      return readinessToReturn!;
+    }
+    return switch (resultToReturn) {
+      LocationSuccess(:final location) => LocationReady(
+          isPermissionApproximate: purpose == LocationPurpose.presenceVerification &&
+              location.isPermissionApproximate,
+        ),
+      LocationFailure(:final reason, :final message) => switch (reason) {
+          LocationFailureReason.serviceDisabled ||
+          LocationFailureReason.permissionDenied ||
+          LocationFailureReason.permissionDeniedForever =>
+            LocationNotReady(reason: reason, message: message),
+          LocationFailureReason.timeout ||
+          LocationFailureReason.error =>
+            const LocationReady(),
+        },
+    };
+  }
 
   @override
   Future<LocationResult> getCurrentLocation({
@@ -615,6 +648,113 @@ void main() {
         final success = await captureFuture;
         expect(success, isFalse);
         expect(locNotifier.hasLocation, isFalse);
+      });
+
+      test('prepareLocationResumeFromSettings retorna true quando erro foi resolvido e false quando permanece bloqueado', () async {
+        locService.resultToReturn = const LocationFailure(
+          reason: LocationFailureReason.permissionDeniedForever,
+          message: 'Permissão bloqueada.',
+        );
+        await locNotifier.captureLocation();
+        expect(locNotifier.locationStatus, LocationCaptureStatus.error);
+
+        // Permanece negada -> não autoriza captura automática e atualiza para permissionDenied sem prompt
+        locService.readinessToReturn = const LocationNotReady(
+          reason: LocationFailureReason.permissionDenied,
+          message: 'Permissão de localização negada.',
+        );
+        expect(await locNotifier.prepareLocationResumeFromSettings(), isFalse);
+        expect(locNotifier.locationFailureReason, LocationFailureReason.permissionDenied);
+        expect(locService.callCount, 1);
+
+        // Agora concedida com precisão exata -> autoriza captura automática
+        locService.readinessToReturn = const LocationReady(isPermissionApproximate: false);
+        expect(await locNotifier.prepareLocationResumeFromSettings(), isTrue);
+        expect(locService.lastReadinessPurpose, LocationPurpose.presenceVerification);
+      });
+
+      test('prepareLocationResumeFromSettings evita captura redundante quando permissão segue aproximada e retoma ao liberar exata', () async {
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(
+            latitude: -23.5505,
+            longitude: -46.6333,
+            accuracyMeters: 300.0,
+            isPermissionApproximate: true,
+          ),
+        );
+        await locNotifier.captureLocation();
+        expect(locNotifier.isPermissionApproximate, isTrue);
+
+        // Continua aproximada -> mantém leitura existente sem nova captura
+        locService.readinessToReturn = const LocationReady(isPermissionApproximate: true);
+        expect(await locNotifier.prepareLocationResumeFromSettings(), isFalse);
+        expect(locNotifier.hasLocation, isTrue);
+
+        // Alterou para exata -> autoriza recaptura
+        locService.readinessToReturn = const LocationReady(isPermissionApproximate: false);
+        expect(await locNotifier.prepareLocationResumeFromSettings(), isTrue);
+
+        // Revogou permissão -> limpa coordenadas e entra em erro sem prompt
+        locService.readinessToReturn = const LocationNotReady(
+          reason: LocationFailureReason.permissionDeniedForever,
+          message: 'Permissão permanentemente negada.',
+        );
+        expect(await locNotifier.prepareLocationResumeFromSettings(), isFalse);
+        expect(locNotifier.hasLocation, isFalse);
+        expect(locNotifier.locationStatus, LocationCaptureStatus.error);
+        expect(locNotifier.locationFailureReason, LocationFailureReason.permissionDeniedForever);
+      });
+
+      test('prepareLocationResumeFromSettings descarta resultado obsoleto em caso de captura manual concorrente ou dispose', () async {
+        locService.resultToReturn = const LocationFailure(
+          reason: LocationFailureReason.serviceDisabled,
+          message: 'Serviço desligado.',
+        );
+        await locNotifier.captureLocation();
+
+        final readinessCompleter = Completer<LocationReadiness>();
+        locService.pendingReadinessCompleter = readinessCompleter;
+
+        final resumeFuture = locNotifier.prepareLocationResumeFromSettings();
+
+        // Tentativa manual concorrente invalida a revalidação em voo
+        locService.resultToReturn = const LocationSuccess(
+          DeviceLocation(latitude: -23.55, longitude: -46.63, accuracyMeters: 10.0),
+        );
+        final manualFuture = locNotifier.captureLocation();
+        expect(await manualFuture, isTrue);
+
+        readinessCompleter.complete(const LocationNotReady(
+          reason: LocationFailureReason.serviceDisabled,
+          message: 'Serviço desligado.',
+        ));
+        expect(await resumeFuture, isFalse);
+        expect(locNotifier.hasLocation, isTrue);
+
+        // Dispose durante revalidação pendente não notifica ouvintes nem lança erro
+        final otherNotifier = ReviewCreateNotifier(
+          repository: locRepo,
+          locationService: locService,
+        );
+        locService.pendingReadinessCompleter = null;
+        locService.resultToReturn = const LocationFailure(
+          reason: LocationFailureReason.serviceDisabled,
+          message: 'Serviço desligado.',
+        );
+        await otherNotifier.captureLocation();
+
+        final disposeCompleter = Completer<LocationReadiness>();
+        locService.pendingReadinessCompleter = disposeCompleter;
+        var notifiedAfterDispose = false;
+        otherNotifier.addListener(() {
+          if (otherNotifier.isDisposed) notifiedAfterDispose = true;
+        });
+
+        final disposeResumeFuture = otherNotifier.prepareLocationResumeFromSettings();
+        otherNotifier.dispose();
+        disposeCompleter.complete(const LocationReady());
+        expect(await disposeResumeFuture, isFalse);
+        expect(notifiedAfterDispose, isFalse);
       });
     });
 

@@ -115,7 +115,7 @@ class PlaceClaimLifecycleIntegrationTest {
     @DisplayName("Conta inativa não cria conta comercial: 401 ACCOUNT_DISABLED")
     void disabledUserCannotCreateAccount() throws Exception {
         UUID user = registerUser("biz_disabled");
-        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", user);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", user);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> createBusinessAccount.execute(user, "Empresa Inativa", randomDigits(14)));
@@ -162,7 +162,7 @@ class PlaceClaimLifecycleIntegrationTest {
 
         // Local já vinculado
         UUID claimedPlace = place("ACTIVE");
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherAccount.id(), claimedPlace);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", otherAccount.id(), claimedPlace);
         assertCode("PLACE_ALREADY_CLAIMED", 409, () -> requestPlaceClaim.execute(owner, account.id(), claimedPlace, EVIDENCE));
     }
 
@@ -171,7 +171,7 @@ class PlaceClaimLifecycleIntegrationTest {
     void rejectedAccountCannotRequest() throws Exception {
         UUID owner = registerUser("claim_rejected");
         BusinessAccountView account = account(owner);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", account.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'REJECTED' WHERE id = ?", account.id());
 
         assertCode("BUSINESS_ACCOUNT_REJECTED", 409, () -> requestPlaceClaim.execute(owner, account.id(), place("ACTIVE"), EVIDENCE));
     }
@@ -277,7 +277,7 @@ class PlaceClaimLifecycleIntegrationTest {
         BusinessAccountView holder = account(registerUser("stale_holder"));
         UUID place = place("ACTIVE");
         PlaceClaimView claim = requestPlaceClaim.execute(owner, account.id(), place, EVIDENCE);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", holder.id(), place);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", holder.id(), place);
 
         assertCode("PLACE_ALREADY_CLAIMED", 409, () -> decidePlaceClaim.execute(moderator("stale_mod"), claim.id(),
                 PlaceClaimDecision.APPROVE, REASON, Instant.now()));
@@ -428,25 +428,25 @@ class PlaceClaimLifecycleIntegrationTest {
                 + "decided_at, decided_by_user_id, decision_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         Timestamp now = Timestamp.from(Instant.now());
 
-        jdbcTemplate.update(insert, UUID.randomUUID(), account, place, EVIDENCE, "PENDING", null, null, null);
+        PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, place, EVIDENCE, "PENDING", null, null, null);
         assertViolation("uq_place_claim_pending_place",
-                () -> jdbcTemplate.update(insert, UUID.randomUUID(), account, place, EVIDENCE, "PENDING", null, null, null));
+                () -> PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, place, EVIDENCE, "PENDING", null, null, null));
         // Decididas não contam para a pendência única
-        jdbcTemplate.update(insert, UUID.randomUUID(), account, place, EVIDENCE, "REJECTED", now, owner, REASON);
+        PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, place, EVIDENCE, "REJECTED", now, owner, REASON);
 
         UUID other = place("ACTIVE");
         assertViolation("chk_place_claim_status",
-                () -> jdbcTemplate.update(insert, UUID.randomUUID(), account, other, EVIDENCE, "CANCELLED", now, owner, REASON));
+                () -> PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, other, EVIDENCE, "CANCELLED", now, owner, REASON));
         assertViolation("chk_place_claim_evidence_length",
-                () -> jdbcTemplate.update(insert, UUID.randomUUID(), account, other, "x".repeat(19), "PENDING", null, null, null));
+                () -> PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, other, "x".repeat(19), "PENDING", null, null, null));
         assertViolation("chk_place_claim_decision",
-                () -> jdbcTemplate.update(insert, UUID.randomUUID(), account, other, EVIDENCE, "PENDING", now, owner, REASON));
+                () -> PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, other, EVIDENCE, "PENDING", now, owner, REASON));
         assertViolation("chk_place_claim_decision",
-                () -> jdbcTemplate.update(insert, UUID.randomUUID(), account, other, EVIDENCE, "APPROVED", now, owner, "   "));
+                () -> PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, other, EVIDENCE, "APPROVED", now, owner, "   "));
         assertViolation("chk_place_claim_decision",
-                () -> jdbcTemplate.update(insert, UUID.randomUUID(), account, other, EVIDENCE, "APPROVED", null, owner, REASON));
+                () -> PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, other, EVIDENCE, "APPROVED", null, owner, REASON));
         assertViolation("place_claim_requests_place_id_fkey",
-                () -> jdbcTemplate.update(insert, UUID.randomUUID(), account, UUID.randomUUID(), EVIDENCE, "PENDING", null, null, null));
+                () -> PrivilegedTestDatabase.jdbc().update(insert, UUID.randomUUID(), account, UUID.randomUUID(), EVIDENCE, "PENDING", null, null, null));
 
         List<String> indexes = jdbcTemplate.queryForList(
                 "SELECT indexname FROM pg_indexes WHERE tablename = 'place_claim_requests' ORDER BY indexname", String.class);
@@ -513,7 +513,10 @@ class PlaceClaimLifecycleIntegrationTest {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         Place saved = placeRepository.save(new Place(null, "Local Reivindicação " + suffix, "claim-" + UUID.randomUUID(),
                 "RESTAURANTE", "Descrição", "Rua Claim, 1", "Curitiba", "PR", "BR", -25.43, -49.27, 50, "USER", false,
-                null, status));
+                null, "ACTIVE"));
+        if (!"ACTIVE".equals(status)) {
+            PrivilegedTestDatabase.setPlaceStatus(saved.getId(), status);
+        }
         return saved.getId();
     }
 

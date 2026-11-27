@@ -28,17 +28,25 @@ public class PlaceClaimRequest {
     private Instant decidedAt;
     private UUID decidedByUserId;
     private String decisionReason;
+    private String authenticityMac;
 
     /** Nova solicitação, pendente. A evidência é aparada e precisa ter entre 20 e 1000 caracteres. */
     public PlaceClaimRequest(UUID businessAccountId, UUID placeId, String evidenceDescription, Instant now) {
         this(UUID.randomUUID(), businessAccountId, placeId, normalizeEvidence(evidenceDescription), PlaceClaimStatus.PENDING,
-                Objects.requireNonNull(now, "now must not be null"), null, null, null);
+                Objects.requireNonNull(now, "now must not be null"), null, null, null, null);
     }
 
     /** Reconstituição a partir da persistência. */
     public PlaceClaimRequest(UUID id, UUID businessAccountId, UUID placeId, String evidenceDescription,
                              PlaceClaimStatus status, Instant createdAt, Instant decidedAt, UUID decidedByUserId,
                              String decisionReason) {
+        this(id, businessAccountId, placeId, evidenceDescription, status, createdAt, decidedAt, decidedByUserId, decisionReason, null);
+    }
+
+    /** Reconstituição a partir da persistência com MAC criptográfico de autenticidade (V45). */
+    public PlaceClaimRequest(UUID id, UUID businessAccountId, UUID placeId, String evidenceDescription,
+                             PlaceClaimStatus status, Instant createdAt, Instant decidedAt, UUID decidedByUserId,
+                             String decisionReason, String authenticityMac) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.businessAccountId = Objects.requireNonNull(businessAccountId, "businessAccountId must not be null");
         this.placeId = Objects.requireNonNull(placeId, "placeId must not be null");
@@ -48,21 +56,30 @@ public class PlaceClaimRequest {
         this.decidedAt = decidedAt;
         this.decidedByUserId = decidedByUserId;
         this.decisionReason = decisionReason;
+        this.authenticityMac = authenticityMac;
     }
 
     public void approve(UUID moderatorUserId, String reason, Instant now) {
-        decide(PlaceClaimStatus.APPROVED, moderatorUserId, reason, now);
+        decide(PlaceClaimStatus.APPROVED, moderatorUserId, reason, now, null);
+    }
+
+    public void approve(UUID moderatorUserId, String reason, Instant now, String authenticityMac) {
+        decide(PlaceClaimStatus.APPROVED, moderatorUserId, reason, now, authenticityMac);
     }
 
     public void reject(UUID moderatorUserId, String reason, Instant now) {
-        decide(PlaceClaimStatus.REJECTED, moderatorUserId, reason, now);
+        decide(PlaceClaimStatus.REJECTED, moderatorUserId, reason, now, null);
+    }
+
+    public void reject(UUID moderatorUserId, String reason, Instant now, String authenticityMac) {
+        decide(PlaceClaimStatus.REJECTED, moderatorUserId, reason, now, authenticityMac);
     }
 
     public boolean isPending() {
         return status == PlaceClaimStatus.PENDING;
     }
 
-    private void decide(PlaceClaimStatus decided, UUID moderatorUserId, String reason, Instant now) {
+    private void decide(PlaceClaimStatus decided, UUID moderatorUserId, String reason, Instant now, String authenticityMac) {
         if (!isPending()) {
             throw new BusinessException("A solicitação de reivindicação já foi decidida", HttpStatus.CONFLICT,
                     "PLACE_CLAIM_ALREADY_DECIDED");
@@ -75,6 +92,7 @@ public class PlaceClaimRequest {
         this.decidedByUserId = moderatorUserId;
         this.decidedAt = now;
         this.decisionReason = normalizedReason;
+        this.authenticityMac = authenticityMac;
     }
 
     private static String normalizeEvidence(String evidenceDescription) {
@@ -132,5 +150,9 @@ public class PlaceClaimRequest {
 
     public String getDecisionReason() {
         return decisionReason;
+    }
+
+    public String getAuthenticityMac() {
+        return authenticityMac;
     }
 }

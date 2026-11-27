@@ -48,7 +48,7 @@ class ExternalTestProfileConfigurationTest {
     @ValueSource(strings = {"spring.datasource.url", "spring.datasource.password", "spring.flyway.user",
             "spring.flyway.password", "spring.data.redis.host", "spring.data.redis.port", "rewit.minio.endpoint",
             "rewit.minio.access-key", "rewit.minio.secret-key", "rewit.minio.bucket-name", "rewit.security.jwt-secret",
-            "rewit.rate-limit.key-secret"})
+            "rewit.security.password-pepper", "rewit.security.refresh-token-secret", "rewit.rate-limit.key-secret"})
     @DisplayName("Credenciais e conexões vêm só do ambiente, sem valor padrão")
     void credentialsHaveNoDefaults(String key) {
         String value = raw(key);

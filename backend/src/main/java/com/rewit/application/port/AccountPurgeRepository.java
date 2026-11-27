@@ -7,7 +7,7 @@ import java.util.UUID;
  * segunda execução não há mais o que remover nem anonimizar, e os contadores voltam zerados.
  *
  * <p>Não toca o que a plataforma preserva: avaliações, notas, helpful, comentários, mídia, denúncias, auditoria de
- * moderação, check-ins e contas empresariais.
+ * moderação, registros de check-in (apenas eventuais coordenadas residuais são limpas) e contas empresariais.
  */
 public interface AccountPurgeRepository {
 
@@ -22,6 +22,7 @@ public interface AccountPurgeRepository {
      * @param reputationSnapshots   snapshot de reputação removido (derivado e recalculável)
      * @param productPresences      presenças de produto que deixaram de atribuir o relato à conta
      * @param reviewLocations       avaliações sem as coordenadas informadas pelo usuário
+     * @param checkInLocations      check-ins dos quais eventuais coordenadas residuais foram removidas
      */
     record PurgeCounts(
             int sessions,
@@ -33,15 +34,16 @@ public interface AccountPurgeRepository {
             int othersNotifications,
             int reputationSnapshots,
             int productPresences,
-            int reviewLocations
+            int reviewLocations,
+            int checkInLocations
     ) {
         public static PurgeCounts none() {
-            return new PurgeCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return new PurgeCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
         public int total() {
             return sessions + follows + savedItems + interests + activities + ownNotifications + othersNotifications
-                    + reputationSnapshots + productPresences + reviewLocations;
+                    + reputationSnapshots + productPresences + reviewLocations + checkInLocations;
         }
     }
 

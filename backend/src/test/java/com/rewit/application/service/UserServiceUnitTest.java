@@ -257,8 +257,8 @@ class UserServiceUnitTest {
     @DisplayName("changePassword: Deve alterar senha com sucesso, persistir novo hash e revogar todas as sessões")
     void shouldChangePasswordSuccessfullyWhenCurrentPasswordIsCorrect() {
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
-        when(passwordHasher.matches("SenhaAtual@123", "hashSeguro")).thenReturn(true);
-        when(passwordHasher.hash("NovaSenhaForte@456")).thenReturn("novoHashArgon2id");
+        when(passwordHasher.matches(userId, "SenhaAtual@123", "hashSeguro")).thenReturn(true);
+        when(passwordHasher.hash(userId, "NovaSenhaForte@456")).thenReturn("novoHashArgon2id");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
@@ -271,8 +271,8 @@ class UserServiceUnitTest {
         userService.changePassword(cmd);
 
         assertEquals("novoHashArgon2id", testUser.getPasswordHash());
-        verify(passwordHasher).matches("SenhaAtual@123", "hashSeguro");
-        verify(passwordHasher).hash("NovaSenhaForte@456");
+        verify(passwordHasher).matches(userId, "SenhaAtual@123", "hashSeguro");
+        verify(passwordHasher).hash(userId, "NovaSenhaForte@456");
         verify(userRepository).save(testUser);
         verify(authSessionRepository).revokeAllByUserId(userId);
     }
@@ -281,7 +281,7 @@ class UserServiceUnitTest {
     @DisplayName("changePassword: Deve rejeitar com INVALID_CREDENTIALS (401) quando senha atual estiver incorreta")
     void shouldRejectWhenCurrentPasswordIsIncorrect() {
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
-        when(passwordHasher.matches("SenhaErrada@123", "hashSeguro")).thenReturn(false);
+        when(passwordHasher.matches(userId, "SenhaErrada@123", "hashSeguro")).thenReturn(false);
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
                 new com.rewit.application.dto.user.UserDtos.ChangePasswordCommand(
@@ -296,7 +296,7 @@ class UserServiceUnitTest {
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatus());
         assertEquals("Senha atual incorreta", ex.getMessage());
 
-        verify(passwordHasher, never()).hash(anyString());
+        verify(passwordHasher, never()).hash(any(), anyString());
         verify(userRepository, never()).save(any(User.class));
         verify(authSessionRepository, never()).revokeAllByUserId(any(UUID.class));
     }
@@ -318,8 +318,8 @@ class UserServiceUnitTest {
 
         assertEquals("LOCAL_AUTH_REQUIRED", ex.getErrorCode());
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-        verify(passwordHasher, never()).matches(anyString(), anyString());
-        verify(passwordHasher, never()).hash(anyString());
+        verify(passwordHasher, never()).matches(any(), anyString(), anyString());
+        verify(passwordHasher, never()).hash(any(), anyString());
         verify(userRepository, never()).save(any(User.class));
         verify(authSessionRepository, never()).revokeAllByUserId(any(UUID.class));
     }
@@ -365,7 +365,7 @@ class UserServiceUnitTest {
     @DisplayName("changePassword: Deve rejeitar nova senha que viola política de tamanho mínimo (422)")
     void shouldRejectWhenNewPasswordViolatesPolicy() {
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
-        when(passwordHasher.matches("SenhaAtual@123", "hashSeguro")).thenReturn(true);
+        when(passwordHasher.matches(userId, "SenhaAtual@123", "hashSeguro")).thenReturn(true);
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
                 new com.rewit.application.dto.user.UserDtos.ChangePasswordCommand(
@@ -378,7 +378,7 @@ class UserServiceUnitTest {
         assertEquals("INVALID_PASSWORD_POLICY", ex.getErrorCode());
         assertEquals(HttpStatus.UNPROCESSABLE_CONTENT, ex.getStatus());
         assertEquals(422, ex.getStatus().value());
-        verify(passwordHasher, never()).hash(anyString());
+        verify(passwordHasher, never()).hash(any(), anyString());
         verify(userRepository, never()).save(any());
         verify(authSessionRepository, never()).revokeAllByUserId(any());
     }
@@ -387,7 +387,7 @@ class UserServiceUnitTest {
     @DisplayName("changePassword: Deve rejeitar nova senha que excede 128 caracteres para caller interno (422)")
     void shouldRejectWhenNewPasswordExceeds128Characters() {
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
-        when(passwordHasher.matches("SenhaAtual@123", "hashSeguro")).thenReturn(true);
+        when(passwordHasher.matches(userId, "SenhaAtual@123", "hashSeguro")).thenReturn(true);
 
         String tooLongPassword = "a".repeat(129);
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
@@ -401,7 +401,7 @@ class UserServiceUnitTest {
         assertEquals("INVALID_PASSWORD_POLICY", ex.getErrorCode());
         assertEquals(HttpStatus.UNPROCESSABLE_CONTENT, ex.getStatus());
         assertEquals(422, ex.getStatus().value());
-        verify(passwordHasher, never()).hash(anyString());
+        verify(passwordHasher, never()).hash(any(), anyString());
         verify(userRepository, never()).save(any());
         verify(authSessionRepository, never()).revokeAllByUserId(any());
     }
@@ -410,7 +410,7 @@ class UserServiceUnitTest {
     @DisplayName("changePassword: Deve rejeitar nova senha nula para caller interno (422)")
     void shouldRejectWhenNewPasswordIsNull() {
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
-        when(passwordHasher.matches("SenhaAtual@123", "hashSeguro")).thenReturn(true);
+        when(passwordHasher.matches(userId, "SenhaAtual@123", "hashSeguro")).thenReturn(true);
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
                 new com.rewit.application.dto.user.UserDtos.ChangePasswordCommand(
@@ -423,7 +423,7 @@ class UserServiceUnitTest {
         assertEquals("INVALID_PASSWORD_POLICY", ex.getErrorCode());
         assertEquals(HttpStatus.UNPROCESSABLE_CONTENT, ex.getStatus());
         assertEquals(422, ex.getStatus().value());
-        verify(passwordHasher, never()).hash(anyString());
+        verify(passwordHasher, never()).hash(any(), anyString());
         verify(userRepository, never()).save(any());
         verify(authSessionRepository, never()).revokeAllByUserId(any());
     }
@@ -433,7 +433,7 @@ class UserServiceUnitTest {
     void shouldNotLeakPasswordOrHashInExceptionMessages() {
         String sensitiveCurrentPassword = "MinhaSenhaSuperSecreta@999";
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(testUser));
-        when(passwordHasher.matches(sensitiveCurrentPassword, "hashSeguro")).thenReturn(false);
+        when(passwordHasher.matches(userId, sensitiveCurrentPassword, "hashSeguro")).thenReturn(false);
 
         com.rewit.application.dto.user.UserDtos.ChangePasswordCommand cmd =
                 new com.rewit.application.dto.user.UserDtos.ChangePasswordCommand(

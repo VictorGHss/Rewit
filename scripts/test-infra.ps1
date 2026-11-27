@@ -1,4 +1,4 @@
-﻿# Infraestrutura descartável dos testes de integração do backend (docs/development/local-setup.md §5).
+# Infraestrutura descartável dos testes de integração do backend (docs/development/local-setup.md §5).
 #
 # Cria PostgreSQL/PostGIS (com os scripts de infrastructure/postgres/init), Redis e SeaweedFS (S3) em containers
 # próprios, publicados só em 127.0.0.1, com credenciais aleatórias que nunca são impressas nem gravadas em arquivo, e
@@ -56,14 +56,17 @@ $names = [ordered]@{
 $database = 'rewit_test'
 $migrationUser = 'rewit_migrator'
 $appUser = 'rewit_app'
+$mediaUser = 'rewit_media'
+$modUser = 'rewit_mod'
 $bucket = 'rewit-test'
 
 # Desenvolvimento (recusadas também por TestInfrastructureSafetyValidator), external-test e API local
 $reservedPorts = @(5432, 5433, 6379, 8333, 8888, 9333, 15432, 16379, 18333, 8080, 8081)
 
 $testVariables = @(
-    'TEST_DATASOURCE_URL', 'TEST_APP_DB_USER', 'TEST_APP_DB_PASSWORD', 'TEST_MIGRATION_DB_USER',
-    'TEST_MIGRATION_DB_PASSWORD', 'TEST_REDIS_HOST', 'TEST_REDIS_PORT', 'TEST_REDIS_PASSWORD',
+    'TEST_DATASOURCE_URL', 'TEST_APP_DB_USER', 'TEST_APP_DB_PASSWORD', 'TEST_MEDIA_DB_USER', 'TEST_MEDIA_DB_PASSWORD',
+    'TEST_MOD_DB_USER', 'TEST_MOD_DB_PASSWORD',
+    'TEST_MIGRATION_DB_USER', 'TEST_MIGRATION_DB_PASSWORD', 'TEST_REDIS_HOST', 'TEST_REDIS_PORT', 'TEST_REDIS_PASSWORD',
     'TEST_STORAGE_ENDPOINT', 'TEST_STORAGE_ACCESS_KEY', 'TEST_STORAGE_SECRET_KEY', 'TEST_STORAGE_BUCKET'
 )
 
@@ -181,8 +184,8 @@ function Wait-Ready {
                     # O entrypoint sobe um servidor temporário para o init e depois o definitivo
                     if (([regex]::Matches($logs, 'ready to accept connections')).Count -ge 2) {
                         $role = Invoke-Docker -Arguments @('exec', $name, 'psql', '-U', $migrationUser, '-d', $database, '-tAc',
-                            "SELECT 1 FROM pg_roles WHERE rolname = '$appUser'") -AllowFailure
-                        $ready = $role.ExitCode -eq 0 -and (($role.Output -join '').Trim() -eq '1')
+                            "SELECT count(*) FROM pg_roles WHERE rolname IN ('$appUser', '$mediaUser', '$modUser')") -AllowFailure
+                        $ready = $role.ExitCode -eq 0 -and (($role.Output -join '').Trim() -eq '3')
                     }
                 }
                 'redis' {
@@ -260,6 +263,8 @@ function Start-TestInfrastructure {
     $secrets = [ordered]@{
         POSTGRES_PASSWORD     = New-Secret
         APP_DB_PASSWORD       = New-Secret
+        MEDIA_DB_PASSWORD     = New-Secret
+        MOD_DB_PASSWORD       = New-Secret
         AWS_ACCESS_KEY_ID     = New-Secret 12
         AWS_SECRET_ACCESS_KEY = New-Secret
     }
@@ -276,6 +281,8 @@ function Start-TestInfrastructure {
             '-p', "127.0.0.1:${PostgresPort}:5432",
             '-e', "POSTGRES_DB=$database", '-e', "POSTGRES_USER=$migrationUser", '-e', 'POSTGRES_PASSWORD',
             '-e', "APP_DB_USER=$appUser", '-e', 'APP_DB_PASSWORD',
+            '-e', "MEDIA_DB_USER=$mediaUser", '-e', 'MEDIA_DB_PASSWORD',
+            '-e', "MOD_DB_USER=$modUser", '-e', 'MOD_DB_PASSWORD',
             '-v', "${initDir}:/docker-entrypoint-initdb.d:ro",
             '-v', "${provisionDir}:/opt/rewit/postgres:ro",
             $images.postgres)) | Out-Null
@@ -309,6 +316,10 @@ function Start-TestInfrastructure {
     $env:TEST_DATASOURCE_URL = "jdbc:postgresql://127.0.0.1:$PostgresPort/$database"
     $env:TEST_APP_DB_USER = $appUser
     $env:TEST_APP_DB_PASSWORD = $secrets.APP_DB_PASSWORD
+    $env:TEST_MEDIA_DB_USER = $mediaUser
+    $env:TEST_MEDIA_DB_PASSWORD = $secrets.MEDIA_DB_PASSWORD
+    $env:TEST_MOD_DB_USER = $modUser
+    $env:TEST_MOD_DB_PASSWORD = $secrets.MOD_DB_PASSWORD
     $env:TEST_MIGRATION_DB_USER = $migrationUser
     $env:TEST_MIGRATION_DB_PASSWORD = $secrets.POSTGRES_PASSWORD
     $env:TEST_REDIS_HOST = '127.0.0.1'

@@ -33,6 +33,6 @@ O aplicativo mobile é o ponto focal da experiência de consumo e geração de c
 - Base de código única para Android e iOS, reduzindo o custo de manutenção e acelerando o ciclo de desenvolvimento.
 - Performance consistente de 60/120 fps graças à renderização via engine gráfica direta do Flutter (Impeller/Skia).
 - Facilidade de mock e testes unitários de casos de uso na camada `domain`.
-- Suíte automatizada robusta com 1.332 testes Flutter (além de 9 testes unitários nativos Kotlin em `CameraPermissionStateMachineTest`) cobrindo navegação, temas, feeds, scanner, transporte HTTP e formulários com 100% de estabilidade.
+- Suíte automatizada robusta com 1.462 testes Flutter (além de 9 testes unitários nativos Kotlin em `CameraPermissionStateMachineTest`) cobrindo navegação, temas, feeds, scanner, denúncias, autenticação/sessão, transporte HTTP e formulários com 100% de estabilidade.
 ### Negativas:
 - Integrações avançadas de visão computacional local podem demandar plugins FFI em C++/Rust no futuro caso não sejam delegadas ao backend.

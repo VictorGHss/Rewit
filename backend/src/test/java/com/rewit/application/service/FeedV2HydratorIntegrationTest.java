@@ -95,7 +95,7 @@ class FeedV2HydratorIntegrationTest {
         Review review = new Review(
                 reviewId, author.getId(), place.getId(),
                 "Experiência da review " + reviewId, anonymous, verified,
-                status, visibility,
+                ReviewStatus.ACTIVE, visibility,
                 -23.55, -46.63, 10.0,
                 createdAt != null ? createdAt : Instant.now(),
                 Instant.now()
@@ -112,6 +112,9 @@ class FeedV2HydratorIntegrationTest {
         }
 
         Review saved = reviewRepository.save(review);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
         for (ReviewTarget rt : review.getTargets()) {
             reviewTargetRepository.save(rt);
         }

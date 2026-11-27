@@ -1,23 +1,24 @@
 package com.rewit.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rewit.infrastructure.security.Argon2PasswordHasher;
+import com.rewit.domain.enums.Role;
+import com.rewit.infrastructure.security.SecuritySecretValidator;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.actuate.endpoint.web.WebServerNamespace;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
 import org.springframework.security.config.annotation.web.configurers.FormLoginConfigurer;
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -28,54 +29,207 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import com.rewit.domain.enums.Role;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import javax.crypto.spec.SecretKeySpec;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
- * Configuração central do Spring Security 7.x para autenticação stateless via JWT e Argon2.
+ * Configuração central do Spring Security 7.x para autenticação stateless via JWT.
+ * Valida de forma fail-closed todos os segredos criptográficos de autenticação no startup
+ * e compartilha o mesmo material binário decodificado de {@code JWT_SECRET} com o emissor.
  */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    private final String jwtSecret;
+    private final byte[] jwtSecretBytes;
     private final String jwtIssuer;
     private final String jwtAudience;
+    private final List<String> corsAllowedOrigins;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public SecurityConfig(
             @Value("${rewit.security.jwt-secret}") String jwtSecret,
+            @Value("${rewit.security.password-pepper}") String passwordPepper,
+            @Value("${rewit.security.password-pepper-previous:}") String passwordPepperPrevious,
+            @Value("${rewit.security.refresh-token-secret}") String refreshTokenSecret,
+            @Value("${rewit.security.refresh-token-secret-previous:}") String refreshTokenSecretPrevious,
+            @Value("${rewit.security.moderation-audit-secret}") String moderationAuditSecret,
+            @Value("${rewit.security.moderation-audit-secret-previous:}") String moderationAuditSecretPrevious,
+            @Value("${spring.datasource.password:}") String appDbPassword,
+            @Value("${rewit.datasource.media.password:}") String mediaDbPassword,
+            @Value("${rewit.datasource.moderation.password:}") String modDbPassword,
+            @Value("${spring.flyway.password:}") String flywayDbPassword,
             @Value("${rewit.security.jwt-issuer:rewit-api}") String jwtIssuer,
-            @Value("${rewit.security.jwt-audience:rewit-clients}") String jwtAudience
+            @Value("${rewit.security.jwt-audience:rewit-clients}") String jwtAudience,
+            @Value("${rewit.security.cors.allowed-origins:}") String corsAllowedOrigins
     ) {
-        com.rewit.infrastructure.security.JwtSecretValidator.validate(jwtSecret);
-        this.jwtSecret = jwtSecret;
+        this.jwtSecretBytes = SecuritySecretValidator.decodeSecret("JWT_SECRET", jwtSecret);
+        SecuritySecretValidator.validateSecret("PASSWORD_PEPPER_SECRET", passwordPepper);
+        SecuritySecretValidator.validateSecret("REFRESH_TOKEN_SECRET", refreshTokenSecret);
+        byte[] modAuditBytes = SecuritySecretValidator.decodeSecret("MODERATION_AUDIT_SECRET", moderationAuditSecret);
+
+        Map<String, String> configuredSecrets = new LinkedHashMap<>();
+        configuredSecrets.put("JWT_SECRET", jwtSecret);
+        configuredSecrets.put("PASSWORD_PEPPER_SECRET", passwordPepper);
+        if (passwordPepperPrevious != null && !passwordPepperPrevious.isBlank()) {
+            SecuritySecretValidator.validateSecret("PASSWORD_PEPPER_SECRET_PREVIOUS", passwordPepperPrevious);
+            configuredSecrets.put("PASSWORD_PEPPER_SECRET_PREVIOUS", passwordPepperPrevious);
+        }
+        configuredSecrets.put("REFRESH_TOKEN_SECRET", refreshTokenSecret);
+        if (refreshTokenSecretPrevious != null && !refreshTokenSecretPrevious.isBlank()) {
+            SecuritySecretValidator.validateSecret("REFRESH_TOKEN_SECRET_PREVIOUS", refreshTokenSecretPrevious);
+            configuredSecrets.put("REFRESH_TOKEN_SECRET_PREVIOUS", refreshTokenSecretPrevious);
+        }
+        configuredSecrets.put("MODERATION_AUDIT_SECRET", moderationAuditSecret);
+        byte[] modAuditPrevBytes = null;
+        if (moderationAuditSecretPrevious != null && !moderationAuditSecretPrevious.isBlank()) {
+            modAuditPrevBytes = SecuritySecretValidator.decodeSecret("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious);
+            configuredSecrets.put("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious);
+        }
+        SecuritySecretValidator.validateDistinct(configuredSecrets);
+
+        // Garante independência de MODERATION_AUDIT_SECRET (e anterior) em relação às senhas de banco (runtime e migrator)
+        validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "APP_DB_PASSWORD", appDbPassword);
+        validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "MEDIA_DB_PASSWORD", mediaDbPassword);
+        validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "MOD_DB_PASSWORD", modDbPassword);
+        validateNotSameAsPassword("MODERATION_AUDIT_SECRET", moderationAuditSecret, modAuditBytes, "FLYWAY_DB_PASSWORD", flywayDbPassword);
+        if (modAuditPrevBytes != null) {
+            validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "APP_DB_PASSWORD", appDbPassword);
+            validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "MEDIA_DB_PASSWORD", mediaDbPassword);
+            validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "MOD_DB_PASSWORD", modDbPassword);
+            validateNotSameAsPassword("MODERATION_AUDIT_SECRET_PREVIOUS", moderationAuditSecretPrevious, modAuditPrevBytes, "FLYWAY_DB_PASSWORD", flywayDbPassword);
+        }
+
         this.jwtIssuer = jwtIssuer;
         this.jwtAudience = jwtAudience;
+        this.corsAllowedOrigins = parseCorsAllowedOrigins(corsAllowedOrigins);
+    }
+
+    public SecurityConfig(
+            String jwtSecret,
+            String passwordPepper,
+            String passwordPepperPrevious,
+            String refreshTokenSecret,
+            String refreshTokenSecretPrevious,
+            String moderationAuditSecret,
+            String moderationAuditSecretPrevious,
+            String appDbPassword,
+            String mediaDbPassword,
+            String modDbPassword,
+            String flywayDbPassword,
+            String jwtIssuer,
+            String jwtAudience
+    ) {
+        this(
+                jwtSecret,
+                passwordPepper,
+                passwordPepperPrevious,
+                refreshTokenSecret,
+                refreshTokenSecretPrevious,
+                moderationAuditSecret,
+                moderationAuditSecretPrevious,
+                appDbPassword,
+                mediaDbPassword,
+                modDbPassword,
+                flywayDbPassword,
+                jwtIssuer,
+                jwtAudience,
+                ""
+        );
+    }
+
+    public SecurityConfig(
+            String jwtSecret,
+            String passwordPepper,
+            String passwordPepperPrevious,
+            String refreshTokenSecret,
+            String refreshTokenSecretPrevious,
+            String moderationAuditSecret,
+            String moderationAuditSecretPrevious,
+            String appDbPassword,
+            String mediaDbPassword,
+            String modDbPassword,
+            String jwtIssuer,
+            String jwtAudience
+    ) {
+        this(
+                jwtSecret,
+                passwordPepper,
+                passwordPepperPrevious,
+                refreshTokenSecret,
+                refreshTokenSecretPrevious,
+                moderationAuditSecret,
+                moderationAuditSecretPrevious,
+                appDbPassword,
+                mediaDbPassword,
+                modDbPassword,
+                "",
+                jwtIssuer,
+                jwtAudience
+        );
+    }
+
+    public SecurityConfig(String jwtSecret, String jwtIssuer, String jwtAudience) {
+        this(
+                jwtSecret,
+                "test_password_pepper_secret_with_sufficient_entropy_and_at_least_32_bytes_12345!",
+                "",
+                "test_refresh_token_secret_with_sufficient_entropy_and_at_least_32_bytes_12345!",
+                "",
+                "test_moderation_audit_secret_with_sufficient_entropy_and_at_least_32_bytes_1!",
+                "",
+                "",
+                "",
+                "",
+                "",
+                jwtIssuer,
+                jwtAudience
+        );
+    }
+
+    private static void validateNotSameAsPassword(String secretName, String secretRaw, byte[] secretBytes,
+                                                  String passwordName, String passwordRaw) {
+        if (passwordRaw == null || passwordRaw.isBlank()) {
+            return;
+        }
+        if (secretRaw.trim().equals(passwordRaw.trim())
+                || java.security.MessageDigest.isEqual(secretBytes, passwordRaw.trim().getBytes(StandardCharsets.UTF_8))) {
+            throw new IllegalArgumentException(
+                    "Reutilização de credencial proibida: '" + secretName + "' não pode coincidir com '" + passwordName + "'.");
+        }
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(SecurityConfig::disableCsrf)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(SecurityConfig::disableFormLogin)
                 .httpBasic(SecurityConfig::disableHttpBasic)
                 .authorizeHttpRequests(auth -> auth
-                        // Actuator (ADR-012): esta chain também protege a porta de management. Só health, info e
-                        // prometheus, sem credencial (o isolamento é a porta interna); qualquer outro endpoint é negado
+                        // Actuator (ADR-012 / F2-DEPLOY-03.4): esta chain protege a porta de management e a API.
+                        // Na porta de management: somente health (incluindo /liveness e /readiness), info e prometheus.
+                        // Na porta da API: somente os caminhos adicionais de probes (/livez e /readyz) quando ativos.
+                        // Qualquer outro endpoint do Actuator continua explicitamente negado.
                         .requestMatchers(EndpointRequest.to("health", "info", "prometheus")).permitAll()
+                        .requestMatchers(EndpointRequest.toAdditionalPaths(WebServerNamespace.SERVER, "health")).permitAll()
                         .requestMatchers(EndpointRequest.toAnyEndpoint()).denyAll()
                         // Endpoints públicos de autenticação e documentação
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
@@ -104,8 +258,7 @@ public class SecurityConfig {
 
     @Bean
     public JwtDecoder jwtDecoder() {
-        byte[] secretBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
-        SecretKeySpec secretKey = new SecretKeySpec(secretBytes, "HmacSHA256");
+        SecretKeySpec secretKey = new SecretKeySpec(jwtSecretBytes, "HmacSHA256");
 
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(secretKey)
                 .macAlgorithm(MacAlgorithm.HS256)
@@ -162,13 +315,106 @@ public class SecurityConfig {
     }
 
     @Bean
-    public PasswordEncoder passwordEncoder(Argon2PasswordHasher argon2PasswordHasher) {
-        return argon2PasswordHasher.getDelegate();
+    public CorsConfigurationSource corsConfigurationSource() {
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        if (corsAllowedOrigins.isEmpty()) {
+            return source;
+        }
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(corsAllowedOrigins);
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        config.setAllowCredentials(false);
+        config.setMaxAge(3600L);
+        source.registerCorsConfiguration("/api/**", config);
+        return source;
     }
 
-    @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
-        return authenticationConfiguration.getAuthenticationManager();
+    private static List<String> parseCorsAllowedOrigins(String rawOrigins) {
+        if (rawOrigins == null || rawOrigins.isBlank()) {
+            return List.of();
+        }
+        List<String> origins = new ArrayList<>();
+        for (String raw : rawOrigins.split(",")) {
+            String origin = raw.trim();
+            if (origin.isEmpty()) {
+                continue;
+            }
+            if (origin.contains("*")) {
+                throw new IllegalArgumentException(
+                        "rewit.security.cors.allowed-origins não pode conter wildcard '*'.");
+            }
+            URI uri;
+            try {
+                uri = URI.create(origin);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "rewit.security.cors.allowed-origins contém origem com URI inválida.");
+            }
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            if (!("http".equals(scheme) || "https".equals(scheme))
+                    || uri.getHost() == null || uri.getHost().isBlank()
+                    || uri.getRawUserInfo() != null
+                    || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())
+                    || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                throw new IllegalArgumentException(
+                        "rewit.security.cors.allowed-origins exige origens no formato scheme://host[:porta] sem path, query, fragmento ou userinfo.");
+            }
+            if (!hasValidOptionalPort(uri)) {
+                throw new IllegalArgumentException(
+                        "rewit.security.cors.allowed-origins contém porta inválida (use 1-65535 ou omita a porta).");
+            }
+            origins.add(origin);
+        }
+        return List.copyOf(origins);
+    }
+
+    private static boolean hasValidOptionalPort(URI uri) {
+        String authority = uri.getRawAuthority();
+        if (authority == null || authority.isBlank()) {
+            return false;
+        }
+        String hostAndPort = authority;
+        if (hostAndPort.startsWith("[")) {
+            int closeBracket = hostAndPort.indexOf(']');
+            if (closeBracket <= 1) {
+                return false;
+            }
+            String remainder = hostAndPort.substring(closeBracket + 1);
+            if (remainder.isEmpty()) {
+                return true;
+            }
+            if (!remainder.startsWith(":")) {
+                return false;
+            }
+            return isValidPortText(remainder.substring(1));
+        }
+        int colonIdx = hostAndPort.indexOf(':');
+        if (colonIdx < 0) {
+            return true;
+        }
+        if (hostAndPort.indexOf(':', colonIdx + 1) >= 0) {
+            return false;
+        }
+        return isValidPortText(hostAndPort.substring(colonIdx + 1));
+    }
+
+    private static boolean isValidPortText(String rawPort) {
+        if (rawPort == null || rawPort.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < rawPort.length(); i++) {
+            if (!Character.isDigit(rawPort.charAt(i))) {
+                return false;
+            }
+        }
+        try {
+            int port = Integer.parseInt(rawPort);
+            return port >= 1 && port <= 65535;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private static void disableCsrf(CsrfConfigurer<HttpSecurity> configurer) {

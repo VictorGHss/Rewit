@@ -51,7 +51,8 @@ class ExternalPlaceResultsSection extends StatefulWidget {
   State<ExternalPlaceResultsSection> createState() => _ExternalPlaceResultsSectionState();
 }
 
-class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSection> {
+class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSection>
+    with WidgetsBindingObserver {
   final TextEditingController _cityController = TextEditingController();
   ExternalRegionMode _mode = ExternalRegionMode.city;
   String? _stateCode;
@@ -71,7 +72,14 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
   /// Posição obtida ao escolher "Perto de mim"; vale só enquanto essa opção estiver ativa e nunca é gravada.
   DeviceLocation? _nearbyLocation;
   bool _locating = false;
+  bool _awaitingSettingsReturn = false;
   _LocationIssue? _locationIssue;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void didUpdateWidget(covariant ExternalPlaceResultsSection oldWidget) {
@@ -84,10 +92,72 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _awaitingSettingsReturn = false;
     _sequence++;
     _locationSequence++;
     _cityController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(_handleResumedFromSettings());
+  }
+
+  Future<void> _handleResumedFromSettings() async {
+    if (!mounted || !_awaitingSettingsReturn) return;
+    _awaitingSettingsReturn = false;
+
+    final service = widget.locationService;
+    if (service == null ||
+        !widget.enabled ||
+        _mode != ExternalRegionMode.nearby ||
+        _locating ||
+        _isLoading ||
+        _locationIssue == null ||
+        _nearbyLocation != null) {
+      return;
+    }
+
+    final locSeq = ++_locationSequence;
+    try {
+      final readiness = await service.checkReadiness(
+        purpose: LocationPurpose.discovery,
+      );
+      if (!mounted ||
+          locSeq != _locationSequence ||
+          !widget.enabled ||
+          _mode != ExternalRegionMode.nearby ||
+          _locating ||
+          _isLoading ||
+          _nearbyLocation != null) {
+        return;
+      }
+
+      switch (readiness) {
+        case LocationReady():
+          await _locateAndSearch();
+        case LocationNotReady(:final reason):
+          setState(() {
+            _locationIssue = _LocationIssue(reason);
+          });
+      }
+    } catch (_) {
+      if (!mounted ||
+          locSeq != _locationSequence ||
+          !widget.enabled ||
+          _mode != ExternalRegionMode.nearby ||
+          _locating ||
+          _isLoading ||
+          _nearbyLocation != null) {
+        return;
+      }
+      setState(() {
+        _locationIssue = const _LocationIssue(LocationFailureReason.error);
+      });
+    }
   }
 
   void _discardResults() {
@@ -179,6 +249,7 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
   Future<void> _locateAndSearch() async {
     final service = widget.locationService;
     if (service == null || _locating) return;
+    _awaitingSettingsReturn = false;
     final locSeq = ++_locationSequence;
     setState(() {
       _locating = true;
@@ -526,6 +597,7 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
 
   void _selectMode(ExternalRegionMode mode) {
     if (mode == _mode) return;
+    _awaitingSettingsReturn = false;
     setState(() {
       _mode = mode;
       _discardResults();
@@ -535,6 +607,19 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
       _locating = false;
     });
     if (mode == ExternalRegionMode.nearby) _locateAndSearch();
+  }
+
+  Future<void> _openSettings({required bool deviceLocationSettings}) async {
+    final service = widget.locationService;
+    if (service == null || !widget.enabled || _locating || _isLoading) return;
+    _awaitingSettingsReturn = true;
+    final opened = deviceLocationSettings
+        ? await service.openLocationSettings()
+        : await service.openAppSettings();
+    if (!mounted) return;
+    if (!opened) {
+      _awaitingSettingsReturn = false;
+    }
   }
 
   Widget _buildLocationIssue(ThemeData theme, _LocationIssue issue) {
@@ -564,14 +649,18 @@ class _ExternalPlaceResultsSectionState extends State<ExternalPlaceResultsSectio
               if (issue.reason == LocationFailureReason.permissionDeniedForever)
                 TextButton.icon(
                   key: const Key('external_location_settings_button'),
-                  onPressed: () => widget.locationService?.openAppSettings(),
+                  onPressed: widget.enabled && !_locating
+                      ? () => _openSettings(deviceLocationSettings: false)
+                      : null,
                   icon: const Icon(Icons.settings_outlined, size: 16),
                   label: const Text('Abrir configurações', style: TextStyle(fontSize: 12)),
                 ),
               if (issue.reason == LocationFailureReason.serviceDisabled)
                 TextButton.icon(
                   key: const Key('external_location_device_settings_button'),
-                  onPressed: () => widget.locationService?.openLocationSettings(),
+                  onPressed: widget.enabled && !_locating
+                      ? () => _openSettings(deviceLocationSettings: true)
+                      : null,
                   icon: const Icon(Icons.location_on_outlined, size: 16),
                   label: const Text('Ativar localização', style: TextStyle(fontSize: 12)),
                 ),

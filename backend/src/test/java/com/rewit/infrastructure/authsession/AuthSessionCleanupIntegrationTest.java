@@ -13,6 +13,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -65,6 +66,7 @@ class AuthSessionCleanupIntegrationTest {
     private PlatformTransactionManager transactionManager;
 
     @Autowired
+    @Qualifier("appDataSource")
     private DataSource dataSource;
 
     @Test
@@ -148,9 +150,10 @@ class AuthSessionCleanupIntegrationTest {
     void cleanupKeepsReuseDetectionForLiveChains() {
         Instant now = Instant.parse("1998-01-01T00:00:00Z");
         UUID user = createUser();
-        String rawA = "reuse-after-cleanup-" + UUID.randomUUID();
+        Instant expiresA = now.minus(DAY);
+        String rawA = tokenService.generateRefreshToken(user, expiresA);
         UUID b = insert(user, now.plus(DAY), null, null);
-        UUID a = insertWithHash(user, tokenService.hashRefreshToken(rawA), now.minus(DAY), now.minus(DAY.multipliedBy(2)), b);
+        UUID a = insertWithHash(user, tokenService.hashRefreshToken(rawA), expiresA, now.minus(DAY.multipliedBy(2)), b);
 
         useCase(100, 10).cleanup(now);
         assertTrue(exists(a));

@@ -25,10 +25,17 @@ Diferente de redes sociais tradicionais de check-in que transformaram a funciona
 5. **Políticas Explícitas de Captura no Cliente (`LocationCapturePolicy`)**:
    - **Descoberta (`discovery`)**: Utilizada na busca de locais próximos em raio de até 10 km. Prioriza velocidade, aceita cache de até 5 minutos, precisão média e timeout máximo de 5 segundos.
    - **Verificação de Presença (`presenceVerification`)**: Utilizada no momento da publicação da avaliação e na aba de check-in. Rejeita cache antigo, exige leitura fresca (<= 1 minuto), alta precisão GPS, timeout de 10 a 15 segundos para aquecimento de satélites e retry único de até 5 segundos caso a acurácia inicial seja aproximada (> 100 metros).
-6. **Localização Simulada em QA e Autoridade do Backend**:
+6. **Retomada Controlada Após Configurações do Sistema (`LocationService.checkReadiness`)**:
+   - Quando `ExternalPlaceResultsSection`, `CheckInScreen` ou `ReviewCreateScreen` iniciam explicitamente `openAppSettings()` ou `openLocationSettings()`, cada tela guarda o retorno ao ciclo `AppLifecycleState.resumed` via `WidgetsBindingObserver` com trava de origem (ignorando retornos sem navegação prévia e eventos repetidos).
+   - Antes de capturar posição novamente, `LocationService.checkReadiness(purpose: ...)` revalida serviço e permissão sem disparar prompt nativo (`requestPermission`), preservando em `GeolocatorLocationService` a última recusa permanente conhecida (`deniedForever`) mesmo quando `Geolocator.checkPermission()` no Android retorna `denied` (limpando-a ao detectar permissão concedida ou recusa temporária), retomando a captura automaticamente apenas quando o bloqueio foi resolvido (ou quando a permissão aproximada em verificação de presença foi alterada para exata) e preservando o controle contra concorrência e descarte de widget.
+7. **Localização Simulada em QA e Autoridade do Backend**:
    - O cliente mobile não bloqueia coordenadas simuladas/mock no dispositivo, assegurando a viabilidade de testes automatizados, CI e testes em emuladores de desenvolvimento.
    - A verificação de presença é estritamente autoritativa no backend (`PresenceVerificationPolicy`): distância geodésica via PostGIS, acurácia horizontal reportada <= 100m, trava transacional `pg_advisory_xact_lock` e teto de no máximo um check-in verificado por usuário e local em janela móvel de 24 horas.
-7. **Evolução Futura**:
+8. **Minimização e Descarte de Coordenadas no Check-in (V43)**:
+   - As coordenadas recebidas na requisição são usadas apenas de forma transitória na consulta espacial PostGIS e descartadas após a decisão.
+   - Nenhuma coordenada GPS exata é persistida em `check_ins` (`coordinates = NULL`), garantido estruturalmente por `CheckInJpaEntity.fromDomain()` e pela constraint `chk_checkin_coordinates_null`, tanto em check-ins `VERIFIED` quanto `REJECTED` ou `PENDING`. Apenas check-ins `VERIFIED` podem manter `distance_to_centroid_meters` (dentro do raio aprovado; garantido por `CheckIn`, `CheckInJpaEntity.fromDomain()` e `chk_checkin_distance_only_verified`); check-ins `REJECTED` registram apenas status e `rejection_reason` (`PresenceVerificationOutcome`), com `coordinates = NULL` e `distance_to_centroid_meters = NULL`.
+   - Registros históricos tiveram coordenadas (e distâncias de `REJECTED`/`PENDING`) descartadas na `V43` sem exclusão de linhas, preservando integralmente `reviews.is_verified_on_site` e `reviews.updated_at`. A implementação técnica segue o princípio de minimização de dados, sujeita à validação jurídica apropriada.
+9. **Evolução Futura**:
    - A modelagem prevê suporte a polígonos delimitadores exatos (`GEOGRAPHY(Polygon, 4326)`) em fases posteriores, substituindo o raio esférico simplificado para locais complexos via `ST_Contains`.
 
 ## Consequências

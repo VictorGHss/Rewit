@@ -457,7 +457,7 @@ class MeControllerIntegrationTest {
         User userAfter = userRepository.findById(credentials.userId()).orElseThrow();
         String updatedHash = userAfter.getPasswordHash();
         assertNotEquals(originalHash, updatedHash);
-        assertTrue(updatedHash.startsWith("$argon2id$"));
+        assertTrue(updatedHash.startsWith("pw2$v1$") && updatedHash.contains("$argon2id$"));
 
         // 3. Comprova que todas as sessões anteriores de refresh do usuário no PostgreSQL foram revogadas
         List<AuthSessionJpaEntity> sessions = authSessionJpaRepository.findAll().stream()

@@ -13,6 +13,7 @@ spring:
       idle-timeout: 10000
       max-lifetime: 30000
   flyway:
+    url: ${spring.datasource.url}
     user: ${TEST_MIGRATION_DB_USER}
     password: ${TEST_MIGRATION_DB_PASSWORD}
     postgresql:
@@ -34,6 +35,23 @@ management:
       enabled: false
 
 rewit:
+  datasource:
+    media:
+      username: ${TEST_MEDIA_DB_USER}
+      password: ${TEST_MEDIA_DB_PASSWORD}
+      hikari:
+        maximum-pool-size: 5
+        minimum-idle: 1
+        idle-timeout: 10000
+        max-lifetime: 30000
+    moderation:
+      username: ${TEST_MOD_DB_USER}
+      password: ${TEST_MOD_DB_PASSWORD}
+      hikari:
+        maximum-pool-size: 5
+        minimum-idle: 1
+        idle-timeout: 10000
+        max-lifetime: 30000
   outbox:
     # Poller desligado em TODOS os testes: o agendador @Scheduled não deve
     # disputar linhas do outbox com testes que seguram locks manualmente.
@@ -59,6 +77,18 @@ rewit:
     access-key: ${TEST_STORAGE_ACCESS_KEY}
     secret-key: ${TEST_STORAGE_SECRET_KEY}
     bucket-name: ${TEST_STORAGE_BUCKET}
+    region: ${TEST_STORAGE_REGION:}
+    auto-create-bucket: true
   security:
     # Segredo fixo de teste: não herda JWT_SECRET do ambiente de desenvolvimento
     jwt-secret: test_jwt_secret_with_sufficient_entropy_and_at_least_32_bytes_length_12345!
+    password-pepper: test_password_pepper_secret_with_sufficient_entropy_and_at_least_32_bytes_12345!
+    password-pepper-previous: test_previous_pepper_secret_with_sufficient_entropy_at_least_32_bytes!
+    password-pepper-key-id: key-2026-b
+    password-pepper-previous-key-id: key-2026-a
+    refresh-token-secret: test_refresh_token_secret_with_sufficient_entropy_and_at_least_32_bytes_12345!
+    refresh-token-secret-previous: test_previous_refresh_secret_with_sufficient_entropy_at_least_32_bytes!
+    moderation-audit-secret: test_moderation_audit_secret_with_sufficient_entropy_and_at_least_32_bytes_1!
+    moderation-audit-secret-previous: test_previous_moderation_audit_secret_with_sufficient_entropy_32_bytes_0!
+    moderation-audit-key-id: mod-key-2026-b
+    moderation-audit-previous-key-id: mod-key-2026-a

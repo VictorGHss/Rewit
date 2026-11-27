@@ -24,12 +24,22 @@ public final class DiscussionModerationAuditLog {
     private final DiscussionStatus newStatus;
     private final int reportsAffectedCount;
     private final Instant createdAt;
+    private final String authenticityMac;
 
     public DiscussionModerationAuditLog(UUID id, UUID discussionId, UUID moderatorUserId,
                                         DiscussionModerationAction action, ModerationDecision decision,
                                         String reasonCode, String justification,
                                         DiscussionStatus previousStatus, DiscussionStatus newStatus,
                                         int reportsAffectedCount, Instant createdAt) {
+        this(id, discussionId, moderatorUserId, action, decision, reasonCode, justification,
+                previousStatus, newStatus, reportsAffectedCount, createdAt, null);
+    }
+
+    public DiscussionModerationAuditLog(UUID id, UUID discussionId, UUID moderatorUserId,
+                                        DiscussionModerationAction action, ModerationDecision decision,
+                                        String reasonCode, String justification,
+                                        DiscussionStatus previousStatus, DiscussionStatus newStatus,
+                                        int reportsAffectedCount, Instant createdAt, String authenticityMac) {
         if (discussionId == null) {
             throw new BusinessException("O identificador da discussão auditada é obrigatório", "MISSING_DISCUSSION_ID");
         }
@@ -65,6 +75,7 @@ public final class DiscussionModerationAuditLog {
         this.newStatus = newStatus;
         this.reportsAffectedCount = reportsAffectedCount;
         this.createdAt = createdAt != null ? createdAt : Instant.now();
+        this.authenticityMac = authenticityMac;
     }
 
     public UUID getId() {
@@ -109,5 +120,9 @@ public final class DiscussionModerationAuditLog {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getAuthenticityMac() {
+        return authenticityMac;
     }
 }

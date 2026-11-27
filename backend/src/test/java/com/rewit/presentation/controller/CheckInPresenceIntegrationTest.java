@@ -6,7 +6,11 @@ import com.rewit.application.port.CheckInRepository;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.RateableTargetRepository;
 import com.rewit.domain.enums.CheckInStatus;
+import com.rewit.domain.enums.PresenceVerificationOutcome;
 import com.rewit.domain.enums.TargetType;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import com.rewit.domain.model.CheckIn;
 import com.rewit.domain.model.Place;
 import com.rewit.domain.model.RateableTarget;
@@ -62,6 +66,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @ActiveProfiles("local")
+@ExtendWith(OutputCaptureExtension.class)
 @DisplayName("Integração: check-in V1 (raio, precisão do GPS e frequência)")
 class CheckInPresenceIntegrationTest {
 
@@ -169,6 +174,30 @@ class CheckInPresenceIntegrationTest {
         return count != null ? count : 0;
     }
 
+    private void assertNoCoordinatesPersisted(UUID reviewId, String expectedStatus, String expectedRejectionReason,
+                                              boolean expectDistanceNull) {
+        Map<String, Object> checkInRow = jdbcTemplate.queryForMap(
+                "SELECT status, coordinates IS NULL AS coords_null, distance_to_centroid_meters, rejection_reason "
+                        + "FROM check_ins WHERE review_id = ?", reviewId);
+        assertEquals(expectedStatus, checkInRow.get("status"));
+        assertEquals(Boolean.TRUE, checkInRow.get("coords_null"), "check_ins.coordinates deve ser NULL");
+        if (expectDistanceNull) {
+            assertNull(checkInRow.get("distance_to_centroid_meters"),
+                    "distance_to_centroid_meters deve ser NULL para check-in REJECTED");
+        } else {
+            assertNotNull(checkInRow.get("distance_to_centroid_meters"));
+        }
+        assertEquals(expectedRejectionReason, checkInRow.get("rejection_reason"));
+
+        Map<String, Object> reviewRow = jdbcTemplate.queryForMap(
+                "SELECT is_verified_on_site, user_coordinates IS NULL AS user_coords_null, "
+                        + "location_accuracy_meters IS NULL AS accuracy_null "
+                        + "FROM reviews WHERE id = ?", reviewId);
+        assertEquals("VERIFIED".equals(expectedStatus), reviewRow.get("is_verified_on_site"));
+        assertEquals(Boolean.TRUE, reviewRow.get("user_coords_null"), "reviews.user_coordinates deve ser NULL");
+        assertEquals(Boolean.TRUE, reviewRow.get("accuracy_null"), "reviews.location_accuracy_meters deve ser NULL");
+    }
+
     private Map<String, Object> placeRequest(Integer radius) {
         Map<String, Object> body = new HashMap<>();
         body.put("name", "Local " + UUID.randomUUID().toString().substring(0, 8));
@@ -269,28 +298,44 @@ class CheckInPresenceIntegrationTest {
     // -----------------------------------------------------------------------------------------------------------
 
     @Test
-    @DisplayName("Precisão de até 100 m verifica; acima de 100 m, ausente ou fora do raio publica sem check-in verificado")
+    @DisplayName("Precisão de até 100 m verifica; acima de 100 m, ausente ou fora do raio publica sem check-in verificado e sem persistir coordenadas")
     void accuracyAndDistanceDecidePresence() throws Exception {
         TestUser user = registerUser("accuracy");
 
         Created atLimit = review(user, createPlace(60), NEAR_LAT, NEAR_LON, 100.0);
         assertCheckIn(atLimit, "VERIFIED", null);
-        assertEquals(CheckInStatus.VERIFIED, checkInRepository.findByReviewId(atLimit.reviewId()).orElseThrow().getStatus());
+        CheckIn verified = checkInRepository.findByReviewId(atLimit.reviewId()).orElseThrow();
+        assertEquals(CheckInStatus.VERIFIED, verified.getStatus());
+        assertNull(verified.getLatitude());
+        assertNull(verified.getLongitude());
+        assertNull(verified.getRejectionReason());
+        assertNoCoordinatesPersisted(atLimit.reviewId(), "VERIFIED", null, false);
 
         Created tooImprecise = review(user, createPlace(60), NEAR_LAT, NEAR_LON, 100.5);
         assertCheckIn(tooImprecise, "NOT_VERIFIED", "ACCURACY_TOO_LOW");
         CheckIn rejected = checkInRepository.findByReviewId(tooImprecise.reviewId()).orElseThrow();
         assertEquals(CheckInStatus.REJECTED, rejected.getStatus());
+        assertEquals(PresenceVerificationOutcome.ACCURACY_TOO_LOW, rejected.getRejectionReason());
         assertNull(rejected.getVerifiedAt());
+        assertNull(rejected.getLatitude());
+        assertNull(rejected.getLongitude());
+        assertNull(rejected.getDistanceToCentroidMeters());
+        assertNoCoordinatesPersisted(tooImprecise.reviewId(), "REJECTED", "ACCURACY_TOO_LOW", true);
 
         Created withoutAccuracy = review(user, createPlace(60), NEAR_LAT, NEAR_LON, null);
         assertCheckIn(withoutAccuracy, "NOT_VERIFIED", "ACCURACY_UNAVAILABLE");
-        assertEquals(CheckInStatus.REJECTED,
-                checkInRepository.findByReviewId(withoutAccuracy.reviewId()).orElseThrow().getStatus());
+        CheckIn noAccuracy = checkInRepository.findByReviewId(withoutAccuracy.reviewId()).orElseThrow();
+        assertEquals(CheckInStatus.REJECTED, noAccuracy.getStatus());
+        assertEquals(PresenceVerificationOutcome.ACCURACY_UNAVAILABLE, noAccuracy.getRejectionReason());
+        assertNoCoordinatesPersisted(withoutAccuracy.reviewId(), "REJECTED", "ACCURACY_UNAVAILABLE", true);
 
         // ~1,5 km do centróide
         Created far = review(user, createPlace(250), -25.4284, -49.2733, 5.0);
         assertCheckIn(far, "NOT_VERIFIED", "OUTSIDE_RADIUS");
+        CheckIn outside = checkInRepository.findByReviewId(far.reviewId()).orElseThrow();
+        assertEquals(CheckInStatus.REJECTED, outside.getStatus());
+        assertEquals(PresenceVerificationOutcome.OUTSIDE_RADIUS, outside.getRejectionReason());
+        assertNoCoordinatesPersisted(far.reviewId(), "REJECTED", "OUTSIDE_RADIUS", true);
 
         // Sem coordenadas: nada foi pedido (ex.: o app não conseguiu a localização) e não há check-in
         Created notRequested = review(user, createPlace(60), null, null, null);
@@ -329,7 +374,10 @@ class CheckInPresenceIntegrationTest {
         assertCheckIn(review(user, place, NEAR_LAT, NEAR_LON, 10.0), "VERIFIED", null);
         Created repeated = review(user, place, NEAR_LAT, NEAR_LON, 10.0);
         assertCheckIn(repeated, "NOT_VERIFIED", "RECENT_CHECK_IN");
-        assertEquals(CheckInStatus.REJECTED, checkInRepository.findByReviewId(repeated.reviewId()).orElseThrow().getStatus());
+        CheckIn repeatedCheckIn = checkInRepository.findByReviewId(repeated.reviewId()).orElseThrow();
+        assertEquals(CheckInStatus.REJECTED, repeatedCheckIn.getStatus());
+        assertEquals(PresenceVerificationOutcome.RECENT_CHECK_IN, repeatedCheckIn.getRejectionReason());
+        assertNoCoordinatesPersisted(repeated.reviewId(), "REJECTED", "RECENT_CHECK_IN", true);
         assertEquals(1, verifiedCount(user.userId(), place.getId()));
 
         mockMvc.perform(get("/api/v1/users/" + user.userId())
@@ -436,6 +484,43 @@ class CheckInPresenceIntegrationTest {
             assertEquals(1, verifiedCount(user.userId(), place.getId()));
         } finally {
             executor.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("Coordenadas recebidas nunca vazam em logs nem em DTOs de resposta (VERIFIED, REJECTED ou histórico)")
+    void coordinatesNeverLeakInLogsOrResponseDtos(CapturedOutput output) throws Exception {
+        TestUser user = registerUser("noleak");
+        Place nearPlace = createPlace(60);
+        Place farPlace = createPlace(60);
+
+        double verifiedLat = -25.438417;
+        double verifiedLon = -49.284923;
+        double rejectedLat = -25.412345;
+        double rejectedLon = -49.265432;
+
+        Created verifiedCreated = review(user, nearPlace, verifiedLat, verifiedLon, 8.5);
+        Created rejectedCreated = review(user, farPlace, rejectedLat, rejectedLon, 12.0);
+
+        assertCheckIn(verifiedCreated, "VERIFIED", null);
+        assertCheckIn(rejectedCreated, "NOT_VERIFIED", "OUTSIDE_RADIUS");
+
+        String historyBody = mockMvc.perform(get("/api/v1/me/check-ins")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.accessToken()))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String reviewDetailBody = mockMvc.perform(get("/api/v1/reviews/" + verifiedCreated.reviewId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.accessToken()))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        String logs = output.getAll();
+        for (String sensitive : List.of("-25.438417", "-49.284923", "-25.412345", "-49.265432")) {
+            assertFalse(logs.contains(sensitive), "Coordenada não pode aparecer em logs: " + sensitive);
+            assertFalse(verifiedCreated.body().toString().contains(sensitive));
+            assertFalse(rejectedCreated.body().toString().contains(sensitive));
+            assertFalse(historyBody.contains(sensitive));
+            assertFalse(reviewDetailBody.contains(sensitive));
         }
     }
 

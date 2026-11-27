@@ -15,33 +15,51 @@ A autenticação no Rewit foi projetada para ser:
 
 ---
 
-## 2. Password Hashing (Argon2id)
+## 2. Password Hashing (Argon2id + Password Pepper Vinculado ao Usuário)
 
-### 2.1 Algoritmo e Justificativa
-Utilizamos o algoritmo **Argon2id** (versão 1.3), o vencedor da Password Hashing Competition (PHC) e padrão moderno recomendado pela OWASP. O Argon2id fornece proteção simultânea contra ataques de canal lateral (side-channel attacks) e ataques acelerados por hardware dedicado (GPUs e ASICs).
+### 2.1 Algoritmo e Modelo de Ameaça Mitigado (S3-A13-F1)
+O armazenamento de credenciais combina o algoritmo **Argon2id** (versão 1.3) com um **Password Pepper criptográfico vinculado à identidade do usuário**, externo ao banco de dados (`PASSWORD_PEPPER_SECRET`).
 
-A implementação utilizada é a oficial do Spring Security:
-`org.springframework.security.crypto.argon2.Argon2PasswordEncoder`, suportada pela biblioteca `org.bouncycastle:bcprov-jdk18on`.
+Essa arquitetura foi introduzida para mitigar o achado de segurança `S3-A13-F1` (comprometimento exclusivo da credencial SQL de runtime `rewit_app`), impedindo que um atacante com permissão de escrita no banco consiga:
+1. **Fabricar hashes válidos**: sem o segredo externo `PASSWORD_PEPPER_SECRET`, o atacante não consegue calcular o HMAC correto.
+2. **Transplantar hashes entre contas**: o HMAC vincula os 16 bytes binários do UUID da conta; um hash copiado diretamente de uma conta para outra falha compulsoriamente na verificação da conta de destino.
+3. **Injetar hashes Argon2id crus**: qualquer hash sem o envelope `pw2` (inclusive o antigo `legacy-sealed`) é rejeitado de forma fail-closed (`INVALID_CREDENTIALS`).
 
-### 2.2 Parâmetros Finais Configurados
-Revisados no Step 4.1 para atender rigorosamente à recomendação da OWASP sem comprometer o tempo de autenticação interativa:
+### 2.2 Derivação Criptográfica e Formato Canônico `pw2`
+A derivação segue estritamente a especificação criptográfica:
+```text
+preHash = Base64URL(HMAC-SHA256(K_password, "rewit-password-v1:" || userId_16bytes || rawPassword))
+```
+- **Domínio criptográfico**: prefixo não ambíguo `rewit-password-v1:`.
+- **Identificador**: 16 bytes do UUID estável (big-endian), nunca e-mail ou dados mutáveis.
+- **Senha bruta**: preservada exatamente como fornecida pelo usuário, sem `trim()`, truncamento ou normalização prévia.
+- **Envelope Canônico**:
+  ```text
+  pw2$v1$[keyId]$[argon2_phc]
+  ```
+  Exemplo real: `pw2$v1$v1$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>` (`keyId` padrão `v1`; o PHC é gravado sem o `$` inicial, logo não existe `$$`). O `keyId` segue `[A-Za-z0-9_-]{1,32}` (sem `$`, vazio ou separadores).
+  O envelope é armazenado em `users.password_hash VARCHAR(255)`.
+
+### 2.3 Parâmetros do Argon2id (Spring Security & BouncyCastle)
 - **Salt Length**: 16 bytes (128 bits criptograficamente seguros via `SecureRandom`).
 - **Hash Length**: 32 bytes (256 bits).
 - **Parallelism (Threads)**: 1 thread (`p=1`).
 - **Memory Cost**: 19.456 KiB (19 MiB de memória por derivação, `m=19456`).
 - **Iterations (Time Cost)**: 2 iterações (`t=2`).
+- **Tempo médio de hashing / verificação**: ~30 a 50 ms no ambiente de execução.
 
-### 2.3 Benchmark Observado (Ambiente Local Real)
-Executado via teste automatizado de benchmark no ambiente local real de desenvolvimento (Intel Core i5-10400, 24 GB de RAM, 2 TB de armazenamento, GT 1030):
-- **Tempo médio de hashing**: ~32 a 51 ms.
-- **Tempo médio de verificação (`matches`)**: ~31 a 51 ms.
-- **Consumo aproximado de memória por derivação**: ~21 a 40 MB.
-- **Conclusão**: O tempo médio na faixa de ~30 a 50 ms situa-se no limiar ideal para autenticação interativa humana (imperceptível para o usuário final, mas ordens de magnitude superior ao hashing ingênuo para inviabilizar ataques de força bruta offline em hardware com 24 GB de RAM).
+### 2.4 Rotação de Pepper e Auto-Upgrade de Chaves
+- Variáveis: `PASSWORD_PEPPER_KEY_ID` (ativa, padrão `v1`, nunca vazia), `PASSWORD_PEPPER_SECRET_PREVIOUS` e `PASSWORD_PEPPER_PREVIOUS_KEY_ID` (obrigatório quando houver chave anterior). IDs inválidos, vazios ou iguais entre ativa e anterior impedem a inicialização. Os segredos anteriores aceitam o mesmo formato dos ativos (§3.4) e participam da validação de independência.
+- O `keyId` gravado no hash seleciona a chave: `keyId` ativo → chave ativa; `keyId` anterior → chave anterior; qualquer outro → rejeição imediata, sem Argon2. Há no máximo **uma** verificação Argon2 por tentativa (sem segunda tentativa após falha).
+- Após autenticação bem-sucedida com a chave anterior, `needsUpgrade()` é verdadeiro e `AuthService.login`/`reactivate` regravam o hash com a chave ativa na mesma transação.
 
-### 2.4 Política de Reconfiguração de Custo
-Caso o hardware de produção aumente de capacidade ou as diretrizes da OWASP recomendem aumento:
-- Os parâmetros podem ser elevados de forma transparente.
-- O formato do hash do Argon2id inclui sua assinatura de parâmetros (ex: `$argon2id$v=19$m=19456,t=2,p=1$...`), permitindo compatibilidade retroativa e re-hashing durante o login de usuários com parâmetros antigos.
+### 2.5 Hashes Legados e Ausência de Selamento
+Esta entrega **não** inclui mecanismo de selamento/migração de hashes legados. O `LegacyPasswordSealer` e o formato `legacy-sealed` foram removidos: um selamento executado com a credencial de runtime comprometida legitimaria hashes possivelmente adulterados (o MAC passaria a atestar dados sem origem confiável).
+- O Rewit não tem produção ativa; hashes Argon2id crus de bancos de desenvolvimento/teste **são rejeitados**. Esses ambientes devem recriar as contas (registro) ou fazer redefinição controlada de senha por operador privilegiado, que grava um `pw2` novo.
+- Se no futuro houver necessidade real de preservar dados, será um procedimento operacional separado, exigindo snapshot confiável anterior à exposição da credencial, backup verificado, modo de manutenção, execução privilegiada, transações reais e dry-run, nunca um endpoint ou startup automático. Não existe recuperação de senha por e-mail no produto atual.
+
+### 2.6 Verificação Simulada em Tempo Constante (`simulateVerification`)
+Para mitigar enumeração de contas e ataques baseados em tempo, requisições de login para contas inexistentes, federadas ou desativadas executam `simulateVerification`, derivando HMAC e Argon2id contra um UUID fixo dummy (`00000000-0000-0000-0000-000000000000`), garantindo custo temporal indistinguível de um login com senha errada em conta existente.
 
 ---
 
@@ -79,17 +97,64 @@ O validador aceita estritamente o algoritmo configurado (`HS256`):
 
 ---
 
+### 3.4 Formato e Validação dos Segredos (`JWT_SECRET`, pepper, refresh)
+Um único decodificador, `SecuritySecretValidator.decodeSecret`, é usado por `JwtTokenService` (assinatura), pelo `JwtDecoder` do `SecurityConfig` (validação), pelo hasher e pelo validador de ambiente; não há parsing paralelo.
+- **Base64 padrão** (`+/`, com ou sem `=`) ou **Base64URL** (`-_`): decodificado para bytes; precisa resultar em **≥ 32 bytes**. Uma string Base64 válida porém curta (ex.: 32 caracteres = 24 bytes) é **rejeitada**, nunca reinterpretada como UTF-8. Base64 malformada (padding no meio, alfabetos misturados, comprimento incompatível) é rejeitada.
+- **Texto** com algum caractere fora do alfabeto Base64/Base64URL: usado como bytes UTF-8, aceito só com ≥ 32 bytes e sem padrões proibidos.
+- Rejeitados: ausente/vazio, placeholders conhecidos, caracteres ou bytes todos idênticos. Não se usa contagem de caracteres distintos como medida de entropia; a entropia vem da geração por CSPRNG.
+- Os segredos ativos e anteriores (JWT, pepper, refresh) não podem compartilhar material binário.
+- Geração recomendada: `openssl rand -base64 32` (ou 48 bytes). `scripts/new-external-test-env.ps1` gera Base64URL de 48 bytes por CSPRNG. Mensagens de erro citam só o nome da variável.
+
 ## 4. Refresh Token e Gerenciamento de Sessões
 
-### 4.1 Estrutura e Armazenamento (SHA-256 vs Argon2)
-- O Refresh Token é uma sequência criptograficamente aleatória de 256 bits (32 bytes), codificada em Base64 URL-safe (43 caracteres) via `SecureRandom`.
-- **Nenhum refresh token puro é salvo no banco de dados**. O banco armazena exclusivamente o **hash criptográfico SHA-256** do token (`64 caracteres hexadecimais`).
-- **Por que SHA-256 e não Argon2 para o Refresh Token?**
-  - O Argon2id é uma função deliberadamente lenta (*memory-hard* e *time-hard*) concebida para mitigar ataques de força bruta contra senhas humanas (que possuem entropia limitada).
-  - O Refresh Token possui **256 bits de entropia puramente criptográfica**, tornando matematicamente impossível qualquer ataque de dicionário ou inversão por força bruta.
-  - O uso de SHA-256 provê hashing determinístico e ultra-rápido, essencial para validação de sessões de alta performance sob concorrência sem esgotar CPU/memória da aplicação.
+### 4.1 Estrutura Vinculada à Identidade e Hash via HMAC-SHA256 (S3-A13-F1)
+O mecanismo de sessões e refresh tokens foi endurecido para mitigar inserção e transplante de sessões por atacante com acesso exclusivo ao SQL de runtime (`rewit_app`):
 
-### 4.2 Tabela `auth_sessions` (Migration V5)
+1. **Estrutura do Token (56 bytes)**:
+   - **16 bytes**: UUID canônico da conta proprietária (`User.id` em big-endian).
+   - **8 bytes**: `expires_at` em epoch seconds (big-endian), exatamente o valor persistido em `auth_sessions.expires_at`.
+   - **32 bytes**: entropia criptográfica gerada por `SecureRandom`.
+   - **Codificação**: Base64URL sem padding (**75 caracteres** canônicos, `^[A-Za-z0-9_-]{75}$`). Para os clientes (mobile e admin) o token continua sendo uma string opaca.
+   - Tokens com comprimento diferente, padding (`=`), espaços ou representação não canônica são rejeitados de forma fail-closed.
+
+2. **Hash Persistido (HMAC-SHA256)**:
+   - O banco armazena exclusivamente:
+     ```text
+     token_hash = HMAC-SHA256(REFRESH_TOKEN_SECRET, rawRefreshToken)
+     ```
+   - Persistido em 64 caracteres hexadecimais minúsculos, mantendo 100% de compatibilidade física com `auth_sessions.token_hash VARCHAR(64)`.
+   - Um atacante com acesso a SQL não consegue calcular um `token_hash` válido para um refresh token arbitrário gerado por ele, pois `REFRESH_TOKEN_SECRET` é externo ao banco.
+   - Hashes SHA-256 sem HMAC não são aceitos (a aplicação só busca por HMAC com as chaves configuradas).
+
+3. **Verificação Estrita de Proprietário na Rotação**:
+   - No fluxo `POST /api/v1/auth/refresh`:
+     1. Valida-se o formato estrito do token apresentado.
+     2. Extrai-se o `UUID` contido nos primeiros 16 bytes do token.
+     3. Localiza-se a sessão com bloqueio pessimista (`SELECT FOR UPDATE`).
+     4. Compara-se o UUID extraído com `session.getUserId()` e o `expiresAt` embutido com o `expires_at` persistido (igualdade de `UUID` e de epoch seconds; não é uma comparação de segredos, então tempo constante não é requisito).
+     5. Havendo qualquer divergência, a requisição é rejeitada com `401 INVALID_REFRESH_TOKEN`.
+   - Segunda camada contra transplante: mesmo que a linha fosse recriada apontando para outra conta, o token do cliente carrega o UUID da conta original e a verificação falha. A primeira camada é o runtime **não ter `DELETE`** em `auth_sessions` (§4.2).
+
+4. **Rotação de Segredo (`REFRESH_TOKEN_SECRET`)**:
+   - Suporte à transição de chave via `REFRESH_TOKEN_SECRET_PREVIOUS` (mesmo formato e requisitos do segredo ativo; independente dos demais segredos).
+   - Sessões geradas durante a chave anterior são aceitas para validação. A chave anterior deve ser mantida por pelo menos o TTL máximo do refresh token (`JWT_REFRESH_TOKEN_TTL_SECONDS`, 30 dias por padrão); depois disso pode ser removida.
+   - Na rotação da sessão, o novo refresh token emitido tem seu hash gravado obrigatoriamente com a chave ativa.
+
+### 4.2 Guards de Integridade, Privilégios e Funções Restritas (Migration V44)
+Para impedir que a credencial de runtime contorne o ciclo de vida das sessões e dos usuários, a `V44` combina triggers `BEFORE UPDATE`, retirada de privilégio e funções restritas:
+
+1. **Integridade de `auth_sessions` (`trg_guard_auth_session_integrity`)**:
+   - Impede `rewit_app` de alterar `id`, `user_id`, `token_hash`, `issued_at`, `expires_at` e `created_at`, e de desrevogar (`revoked_at`).
+   - **Um trigger `BEFORE UPDATE` não cobre `DELETE` seguido de `INSERT`.** Por isso `rewit_app` **não possui `DELETE`** em `auth_sessions` (revogado na V44; sem esse privilégio uma sessão revogada ou válida não pode ser apagada nem recriada com os mesmos dados). `INSERT` continua permitido (cadastro, login, rotação), mas uma linha inserida só autentica se o `token_hash` for um HMAC com `REFRESH_TOKEN_SECRET`, que o runtime não conhece.
+2. **Remoção legítima por funções `SECURITY DEFINER`** (owner = role de migração, `search_path = pg_catalog, public, pg_temp`, `EXECUTE` revogado de `PUBLIC` e concedido só a `rewit_app`, sem SQL dinâmico):
+   - `rewit_purge_expired_auth_sessions(p_now, p_limit)`: cleanup em lotes (`FOR UPDATE SKIP LOCKED`, limite 1–10000) de sessões com `expires_at < LEAST(p_now, clock_timestamp())` e sem sucessora de rotação. O corte nunca passa do relógio do PostgreSQL, então uma data futura não apaga sessões ainda válidas.
+   - `rewit_purge_deleted_user_auth_sessions(p_user_id)`: purge LGPD; verifica no banco que a conta está `DELETED` com `deleted_at` preenchido e, caso contrário, falha com `insufficient_privilege`.
+3. **Expiração vinculada ao token**: o token embute `expires_at` (§4.1). Depois do purge legítimo de uma sessão expirada, uma linha reconstruída com o mesmo hash e `expires_at` ampliado diverge do valor embutido no token e é rejeitada; um token expirado nunca renova.
+4. **Identidade e Provedor em `users` (`trg_guard_user_role_assignment`)**:
+   - Impede `rewit_app` de alterar `id`, `created_at` e `auth_provider`, de definir ou alterar `provider_user_id` (única exceção: `NULL` em conta já `DELETED`, para o purge LGPD) e de tirar uma conta do estado `DELETED`.
+5. **`rewit_assert_runtime_privileges()`** verifica: ausência de `DELETE` direto em `auth_sessions`, existência das duas funções, owner correto, `SECURITY DEFINER`, `search_path` fixo, `EXECUTE` só para `rewit_app` (nenhum para `PUBLIC`), ausência de outras funções `SECURITY DEFINER` e de memberships indevidas, além de todas as assertions da V37.
+
+### 4.3 Tabela `auth_sessions` e Modelo Físico
 ```sql
 CREATE TABLE auth_sessions (
     id UUID PRIMARY KEY,
@@ -109,7 +174,7 @@ CREATE TABLE auth_sessions (
 - **Índices estratégicos**: `user_id`, `expires_at`, `revoked_at` e índice único em `token_hash`.
 - **TTL do Refresh Token**: 30 dias (2.592.000 segundos) por padrão (`JWT_REFRESH_TOKEN_TTL_SECONDS`).
 
-### 4.3 Rotação Atômica e Proteção Contra Concorrência (Row-Level Locking)
+### 4.4 Rotação Atômica e Proteção Contra Concorrência (Row-Level Locking)
 Para fechar completamente a janela de corrida (*race condition*) na rotação do refresh token, o fluxo utiliza **bloqueio pessimista de linha no PostgreSQL** (`SELECT FOR UPDATE` / `LockModeType.PESSIMISTIC_WRITE`):
 1. **Localização e Bloqueio Exclusivo**: O registro da sessão é localizado com `SELECT ... WHERE token_hash = ? FOR UPDATE`.
 2. **Serialização no Banco**: Se duas requisições simultâneas apresentarem o mesmo token `X`, a primeira requisição adquire o lock da linha e a segunda é bloqueada no nível do PostgreSQL.
@@ -281,3 +346,25 @@ Sem Redis, o login social falha fechado (`503 SOCIAL_LOGIN_UNAVAILABLE`), ao con
 3. **Limites do Escopo**:
    - Provedores externos (Google, Apple) ficaram fora do Step 4; o login social foi implementado depois (§4.9).
    - Recursos como verificação de e-mail, recuperação de senha e MFA serão incorporados nas etapas subsequentes. O rate limiting distribuído está na seção 4.6.
+
+---
+
+## 8. Análise de Riscos Residuais (S3-A13-F1)
+
+Modelo de ameaça: posse exclusiva da credencial SQL de runtime (`rewit_app`). O F1 só é considerado mitigado depois de os testes de ataque em `RuntimeSqlCredentialCompromiseIntegrationTest` e da regressão completa passarem (ver ADR-017 e o roadmap §13.8).
+
+### 8.1 Vetores mitigados
+1. **Senha fabricada ou copiada**: sem `PASSWORD_PEPPER_SECRET` não se calcula um `pw2` válido; o HMAC inclui o UUID da conta, então copiar o hash de A para B falha. Hashes crus ou `legacy-sealed` são rejeitados.
+2. **Sessão fabricada**: o `token_hash` é HMAC com segredo externo; um SHA-256 puro não autentica (teste com linha administrativa válida em todos os campos).
+3. **Transplante de sessão**: `UPDATE` de `user_id` bloqueado por trigger; `DELETE` negado ao runtime; reconstrução (feita só por conexão privilegiada no teste) cai no vínculo UUID do token.
+4. **Ressurreição de sessão revogada** (logout, troca de senha, rotação): não pode ser apagada, desrevogada nem ter `expires_at` alterado; token antigo continua rejeitado.
+5. **Expiração artificial após purge legítimo**: o `expires_at` embutido no token (HMAC-autenticado indiretamente pelo hash) precisa coincidir com o persistido.
+6. **Sequestro de identidade federada**: `auth_provider` e `provider_user_id` imutáveis para o runtime (exceto anulação em conta `DELETED`).
+
+### 8.2 Riscos residuais (honestos)
+- **Quem já possui um refresh token válido** pode renová-lo pela API normalmente; isso não é uma escalada.
+- **Purge de sessões já expiradas**: a função restrita pode apagar sessões expiradas sem sucessora, o que é o comportamento do cleanup (ADR-011). Apagar uma sessão expirada não a torna reutilizável, pelo vínculo de expiração no token. Consequência: após o purge, o token expirado recebe `INVALID_REFRESH_TOKEN` em vez de `REFRESH_TOKEN_EXPIRED`.
+- **Replay de estados antigos de uma linha**: como `rewit_app` não apaga nem altera campos de segurança, não há como restaurar um estado anterior da linha; por isso não se adicionou coluna de MAC de sessão (custo e complexidade sem benefício adicional para este modelo de ameaça).
+- **Negação de serviço**: com `INSERT` e `UPDATE` de `revoked_at` ainda permitidos, o runtime comprometido pode revogar sessões de terceiros. Fora do escopo do F1.
+- **Segredos externos comprometidos**: quem obtiver `PASSWORD_PEPPER_SECRET` ou `REFRESH_TOKEN_SECRET` junto com SQL volta ao cenário anterior; os segredos devem ficar em cofre separado do banco e rotacionados (§2.4, §4.1).
+- **F2 (moderação) permanece aberto** e não é tratado aqui.

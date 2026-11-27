@@ -51,6 +51,9 @@ class AdminPlaceMediaQueueIntegrationTest {
     private PlaceMediaReportRepository placeMediaReportRepository;
 
     @Autowired
+    private com.rewit.application.port.MediaLifecycleTransactionPort mediaLifecycleTransactionPort;
+
+    @Autowired
     private PlaceRepository placeRepository;
 
     @Autowired
@@ -120,20 +123,25 @@ class AdminPlaceMediaQueueIntegrationTest {
                 UUID.randomUUID(), place.getId(), author.getId(),
                 "places/" + place.getId() + "/" + UUID.randomUUID() + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 1024L, 800, 600,
-                PlaceMediaStatus.UNDER_REVIEW, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
         media = placeMediaRepository.save(media);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update(
+                "UPDATE place_media SET status = 'UNDER_REVIEW' WHERE id = ?", media.getId());
+        media = placeMediaRepository.findById(media.getId()).orElseThrow();
 
         // Cria segundo usuário para segunda denúncia (uq_place_media_reports_reporter)
         String reporter2Email = "rep2." + UUID.randomUUID() + "@rewit.com";
         loginUser(reporter2Email, "Password123!", Role.USER);
         User reporter2 = userRepository.findByEmail(reporter2Email).orElseThrow();
 
-        // Cria denúncias associadas
+        // Cria denúncias associadas sob rewit_media
         PlaceMediaReport report1 = new PlaceMediaReport(UUID.randomUUID(), media.getId(), author.getId(), "SPAM", "Denúncia 1");
         PlaceMediaReport report2 = new PlaceMediaReport(UUID.randomUUID(), media.getId(), reporter2.getId(), "OFENSIVO", "Denúncia 2");
-        placeMediaReportRepository.save(report1);
-        placeMediaReportRepository.save(report2);
+        mediaLifecycleTransactionPort.run(() -> {
+            placeMediaReportRepository.save(report1);
+            placeMediaReportRepository.save(report2);
+        });
 
         // GET /api/v1/admin/place-media/under-review
         mockMvc.perform(get("/api/v1/admin/place-media/under-review")

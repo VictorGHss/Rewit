@@ -24,12 +24,13 @@ import java.util.UUID;
  *
  * <ul>
  *   <li><b>Minimizado</b>: e-mail (vira o valor reservado), credencial, identificador do provedor externo; perfil
- *       (handle reservado, nome neutro, sem bio, avatar nem reputação); coordenadas informadas nas avaliações; a
- *       referência à conta em notificações de outros usuários e em presenças de produto;</li>
+ *       (handle reservado, nome neutro, sem bio, avatar nem reputação); coordenadas informadas nas avaliações e
+ *       eventuais coordenadas residuais em check-ins; a referência à conta em notificações de outros usuários e em
+ *       presenças de produto;</li>
  *   <li><b>Removido</b>: sessões, follows, itens salvos, interesses, atividades, notificações próprias e o snapshot
  *       de reputação;</li>
- *   <li><b>Preservado</b>: avaliações, notas, helpful, comentários, mídia, denúncias, auditoria, check-ins e contas
- *       empresariais (estes dois dependem de decisão de produto).</li>
+ *   <li><b>Preservado</b>: avaliações, notas, helpful, comentários, mídia, denúncias, auditoria, registros de check-in
+ *       (sem coordenadas) e contas empresariais (contas empresariais dependem de decisão de produto).</li>
  * </ul>
  *
  * <p><b>Período de arrependimento</b>: a exclusão lógica é imediata, o purge só é elegível quando

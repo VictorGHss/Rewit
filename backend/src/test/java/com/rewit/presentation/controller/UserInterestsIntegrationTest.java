@@ -176,7 +176,7 @@ class UserInterestsIntegrationTest {
             putInterests(user, false, "CAFE").andExpect(status().isOk());
             Map<String, Object> before = profileRow(user.id());
 
-            jdbcTemplate.update("UPDATE users SET account_status = ?, is_active = false WHERE id = ?",
+            com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = ?, is_active = false WHERE id = ?",
                     accountStatus, user.id());
 
             mockMvc.perform(withToken(get("/api/v1/me/interests"), user))

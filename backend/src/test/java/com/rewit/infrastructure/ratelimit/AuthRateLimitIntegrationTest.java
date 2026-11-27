@@ -176,7 +176,8 @@ class AuthRateLimitIntegrationTest {
 
     private String createUser() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
-        User user = userRepository.save(new User(null, "rl." + suffix + "@rewit.com", passwordHasher.hash(PASSWORD),
+        UUID userId = UUID.randomUUID();
+        User user = userRepository.save(new User(userId, "rl." + suffix + "@rewit.com", passwordHasher.hash(userId, PASSWORD),
                 AuthProvider.LOCAL, null));
         profileRepository.save(new Profile(null, user.getId(), "rl_" + suffix, "Rate Limit " + suffix, null, null));
         return user.getEmail();

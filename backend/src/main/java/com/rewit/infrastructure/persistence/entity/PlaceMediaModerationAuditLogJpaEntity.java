@@ -49,12 +49,22 @@ public class PlaceMediaModerationAuditLogJpaEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "authenticity_mac", updatable = false, length = 128)
+    private String authenticityMac;
+
     public PlaceMediaModerationAuditLogJpaEntity() {
     }
 
     public PlaceMediaModerationAuditLogJpaEntity(UUID id, UUID placeMediaId, UUID placeId,
                                                 UUID actorUserId, String actorType, String action, String reason,
                                                 String notes, UUID reportId, Instant createdAt) {
+        this(id, placeMediaId, placeId, actorUserId, actorType, action, reason, notes, reportId, createdAt, null);
+    }
+
+    public PlaceMediaModerationAuditLogJpaEntity(UUID id, UUID placeMediaId, UUID placeId,
+                                                UUID actorUserId, String actorType, String action, String reason,
+                                                String notes, UUID reportId, Instant createdAt,
+                                                String authenticityMac) {
         this.id = id;
         this.placeMediaId = placeMediaId;
         this.placeId = placeId;
@@ -65,6 +75,7 @@ public class PlaceMediaModerationAuditLogJpaEntity {
         this.notes = notes;
         this.reportId = reportId;
         this.createdAt = createdAt;
+        this.authenticityMac = authenticityMac;
     }
 
     public static PlaceMediaModerationAuditLogJpaEntity fromDomain(PlaceMediaModerationAuditLog domain) {
@@ -78,7 +89,8 @@ public class PlaceMediaModerationAuditLogJpaEntity {
                 domain.getReason(),
                 domain.getNotes(),
                 domain.getReportId(),
-                domain.getCreatedAt()
+                domain.getCreatedAt(),
+                domain.getAuthenticityMac()
         );
     }
 
@@ -94,7 +106,8 @@ public class PlaceMediaModerationAuditLogJpaEntity {
                 this.reason,
                 this.notes,
                 this.reportId,
-                this.createdAt
+                this.createdAt,
+                this.authenticityMac
         );
     }
 

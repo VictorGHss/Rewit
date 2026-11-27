@@ -125,7 +125,60 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 - `users`: Substituição do índice não-único `idx_users_provider` pelo índice único parcial `uq_users_provider_user_id ON users (auth_provider, provider_user_id) WHERE provider_user_id IS NOT NULL`. Permite múltiplos usuários `LOCAL` com `provider_user_id = NULL` sem colisão e assegura unicidade para identidades remotas (`GOOGLE`, `APPLE`).
 - `profiles`: Substituição da constraint `uq_profiles_handle` por índice único case-insensitive `uq_profiles_handle_lower ON profiles (LOWER(handle))`. Preserva o índice trigram GIN `idx_profiles_handle_trgm` para buscas textuais parciais.
 - `rateable_targets`: Trigger `trg_prevent_rateable_target_type_change` impedindo alteração de `target_type` de alvos já especializados.
-- CHECK constraints adicionadas: `chk_review_status`, `chk_review_visibility`, `chk_review_location_accuracy`, `chk_places_status`, `chk_products_status`, `chk_services_status`, `chk_events_status`, `chk_users_auth_provider`, `chk_business_verification_status`, `chk_business_plan_tier`, `chk_review_tags_source`.
+- **CHECK constraints adicionadas**: `chk_review_status`, `chk_review_visibility`, `chk_review_location_accuracy`, `chk_places_status`, `chk_products_status`, `chk_services_status`, `chk_events_status`, `chk_users_auth_provider`, `chk_business_verification_status`, `chk_business_plan_tier`, `chk_review_tags_source`.
+
+### `V43__checkin_coordinate_minimization.sql` (Minimização e Proteção de Coordenadas GPS)
+- `check_ins`: Remoção do índice espacial `idx_checkins_coordinates` (`DROP INDEX IF EXISTS`).
+- `check_ins`: Remoção de `NOT NULL` em `coordinates` e `distance_to_centroid_meters`.
+- `check_ins`: Adição da coluna anulável `rejection_reason VARCHAR(64)` com constraints `chk_checkin_rejection_reason` (`ACCURACY_UNAVAILABLE`, `ACCURACY_TOO_LOW`, `OUTSIDE_RADIUS`, `RECENT_CHECK_IN`), `chk_checkin_rejection_reason_consistency` (`status = 'REJECTED' OR rejection_reason IS NULL`), `chk_checkin_coordinates_null` (`coordinates IS NULL`) e `chk_checkin_distance_only_verified` (`status = 'VERIFIED' OR distance_to_centroid_meters IS NULL`).
+- Backfill imediato sem `DELETE`: `coordinates = NULL` em todos os registros históricos (`VERIFIED`, `REJECTED` e `PENDING`) e `distance_to_centroid_meters = NULL` nos registros históricos não verificados (`REJECTED` e `PENDING`), preservando integralmente as linhas, `reviews.is_verified_on_site` e os valores originais de `reviews.updated_at` (restaurados na mesma transação após o disparo da trigger `trg_sync_check_in_to_review_verified`).
+- Validação final de privilégios mínimos via `rewit_assert_runtime_privileges()`.
+
+### `V44__auth_identity_and_session_immutability_guards.sql` (Hardening de Autenticação F1)
+- `users`: `trg_guard_user_role_assignment` (`fn_guard_user_role_assignment()`) impede o runtime `rewit_app` de alterar `role`, `id`, `created_at`, `auth_provider`, de definir/alterar `provider_user_id` (exceto `NULL` em conta já `DELETED`, para o purge LGPD) e de tirar uma conta de `DELETED`.
+- `auth_sessions`: `trg_guard_auth_session_integrity` (`BEFORE UPDATE`) impede alterar `id`, `user_id`, `token_hash`, `issued_at`, `expires_at`, `created_at` e desrevogar (`revoked_at`).
+- `auth_sessions`: **`DELETE` revogado de `rewit_app` e de `PUBLIC`** (um trigger `BEFORE UPDATE` não impede `DELETE` + `INSERT`). Removido de `deletable` em `rewit_assert_runtime_privileges()`; o cascade `users -> auth_sessions` continua restrito ao owner (o runtime não tem `DELETE` em `users`).
+- Funções `SECURITY DEFINER` restritas (owner da migração; `search_path = pg_catalog, public, pg_temp`; `EXECUTE` revogado de `PUBLIC` e concedido só a `rewit_app`):
+  - `rewit_purge_expired_auth_sessions(p_now TIMESTAMPTZ, p_limit INT)`: lotes `FOR UPDATE SKIP LOCKED` (1 a 10000) de sessões com `expires_at < LEAST(p_now, clock_timestamp())` e `replaced_by_session_id IS NULL`.
+  - `rewit_purge_deleted_user_auth_sessions(p_user_id UUID)`: remove as sessões somente se `users.account_status = 'DELETED'` e `deleted_at IS NOT NULL`; senão `insufficient_privilege`.
+- `rewit_assert_runtime_privileges()`: preserva a V37 e acrescenta: sem `DELETE` em `auth_sessions`, trigger `trg_guard_auth_session_integrity` ativo, as duas funções presentes com owner administrado pela role de migração (nunca `rewit_app`), `SECURITY DEFINER`, `search_path` fixo, `EXECUTE` só para `rewit_app`, nenhuma outra função `SECURITY DEFINER`, sem memberships de `rewit_app`.
+- A V44 existe só na branch não integrada e foi corrigida no próprio arquivo (nenhum banco persistente a aplicou); ver ADR-017 §6.
+
+### `V45__moderation_privilege_separation_and_decision_guards.sql` (Hardening de Moderação e Auditoria F2 — ADR-018)
+- **Inventário reconciliado de tabelas**: o schema de aplicação passa de 47 tabelas (V1–V44) para **49 tabelas de aplicação** com a criação das duas novas trilhas append-only:
+  - `account_moderation_audit_logs` (`SUSPEND`, `REINSTATE`, `DELETE` em contas de usuário);
+  - `place_claim_moderation_audit_logs` (`APPROVE_CLAIM`, `REJECT_CLAIM` em reivindicações de estabelecimentos).
+  - Ambas seguem o padrão desacoplado da V37 (`BEFORE INSERT ... FOR KEY SHARE` em vez de FKs `ON DELETE CASCADE`/`RESTRICT` em `users`) e possuem triggers que impedem `UPDATE`, `DELETE` e `TRUNCATE`.
+- **Separação de roles (`rewit_app` vs. `rewit_media` vs. `rewit_mod`)**: garante as roles `rewit_media` (ciclo de vida público/automático de mídias de locais, SEC-F2-03) e `rewit_mod` (6 módulos administrativos), ambas com `NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`, sem ownership e sem `SET ROLE` cruzado entre as 3 roles. Revoga de `rewit_app` qualquer escrita nas 6 trilhas de auditoria (incluindo `place_media_moderation_audit_logs`), `UPDATE` em `place_media`, escrita em `place_media_reports` e escrita administrativa em denúncias e reivindicações; concede a `rewit_media` exclusivamente o conjunto mínimo para remoções públicas, denúncias/auto-quarentena, troca de capa e expurgo `purged_at` (> 24h) de `place_media`; concede a `rewit_mod` exclusivamente o conjunto mínimo para os 6 módulos administrativos (incluindo `SELECT` em `check_ins` e `rateable_targets` para triggers existentes, `UPDATE` por coluna em `place_media_reports`, e `DELETE` restrito às tabelas de invalidação comercial V28/V29).
+- **Autenticidade criptográfica de payload (`authenticity_mac`)**: adiciona `authenticity_mac VARCHAR(128)` com `CHECK (authenticity_mac ~ '^aud1\$[A-Za-z0-9_-]{1,32}\$[0-9a-f]{64}$')` e `txid` / `decision_txid` nas 6 trilhas de auditoria, em `place_media_reports` e em `place_claim_requests`.
+- **Guards de máquina de estados por role**: protege `users` (`fn_guard_user_role_assignment`), `places` (`trg_a_guard_places_governance`, executado antes dos triggers destrutivos V28/V29/V39 e bloqueando qualquer mutação por `rewit_media`), `business_accounts`, `place_media_reports`, `review_reports`, `discussion_reports`, `place_claim_requests`, `reviews`, `review_discussions`, `business_responses`, `place_media` (proteção de `removal_source`, anti-backdating de `removed_at`, prazo mínimo de 24h em `purged_at` e bloqueio de `UPDATE` por `rewit_app`) e `review_media`.
+- **Integridade transacional bidirecional (`DEFERRABLE INITIALLY DEFERRED`)**: correlaciona por `txid_current()` cada transição administrativa (`rewit_mod`) nos 6 módulos e cada transição pública/automática de `place_media`/`place_media_reports` (`rewit_media`) com seu registro correspondente de auditoria; transição sem auditoria ou auditoria órfã sem transição real falha no `COMMIT`.
+- **Funções `SECURITY DEFINER` restritas**:
+  - `public.rewit_auto_resolve_removed_place_media_reports(p_media_id UUID, p_notes VARCHAR)` (`search_path = pg_catalog, public, pg_temp`, `EXECUTE` somente para `rewit_media`, revogado de `PUBLIC`, `rewit_app` e `rewit_mod`, validando `session_user`, `place_media.status = 'REMOVED'` e `removal_source` não administrativo) encerra apenas denúncias `PENDING` para `AUTO_RESOLVED` sem tocar decisões finais prévias.
+  - `public.rewit_release_place_quarantine_entry(p_entry_id UUID)` (`search_path = pg_catalog, public, pg_temp`, `EXECUTE` somente para `rewit_media`, revogado de `PUBLIC`, `rewit_app` e `rewit_mod`) substitui `DELETE` direto em `storage_object_quarantine` para `rewit_media`, validando `session_user`, exigindo estado `CONFIRMED_ORPHAN` e namespace `places/`.
+- **`rewit_assert_runtime_privileges()`**: atualizado para auditar `rewit_app`, `rewit_media`, `rewit_mod`, isolamento de `SET ROLE`, novas trilhas, guards, privilégio mínimo estrito em `storage_object_quarantine` (`rewit_media` com apenas `UPDATE (id)` e sem `DELETE` direto) e a matriz exata de `EXECUTE` das 4 funções `SECURITY DEFINER` autorizadas (`rewit_purge_expired_auth_sessions` e `rewit_purge_deleted_user_auth_sessions` para `rewit_app`; `rewit_auto_resolve_removed_place_media_reports` e `rewit_release_place_quarantine_entry` para `rewit_media`).
+
+### `V46__storage_quarantine_integrity_and_grace_hardening.sql` (Hardening de Quarentena e Grace Period do Storage GC — SEC-F2-04 / SEC-F2-04-R1, ADR-018)
+- **Invariantes, Defaults e Reinício Conservador de `storage_object_quarantine`**:
+  - `status` DEFAULT `'OBSERVED'`, `first_observed_at` DEFAULT `clock_timestamp()`, `last_observed_at` DEFAULT `clock_timestamp()`, `confirmed_at` DEFAULT `NULL`.
+  - **Reinício conservador no upgrade (SEC-F2-04-VULN-01)**: todas as entradas preexistentes (sejam `OBSERVED` ou `CONFIRMED_ORPHAN`) têm seu estado temporal reiniciado incondicionalmente com um único instante `v_reset_at := clock_timestamp()` do PostgreSQL (`status = 'OBSERVED'`, `confirmed_at = NULL`, `first_observed_at = v_reset_at`, `last_observed_at = v_reset_at`, e ajuste coerente de `last_modified_at` futuro), preservando `id`, `object_key`, constraints e índices.
+- **Trigger `trg_guard_storage_quarantine_integrity` (`BEFORE INSERT OR UPDATE`)**:
+  - `INSERT`: garante que chamadores de runtime comum criem novas entradas exclusivamente como `OBSERVED` com `confirmed_at = NULL`. Força `first_observed_at = clock_timestamp()` e `last_observed_at = clock_timestamp()`, neutralizando timestamps retroativos/futuros fornecidos manualmente.
+  - `UPDATE`: impõe imutabilidade estrita de `id` para todas as roles (SEC-F2-04-VULN-02) e de `object_key` e `first_observed_at` para roles de runtime. Bloqueia qualquer alteração direta de `status` e `confirmed_at` por conexões de runtime comum.
+- **Função `SECURITY DEFINER` de Confirmação de Órfão**:
+  - `public.rewit_confirm_storage_quarantine_entry(p_entry_id UUID)` (`search_path = pg_catalog, public, pg_temp`, `EXECUTE` concedido exclusivamente a `rewit_app`, revogado de `PUBLIC`, `rewit_media` e `rewit_mod`).
+  - Valida `session_user` (`rewit_app` ou owner).
+  - Trava a linha com `FOR UPDATE`.
+  - Exige estado anterior `OBSERVED` (retorno idempotente se já `CONFIRMED_ORPHAN` com timestamps consistentes).
+  - Valida rigorosamente pelo relógio do banco que `first_observed_at <= clock_timestamp() - INTERVAL '24 hours'`.
+  - Rejeita timestamps futuros ou inconsistentes (`first_observed_at > clock_timestamp()`).
+  - Atualiza atomicamente `status = 'CONFIRMED_ORPHAN'` e `confirmed_at = clock_timestamp()`.
+- **Autoridade Temporal no Expurgo (SEC-F2-04-ARCH-01)**:
+  - Dentro da transação de expurgo, após adquirir os locks da entidade pai e da entrada de quarentena (`FOR UPDATE`), e imediatamente antes da exclusão física, a aplicação executa consulta autoritativa com `clock_timestamp()` do PostgreSQL (usando `SELECT` normal, sem nova função `SECURITY DEFINER`) em ambos os namespaces (`reviews/` sob `rewit_app` e `places/` sob `rewit_media`), validando `status = 'CONFIRMED_ORPHAN'`, `first_observed_at <= v_now - INTERVAL '24 hours'`, `confirmed_at IS NOT NULL`, `confirmed_at <= v_now` e `confirmed_at >= first_observed_at + INTERVAL '24 hours'`.
+- **Privilégios Mínimos Estritos**:
+  - `rewit_app`: revogado `UPDATE` geral na tabela e revogado `UPDATE(id)`. Concedido `SELECT`, `INSERT` nas colunas de observação (`id`, `object_key`, `status`, `first_observed_at`, `last_observed_at`, `last_modified_at`), `UPDATE` restrito a `(last_observed_at, last_modified_at)` (suficiente para upsert de reobservação e para `SELECT ... FOR UPDATE` no PostgreSQL 18), `DELETE` e `EXECUTE` em `rewit_confirm_storage_quarantine_entry`. Bloqueada qualquer escrita direta em `id`, `confirmed_at`, `status`, `first_observed_at` ou `object_key`.
+  - `rewit_media`: mantém apenas `SELECT` e `UPDATE(id)` (indispensável ao `SELECT ... FOR UPDATE`), com toda escrita direta bloqueada por `trg_guard_storage_quarantine_media_writes` e `trg_guard_storage_quarantine_integrity`, e liberação exclusiva via `rewit_release_place_quarantine_entry(UUID)`.
+- **`rewit_assert_runtime_privileges()`**: atualizado para auditar os novos privilégios de `rewit_app` em `storage_object_quarantine` (sem UPDATE geral nem escrita em `id`/colunas protegidas), a presença de `trg_guard_storage_quarantine_integrity` e a 5ª função `SECURITY DEFINER` autorizada (`rewit_confirm_storage_quarantine_entry`).
 
 ---
 
@@ -145,6 +198,10 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 | `check_ins` | `chk_checkin_status` | CHECK | `status IN ('PENDING', 'VERIFIED', 'REJECTED')` |
 | `check_ins` | `chk_checkin_verification_method` | CHECK | `verification_method IN ('GPS', 'QR_CODE', 'NFC', 'BEACON')` |
 | `check_ins` | `chk_checkin_verified_at_consistency` | CHECK | `(status = 'VERIFIED' AND verified_at IS NOT NULL) OR (status IN ('PENDING', 'REJECTED') AND verified_at IS NULL)` |
+| `check_ins` | `chk_checkin_coordinates_null` | CHECK | `coordinates IS NULL` (V43) |
+| `check_ins` | `chk_checkin_distance_only_verified` | CHECK | `status = 'VERIFIED' OR distance_to_centroid_meters IS NULL` (V43) |
+| `check_ins` | `chk_checkin_rejection_reason` | CHECK | `rejection_reason IS NULL OR rejection_reason IN ('ACCURACY_UNAVAILABLE', 'ACCURACY_TOO_LOW', 'OUTSIDE_RADIUS', 'RECENT_CHECK_IN')` (V43) |
+| `check_ins` | `chk_checkin_rejection_reason_consistency` | CHECK | `status = 'REJECTED' OR rejection_reason IS NULL` (V43) |
 | `places` | `chk_places_radius` | CHECK | `validation_radius_meters > 0` |
 | `places` | `chk_places_status` | CHECK | `status IN ('ACTIVE', 'INACTIVE', 'CLOSED')` |
 | `places` | `uq_places_slug` | UNIQUE | `(slug)` |
@@ -180,7 +237,7 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 
 ---
 
-## 6. Triggers de Integridade Relacional
+## 6. Triggers de Integridade Relacional e Segurança
 
 1. **`trg_check_in_review_consistency`** (em `check_ins`):
    Garante antes de INSERT ou UPDATE que a Review existe, possui `context_place_id` preenchido e que `user_id` e `place_id` do check-in coincidem exatamente com o autor e local da review.
@@ -192,6 +249,10 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
    Impede que um `RateableTarget` de um tipo seja inserido na tabela de outro tipo.
 5. **`trg_prevent_rateable_target_type_change`** (em `rateable_targets`):
    Impede que a coluna `target_type` seja modificada caso o alvo já possua especialização cadastrada.
+6. **`trg_guard_user_role_assignment`** (em `users`, V44):
+   Impede que a role de runtime `rewit_app` modifique `role`, `id`, `created_at` e `auth_provider`, previne a alteração de `provider_user_id` (salvo anulação para `NULL` no expurgo de contas `DELETED`) e bloqueia transições de saída do estado `DELETED`.
+7. **`trg_guard_auth_session_integrity`** (em `auth_sessions`, V44):
+   Impede que a role de runtime `rewit_app` modifique `id`, `user_id`, `token_hash`, `issued_at`, `expires_at`, `created_at` e bloqueia a desrevogação de sessões já revogadas (`revoked_at`). Não cobre `DELETE`, por isso o privilégio `DELETE` foi retirado do runtime.
 
 ---
 
@@ -200,7 +261,10 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 ### Índices Espaciais GiST (Generalized Search Tree)
 - `idx_places_coordinates` em `places(coordinates)`: Acelera consultas de raio geodésico (`ST_DWithin`).
 - `idx_reviews_coordinates` em `reviews(user_coordinates)`: Acelera filtros geográficos em avaliações.
-- `idx_checkins_coordinates` em `check_ins(coordinates)`: Acelera auditorias de telemetria presencial.
+- *(Removido na V43)* `idx_checkins_coordinates` em `check_ins(coordinates)` foi removido porque coordenadas exatas de usuário não são mais retidas em `check_ins`.
+
+### Índices Parciais de Presença
+- `idx_checkins_verified_user_place` em `check_ins(user_id, place_id, verified_at DESC) WHERE status = 'VERIFIED'` (V41): Atende a regra de 1 check-in verificado por usuário/local em 24 horas e a listagem do histórico do usuário.
 
 ### Índices Trigram (GIN)
 - `idx_places_name_trgm` em `places USING GIN (name gin_trgm_ops)`: Acelera busca textual aproximada com tolerância a erros de digitação.
@@ -218,20 +282,20 @@ Isso isola transações de alta frequência de escrita das consultas de leitura 
 
 ---
 
-## 8. Tabela de Sessões de Autenticação (`auth_sessions` - V5)
+## 8. Tabela de Sessões de Autenticação (`auth_sessions` - V5, V44)
 
-Armazena as sessões e hashes de Refresh Tokens (Step 4):
+Armazena as sessões e hashes de Refresh Tokens (Step 4, hardening F1 na V44):
 
 | Coluna | Tipo | Modificador | Descrição |
 |---|---|---|---|
-| `id` | `UUID` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Identificador único da sessão |
-| `user_id` | `UUID` | `NOT NULL REFERENCES users(id) ON DELETE CASCADE` | Usuário proprietário |
-| `token_hash` | `VARCHAR(64)` | `NOT NULL UNIQUE` | Hash SHA-256 hexadecimal do Refresh Token |
-| `issued_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Data/hora de emissão |
-| `expires_at` | `TIMESTAMPTZ` | `NOT NULL` | Expiração da sessão |
-| `revoked_at` | `TIMESTAMPTZ` | `NULL` | Data de revogação/logout |
+| `id` | `UUID` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Identificador único da sessão (imutável via trigger V44) |
+| `user_id` | `UUID` | `NOT NULL REFERENCES users(id) ON DELETE CASCADE` | Usuário proprietário (imutável via trigger V44; previne transplante direto) |
+| `token_hash` | `VARCHAR(64)` | `NOT NULL UNIQUE` | HMAC-SHA256 (64 hex) do refresh token de 75 caracteres (UUID + `expires_at` + 32 bytes aleatórios) com `REFRESH_TOKEN_SECRET` (imutável via V44) |
+| `issued_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Data/hora de emissão (imutável via trigger V44) |
+| `expires_at` | `TIMESTAMPTZ` | `NOT NULL` | Expiração da sessão, igual ao instante (epoch seconds) embutido no refresh token (imutável via trigger V44) |
+| `revoked_at` | `TIMESTAMPTZ` | `NULL` | Data de revogação/logout (desrevogação bloqueada via trigger V44 se já preenchida) |
 | `replaced_by_session_id` | `UUID` | `NULL REFERENCES auth_sessions(id) ON DELETE SET NULL` | Sessão sucessora após rotação |
-| `created_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Criação do registro |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT CURRENT_TIMESTAMP` | Criação do registro (imutável via trigger V44) |
 | `last_used_at` | `TIMESTAMPTZ` | `NULL` | Último uso da sessão |
 | `user_agent` | `TEXT` | `NULL` | Cabeçalho User-Agent para telemetria |
 | `ip_address` | `INET` | `NULL` | Endereço IP do cliente no momento da emissão |

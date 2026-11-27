@@ -182,6 +182,8 @@ class TestInfrastructureIsolationTest {
     private static final Map<String, String> TEST_VARIABLES = Map.ofEntries(
             Map.entry("TEST_DATASOURCE_URL", "jdbc:postgresql://127.0.0.1:61234/rewit_suite"),
             Map.entry("TEST_APP_DB_USER", "rewit_app"), Map.entry("TEST_APP_DB_PASSWORD", "app-secret"),
+            Map.entry("TEST_MEDIA_DB_USER", "rewit_media"), Map.entry("TEST_MEDIA_DB_PASSWORD", "media-secret"),
+            Map.entry("TEST_MOD_DB_USER", "rewit_mod"), Map.entry("TEST_MOD_DB_PASSWORD", "mod-secret"),
             Map.entry("TEST_MIGRATION_DB_USER", "rewit_owner"), Map.entry("TEST_MIGRATION_DB_PASSWORD", "owner-secret"),
             Map.entry("TEST_REDIS_HOST", "127.0.0.1"), Map.entry("TEST_REDIS_PORT", "61235"),
             Map.entry("TEST_STORAGE_ENDPOINT", "http://127.0.0.1:61236"), Map.entry("TEST_STORAGE_ACCESS_KEY", "access"),
@@ -213,7 +215,8 @@ class TestInfrastructureIsolationTest {
         assertTrue(ex.getMessage().contains("TEST_DATASOURCE_URL"), ex.getMessage());
         assertTrue(ex.getMessage().contains("obrigatória ausente"), ex.getMessage());
         for (String property : List.of("spring.data.redis.port", "spring.data.redis.host", "rewit.minio.endpoint",
-                "spring.datasource.username", "spring.datasource.password", "spring.flyway.user")) {
+                "spring.datasource.username", "spring.datasource.password",
+                "rewit.datasource.moderation.username", "rewit.datasource.moderation.password", "spring.flyway.user")) {
             assertRejected(IllegalArgumentException.class, () -> env.getProperty(property),
                     property + " não pode ter valor padrão nem usar variável de desenvolvimento");
         }

@@ -25,6 +25,7 @@ import io.minio.errors.XmlParserException;
 import io.minio.messages.Item;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -59,16 +60,31 @@ public class MinioStorageAdapter implements ObjectStoragePort, ObjectStorageList
 
     private final MinioClient minioClient;
     private final String bucketName;
+    private final boolean autoCreateBucket;
     private final AtomicBoolean bucketChecked = new AtomicBoolean(false);
 
+    @Autowired
     public MinioStorageAdapter(MinioClient minioClient,
-                               @Value("${rewit.minio.bucket-name:rewit-local}") String bucketName) {
+                               @Value("${rewit.minio.bucket-name}") String bucketName,
+                               @Value("${rewit.minio.auto-create-bucket:false}") boolean autoCreateBucket) {
         this.minioClient = Objects.requireNonNull(minioClient, "MinioClient must not be null");
-        this.bucketName = Objects.requireNonNull(bucketName, "Bucket name must not be null");
+        if (bucketName == null || bucketName.isBlank()) {
+            throw new IllegalStateException("rewit.minio.bucket-name (OBJECT_STORAGE_BUCKET) é obrigatório.");
+        }
+        this.bucketName = bucketName.trim();
+        this.autoCreateBucket = autoCreateBucket;
+    }
+
+    public MinioStorageAdapter(MinioClient minioClient, String bucketName) {
+        this(minioClient, bucketName, true);
+    }
+
+    public boolean isAutoCreateBucket() {
+        return autoCreateBucket;
     }
 
     private void ensureBucketExists() {
-        if (bucketChecked.get()) {
+        if (!autoCreateBucket || bucketChecked.get()) {
             return;
         }
         synchronized (bucketChecked) {

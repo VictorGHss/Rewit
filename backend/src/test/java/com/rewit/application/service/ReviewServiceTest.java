@@ -513,4 +513,69 @@ class ReviewServiceTest {
         assertFalse(result.isVerifiedOnSite());
         verifyNoInteractions(checkInRepository);
     }
+
+    @Test
+    @DisplayName("16. Check-in VERIFIED e REJECTED são salvos sem coordenadas GPS; REJECTED também omite distância e registra rejectionReason")
+    void shouldMinimizeCoordinatesAndRejectionDistanceWhenSavingCheckIn() {
+        com.rewit.application.port.CheckInRepository checkInRepository = mock(com.rewit.application.port.CheckInRepository.class);
+        ReviewService serviceWithCheckIn = new ReviewService(
+                reviewRepository,
+                reviewTargetRepository,
+                userRepository,
+                rateableTargetRepository,
+                placeRepository,
+                null,
+                checkInRepository,
+                rateableTargetStatsRepository,
+                null,
+                null,
+                reputationService
+        );
+
+        UUID placeId = UUID.randomUUID();
+        com.rewit.domain.model.Place place = new com.rewit.domain.model.Place(
+                placeId, "Café", "cafe", "CAFETERIA", null, "Rua XV, 100",
+                null, null, "Curitiba", "PR", "BR", -25.4385, -49.2850, 50, "USER", false, null, "ACTIVE");
+
+        when(userRepository.findById(authorUserId)).thenReturn(Optional.of(activeUser));
+        when(placeRepository.findById(placeId)).thenReturn(Optional.of(place));
+        when(rateableTargetRepository.existsPubliclyVisibleById(placeId)).thenReturn(true);
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reviewTargetRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+        when(checkInRepository.save(any(com.rewit.domain.model.CheckIn.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // 1. VERIFIED
+        when(placeRepository.validateProximity(placeId, -25.4384, -49.2849))
+                .thenReturn(Optional.of(new com.rewit.application.dto.catalog.CatalogDtos.SpatialValidationResult(15.0, true, 50)));
+        when(checkInRepository.existsVerifiedSince(eq(authorUserId), eq(placeId), any())).thenReturn(false);
+
+        serviceWithCheckIn.createReviewWithPresence(new CreateReviewCommand(
+                authorUserId, placeId, "Ótimo", false, "PUBLIC", -25.4384, -49.2849, 8.0,
+                List.of(new CreateReviewTargetCommand(placeId, new BigDecimal("5.0"), null))));
+
+        // 2. REJECTED por OUTSIDE_RADIUS
+        when(placeRepository.validateProximity(placeId, -25.4200, -49.2700))
+                .thenReturn(Optional.of(new com.rewit.application.dto.catalog.CatalogDtos.SpatialValidationResult(2400.0, false, 50)));
+
+        serviceWithCheckIn.createReviewWithPresence(new CreateReviewCommand(
+                authorUserId, placeId, "De casa", false, "PUBLIC", -25.4200, -49.2700, 10.0,
+                List.of(new CreateReviewTargetCommand(placeId, new BigDecimal("4.0"), null))));
+
+        ArgumentCaptor<com.rewit.domain.model.CheckIn> captor = ArgumentCaptor.forClass(com.rewit.domain.model.CheckIn.class);
+        verify(checkInRepository, times(2)).save(captor.capture());
+
+        com.rewit.domain.model.CheckIn verifiedSaved = captor.getAllValues().get(0);
+        assertEquals(com.rewit.domain.enums.CheckInStatus.VERIFIED, verifiedSaved.getStatus());
+        assertNull(verifiedSaved.getLatitude());
+        assertNull(verifiedSaved.getLongitude());
+        assertEquals(15.0, verifiedSaved.getDistanceToCentroidMeters());
+        assertNull(verifiedSaved.getRejectionReason());
+
+        com.rewit.domain.model.CheckIn rejectedSaved = captor.getAllValues().get(1);
+        assertEquals(com.rewit.domain.enums.CheckInStatus.REJECTED, rejectedSaved.getStatus());
+        assertNull(rejectedSaved.getLatitude());
+        assertNull(rejectedSaved.getLongitude());
+        assertNull(rejectedSaved.getDistanceToCentroidMeters());
+        assertEquals(com.rewit.domain.enums.PresenceVerificationOutcome.OUTSIDE_RADIUS, rejectedSaved.getRejectionReason());
+    }
 }

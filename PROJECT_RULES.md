@@ -81,18 +81,18 @@ Este documento estabelece as regras mandatórias de engenharia, arquitetura, seg
 
 ## 5. Estratégia de Branches e Commits
 
-- **Convenção de Commits**: Padrão [Conventional Commits](https://www.conventionalcommits.org/):
-  - `feat: <descrição>` para novas funcionalidades;
-  - `fix: <descrição>` para correção de bugs;
-  - `docs: <descrição>` para documentação;
-  - `chore: <descrição>` para tarefas de manutenção, dependências e build;
-  - `refactor: <descrição>` para refatorações que não alteram comportamento;
-  - `test: <descrição>` para adição ou ajuste de testes.
-- **Ramos**:
-  - `main`: Código pronto para produção e releases estáveis.
-  - `develop`: Ramo de integração dos desenvolvimentos correntes.
-  - `feature/<nome-da-funcionalidade>`: Branches de curta duração para desenvolvimento incremental.
-  - `hotfix/<nome-do-bug>`: Correções urgentes derivadas diretamente da `main`.
+- **Convenção de Commits**: Padrão [Conventional Commits](https://www.conventionalcommits.org/) com **descrição obrigatória em português brasileiro (PT-BR)**, preservando os tipos padronizados (ex.: `feat(deploy): adicionar provisionamento do PostgreSQL gerenciado`):
+  - `feat: <descrição em PT-BR>` para novas funcionalidades;
+  - `fix: <descrição em PT-BR>` para correção de bugs;
+  - `docs: <descrição em PT-BR>` para documentação;
+  - `chore: <descrição em PT-BR>` para tarefas de manutenção, dependências e build;
+  - `refactor: <descrição em PT-BR>` para refatorações que não alteram comportamento;
+  - `test: <descrição em PT-BR>` para adição ou ajuste de testes.
+- **Ramos e Isolamento**:
+  - `main`: Única branch canônica de integração do projeto (código pronto para produção e releases estáveis).
+  - `agent/neon/<slug>`: Branches temporárias para tarefas executadas por agentes em worktrees isoladas (ver `AGENTS.md` e `docs/development/agent-workflow.md`).
+  - Branches curtas derivadas diretamente de `main` para contribuições humanas (ver `CONTRIBUTING.md`).
+  - `hotfix/<slug>`: Correções urgentes derivadas diretamente da `main` e integradas de volta em `main`.
 
 ---
 

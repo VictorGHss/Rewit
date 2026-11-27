@@ -1,0 +1,388 @@
+name: CI e Governança
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detectar escopo alterado
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      postgres_provisioning: ${{ steps.filter.outputs.postgres_provisioning }}
+      admin: ${{ steps.filter.outputs.admin }}
+      mobile: ${{ steps.filter.outputs.mobile }}
+    steps:
+      - name: Checkout pelo SHA imutável esperado
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          persist-credentials: false
+
+      - name: Classificar módulos alterados
+        id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            ./scripts/ci/detect-changes.sh \
+              --event pull_request \
+              --expected-head "$EXPECTED_SHA" \
+              --base "$PR_BASE_SHA" \
+              --output "$GITHUB_OUTPUT"
+          else
+            ./scripts/ci/detect-changes.sh \
+              --event push \
+              --expected-head "$EXPECTED_SHA" \
+              --output "$GITHUB_OUTPUT"
+          fi
+
+  governance:
+    name: Governança e scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout completo pelo SHA imutável esperado
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Confirmar integridade do SHA checked out
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/ci/verify-head-sha.sh --expected "$EXPECTED_SHA"
+
+      - name: Validar sintaxe dos scripts Shell (bash -n / sh -n)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in \
+            scripts/worktree-task.sh \
+            scripts/task-gate.sh \
+            scripts/test-infra.sh \
+            scripts/ci/verify-head-sha.sh \
+            scripts/ci/detect-changes.sh \
+            scripts/ci/validate-pr-commits.sh \
+            scripts/tests/worktree-task-test.sh \
+            scripts/tests/task-gate-test.sh \
+            scripts/tests/test-infra-test.sh \
+            scripts/tests/ci-workflow-test.sh \
+            infrastructure/postgres/tests/provisioning-test.sh; do
+            bash -n "$script"
+            echo "[OK] bash -n ${script}"
+          done
+          sh -n infrastructure/postgres/init/02-create-app-role.sh
+          echo "[OK] sh -n infrastructure/postgres/init/02-create-app-role.sh"
+
+      - name: Executar ShellCheck nos scripts do repositório
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v shellcheck >/dev/null 2>&1 || {
+            echo "ERRO: shellcheck indisponível no runner." >&2
+            exit 1
+          }
+          shellcheck --version
+          shellcheck -S warning \
+            scripts/worktree-task.sh \
+            scripts/task-gate.sh \
+            scripts/test-infra.sh \
+            scripts/ci/verify-head-sha.sh \
+            scripts/ci/detect-changes.sh \
+            scripts/ci/validate-pr-commits.sh \
+            scripts/tests/worktree-task-test.sh \
+            scripts/tests/task-gate-test.sh \
+            scripts/tests/test-infra-test.sh \
+            scripts/tests/ci-workflow-test.sh \
+            infrastructure/postgres/init/02-create-app-role.sh \
+            infrastructure/postgres/tests/provisioning-test.sh
+
+      - name: Validar workflows do GitHub Actions (actionlint v1.7.12)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIONLINT_VERSION="1.7.12"
+          ACTIONLINT_SHA256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          ACTIONLINT_URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+
+          tmp_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/rewit-actionlint.XXXXXX")"
+          trap 'rm -rf "$tmp_dir"' EXIT
+
+          curl -fsSL "$ACTIONLINT_URL" -o "${tmp_dir}/actionlint.tar.gz"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "${tmp_dir}/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "${tmp_dir}/actionlint.tar.gz" -C "$tmp_dir" actionlint
+          "${tmp_dir}/actionlint" -version
+          "${tmp_dir}/actionlint" .github/workflows/*.yml
+
+      - name: Executar suítes descartáveis de governança, infraestrutura e CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/tests/worktree-task-test.sh
+          ./scripts/tests/task-gate-test.sh
+          ./scripts/tests/test-infra-test.sh
+          ./scripts/tests/ci-workflow-test.sh
+
+      - name: Executar gate de governança do PR (task-gate.sh check)
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          ./scripts/ci/verify-head-sha.sh --expected "$EXPECTED_SHA"
+          git cat-file -e "${PR_BASE_SHA}^{commit}"
+
+          # Higieniza variáveis GIT_* eventualmente injetadas pelo runner fora da allowlist do gate,
+          # sem alterar nem enfraquecer a política de scripts/task-gate.sh (nunca exibe valores).
+          unset_args=()
+          for var_name in "${!GIT_@}"; do
+            case "$var_name" in
+              GIT_OPTIONAL_LOCKS|GIT_PAGER|GIT_EDITOR|GIT_TERMINAL_PROMPT) ;;
+              *)
+                echo "Higienizando variável do runner fora da allowlist antes do gate: ${var_name}"
+                unset_args+=(-u "$var_name")
+                ;;
+            esac
+          done
+
+          if (( ${#unset_args[@]} > 0 )); then
+            env "${unset_args[@]}" ./scripts/task-gate.sh check --base "$PR_BASE_SHA"
+          else
+            ./scripts/task-gate.sh check --base "$PR_BASE_SHA"
+          fi
+
+      - name: Validar mensagens literais de commit do PR (check-commit-msg)
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/ci/validate-pr-commits.sh \
+            --base "$PR_BASE_SHA" \
+            --expected-head "$EXPECTED_SHA"
+
+  backend:
+    name: Backend (Java 25 + infra descartável)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout pelo SHA imutável esperado
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Confirmar integridade do SHA checked out
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/ci/verify-head-sha.sh --expected "$EXPECTED_SHA"
+
+      - name: Configurar Java 25 LTS (Temurin) e cache Maven
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Diagnosticar infraestrutura descartável (doctor)
+        shell: bash
+        env:
+          TEST_INFRA_RUNTIME: docker
+        run: |
+          set -euo pipefail
+          ./scripts/test-infra.sh doctor --instance ci
+
+      - name: Executar suíte backend em infraestrutura descartável (test-infra.sh run)
+        shell: bash
+        env:
+          TEST_INFRA_RUNTIME: docker
+        run: |
+          set -euo pipefail
+          ./scripts/test-infra.sh run --instance ci
+
+      - name: Validar provisionamento PostgreSQL em clone limpo (provisioning-test.sh)
+        if: ${{ needs.changes.outputs.postgres_provisioning == 'true' }}
+        shell: bash
+        env:
+          PROVISIONING_TEST_RUNTIME: docker
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          bash infrastructure/postgres/tests/provisioning-test.sh "$EXPECTED_SHA"
+
+  admin:
+    name: Admin Web (Node 24 + Vitest)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.admin == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/admin
+    steps:
+      - name: Checkout pelo SHA imutável esperado
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Confirmar integridade do SHA checked out
+        working-directory: .
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/ci/verify-head-sha.sh --expected "$EXPECTED_SHA"
+
+      - name: Configurar Node.js 24 LTS e cache npm
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/admin/package-lock.json
+
+      - name: Instalar dependências reproduzíveis (npm ci)
+        run: npm ci
+
+      - name: Executar lint (ESLint)
+        run: npm run lint
+
+      - name: Executar testes (Vitest)
+        run: npm test
+
+      - name: Executar build de produção (TypeScript + Vite)
+        run: npm run build
+
+  mobile:
+    name: Mobile (Flutter 3.47.6)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.mobile == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout pelo SHA imutável esperado
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Confirmar integridade do SHA checked out
+        working-directory: .
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/ci/verify-head-sha.sh --expected "$EXPECTED_SHA"
+
+      - name: Restaurar cache de dependências Dart (pub-cache com Action fixada por SHA)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pub-cache
+          key: flutter-pub-${{ runner.os }}-3.47.6-${{ hashFiles('apps/mobile/pubspec.lock') }}
+          restore-keys: |
+            flutter-pub-${{ runner.os }}-3.47.6-
+
+      - name: Configurar Flutter 3.47.6 (stable, sem cache transitivo mutável)
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: false
+          pub-cache: false
+          pub-cache-path: ${{ runner.temp }}/pub-cache
+
+      - name: Instalar dependências reproduzíveis (pubspec.lock)
+        run: flutter pub get --enforce-lockfile
+
+      - name: Executar análise estática (dart analyze)
+        run: dart analyze
+
+      - name: Executar suíte de testes Flutter
+        run: flutter test --no-pub
+
+  ci-gate:
+    name: Status consolidado de CI
+    needs: [changes, governance, backend, admin, mobile]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verificar resultados consolidados dos jobs
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          GOVERNANCE_RESULT: ${{ needs.governance.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          ADMIN_RESULT: ${{ needs.admin.result }}
+          MOBILE_RESULT: ${{ needs.mobile.result }}
+        run: |
+          set -euo pipefail
+
+          echo "Resumo de execução do CI:"
+          echo "  - changes    : ${CHANGES_RESULT}"
+          echo "  - governance : ${GOVERNANCE_RESULT}"
+          echo "  - backend    : ${BACKEND_RESULT}"
+          echo "  - admin      : ${ADMIN_RESULT}"
+          echo "  - mobile     : ${MOBILE_RESULT}"
+
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "ERRO: job obrigatório 'changes' não concluiu com sucesso (${CHANGES_RESULT})." >&2
+            exit 1
+          fi
+          if [[ "$GOVERNANCE_RESULT" != "success" ]]; then
+            echo "ERRO: job obrigatório 'governance' não concluiu com sucesso (${GOVERNANCE_RESULT})." >&2
+            exit 1
+          fi
+
+          for pair in \
+            "backend:${BACKEND_RESULT}" \
+            "admin:${ADMIN_RESULT}" \
+            "mobile:${MOBILE_RESULT}"; do
+            job="${pair%%:*}"
+            res="${pair##*:}"
+            if [[ "$res" != "success" && "$res" != "skipped" ]]; then
+              echo "ERRO: job condicional '${job}' falhou ou foi cancelado (${res})." >&2
+              exit 1
+            fi
+          done
+
+          echo "[APROVADO] Todos os jobs aplicáveis do CI foram concluídos com sucesso."

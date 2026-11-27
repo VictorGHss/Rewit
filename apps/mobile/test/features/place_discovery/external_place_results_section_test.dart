@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:rewit_mobile/app/theme/app_theme.dart';
 import 'package:rewit_mobile/core/error/api_exception.dart';
 import 'package:rewit_mobile/features/place/domain/entities/place_detail.dart';
 import 'package:rewit_mobile/features/place_discovery/domain/entities/discovery_region.dart';
 import 'package:rewit_mobile/features/place_discovery/domain/entities/external_place_candidate.dart';
 import 'package:rewit_mobile/features/place_discovery/domain/repositories/place_discovery_repository.dart';
+import 'package:rewit_mobile/features/review_creation/data/services/geolocator_location_service.dart';
 import 'package:rewit_mobile/features/review_creation/domain/entities/device_location.dart';
 import 'package:rewit_mobile/features/review_creation/domain/services/location_service.dart';
 import 'package:rewit_mobile/features/review_creation/presentation/widgets/target_search_selector_widget.dart';
@@ -76,14 +78,45 @@ class _FakeDiscoveryRepository implements PlaceDiscoveryRepository {
 
 class _FakeLocationService implements LocationService {
   int calls = 0;
+  int readinessCalls = 0;
   int openAppSettingsCalls = 0;
   int openLocationSettingsCalls = 0;
+  bool openAppSettingsResult = true;
+  bool openLocationSettingsResult = true;
   LocationPurpose? lastPurpose;
+  LocationPurpose? lastReadinessPurpose;
   Duration? lastTimeout;
   LocationResult result = const LocationSuccess(
     DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 20),
   );
+  LocationReadiness? readinessResult;
   Completer<LocationResult>? locationCompleter;
+  Completer<LocationReadiness>? readinessCompleter;
+
+  @override
+  Future<LocationReadiness> checkReadiness({
+    LocationPurpose purpose = LocationPurpose.discovery,
+  }) async {
+    readinessCalls++;
+    lastReadinessPurpose = purpose;
+    if (readinessCompleter != null) return readinessCompleter!.future;
+    if (readinessResult != null) return readinessResult!;
+    return switch (result) {
+      LocationSuccess(:final location) => LocationReady(
+          isPermissionApproximate: purpose == LocationPurpose.presenceVerification &&
+              location.isPermissionApproximate,
+        ),
+      LocationFailure(:final reason, :final message) => switch (reason) {
+          LocationFailureReason.serviceDisabled ||
+          LocationFailureReason.permissionDenied ||
+          LocationFailureReason.permissionDeniedForever =>
+            LocationNotReady(reason: reason, message: message),
+          LocationFailureReason.timeout ||
+          LocationFailureReason.error =>
+            const LocationReady(),
+        },
+    };
+  }
 
   @override
   Future<LocationResult> getCurrentLocation({
@@ -100,13 +133,13 @@ class _FakeLocationService implements LocationService {
   @override
   Future<bool> openAppSettings() async {
     openAppSettingsCalls++;
-    return true;
+    return openAppSettingsResult;
   }
 
   @override
   Future<bool> openLocationSettings() async {
     openLocationSettingsCalls++;
-    return true;
+    return openLocationSettingsResult;
   }
 }
 
@@ -709,4 +742,375 @@ void main() {
     expect(discovery.searchCalls, 0);
     expect(find.byKey(const Key('external_region_city_field')), findsOneWidget);
   });
+
+  group('Retomada automática após configurações (ExternalPlaceResultsSection)', () {
+    void simulateResume(WidgetTester tester) {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    }
+
+    testWidgets('retorno de openAppSettings com permissão concedida retoma localização e busca automaticamente',
+        (tester) async {
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      );
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      expect(find.byKey(const Key('external_location_settings_button')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('external_location_settings_button')));
+      await tester.pumpAndSettle();
+      expect(location.openAppSettingsCalls, 1);
+
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 25),
+      );
+      discovery.results = const [_adoptable];
+
+      simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessCalls, 1);
+      expect(location.lastReadinessPurpose, LocationPurpose.discovery);
+      expect(location.calls, 2);
+      expect(discovery.searchCalls, 1);
+      expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+      expect(find.byKey(const Key('external_location_issue')), findsNothing);
+    });
+
+    testWidgets('retorno de openLocationSettings após ativar serviço retoma captura e busca automaticamente',
+        (tester) async {
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'GPS desligado.',
+      );
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      await tester.tap(find.byKey(const Key('external_location_device_settings_button')));
+      await tester.pumpAndSettle();
+      expect(location.openLocationSettingsCalls, 1);
+
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 30),
+      );
+      discovery.results = const [_adoptable];
+
+      simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessCalls, 1);
+      expect(location.calls, 2);
+      expect(discovery.searchCalls, 1);
+      expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+    });
+
+    testWidgets('retorno sem conceder permissão (denied ou deniedForever) não dispara captura nem loop e preserva retry',
+        (tester) async {
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      );
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      await tester.tap(find.byKey(const Key('external_location_settings_button')));
+      await tester.pumpAndSettle();
+
+      // Permissão trocada para "Perguntar sempre" (denied): não deve chamar getCurrentLocation (sem prompt nativo)
+      location.readinessResult = const LocationNotReady(
+        reason: LocationFailureReason.permissionDenied,
+        message: 'Permissão de localização negada.',
+      );
+      simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessCalls, 1);
+      expect(location.calls, 1);
+      expect(location.openAppSettingsCalls, 1);
+      expect(discovery.searchCalls, 0);
+      expect(find.textContaining('Permissão de localização negada.'), findsOneWidget);
+      expect(find.byKey(const Key('external_location_retry_button')), findsOneWidget);
+    });
+
+    testWidgets('retorno sem ativar serviço mantém estado serviceDisabled sem loop e permite retry manual',
+        (tester) async {
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'GPS desligado.',
+      );
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      await tester.tap(find.byKey(const Key('external_location_device_settings_button')));
+      await tester.pumpAndSettle();
+
+      simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessCalls, 1);
+      expect(location.calls, 1);
+      expect(location.openLocationSettingsCalls, 1);
+      expect(find.byKey(const Key('external_location_device_settings_button')), findsOneWidget);
+      expect(find.byKey(const Key('external_location_retry_button')), findsOneWidget);
+
+      // Retry manual funciona depois que o usuário ativa o serviço
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 15),
+      );
+      discovery.results = const [_adoptable];
+      await tester.tap(find.byKey(const Key('external_location_retry_button')));
+      await tester.pumpAndSettle();
+
+      expect(location.calls, 2);
+      expect(discovery.searchCalls, 1);
+      expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+    });
+
+    testWidgets('eventos resumed sem abertura prévia das configurações ou quando openSettings falha são ignorados',
+        (tester) async {
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      );
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      // resumed sem abrir Settings
+      simulateResume(tester);
+      await tester.pumpAndSettle();
+      expect(location.readinessCalls, 0);
+      expect(location.calls, 1);
+
+      // openAppSettings falha (retorna false): não deve armar retomada
+      location.openAppSettingsResult = false;
+      await tester.tap(find.byKey(const Key('external_location_settings_button')));
+      await tester.pumpAndSettle();
+      simulateResume(tester);
+      await tester.pumpAndSettle();
+      expect(location.readinessCalls, 0);
+      expect(location.calls, 1);
+    });
+
+    testWidgets('eventos repetidos de resumed geram no máximo uma reavaliação', (tester) async {
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      );
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      await tester.tap(find.byKey(const Key('external_location_settings_button')));
+      await tester.pumpAndSettle();
+
+      final readinessCompleter = Completer<LocationReadiness>();
+      location.readinessCompleter = readinessCompleter;
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 20),
+      );
+      discovery.results = const [_adoptable];
+
+      // Múltiplos eventos resumed em sequência (transição válida inactive -> resumed)
+      simulateResume(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+
+      expect(location.readinessCalls, 1);
+
+      readinessCompleter.complete(const LocationReady());
+      await tester.pumpAndSettle();
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(location.readinessCalls, 1);
+      expect(location.calls, 2);
+      expect(discovery.searchCalls, 1);
+    });
+
+    testWidgets('descarte do widget durante revalidação assíncrona no resumed não lança exceção nem captura',
+        (tester) async {
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.permissionDeniedForever,
+        message: 'Permissão bloqueada.',
+      );
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      await tester.tap(find.byKey(const Key('external_location_settings_button')));
+      await tester.pumpAndSettle();
+
+      final readinessCompleter = Completer<LocationReadiness>();
+      location.readinessCompleter = readinessCompleter;
+      simulateResume(tester);
+      await tester.pump();
+
+      expect(location.readinessCalls, 1);
+
+      // Desmonta o widget antes de checkReadiness resolver
+      await tester.pumpWidget(const SizedBox.shrink());
+      readinessCompleter.complete(const LocationReady());
+      await tester.pumpAndSettle();
+
+      expect(location.calls, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('concorrência entre tentativa manual e retomada automática mantém apenas uma captura ativa',
+        (tester) async {
+      location.result = const LocationFailure(
+        reason: LocationFailureReason.serviceDisabled,
+        message: 'GPS desligado.',
+      );
+      await pumpSubject(tester);
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      await tester.tap(find.byKey(const Key('external_location_device_settings_button')));
+      await tester.pumpAndSettle();
+
+      final readinessCompleter = Completer<LocationReadiness>();
+      location.readinessCompleter = readinessCompleter;
+      simulateResume(tester);
+      await tester.pump();
+      expect(location.readinessCalls, 1);
+
+      // Usuário toca manualmente em Tentar novamente antes da revalidação automática concluir
+      location.result = const LocationSuccess(
+        DeviceLocation(latitude: -25.09, longitude: -50.16, accuracyMeters: 18),
+      );
+      discovery.results = const [_adoptable];
+      await tester.tap(find.byKey(const Key('external_location_retry_button')));
+      await tester.pumpAndSettle();
+
+      // Revalidação automática antiga resolve tarde e deve ser descartada
+      readinessCompleter.complete(const LocationReady());
+      await tester.pumpAndSettle();
+
+      expect(location.calls, 2, reason: '1 inicial + 1 manual; retomada obsoleta não deve duplicar');
+      expect(discovery.searchCalls, 1);
+      expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+    });
+
+    testWidgets('regressão Android 16: GeolocatorLocationService preserva Abrir configurações após retorno e reentradas sem conceder e retoma ao conceder',
+        (tester) async {
+      final originalPlatform = GeolocatorPlatform.instance;
+      final androidPlatform = _AndroidGeolocatorStub();
+      GeolocatorPlatform.instance = androidPlatform;
+      addTearDown(() => GeolocatorPlatform.instance = originalPlatform);
+
+      final realService = GeolocatorLocationService();
+      tester.view.physicalSize = const Size(1200, 4000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: Scaffold(
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: TargetSearchSelectorWidget(
+              searchRepository: search,
+              placeDiscoveryRepository: discovery,
+              locationService: realService,
+              targetIndex: 0,
+              onTargetSelected: selected.add,
+            ),
+          ),
+        ),
+      ));
+
+      await typeQuery(tester, 'padaria');
+      await selectNearby(tester);
+
+      expect(androidPlatform.requestPermissionCalls, 1);
+      expect(find.byKey(const Key('external_location_settings_button')), findsOneWidget);
+      expect(find.byKey(const Key('external_location_retry_button')), findsOneWidget);
+
+      // Reentradas repetidas sem conceder: checkPermission() do Android retorna denied,
+      // mas o estado de negação permanente e o botão Abrir configurações permanecem disponíveis.
+      for (var i = 0; i < 2; i++) {
+        await tester.tap(find.byKey(const Key('external_location_settings_button')));
+        await tester.pumpAndSettle();
+        simulateResume(tester);
+        await tester.pumpAndSettle();
+
+        expect(androidPlatform.requestPermissionCalls, 1);
+        expect(find.byKey(const Key('external_location_settings_button')), findsOneWidget);
+        expect(find.byKey(const Key('external_location_retry_button')), findsOneWidget);
+        expect(find.textContaining('bloqueada'), findsOneWidget);
+      }
+      expect(androidPlatform.openAppSettingsCalls, 2);
+
+      // Usuário concede nas configurações na tentativa seguinte e retorna
+      discovery.results = const [_adoptable];
+      await tester.tap(find.byKey(const Key('external_location_settings_button')));
+      await tester.pumpAndSettle();
+      androidPlatform.checkPermissionResult = LocationPermission.whileInUse;
+      simulateResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(discovery.searchCalls, 1);
+      expect(find.text('Padaria Junior Raikoski'), findsOneWidget);
+      expect(find.byKey(const Key('external_location_settings_button')), findsNothing);
+    });
+  });
+}
+
+class _AndroidGeolocatorStub extends GeolocatorPlatform {
+  LocationPermission checkPermissionResult = LocationPermission.denied;
+  LocationPermission requestPermissionResult = LocationPermission.deniedForever;
+  int requestPermissionCalls = 0;
+  int openAppSettingsCalls = 0;
+
+  @override
+  Future<bool> isLocationServiceEnabled() async => true;
+
+  @override
+  Future<LocationPermission> checkPermission() async => checkPermissionResult;
+
+  @override
+  Future<LocationPermission> requestPermission() async {
+    requestPermissionCalls++;
+    return requestPermissionResult;
+  }
+
+  @override
+  Future<LocationAccuracyStatus> getLocationAccuracy() async => LocationAccuracyStatus.precise;
+
+  @override
+  Future<Position?> getLastKnownPosition({bool forceLocationManager = false}) async => Position(
+        latitude: -25.09,
+        longitude: -50.16,
+        timestamp: DateTime.now(),
+        accuracy: 20,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+
+  @override
+  Future<bool> openAppSettings() async {
+    openAppSettingsCalls++;
+    return true;
+  }
 }

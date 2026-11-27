@@ -174,7 +174,7 @@ class MyCheckInsIntegrationTest {
         mockMvc.perform(delete("/api/v1/reviews/" + removed)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.accessToken()))
                 .andExpect(status().is2xxSuccessful());
-        jdbcTemplate.update("UPDATE reviews SET status = 'UNDER_REVIEW' WHERE id = ?", underReview);
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(underReview, "UNDER_REVIEW");
 
         JsonNode page = myCheckIns(user, "");
         assertEquals(List.of(kept.toString()), reviewIds(page));

@@ -54,6 +54,9 @@ public class ModerationAuditLogJpaEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
+    @Column(name = "authenticity_mac", updatable = false, length = 128)
+    private String authenticityMac;
+
     public ModerationAuditLogJpaEntity() {}
 
     public ModerationAuditLogJpaEntity(UUID id, UUID reviewId, UUID moderatorUserId,
@@ -61,6 +64,15 @@ public class ModerationAuditLogJpaEntity {
                                        String justification, String previousReviewStatus,
                                        String newReviewStatus, int reportsAffectedCount,
                                        Instant createdAt) {
+        this(id, reviewId, moderatorUserId, action, decision, reasonCode, justification,
+                previousReviewStatus, newReviewStatus, reportsAffectedCount, createdAt, null);
+    }
+
+    public ModerationAuditLogJpaEntity(UUID id, UUID reviewId, UUID moderatorUserId,
+                                       String action, String decision, String reasonCode,
+                                       String justification, String previousReviewStatus,
+                                       String newReviewStatus, int reportsAffectedCount,
+                                       Instant createdAt, String authenticityMac) {
         this.id = id != null ? id : UUID.randomUUID();
         this.reviewId = reviewId;
         this.moderatorUserId = moderatorUserId;
@@ -72,6 +84,7 @@ public class ModerationAuditLogJpaEntity {
         this.newReviewStatus = newReviewStatus;
         this.reportsAffectedCount = reportsAffectedCount;
         this.createdAt = createdAt != null ? createdAt : Instant.now();
+        this.authenticityMac = authenticityMac;
     }
 
     public static ModerationAuditLogJpaEntity fromDomain(ModerationAuditLog domain) {
@@ -89,7 +102,8 @@ public class ModerationAuditLogJpaEntity {
                 domain.getPreviousReviewStatus().name(),
                 domain.getNewReviewStatus().name(),
                 domain.getReportsAffectedCount(),
-                domain.getCreatedAt()
+                domain.getCreatedAt(),
+                domain.getAuthenticityMac()
         );
     }
 
@@ -105,7 +119,8 @@ public class ModerationAuditLogJpaEntity {
                 ReviewStatus.valueOf(this.previousReviewStatus),
                 ReviewStatus.valueOf(this.newReviewStatus),
                 this.reportsAffectedCount,
-                this.createdAt
+                this.createdAt,
+                this.authenticityMac
         );
     }
 

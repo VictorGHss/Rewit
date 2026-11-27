@@ -2,17 +2,23 @@ package com.rewit.application.usecase;
 
 import com.rewit.application.dto.business.BusinessDtos.PlaceClaimView;
 import com.rewit.application.port.BusinessAccountRepository;
+import com.rewit.application.port.PlaceClaimModerationAuditLogRepository;
 import com.rewit.application.port.PlaceClaimRequestRepository;
 import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.service.ModeratorRolePolicy;
 import com.rewit.common.exception.BusinessException;
 import com.rewit.domain.enums.PlaceClaimDecision;
+import com.rewit.domain.enums.PlaceClaimStatus;
 import com.rewit.domain.model.BusinessAccount;
 import com.rewit.domain.model.Place;
+import com.rewit.domain.model.PlaceClaimModerationAuditLog;
 import com.rewit.domain.model.PlaceClaimRequest;
+import com.rewit.infrastructure.persistence.routing.ModerationTransactional;
+import com.rewit.infrastructure.security.ModerationAuditMacService;
+import com.rewit.infrastructure.security.ModerationAuditPayload;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -39,6 +45,27 @@ public class DecidePlaceClaimUseCase {
     private final PlaceRepository placeRepository;
     private final BusinessAccountRepository businessAccountRepository;
     private final ModeratorRolePolicy moderatorRolePolicy;
+    private final PlaceClaimModerationAuditLogRepository placeClaimModerationAuditLogRepository;
+    private final ModerationAuditMacService moderationAuditMacService;
+
+    @Autowired
+    public DecidePlaceClaimUseCase(PlaceClaimRequestRepository placeClaimRequestRepository,
+                                   PlaceRepository placeRepository,
+                                   BusinessAccountRepository businessAccountRepository,
+                                   ModeratorRolePolicy moderatorRolePolicy,
+                                   PlaceClaimModerationAuditLogRepository placeClaimModerationAuditLogRepository,
+                                   ModerationAuditMacService moderationAuditMacService) {
+        this.placeClaimRequestRepository = Objects.requireNonNull(placeClaimRequestRepository,
+                "PlaceClaimRequestRepository must not be null");
+        this.placeRepository = Objects.requireNonNull(placeRepository, "PlaceRepository must not be null");
+        this.businessAccountRepository = Objects.requireNonNull(businessAccountRepository,
+                "BusinessAccountRepository must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
+        this.placeClaimModerationAuditLogRepository = Objects.requireNonNull(placeClaimModerationAuditLogRepository,
+                "PlaceClaimModerationAuditLogRepository must not be null");
+        this.moderationAuditMacService = Objects.requireNonNull(moderationAuditMacService,
+                "ModerationAuditMacService must not be null");
+    }
 
     public DecidePlaceClaimUseCase(PlaceClaimRequestRepository placeClaimRequestRepository,
                                    PlaceRepository placeRepository,
@@ -50,9 +77,11 @@ public class DecidePlaceClaimUseCase {
         this.businessAccountRepository = Objects.requireNonNull(businessAccountRepository,
                 "BusinessAccountRepository must not be null");
         this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
+        this.placeClaimModerationAuditLogRepository = null;
+        this.moderationAuditMacService = null;
     }
 
-    @Transactional
+    @ModerationTransactional
     public PlaceClaimView execute(UUID actorUserId, UUID claimId, PlaceClaimDecision decision, String justification,
                                   Instant now) {
         if (actorUserId == null) {
@@ -65,7 +94,7 @@ public class DecidePlaceClaimUseCase {
             throw new BusinessException("A decisão é obrigatória", HttpStatus.BAD_REQUEST, "MISSING_DECISION");
         }
         String reason = PlaceClaimRequest.normalizeDecisionReason(justification);
-        Instant decidedAt = now != null ? now : Instant.now();
+        Instant decidedAt = ModerationAuditPayload.canonicalTimestamp(now);
 
         // Estado e role atuais: o JWT pode ser anterior a uma desativação ou mudança de role
         moderatorRolePolicy.requireCurrentModerator(actorUserId);
@@ -90,6 +119,21 @@ public class DecidePlaceClaimUseCase {
                     "PLACE_CLAIM_ALREADY_DECIDED");
         }
 
+        PlaceClaimStatus previousStatus = claim.getStatus();
+        PlaceClaimStatus targetStatus = decision == PlaceClaimDecision.APPROVE
+                ? PlaceClaimStatus.APPROVED
+                : PlaceClaimStatus.REJECTED;
+        String decisionMac = moderationAuditMacService != null
+                ? moderationAuditMacService.computeMac(ModerationAuditPayload.forPlaceClaimDecision(
+                        claim.getId(),
+                        place.getId(),
+                        account.getId(),
+                        actorUserId,
+                        targetStatus.name(),
+                        reason,
+                        decidedAt))
+                : null;
+
         if (decision == PlaceClaimDecision.APPROVE) {
             if (account.isRejected()) {
                 throw new BusinessException("Conta comercial rejeitada não pode receber locais", HttpStatus.CONFLICT,
@@ -99,15 +143,49 @@ public class DecidePlaceClaimUseCase {
                     || !placeRepository.assignClaimedBusiness(place.getId(), account.getId())) {
                 throw RequestPlaceClaimUseCase.placeAlreadyClaimed();
             }
-            claim.approve(actorUserId, reason, decidedAt);
+            claim.approve(actorUserId, reason, decidedAt, decisionMac);
             if (account.approveVerification(decidedAt)) {
                 account = businessAccountRepository.save(account);
             }
         } else {
-            claim.reject(actorUserId, reason, decidedAt);
+            claim.reject(actorUserId, reason, decidedAt, decisionMac);
         }
 
-        return PlaceClaimView.of(placeClaimRequestRepository.save(claim), account, place);
+        PlaceClaimRequest savedClaim = placeClaimRequestRepository.save(claim);
+
+        if (placeClaimModerationAuditLogRepository != null) {
+            PlaceClaimModerationAuditLog.Action auditAction = decision == PlaceClaimDecision.APPROVE
+                    ? PlaceClaimModerationAuditLog.Action.APPROVE_CLAIM
+                    : PlaceClaimModerationAuditLog.Action.REJECT_CLAIM;
+            UUID auditId = UUID.randomUUID();
+            String auditMac = moderationAuditMacService != null
+                    ? moderationAuditMacService.computeMac(ModerationAuditPayload.forPlaceClaimAudit(
+                            auditId,
+                            savedClaim.getId(),
+                            place.getId(),
+                            account.getId(),
+                            actorUserId,
+                            auditAction.name(),
+                            previousStatus.name(),
+                            savedClaim.getStatus().name(),
+                            reason,
+                            decidedAt))
+                    : null;
+            placeClaimModerationAuditLogRepository.save(new PlaceClaimModerationAuditLog(
+                    auditId,
+                    savedClaim.getId(),
+                    place.getId(),
+                    account.getId(),
+                    actorUserId,
+                    auditAction,
+                    previousStatus,
+                    savedClaim.getStatus(),
+                    reason,
+                    decidedAt,
+                    auditMac));
+        }
+
+        return PlaceClaimView.of(savedClaim, account, place);
     }
 
     private static BusinessException claimNotFound() {

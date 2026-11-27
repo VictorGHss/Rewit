@@ -36,14 +36,17 @@ public class PlaceClaimRequestJpaEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    @Column(name = "decided_at")
+    @Column(name = "decided_at", insertable = false)
     private Instant decidedAt;
 
-    @Column(name = "decided_by_user_id")
+    @Column(name = "decided_by_user_id", insertable = false)
     private UUID decidedByUserId;
 
-    @Column(name = "decision_reason", columnDefinition = "TEXT")
+    @Column(name = "decision_reason", insertable = false, columnDefinition = "TEXT")
     private String decisionReason;
+
+    @Column(name = "authenticity_mac", insertable = false, length = 128)
+    private String authenticityMac;
 
     protected PlaceClaimRequestJpaEntity() {
     }
@@ -65,11 +68,12 @@ public class PlaceClaimRequestJpaEntity {
         this.decidedAt = claim.getDecidedAt();
         this.decidedByUserId = claim.getDecidedByUserId();
         this.decisionReason = claim.getDecisionReason();
+        this.authenticityMac = claim.getAuthenticityMac();
     }
 
     public PlaceClaimRequest toDomain() {
         return new PlaceClaimRequest(id, businessAccountId, placeId, evidenceDescription, PlaceClaimStatus.valueOf(status),
-                createdAt, decidedAt, decidedByUserId, decisionReason);
+                createdAt, decidedAt, decidedByUserId, decisionReason, authenticityMac);
     }
 
     public UUID getId() {

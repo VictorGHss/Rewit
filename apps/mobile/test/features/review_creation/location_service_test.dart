@@ -20,6 +20,7 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
 
   int getCurrentPositionCallCount = 0;
   int getLastKnownPositionCallCount = 0;
+  int requestPermissionCallCount = 0;
   int openAppSettingsCallCount = 0;
   int openLocationSettingsCallCount = 0;
   final List<LocationSettings?> capturedLocationSettings = [];
@@ -32,7 +33,10 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
   Future<LocationPermission> checkPermission() async => checkPermissionResult;
 
   @override
-  Future<LocationPermission> requestPermission() async => requestPermissionResult;
+  Future<LocationPermission> requestPermission() async {
+    requestPermissionCallCount++;
+    return requestPermissionResult;
+  }
 
   @override
   Future<LocationAccuracyStatus> getLocationAccuracy() async {
@@ -100,7 +104,7 @@ void main() {
     setUp(() {
       fakePlatform = FakeGeolocatorPlatform();
       GeolocatorPlatform.instance = fakePlatform;
-      service = const GeolocatorLocationService();
+      service = GeolocatorLocationService();
     });
 
     tearDown(() {
@@ -984,7 +988,7 @@ void main() {
         });
 
         test('orçamento explícito curto esgotado impede disparo do fallback (cancelamento/teto)', () async {
-          const customService = GeolocatorLocationService();
+          final customService = GeolocatorLocationService();
           fakePlatform.lastKnownPositionToReturn = null;
           fakePlatform.onGetCurrentPosition = (call, _) async {
             await Future<void>.delayed(const Duration(milliseconds: 35));
@@ -1038,6 +1042,154 @@ void main() {
           expect((result as LocationFailure).reason, LocationFailureReason.serviceDisabled);
           expect(fakePlatform.getLastKnownPositionCallCount, 0);
           expect(fakePlatform.getCurrentPositionCallCount, 0);
+        });
+      });
+
+      group('checkReadiness sem prompt nativo', () {
+        test('retorna serviceDisabled quando serviço está desligado sem pedir permissão', () async {
+          fakePlatform.serviceEnabled = false;
+          fakePlatform.checkPermissionResult = LocationPermission.denied;
+
+          final readiness = await service.checkReadiness(
+            purpose: LocationPurpose.presenceVerification,
+          );
+
+          expect(readiness, isA<LocationNotReady>());
+          expect((readiness as LocationNotReady).reason, LocationFailureReason.serviceDisabled);
+          expect(fakePlatform.requestPermissionCallCount, 0);
+        });
+
+        test('retorna permissionDenied quando permissão está denied sem abrir diálogo nativo', () async {
+          fakePlatform.serviceEnabled = true;
+          fakePlatform.checkPermissionResult = LocationPermission.denied;
+
+          final readiness = await service.checkReadiness(
+            purpose: LocationPurpose.discovery,
+          );
+
+          expect(readiness, isA<LocationNotReady>());
+          expect((readiness as LocationNotReady).reason, LocationFailureReason.permissionDenied);
+          expect(fakePlatform.requestPermissionCallCount, 0);
+        });
+
+        test('retorna permissionDeniedForever quando permissão está bloqueada permanentemente', () async {
+          fakePlatform.serviceEnabled = true;
+          fakePlatform.checkPermissionResult = LocationPermission.deniedForever;
+
+          final readiness = await service.checkReadiness(
+            purpose: LocationPurpose.presenceVerification,
+          );
+
+          expect(readiness, isA<LocationNotReady>());
+          expect((readiness as LocationNotReady).reason, LocationFailureReason.permissionDeniedForever);
+          expect(fakePlatform.requestPermissionCallCount, 0);
+        });
+
+        test('identifica permissão aproximada para presenceVerification e ignora redução em discovery', () async {
+          fakePlatform.serviceEnabled = true;
+          fakePlatform.checkPermissionResult = LocationPermission.whileInUse;
+          fakePlatform.locationAccuracyResult = LocationAccuracyStatus.reduced;
+
+          final presence = await service.checkReadiness(
+            purpose: LocationPurpose.presenceVerification,
+          );
+          final discovery = await service.checkReadiness(
+            purpose: LocationPurpose.discovery,
+          );
+
+          expect(presence, isA<LocationReady>());
+          expect((presence as LocationReady).isPermissionApproximate, isTrue);
+          expect(discovery, isA<LocationReady>());
+          expect((discovery as LocationReady).isPermissionApproximate, isFalse);
+          expect(fakePlatform.requestPermissionCallCount, 0);
+        });
+
+        test('preserva permissionDeniedForever quando checkPermission do Android retorna denied após requestPermission deniedForever (Cenários A e D)', () async {
+          fakePlatform.serviceEnabled = true;
+          fakePlatform.checkPermissionResult = LocationPermission.denied;
+          fakePlatform.requestPermissionResult = LocationPermission.deniedForever;
+
+          final initialResult = await service.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+          );
+          expect(initialResult, isA<LocationFailure>());
+          expect(
+            (initialResult as LocationFailure).reason,
+            LocationFailureReason.permissionDeniedForever,
+          );
+          expect(fakePlatform.requestPermissionCallCount, 1);
+
+          // Simula comportamento real do Android: ContextCompat.checkSelfPermission devolve denied
+          // mesmo em negação permanente ao retornar das configurações (e em múltiplas reentradas).
+          for (var i = 0; i < 3; i++) {
+            final readiness = await service.checkReadiness(
+              purpose: LocationPurpose.discovery,
+            );
+            expect(readiness, isA<LocationNotReady>());
+            expect(
+              (readiness as LocationNotReady).reason,
+              LocationFailureReason.permissionDeniedForever,
+            );
+          }
+          expect(fakePlatform.requestPermissionCallCount, 1);
+          expect(fakePlatform.getCurrentPositionCallCount, 0);
+        });
+
+        test('limpa estado de negação permanente após permissão concedida em checkReadiness (Cenário B)', () async {
+          fakePlatform.serviceEnabled = true;
+          fakePlatform.checkPermissionResult = LocationPermission.denied;
+          fakePlatform.requestPermissionResult = LocationPermission.deniedForever;
+
+          final initialResult = await service.getCurrentLocation(
+            purpose: LocationPurpose.presenceVerification,
+          );
+          expect(
+            (initialResult as LocationFailure).reason,
+            LocationFailureReason.permissionDeniedForever,
+          );
+
+          // Usuário concede permissão nas configurações
+          fakePlatform.checkPermissionResult = LocationPermission.whileInUse;
+          fakePlatform.locationAccuracyResult = LocationAccuracyStatus.precise;
+          final grantedReadiness = await service.checkReadiness(
+            purpose: LocationPurpose.presenceVerification,
+          );
+          expect(grantedReadiness, isA<LocationReady>());
+
+          // Se for revogada posteriormente sem requestPermission, não mantém deniedForever obsoleto
+          fakePlatform.checkPermissionResult = LocationPermission.denied;
+          final revokedReadiness = await service.checkReadiness(
+            purpose: LocationPurpose.presenceVerification,
+          );
+          expect(revokedReadiness, isA<LocationNotReady>());
+          expect(
+            (revokedReadiness as LocationNotReady).reason,
+            LocationFailureReason.permissionDenied,
+          );
+        });
+
+        test('mantém negação temporária como permissionDenied sem promover para deniedForever (Cenário C)', () async {
+          fakePlatform.serviceEnabled = true;
+          fakePlatform.checkPermissionResult = LocationPermission.denied;
+          fakePlatform.requestPermissionResult = LocationPermission.denied;
+
+          final initialResult = await service.getCurrentLocation(
+            purpose: LocationPurpose.discovery,
+          );
+          expect(
+            (initialResult as LocationFailure).reason,
+            LocationFailureReason.permissionDenied,
+          );
+
+          final readiness = await service.checkReadiness(
+            purpose: LocationPurpose.discovery,
+          );
+          expect(readiness, isA<LocationNotReady>());
+          expect(
+            (readiness as LocationNotReady).reason,
+            LocationFailureReason.permissionDenied,
+          );
+          expect(fakePlatform.requestPermissionCallCount, 1);
         });
       });
     });

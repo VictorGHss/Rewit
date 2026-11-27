@@ -148,7 +148,7 @@ class AccountStatusMutationIntegrationTest {
         User actor = createUser("concorrente");
         Review second = createReview(author.getId());
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        try (Connection deactivation = dataSource.getConnection()) {
+        try (Connection deactivation = com.rewit.config.PrivilegedTestDatabase.jdbc().getDataSource().getConnection()) {
             deactivation.setAutoCommit(false);
             try (PreparedStatement ps = deactivation.prepareStatement("UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?")) {
                 ps.setObject(1, actor.getId());
@@ -178,23 +178,32 @@ class AccountStatusMutationIntegrationTest {
     void inconsistentAccountStateIsRejectedBySchema() {
         UUID id = UUID.randomUUID();
         DataIntegrityViolationException insert = assertThrows(DataIntegrityViolationException.class, () ->
-                jdbcTemplate.update("INSERT INTO users (id, email, auth_provider, is_active, deleted_at) "
+                com.rewit.config.PrivilegedTestDatabase.jdbc().update("INSERT INTO users (id, email, auth_provider, is_active, deleted_at) "
                         + "VALUES (?, ?, 'LOCAL', TRUE, now())", id, "inconsistente." + id + "@rewit.test"));
         assertTrue(insert.getMessage().contains("chk_users_active_not_deleted"));
 
         User deleted = createUser("schema");
         setState(deleted, AccountState.SOFT_DELETED);
         DataIntegrityViolationException update = assertThrows(DataIntegrityViolationException.class, () ->
-                jdbcTemplate.update("UPDATE users SET is_active = TRUE WHERE id = ?", deleted.getId()));
+                com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET is_active = TRUE WHERE id = ?", deleted.getId()));
         assertTrue(update.getMessage().contains("chk_users_active_not_deleted"));
 
-        // Todo estado do ciclo de vida (V21) com is_active/deleted_at coerentes é aceito
+        // Todo estado do ciclo de vida (V21) com is_active/deleted_at coerentes é aceito (ACTIVE -> DEACTIVATED -> SUSPENDED -> ACTIVE -> DELETED)
         User valid = createUser("schema_validos");
-        jdbcTemplate.update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", valid.getId());
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED' WHERE id = ?", valid.getId());
-        jdbcTemplate.update("UPDATE users SET account_status = 'DELETED', deleted_at = now() WHERE id = ?", valid.getId());
-        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', deleted_at = NULL, is_active = TRUE WHERE id = ?",
-                valid.getId());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'DEACTIVATED', is_active = FALSE WHERE id = ?", valid.getId());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED' WHERE id = ?", valid.getId());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'ACTIVE', is_active = TRUE WHERE id = ?", valid.getId());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'DELETED', is_active = FALSE, deleted_at = now() WHERE id = ?", valid.getId());
+
+        // Guard V44: a role de runtime não pode reativar uma conta que já atingiu o estado definitivo DELETED
+        org.springframework.dao.DataAccessException reactivateDeleted = assertThrows(
+                org.springframework.dao.DataAccessException.class,
+                () -> jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', deleted_at = NULL, is_active = TRUE WHERE id = ?",
+                        valid.getId())
+        );
+        assertTrue(reactivateDeleted.getMostSpecificCause().getMessage().contains("users.account_status"),
+                reactivateDeleted.getMostSpecificCause().getMessage());
+        assertEquals("DELETED", jdbcTemplate.queryForObject("SELECT account_status FROM users WHERE id = ?", String.class, valid.getId()));
         assertEquals(1, count("SELECT count(*) FROM pg_constraint WHERE conname = 'chk_users_active_not_deleted' "
                 + "AND conrelid = 'users'::regclass AND convalidated"));
     }
@@ -223,7 +232,7 @@ class AccountStatusMutationIntegrationTest {
 
     private void assertConstraintViolated(String constraint, String sql, Object... args) {
         DataIntegrityViolationException ex = assertThrows(DataIntegrityViolationException.class,
-                () -> jdbcTemplate.update(sql, args));
+                () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update(sql, args));
         assertTrue(ex.getMessage().contains(constraint), ex.getMessage());
     }
 
@@ -281,7 +290,7 @@ class AccountStatusMutationIntegrationTest {
         String sql = state == AccountState.INACTIVE
                 ? "UPDATE users SET account_status = 'SUSPENDED', is_active = FALSE WHERE id = ?"
                 : "UPDATE users SET account_status = 'DELETED', is_active = FALSE, deleted_at = now() WHERE id = ?";
-        assertEquals(1, jdbcTemplate.update(sql, user.getId()));
+        assertEquals(1, com.rewit.config.PrivilegedTestDatabase.jdbc().update(sql, user.getId()));
     }
 
     private long count(String sql, Object... args) {

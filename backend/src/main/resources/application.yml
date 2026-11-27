@@ -1,8 +1,6 @@
 spring:
   application:
     name: rewit-backend
-  profiles:
-    active: ${SPRING_PROFILES_ACTIVE:local}
   threads:
     virtual:
       enabled: true
@@ -36,6 +34,31 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+        add-additional-paths: true
+      group:
+        liveness:
+          include: livenessState
+          show-details: never
+          show-components: never
+        readiness:
+          include: readinessState,db,redis,objectStorage
+          show-details: never
+          show-components: never
+          status:
+            order: DOWN,OUT_OF_SERVICE,UNKNOWN,UP
+            http-mapping:
+              DOWN: 503
+              OUT_OF_SERVICE: 503
+              UNKNOWN: 503
+  health:
+    db:
+      ignore-routing-data-sources: true
   observations:
     enable:
       # Os quatro jobs já têm métricas rewit.* próprias; sem observação, também não há spans de @Scheduled
@@ -66,6 +89,23 @@ logging:
         max-throwable-depth: 30
 
 rewit:
+  environment: ${ENVIRONMENT:}
+  security:
+    jwt-secret: ${JWT_SECRET:}
+    password-pepper: ${PASSWORD_PEPPER_SECRET:}
+    password-pepper-previous: ${PASSWORD_PEPPER_SECRET_PREVIOUS:}
+    password-pepper-key-id: ${PASSWORD_PEPPER_KEY_ID:v1}
+    password-pepper-previous-key-id: ${PASSWORD_PEPPER_PREVIOUS_KEY_ID:}
+    refresh-token-secret: ${REFRESH_TOKEN_SECRET:}
+    refresh-token-secret-previous: ${REFRESH_TOKEN_SECRET_PREVIOUS:}
+    moderation-audit-secret: ${MODERATION_AUDIT_SECRET:}
+    moderation-audit-key-id: ${MODERATION_AUDIT_KEY_ID:v1}
+    moderation-audit-secret-previous: ${MODERATION_AUDIT_SECRET_PREVIOUS:}
+    moderation-audit-previous-key-id: ${MODERATION_AUDIT_PREVIOUS_KEY_ID:}
+    jwt-issuer: ${JWT_ISSUER:rewit-api}
+    jwt-audience: ${JWT_AUDIENCE:rewit-clients}
+    access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}
+    refresh-token-ttl-seconds: ${JWT_REFRESH_TOKEN_TTL_SECONDS:2592000}
   outbox:
     poller-enabled: ${OUTBOX_POLLER_ENABLED:true}
     poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:5000}

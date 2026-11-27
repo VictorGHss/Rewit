@@ -63,6 +63,9 @@ class PlaceMediaConcurrencyTest {
     private PlaceMediaReportRepository placeMediaReportRepository;
 
     @Autowired
+    private com.rewit.application.port.MediaLifecycleTransactionPort mediaLifecycleTransactionPort;
+
+    @Autowired
     private PlaceMediaModerationAuditLogRepository auditLogRepository;
 
     @Autowired
@@ -122,19 +125,28 @@ class PlaceMediaConcurrencyTest {
                 UUID.randomUUID(), place.getId(), authorUser.getId(),
                 "places/" + place.getId() + "/" + UUID.randomUUID() + "/image.jpg",
                 ReviewMediaType.IMAGE, "image/jpeg", 1024L, 800, 600,
-                status, false, null, null, Instant.now(), Instant.now()
+                PlaceMediaStatus.ACTIVE, false, null, null, Instant.now(), Instant.now()
         );
+        PlaceMedia saved = placeMediaRepository.save(media);
         if (status == PlaceMediaStatus.REMOVED) {
-            media.markRemovedByModerator();
+            com.rewit.config.PrivilegedTestDatabase.jdbc().update(
+                    "UPDATE place_media SET status = 'REMOVED', removal_source = 'MODERATOR', removed_at = NOW(), is_primary = FALSE WHERE id = ?",
+                    saved.getId());
+            return placeMediaRepository.findById(saved.getId()).orElseThrow();
         }
-        return placeMediaRepository.save(media);
+        if (status != PlaceMediaStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.jdbc().update(
+                    "UPDATE place_media SET status = ? WHERE id = ?", status.name(), saved.getId());
+            return placeMediaRepository.findById(saved.getId()).orElseThrow();
+        }
+        return saved;
     }
 
     private PlaceMediaReport createTestReport(PlaceMedia media, User reporter, String reason) {
         PlaceMediaReport report = new PlaceMediaReport(
                 UUID.randomUUID(), media.getId(), reporter.getId(), reason, "Detalhes da denúncia"
         );
-        return placeMediaReportRepository.save(report);
+        return mediaLifecycleTransactionPort.execute(() -> placeMediaReportRepository.save(report));
     }
 
     @Test
@@ -512,7 +524,7 @@ class PlaceMediaConcurrencyTest {
         Place place = createTestPlace();
         PlaceMedia existingMedia = createTestMedia(place, PlaceMediaStatus.ACTIVE);
         existingMedia.setPrimary(true);
-        placeMediaRepository.save(existingMedia);
+        mediaLifecycleTransactionPort.execute(() -> placeMediaRepository.save(existingMedia));
 
         byte[] validPng = createValidPng();
 

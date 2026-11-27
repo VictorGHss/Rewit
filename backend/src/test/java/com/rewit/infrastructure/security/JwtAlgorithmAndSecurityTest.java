@@ -115,7 +115,7 @@ class JwtAlgorithmAndSecurityTest {
                 .build();
 
         SignedJWT signedJWT = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
-        JWSSigner signer = new MACSigner(STRONG_SECRET.getBytes(StandardCharsets.UTF_8));
+        JWSSigner signer = new MACSigner(SecuritySecretValidator.decodeSecret("JWT_SECRET", STRONG_SECRET));
         signedJWT.sign(signer);
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
@@ -140,7 +140,7 @@ class JwtAlgorithmAndSecurityTest {
                 .build();
 
         SignedJWT signedJWT = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
-        JWSSigner signer = new MACSigner(STRONG_SECRET.getBytes(StandardCharsets.UTF_8));
+        JWSSigner signer = new MACSigner(SecuritySecretValidator.decodeSecret("JWT_SECRET", STRONG_SECRET));
         signedJWT.sign(signer);
 
         BusinessException ex = assertThrows(BusinessException.class, () ->

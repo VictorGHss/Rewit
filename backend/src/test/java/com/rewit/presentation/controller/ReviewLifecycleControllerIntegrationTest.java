@@ -395,12 +395,8 @@ class ReviewLifecycleControllerIntegrationTest {
                 List.of(new CreateReviewTargetRequest(target.getId(), new BigDecimal("4.0"), "T")),
                 "Texto em investigação", false, "PUBLIC");
 
-        // Simula moderação
-        new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
-            ReviewJpaEntity entity = reviewJpaRepository.findById(reviewId).orElseThrow();
-            entity.setStatus("UNDER_REVIEW");
-            reviewJpaRepository.save(entity);
-        });
+        // Simula moderação em fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(reviewId, "UNDER_REVIEW");
 
         UpdateReviewRequest req = new UpdateReviewRequest("Tentando burlar moderação", null, null, null);
 
@@ -424,8 +420,8 @@ class ReviewLifecycleControllerIntegrationTest {
                 List.of(new CreateReviewTargetRequest(target.getId(), new BigDecimal("4.0"), "T")),
                 "Texto antigo", false, "PUBLIC");
 
-        // Força createdAt para 25 horas atrás no PostgreSQL via SQL direto
-        jdbcTemplate.update("UPDATE reviews SET created_at = ? WHERE id = ?",
+        // Força createdAt para 25 horas atrás no PostgreSQL via fixture administrativa
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE reviews SET created_at = ? WHERE id = ?",
                 java.sql.Timestamp.from(Instant.now().minus(25, ChronoUnit.HOURS)),
                 reviewId);
 
@@ -578,14 +574,8 @@ class ReviewLifecycleControllerIntegrationTest {
         UUID privateRemovedId = createReviewViaHttp(author, place.getId(),
                 List.of(new CreateReviewTargetRequest(target.getId(), new BigDecimal("4.0"), "Comentario privado")),
                 "Texto privado removido", false, "PRIVATE");
-        new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
-            ReviewJpaEntity quarantined = reviewJpaRepository.findById(quarantinedId).orElseThrow();
-            quarantined.setStatus("UNDER_REVIEW");
-            reviewJpaRepository.save(quarantined);
-            ReviewJpaEntity privateRemoved = reviewJpaRepository.findById(privateRemovedId).orElseThrow();
-            privateRemoved.setStatus("REMOVED");
-            reviewJpaRepository.save(privateRemoved);
-        });
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(quarantinedId, "UNDER_REVIEW");
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(privateRemovedId, "REMOVED");
 
         for (UUID hiddenId : List.of(removedId, quarantinedId, privateRemovedId)) {
             mockMvc.perform(get("/api/v1/reviews/" + hiddenId)
@@ -616,11 +606,7 @@ class ReviewLifecycleControllerIntegrationTest {
                 List.of(new CreateReviewTargetRequest(target.getId(), new BigDecimal("4.0"), "T")),
                 "Conteúdo sob denúncia", false, "PUBLIC");
 
-        new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
-            ReviewJpaEntity entity = reviewJpaRepository.findById(reviewId).orElseThrow();
-            entity.setStatus("UNDER_REVIEW");
-            reviewJpaRepository.save(entity);
-        });
+        com.rewit.config.PrivilegedTestDatabase.setReviewStatus(reviewId, "UNDER_REVIEW");
 
         mockMvc.perform(delete("/api/v1/reviews/" + reviewId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + author.accessToken()))

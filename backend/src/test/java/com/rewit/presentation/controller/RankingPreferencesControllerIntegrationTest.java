@@ -143,7 +143,7 @@ class RankingPreferencesControllerIntegrationTest {
     @DisplayName("Conta SUSPENDED: GET e PUT recusados com 401 ACCOUNT_DISABLED")
     void shouldRejectGetAndPutForSuspendedAccount() throws Exception {
         TestUser user = registerUser("susp");
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", user.userId());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", user.userId());
 
         mockMvc.perform(get("/api/v1/me/ranking-preferences")
                         .header("Authorization", "Bearer " + user.accessToken()))
@@ -181,7 +181,7 @@ class RankingPreferencesControllerIntegrationTest {
     @DisplayName("Conta DELETED: GET e PUT recusados com 401 ACCOUNT_DISABLED")
     void shouldRejectGetAndPutForDeletedAccount() throws Exception {
         TestUser user = registerUser("del");
-        jdbcTemplate.update("UPDATE users SET account_status = 'DELETED', is_active = false, deleted_at = now() WHERE id = ?", user.userId());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'DELETED', is_active = false, deleted_at = now() WHERE id = ?", user.userId());
 
         mockMvc.perform(get("/api/v1/me/ranking-preferences")
                         .header("Authorization", "Bearer " + user.accessToken()))

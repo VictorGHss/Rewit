@@ -201,7 +201,7 @@ class FeedV2PersonalizationIntegrationTest {
                 "Avaliação para testes de relevância por interesses Feed V2.",
                 isAnonymous,
                 false,
-                status,
+                ReviewStatus.ACTIVE,
                 visibility,
                 -23.5505,
                 -46.6333,
@@ -221,6 +221,9 @@ class FeedV2PersonalizationIntegrationTest {
         review.addTarget(rt);
 
         Review saved = reviewRepository.save(review);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
         reviewTargetRepository.save(rt);
         return saved;
     }

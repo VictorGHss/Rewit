@@ -109,7 +109,7 @@ class UserPublicProfilePersistenceIntegrationTest {
                 "Experiência da avaliação",
                 false,
                 false,
-                status,
+                ReviewStatus.ACTIVE,
                 visibility,
                 -23.5505,
                 -46.6333,
@@ -121,12 +121,15 @@ class UserPublicProfilePersistenceIntegrationTest {
         review.addTarget(reviewTarget);
         Review saved = reviewRepository.save(review);
         reviewTargetRepository.save(reviewTarget);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
 
         if (isVerifiedOnSite) {
             UUID checkInId = UUID.randomUUID();
             jdbcTemplate.update(
                     "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status, verified_at) " +
-                            "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-46.6333, -23.5505), 4326)::geography, 10.0, 'VERIFIED', NOW())",
+                            "VALUES (?, ?, ?, ?, NULL, 10.0, 'VERIFIED', NOW())",
                     checkInId, reviewId, author.getId(), place.getId()
             );
         }
@@ -383,8 +386,7 @@ class UserPublicProfilePersistenceIntegrationTest {
         User user = createUser("deleted");
         User requester = createUser("req");
 
-        user.softDelete();
-        userRepository.save(user);
+        com.rewit.config.PrivilegedTestDatabase.setUserAccountStatus(user.getId(), "DELETED");
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 userService.getPublicProfile(user.getId(), requester.getId()));

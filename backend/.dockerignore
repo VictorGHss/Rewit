@@ -1,0 +1,47 @@
+# Contexto de build do backend (ver docker-compose.yml: context: ./backend)
+# Impede envio de artefatos locais, metadados de IDE, logs e segredos ao daemon Docker/Podman.
+# Preserva obrigatoriamente: mvnw, .mvn/, pom.xml e src/ (incluindo migrations Flyway).
+
+# Controle de versão
+.git
+.gitignore
+.gitattributes
+
+# Artefatos de build e dependências locais
+target/
+build/
+dist/
+out/
+node_modules/
+
+# IDEs e editores
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+
+# Logs e arquivos temporários
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Arquivos locais de ambiente, chaves e segredos
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+*.secret
+secrets/

@@ -7,6 +7,7 @@ import com.rewit.application.port.PlaceRepository;
 import com.rewit.application.port.RateableTargetRepository;
 import com.rewit.application.port.ReviewRepository;
 import com.rewit.domain.enums.CheckInStatus;
+import com.rewit.domain.enums.PresenceVerificationOutcome;
 import com.rewit.domain.enums.TargetType;
 import com.rewit.domain.enums.VerificationMethod;
 import com.rewit.domain.model.CheckIn;
@@ -173,6 +174,9 @@ class ReviewCheckInIntegrationTest {
         assertEquals(CheckInStatus.VERIFIED, checkIn.getStatus(), "Status do check-in deve ser VERIFIED");
         assertEquals(VerificationMethod.GPS, checkIn.getVerificationMethod(), "Método deve ser GPS");
         assertNotNull(checkIn.getVerifiedAt(), "verifiedAt deve ser preenchido quando VERIFIED");
+        assertNull(checkIn.getLatitude(), "Coordenadas GPS não podem ser persistidas mesmo em check-in VERIFIED");
+        assertNull(checkIn.getLongitude(), "Coordenadas GPS não podem ser persistidas mesmo em check-in VERIFIED");
+        assertNull(checkIn.getRejectionReason(), "Check-in VERIFIED não deve possuir rejectionReason");
         assertTrue(checkIn.getDistanceToCentroidMeters() >= 0.0 && checkIn.getDistanceToCentroidMeters() <= radiusMeters,
                 "Distância calculada deve estar dentro do raio: " + checkIn.getDistanceToCentroidMeters());
 
@@ -227,7 +231,11 @@ class ReviewCheckInIntegrationTest {
 
         assertEquals(CheckInStatus.REJECTED, checkIn.getStatus(), "Status deve ser REJECTED quando fora do raio");
         assertNull(checkIn.getVerifiedAt(), "Check-in rejeitado não pode possuir verifiedAt");
-        assertTrue(checkIn.getDistanceToCentroidMeters() > radiusMeters, "Distância deve exceder o raio de validação");
+        assertNull(checkIn.getLatitude(), "Check-in rejeitado não pode persistir latitude");
+        assertNull(checkIn.getLongitude(), "Check-in rejeitado não pode persistir longitude");
+        assertNull(checkIn.getDistanceToCentroidMeters(), "Check-in rejeitado não pode persistir distância de origem");
+        assertEquals(PresenceVerificationOutcome.OUTSIDE_RADIUS, checkIn.getRejectionReason(),
+                "Motivo da rejeição deve ser OUTSIDE_RADIUS");
 
         // Validar que GET /api/v1/reviews/{id} retorna isVerifiedOnSite = false
         mockMvc.perform(get("/api/v1/reviews/" + reviewId)
@@ -552,6 +560,8 @@ class ReviewCheckInIntegrationTest {
         UUID reviewId = UUID.fromString(responseNode.get("id").asText());
 
         CheckIn checkIn = checkInRepository.findByReviewId(reviewId).orElseThrow();
+        assertNull(checkIn.getLatitude(), "Latitude não deve ser persistida");
+        assertNull(checkIn.getLongitude(), "Longitude não deve ser persistida");
         double calculatedDist = checkIn.getDistanceToCentroidMeters();
 
         // 1 grau de latitude é aprox 111.139 metros -> 0.001 grau é aprox 111 metros

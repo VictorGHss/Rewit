@@ -162,9 +162,10 @@ class RankingControllerIntegrationTest {
         checkIn.setReviewId(reviewId);
         checkIn.setStatus(status);
         checkIn.setVerificationMethod(VerificationMethod.GPS.name());
-        checkIn.setCoordinates(GEOMETRY_FACTORY.createPoint(new Coordinate(-47.0608, -22.9056)));
-        checkIn.setDistanceToCentroidMeters(BigDecimal.valueOf(15.5));
-        checkIn.setVerifiedAt("VERIFIED".equals(status) ? Instant.now() : null);
+        boolean verified = "VERIFIED".equals(status);
+        checkIn.setDistanceToCentroidMeters(verified ? BigDecimal.valueOf(15.5) : null);
+        checkIn.setRejectionReason("REJECTED".equals(status) ? "OUTSIDE_RADIUS" : null);
+        checkIn.setVerifiedAt(verified ? Instant.now() : null);
         CheckInJpaEntity saved = checkInJpaRepository.saveAndFlush(checkIn);
         if ("VERIFIED".equals(status)) {
             reviewJpaRepository.findById(reviewId).ifPresent(r -> {

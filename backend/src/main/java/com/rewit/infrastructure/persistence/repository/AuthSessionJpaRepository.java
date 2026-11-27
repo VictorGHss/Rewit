@@ -50,21 +50,11 @@ public interface AuthSessionJpaRepository extends JpaRepository<AuthSessionJpaEn
     int clearInactiveMetadata(@Param("now") Instant now, @Param("limit") int limit);
 
     /**
-     * Remove sessões expiradas sem sucessora (Step 29.3). Uma antecessora de rotação só fica elegível depois
-     * que a sucessora é removida e o ON DELETE SET NULL limpa sua referência, em um lote posterior.
+     * Remove sessões expiradas sem sucessora (Step 29.3, F1-AUD-02) via função PostgreSQL restrita
+     * {@code public.rewit_purge_expired_auth_sessions}, que limita o corte a {@code LEAST(now, clock_timestamp())}.
+     * Uma antecessora de rotação só fica elegível depois que a sucessora é removida e o ON DELETE SET NULL limpa sua
+     * referência, em um lote posterior.
      */
-    @Modifying(clearAutomatically = true)
-    @Query(value = """
-        DELETE FROM auth_sessions
-        WHERE id IN (
-            SELECT id
-            FROM auth_sessions
-            WHERE expires_at < :now
-              AND replaced_by_session_id IS NULL
-            ORDER BY expires_at, id
-            LIMIT :limit
-            FOR UPDATE SKIP LOCKED
-        )
-        """, nativeQuery = true)
+    @Query(value = "SELECT public.rewit_purge_expired_auth_sessions(:now, :limit)", nativeQuery = true)
     int purgeExpiredWithoutSuccessor(@Param("now") Instant now, @Param("limit") int limit);
 }

@@ -167,13 +167,13 @@ public class UserService {
         }
 
         if (cmd.currentPassword() == null || cmd.currentPassword().isBlank()
-                || !passwordHasher.matches(cmd.currentPassword(), user.getPasswordHash())) {
+                || !passwordHasher.matches(user.getId(), cmd.currentPassword(), user.getPasswordHash())) {
             throw new BusinessException("Senha atual incorreta", HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS");
         }
 
         validatePasswordPolicy(cmd.newPassword());
 
-        String newPasswordHash = passwordHasher.hash(cmd.newPassword());
+        String newPasswordHash = passwordHasher.hash(user.getId(), cmd.newPassword());
         user.changePassword(newPasswordHash);
         userRepository.save(user);
 

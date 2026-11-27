@@ -46,6 +46,16 @@
       "description": "JWT signing secret used for bearer token validation."
     },
     {
+      "name": "rewit.security.password-pepper",
+      "type": "java.lang.String",
+      "description": "Pepper secret used with HMAC-SHA256 for password hashing."
+    },
+    {
+      "name": "rewit.security.refresh-token-secret",
+      "type": "java.lang.String",
+      "description": "HMAC secret used for refresh token authentication and verification."
+    },
+    {
       "name": "rewit.security.jwt-issuer",
       "type": "java.lang.String",
       "description": "Expected JWT issuer claim."

@@ -11,7 +11,9 @@ import com.rewit.domain.model.ReviewMediaObjectKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,11 +36,19 @@ public class PurgeConfirmedOrphanStorageObjectUseCase {
 
     private final StorageQuarantineRepository quarantineRepository;
     private final ObjectStorageDeletionPort deletionPort;
+    private final Clock clock;
 
     public PurgeConfirmedOrphanStorageObjectUseCase(StorageQuarantineRepository quarantineRepository,
                                                     ObjectStorageDeletionPort deletionPort) {
+        this(quarantineRepository, deletionPort, Clock.systemUTC());
+    }
+
+    public PurgeConfirmedOrphanStorageObjectUseCase(StorageQuarantineRepository quarantineRepository,
+                                                    ObjectStorageDeletionPort deletionPort,
+                                                    Clock clock) {
         this.quarantineRepository = Objects.requireNonNull(quarantineRepository, "quarantineRepository must not be null");
         this.deletionPort = Objects.requireNonNull(deletionPort, "deletionPort must not be null");
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
     /**
@@ -63,6 +73,18 @@ public class PurgeConfirmedOrphanStorageObjectUseCase {
         }
         if (quarantined.get().status() != StorageQuarantineStatus.CONFIRMED_ORPHAN) {
             return finish(new StoragePurgeResult(objectKey, StoragePurgeOutcome.NOT_CONFIRMED, null, null), startedAt);
+        }
+
+        // Validação temporal antecipada na JVM (proteção redundante SEC-F2-04): a autoridade final
+        // é o relógio do PostgreSQL (clock_timestamp()) sob locks dentro da transação de expurgo.
+        Instant firstObservedAt = quarantined.get().firstObservedAt();
+        Instant now = clock.instant();
+        if (firstObservedAt.isAfter(now)) {
+            throw new IllegalStateException("Integridade da quarentena violada: first_observed_at no futuro (" + firstObservedAt + ")");
+        }
+        if (firstObservedAt.isAfter(now.minus(Duration.ofHours(24)))) {
+            throw new IllegalStateException("Integridade do grace period violada: período mínimo de 24 horas não decorrido (firstObservedAt="
+                    + firstObservedAt + ", now=" + now + ")");
         }
 
         QuarantinePurgeResolution resolution = quarantineRepository.purgeConfirmedOrphanUnderCreationLock(

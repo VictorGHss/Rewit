@@ -1,6 +1,12 @@
 package com.rewit.infrastructure.persistence;
 
 import com.rewit.config.TestInfrastructureConfig;
+import io.minio.BucketExistsArgs;
+import io.minio.MakeBucketArgs;
+import io.minio.MinioClient;
+import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
+import io.minio.StatObjectArgs;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.output.MigrateResult;
 import org.junit.jupiter.api.AfterEach;
@@ -8,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -256,7 +263,8 @@ class DatabaseUpgradeMigrationTest {
         try (Connection conn = owner()) {
             f = new Fixture(conn, t0);
             f.seed();
-            placeMediaAuditBefore = string(conn, "SELECT md5(string_agg(t::text, '|' ORDER BY id)) FROM place_media_moderation_audit_logs t");
+            placeMediaAuditBefore = string(conn, "SELECT md5(string_agg(row(id, place_media_id, place_id, actor_user_id, action, reason, "
+                    + "notes, report_id, created_at, actor_type)::text, '|' ORDER BY id)) FROM place_media_moderation_audit_logs");
             discussionAuditBefore = string(conn, "SELECT md5(string_agg(row(id, discussion_id, moderator_user_id, action, decision, reason_code, "
                     + "justification, previous_status, new_status, reports_affected_count, created_at)::text, '|' ORDER BY id)) "
                     + "FROM discussion_moderation_audit_logs");
@@ -303,7 +311,8 @@ class DatabaseUpgradeMigrationTest {
 
             // ---- A trilha histórica é lida e nunca alterada pela migração
             assertEquals(placeMediaAuditBefore,
-                    string(conn, "SELECT md5(string_agg(t::text, '|' ORDER BY id)) FROM place_media_moderation_audit_logs t"));
+                    string(conn, "SELECT md5(string_agg(row(id, place_media_id, place_id, actor_user_id, action, reason, "
+                            + "notes, report_id, created_at, actor_type)::text, '|' ORDER BY id)) FROM place_media_moderation_audit_logs"));
             assertEquals(discussionAuditBefore, string(conn, "SELECT md5(string_agg(row(id, discussion_id, moderator_user_id, action, "
                     + "decision, reason_code, justification, previous_status, new_status, reports_affected_count, created_at)::text, '|' "
                     + "ORDER BY id)) FROM discussion_moderation_audit_logs"));
@@ -537,6 +546,365 @@ class DatabaseUpgradeMigrationTest {
             assertEquals("false", string(conn,
                     "SELECT has_table_privilege('rewit_app', 'user_interest_profiles', 'DELETE')::text"));
             st.execute("SELECT rewit_assert_runtime_privileges()");
+        }
+    }
+
+    @Test
+    @DisplayName("V43: upgrade V42 -> V43 limpa coordenadas históricas (VERIFIED/REJECTED/PENDING), preserva reviews.updated_at e aplica constraints estruturais")
+    void upgradeFromV42MinimizesHistoricalCheckInCoordinatesAndPreservesVerifiedReviews() throws SQLException {
+        flyway("42").migrate();
+        UUID userId = UUID.randomUUID();
+        UUID placeId = UUID.randomUUID();
+        UUID verifiedReviewId = UUID.randomUUID();
+        UUID rejectedReviewId = UUID.randomUUID();
+        UUID pendingReviewId = UUID.randomUUID();
+        UUID verifiedCheckInId = UUID.randomUUID();
+        UUID rejectedCheckInId = UUID.randomUUID();
+        UUID pendingCheckInId = UUID.randomUUID();
+        Timestamp verifiedReviewUpdatedAt = Timestamp.from(Instant.parse("2026-01-01T12:00:00Z"));
+        Timestamp rejectedReviewUpdatedAt = Timestamp.from(Instant.parse("2026-01-02T12:00:00Z"));
+        Timestamp pendingReviewUpdatedAt = Timestamp.from(Instant.parse("2026-01-03T12:00:00Z"));
+
+        try (Connection conn = owner()) {
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'USER')",
+                    userId, "v42." + userId + "@rewit.test");
+            update(conn, "INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", placeId);
+            update(conn, "INSERT INTO places (id, name, slug, category, address_text, city, state, coordinates) "
+                            + "VALUES (?, 'Local V42', ?, 'CAFE', 'Rua V42, 10', 'Curitiba', 'PR', "
+                            + "ST_SetSRID(ST_MakePoint(-49.2850, -25.4385), 4326)::geography)",
+                    placeId, "local-v42-" + placeId);
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id, experience_text) VALUES (?, ?, ?, 'Review verificado')",
+                    verifiedReviewId, userId, placeId);
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id, experience_text) VALUES (?, ?, ?, 'Review rejeitado')",
+                    rejectedReviewId, userId, placeId);
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id, experience_text) VALUES (?, ?, ?, 'Review pendente')",
+                    pendingReviewId, userId, placeId);
+
+            update(conn, "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status, verified_at) "
+                            + "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.2849, -25.4384), 4326)::geography, 12.50, 'VERIFIED', NOW())",
+                    verifiedCheckInId, verifiedReviewId, userId, placeId);
+            update(conn, "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) "
+                            + "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.2733, -25.4284), 4326)::geography, 1540.00, 'REJECTED')",
+                    rejectedCheckInId, rejectedReviewId, userId, placeId);
+            update(conn, "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status) "
+                            + "VALUES (?, ?, ?, ?, ST_SetSRID(ST_MakePoint(-49.2800, -25.4350), 4326)::geography, 480.00, 'PENDING')",
+                    pendingCheckInId, pendingReviewId, userId, placeId);
+
+            // Fixa updated_at históricos após inserção dos check-ins para comprovar que o backfill não altera timestamps
+            update(conn, "UPDATE reviews SET updated_at = ? WHERE id = ?", verifiedReviewUpdatedAt, verifiedReviewId);
+            update(conn, "UPDATE reviews SET updated_at = ? WHERE id = ?", rejectedReviewUpdatedAt, rejectedReviewId);
+            update(conn, "UPDATE reviews SET updated_at = ? WHERE id = ?", pendingReviewUpdatedAt, pendingReviewId);
+
+            assertEquals("true", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", verifiedReviewId));
+            assertEquals("false", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", rejectedReviewId));
+            assertEquals("false", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", pendingReviewId));
+        }
+
+        assertTrue(flyway(null).migrate().success);
+
+        try (Connection conn = owner(); Statement st = conn.createStatement()) {
+            assertEquals(1, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE version = '43' AND success"));
+
+            // Todas as linhas permanecem; coordenadas históricas são descartadas em VERIFIED, REJECTED e PENDING
+            assertEquals(3, count(conn, "SELECT count(*) FROM check_ins WHERE id IN (?, ?, ?)",
+                    verifiedCheckInId, rejectedCheckInId, pendingCheckInId));
+            assertEquals(0, count(conn, "SELECT count(*) FROM check_ins WHERE coordinates IS NOT NULL"));
+            assertEquals("VERIFIED", string(conn, "SELECT status FROM check_ins WHERE id = ?", verifiedCheckInId));
+            assertEquals("REJECTED", string(conn, "SELECT status FROM check_ins WHERE id = ?", rejectedCheckInId));
+            assertEquals("PENDING", string(conn, "SELECT status FROM check_ins WHERE id = ?", pendingCheckInId));
+
+            // Distância preservada apenas em VERIFIED; minimizada em REJECTED e PENDING históricos
+            assertEquals("12.50", string(conn, "SELECT distance_to_centroid_meters::text FROM check_ins WHERE id = ?", verifiedCheckInId));
+            assertNull(string(conn, "SELECT distance_to_centroid_meters::text FROM check_ins WHERE id = ?", rejectedCheckInId));
+            assertNull(string(conn, "SELECT distance_to_centroid_meters::text FROM check_ins WHERE id = ?", pendingCheckInId));
+
+            // verified_at e rejection_reason coerentes em PENDING e REJECTED históricos
+            assertNotNull(string(conn, "SELECT verified_at::text FROM check_ins WHERE id = ?", verifiedCheckInId));
+            assertNull(string(conn, "SELECT verified_at::text FROM check_ins WHERE id = ?", rejectedCheckInId));
+            assertNull(string(conn, "SELECT verified_at::text FROM check_ins WHERE id = ?", pendingCheckInId));
+            assertNull(string(conn, "SELECT rejection_reason FROM check_ins WHERE id = ?", verifiedCheckInId));
+            assertNull(string(conn, "SELECT rejection_reason FROM check_ins WHERE id = ?", rejectedCheckInId));
+            assertNull(string(conn, "SELECT rejection_reason FROM check_ins WHERE id = ?", pendingCheckInId));
+
+            // Invariante de reviews.is_verified_on_site e updated_at preservados sem efeito colateral
+            assertEquals("true", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", verifiedReviewId));
+            assertEquals("false", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", rejectedReviewId));
+            assertEquals("false", string(conn, "SELECT is_verified_on_site::text FROM reviews WHERE id = ?", pendingReviewId));
+            assertEquals(verifiedReviewUpdatedAt.toInstant(),
+                    timestamp(conn, "SELECT updated_at FROM reviews WHERE id = ?", verifiedReviewId).toInstant());
+            assertEquals(rejectedReviewUpdatedAt.toInstant(),
+                    timestamp(conn, "SELECT updated_at FROM reviews WHERE id = ?", rejectedReviewId).toInstant());
+            assertEquals(pendingReviewUpdatedAt.toInstant(),
+                    timestamp(conn, "SELECT updated_at FROM reviews WHERE id = ?", pendingReviewId).toInstant());
+
+            // Nulabilidade e coluna rejection_reason no catálogo
+            assertEquals("YES", string(conn, "SELECT is_nullable FROM information_schema.columns "
+                    + "WHERE table_schema = 'public' AND table_name = 'check_ins' AND column_name = 'coordinates'"));
+            assertEquals("YES", string(conn, "SELECT is_nullable FROM information_schema.columns "
+                    + "WHERE table_schema = 'public' AND table_name = 'check_ins' AND column_name = 'distance_to_centroid_meters'"));
+            assertEquals("YES", string(conn, "SELECT is_nullable FROM information_schema.columns "
+                    + "WHERE table_schema = 'public' AND table_name = 'check_ins' AND column_name = 'rejection_reason'"));
+            assertEquals(0, count(conn, "SELECT count(*) FROM pg_indexes WHERE tablename = 'check_ins' AND indexname = 'idx_checkins_coordinates'"));
+
+            // Constraints estruturais de coordenadas, distância em REJECTED e rejection_reason
+            UUID newReviewForValidReject = UUID.randomUUID();
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id) VALUES (?, ?, ?)",
+                    newReviewForValidReject, userId, placeId);
+            update(conn, "INSERT INTO check_ins (id, review_id, user_id, place_id, coordinates, distance_to_centroid_meters, status, rejection_reason) "
+                            + "VALUES (?, ?, ?, ?, NULL, NULL, 'REJECTED', 'OUTSIDE_RADIUS')",
+                    UUID.randomUUID(), newReviewForValidReject, userId, placeId);
+
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET rejection_reason = 'OUTSIDE_RADIUS' WHERE id = ?", verifiedCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET rejection_reason = 'OUTSIDE_RADIUS' WHERE id = ?", pendingCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET rejection_reason = 'INVENTED_REASON' WHERE id = ?", rejectedCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET coordinates = ST_SetSRID(ST_MakePoint(-49.28, -25.43), 4326)::geography WHERE id = ?",
+                    verifiedCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET distance_to_centroid_meters = 500.00 WHERE id = ?", rejectedCheckInId));
+            assertThrows(SQLException.class, () -> update(conn,
+                    "UPDATE check_ins SET distance_to_centroid_meters = 50.00 WHERE id = ?", pendingCheckInId));
+
+            st.execute("SELECT rewit_assert_runtime_privileges()");
+        }
+    }
+
+    // ============================================================================================ V45 (S3-A13-F2)
+
+    @Test
+    @DisplayName("V45: upgrade V44 -> V45 preserva registros históricos como não autenticados (authenticity_mac NULL), cria rewit_mod e iguala privilégios à instalação limpa")
+    void upgradeFromV44ToV45PreservesHistoricalRecordsAndSeparatesRoles() throws SQLException {
+        flyway("44").migrate();
+        UUID moderator = UUID.randomUUID();
+        UUID author = UUID.randomUUID();
+        UUID businessOwner = UUID.randomUUID();
+        UUID place = UUID.randomUUID();
+        UUID business = UUID.randomUUID();
+        UUID review = UUID.randomUUID();
+        UUID discussion = UUID.randomUUID();
+        UUID response = UUID.randomUUID();
+        UUID media = UUID.randomUUID();
+        UUID report = UUID.randomUUID();
+        UUID claim = UUID.randomUUID();
+        UUID reviewAudit = UUID.randomUUID();
+        UUID discussionAudit = UUID.randomUUID();
+        UUID responseAudit = UUID.randomUUID();
+        UUID mediaAudit = UUID.randomUUID();
+
+        try (Connection conn = owner()) {
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'MODERATOR')",
+                    moderator, "v44mod." + moderator + "@rewit.test");
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'USER')",
+                    author, "v44author." + author + "@rewit.test");
+            update(conn, "INSERT INTO users (id, email, auth_provider, role) VALUES (?, ?, 'LOCAL', 'USER')",
+                    businessOwner, "v44biz." + businessOwner + "@rewit.test");
+            update(conn, "INSERT INTO rateable_targets (id, target_type) VALUES (?, 'PLACE')", place);
+            update(conn, "INSERT INTO places (id, name, slug, category, address_text, city, state) "
+                    + "VALUES (?, 'Local V44', ?, 'CAFE', 'Rua V44', 'Curitiba', 'PR')", place, "v44-" + place);
+            update(conn, "INSERT INTO business_accounts (id, user_id, corporate_name, tax_id, verification_status) "
+                    + "VALUES (?, ?, 'Empresa V44', ?, 'APPROVED')", business, businessOwner, "44" + business.toString().replace("-", "").substring(0, 12));
+            update(conn, "UPDATE places SET claimed_by_business_id = ? WHERE id = ?", business, place);
+            update(conn, "INSERT INTO reviews (id, user_id, context_place_id, status) VALUES (?, ?, ?, 'REMOVED')", review, author, place);
+            update(conn, "INSERT INTO review_discussions (id, review_id, user_id, content, status) VALUES (?, ?, ?, 'Comentário V44', 'REMOVED')",
+                    discussion, review, author);
+            update(conn, "INSERT INTO business_responses (id, review_id, business_account_id, place_id, author_user_id, content, status, removed_by, removed_at) "
+                    + "VALUES (?, ?, ?, ?, ?, 'Resposta V44', 'REMOVED', 'MODERATION', NOW())", response, review, business, place, businessOwner);
+            update(conn, "INSERT INTO place_media (id, place_id, user_id, object_key, media_type, mime_type, size_bytes, width, height, status, removed_at, removal_source) "
+                    + "VALUES (?, ?, ?, ?, 'IMAGE', 'image/jpeg', 1024, 800, 600, 'REMOVED', NOW() - INTERVAL '2 days', 'MODERATOR')",
+                    media, place, author, "places/v44-" + media + ".jpg");
+            update(conn, "INSERT INTO place_media_reports (id, place_media_id, reporter_user_id, reason) "
+                    + "VALUES (?, ?, ?, 'SPAM')", report, media, businessOwner);
+            update(conn, "UPDATE place_media_reports SET status = 'ACCEPTED', decided_by_user_id = ?, decided_at = NOW() WHERE id = ?",
+                    moderator, report);
+            update(conn, "INSERT INTO place_claim_requests (id, business_account_id, place_id, evidence_description, status, decided_at, decided_by_user_id, decision_reason) "
+                    + "VALUES (?, ?, ?, 'Evidência histórica V44 suficiente para teste de upgrade.', 'APPROVED', NOW(), ?, 'Justificativa histórica V44 válida.')",
+                    claim, business, place, moderator);
+            update(conn, "INSERT INTO moderation_audit_logs (id, review_id, moderator_user_id, action, decision, reason_code, justification, previous_review_status, new_review_status) "
+                    + "VALUES (?, ?, ?, 'REMOVE_REVIEW', 'ACCEPTED', 'SPAM', 'Histórico V44', 'ACTIVE', 'REMOVED')", reviewAudit, review, moderator);
+            update(conn, "INSERT INTO discussion_moderation_audit_logs (id, discussion_id, moderator_user_id, action, decision, reason_code, justification, previous_status, new_status) "
+                    + "VALUES (?, ?, ?, 'REMOVE_DISCUSSION', 'ACCEPTED', 'SPAM', 'Histórico V44', 'ACTIVE', 'REMOVED')", discussionAudit, discussion, moderator);
+            update(conn, "INSERT INTO business_response_moderation_audit_logs (id, response_id, moderator_user_id, action, reason_code, justification, previous_status, new_status) "
+                    + "VALUES (?, ?, ?, 'REMOVE_RESPONSE', 'SPAM', 'Histórico V44', 'ACTIVE', 'REMOVED')", responseAudit, response, moderator);
+            update(conn, "INSERT INTO place_media_moderation_audit_logs (id, place_media_id, place_id, actor_user_id, actor_type, action, report_id) "
+                    + "VALUES (?, ?, ?, ?, 'USER', 'ACCEPT_REPORT', ?)", mediaAudit, media, place, moderator, report);
+            UUID legacyQuarantineId = UUID.randomUUID();
+            update(conn, "INSERT INTO storage_object_quarantine (id, object_key, status, first_observed_at, last_observed_at, confirmed_at) "
+                    + "VALUES (?, 'reviews/legacy-test.jpg', 'CONFIRMED_ORPHAN', NOW() + INTERVAL '1 day', NOW() + INTERVAL '1 day', NOW() + INTERVAL '1 day')",
+                    legacyQuarantineId);
+        }
+
+        assertTrue(flyway(null).migrate().success);
+
+        String privilegesForRole = """
+                SELECT string_agg(format('%s:%s', c.relname, p.priv), ',' ORDER BY c.relname, p.priv)
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')) p(priv)
+                WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v') AND c.relname <> 'flyway_schema_history'
+                  AND has_table_privilege(?, c.oid, p.priv)
+                """;
+        String upgradedAppPrivs;
+        String upgradedMediaPrivs;
+        String upgradedModPrivs;
+        try (Connection conn = owner(); Statement st = conn.createStatement()) {
+            assertEquals(1, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE version = '45' AND success"));
+            assertEquals(1, count(conn, "SELECT count(*) FROM flyway_schema_history WHERE version = '46' AND success"));
+            st.execute("SELECT rewit_assert_runtime_privileges()");
+
+            // V46: Sanitização de registros legados inconsistentes de quarentena
+            assertEquals("OBSERVED", string(conn, "SELECT status FROM storage_object_quarantine WHERE object_key = 'reviews/legacy-test.jpg'"));
+            assertNull(string(conn, "SELECT confirmed_at::text FROM storage_object_quarantine WHERE object_key = 'reviews/legacy-test.jpg'"));
+
+            // Registros históricos permanecem intactos e explicitamente sem MAC (authenticity_mac IS NULL)
+            assertNull(string(conn, "SELECT authenticity_mac FROM moderation_audit_logs WHERE id = ?", reviewAudit));
+            assertNull(string(conn, "SELECT authenticity_mac FROM discussion_moderation_audit_logs WHERE id = ?", discussionAudit));
+            assertNull(string(conn, "SELECT authenticity_mac FROM business_response_moderation_audit_logs WHERE id = ?", responseAudit));
+            assertNull(string(conn, "SELECT authenticity_mac FROM place_media_moderation_audit_logs WHERE id = ?", mediaAudit));
+            assertNull(string(conn, "SELECT authenticity_mac FROM place_media_reports WHERE id = ?", report));
+            assertNull(string(conn, "SELECT authenticity_mac FROM place_claim_requests WHERE id = ?", claim));
+
+            // Novas trilhas existem e são append-only
+            assertNotNull(string(conn, "SELECT to_regclass('public.account_moderation_audit_logs')::text"));
+            assertNotNull(string(conn, "SELECT to_regclass('public.place_claim_moderation_audit_logs')::text"));
+
+            upgradedAppPrivs = string(conn, privilegesForRole, "rewit_app");
+            upgradedMediaPrivs = string(conn, privilegesForRole, "rewit_media");
+            upgradedModPrivs = string(conn, privilegesForRole, "rewit_mod");
+        }
+
+        // Compara privilégios efetivos de upgrade V44 -> V45 com instalação limpa
+        dropDisposableDatabase();
+        createDisposableDatabase();
+        assertTrue(flyway(null).migrate().success);
+        try (Connection conn = owner()) {
+            assertEquals(string(conn, privilegesForRole, "rewit_app"), upgradedAppPrivs);
+            assertEquals(string(conn, privilegesForRole, "rewit_media"), upgradedMediaPrivs);
+            assertEquals(string(conn, privilegesForRole, "rewit_mod"), upgradedModPrivs);
+        }
+    }
+
+    @Test
+    @DisplayName("SEC-F2-04-VULN-01: upgrade V45 -> V46 reinicia TODAS as entradas legadas (OBSERVED e CONFIRMED_ORPHAN) e bloqueia confirmação/expurgo imediato")
+    void upgradeV45ToV46ResetsAllLegacyQuarantineEntriesAndBlocksImmediateConfirmationAndPurge() throws Exception {
+        // 1. Provisiona schema até V45 (antes da proteção V46)
+        assertTrue(flyway("45").migrate().success);
+
+        UUID legacyObservedId = UUID.randomUUID();
+        UUID legacyConfirmedId = UUID.randomUUID();
+        UUID legacyFutureModifiedId = UUID.randomUUID();
+        String observedKey = "reviews/" + UUID.randomUUID() + "/" + UUID.randomUUID() + "/image.jpg";
+        String confirmedKey = "places/" + UUID.randomUUID() + "/" + UUID.randomUUID() + "/image.jpg";
+        String futureModKey = "reviews/" + UUID.randomUUID() + "/" + UUID.randomUUID() + "/image.jpg";
+
+        MinioClient minio = MinioClient.builder()
+                .endpoint(INFRASTRUCTURE.storageEndpoint())
+                .credentials(INFRASTRUCTURE.storageAccessKey(), INFRASTRUCTURE.storageSecretKey())
+                .build();
+        String bucket = INFRASTRUCTURE.storageBucket();
+        if (!minio.bucketExists(BucketExistsArgs.builder().bucket(bucket).build())) {
+            minio.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+        }
+        byte[] payload = "legacy-orphan-payload".getBytes();
+        minio.putObject(PutObjectArgs.builder().bucket(bucket).object(observedKey)
+                .stream(new ByteArrayInputStream(payload), payload.length, -1).contentType("image/jpeg").build());
+        minio.putObject(PutObjectArgs.builder().bucket(bucket).object(confirmedKey)
+                .stream(new ByteArrayInputStream(payload), payload.length, -1).contentType("image/jpeg").build());
+
+        try {
+            // 2-4. Conecta como rewit_app real pré-V46 e fabrica entradas retroativas (OBSERVED 48h e CONFIRMED_ORPHAN 48h)
+            try (Connection appConn = DriverManager.getConnection(
+                    databaseUrl, INFRASTRUCTURE.appDbUser(), INFRASTRUCTURE.appDbPassword())) {
+                update(appConn, "INSERT INTO storage_object_quarantine (id, object_key, status, first_observed_at, last_observed_at, confirmed_at) "
+                                + "VALUES (?, ?, 'OBSERVED', NOW() - INTERVAL '48 hours', NOW() - INTERVAL '48 hours', NULL)",
+                        legacyObservedId, observedKey);
+                update(appConn, "INSERT INTO storage_object_quarantine (id, object_key, status, first_observed_at, last_observed_at, confirmed_at) "
+                                + "VALUES (?, ?, 'CONFIRMED_ORPHAN', NOW() - INTERVAL '48 hours', NOW() - INTERVAL '48 hours', NOW() - INTERVAL '24 hours')",
+                        legacyConfirmedId, confirmedKey);
+                update(appConn, "INSERT INTO storage_object_quarantine (id, object_key, status, first_observed_at, last_observed_at, last_modified_at, confirmed_at) "
+                                + "VALUES (?, ?, 'OBSERVED', NOW() - INTERVAL '25 hours', NOW() - INTERVAL '25 hours', NOW() + INTERVAL '10 hours', NULL)",
+                        legacyFutureModifiedId, futureModKey);
+            }
+
+            // 6. Executa migration corretiva V46
+            assertTrue(flyway(null).migrate().success);
+
+            // 7. Confere estado pós-V46: TODAS as entradas reiniciadas para OBSERVED com um único instante confiável
+            try (Connection ownerConn = owner()) {
+                assertEquals("OBSERVED", string(ownerConn, "SELECT status FROM storage_object_quarantine WHERE id = ?", legacyObservedId));
+                assertNull(string(ownerConn, "SELECT confirmed_at::text FROM storage_object_quarantine WHERE id = ?", legacyObservedId));
+                assertEquals(observedKey, string(ownerConn, "SELECT object_key FROM storage_object_quarantine WHERE id = ?", legacyObservedId));
+
+                assertEquals("OBSERVED", string(ownerConn, "SELECT status FROM storage_object_quarantine WHERE id = ?", legacyConfirmedId));
+                assertNull(string(ownerConn, "SELECT confirmed_at::text FROM storage_object_quarantine WHERE id = ?", legacyConfirmedId));
+                assertEquals(confirmedKey, string(ownerConn, "SELECT object_key FROM storage_object_quarantine WHERE id = ?", legacyConfirmedId));
+
+                Timestamp obsFirst = timestamp(ownerConn, "SELECT first_observed_at FROM storage_object_quarantine WHERE id = ?", legacyObservedId);
+                Timestamp obsLast = timestamp(ownerConn, "SELECT last_observed_at FROM storage_object_quarantine WHERE id = ?", legacyObservedId);
+                Timestamp confFirst = timestamp(ownerConn, "SELECT first_observed_at FROM storage_object_quarantine WHERE id = ?", legacyConfirmedId);
+                Timestamp futureMod = timestamp(ownerConn, "SELECT last_modified_at FROM storage_object_quarantine WHERE id = ?", legacyFutureModifiedId);
+
+                assertEquals(obsFirst, obsLast, "first_observed_at e last_observed_at devem usar o mesmo instante confiável");
+                assertEquals(obsFirst, confFirst, "Todo o lote da migration deve compartilhar um único instante confiável do PostgreSQL");
+                assertTrue(obsFirst.toInstant().isAfter(Instant.now().minusSeconds(120)),
+                        "Idade da entrada OBSERVED legada de 48h deve ter sido reiniciada");
+                assertFalse(futureMod.toInstant().isAfter(obsFirst.toInstant()),
+                        "last_modified_at futuro deve ter sido ajustado de forma coerente");
+            }
+
+            // 8-10. Reconecta como rewit_app real e tenta confirmar/expurgar imediatamente: bloqueio obrigatório
+            try (Connection appConn = DriverManager.getConnection(
+                    databaseUrl, INFRASTRUCTURE.appDbUser(), INFRASTRUCTURE.appDbPassword())) {
+                SQLException exObs = assertThrows(SQLException.class,
+                        () -> string(appConn, "SELECT public.rewit_confirm_storage_quarantine_entry(?)::text", legacyObservedId));
+                assertTrue(exObs.getMessage().contains("24 horas") || "42501".equals(exObs.getSQLState()),
+                        "Confirmação imediata de entrada OBSERVED legada deve ser bloqueada: " + exObs.getMessage());
+
+                SQLException exConf = assertThrows(SQLException.class,
+                        () -> string(appConn, "SELECT public.rewit_confirm_storage_quarantine_entry(?)::text", legacyConfirmedId));
+                assertTrue(exConf.getMessage().contains("24 horas") || "42501".equals(exConf.getSQLState()),
+                        "Confirmação imediata de entrada CONFIRMED_ORPHAN rebaixada deve ser bloqueada: " + exConf.getMessage());
+
+                // Elegibilidade final de expurgo pelo PostgreSQL retorna false para ambas as entradas
+                String eligibilitySql = """
+                        SELECT (
+                            q.status = 'CONFIRMED_ORPHAN'
+                            AND q.first_observed_at <= t.v_now
+                            AND q.first_observed_at <= t.v_now - INTERVAL '24 hours'
+                            AND q.confirmed_at IS NOT NULL
+                            AND q.confirmed_at <= t.v_now
+                            AND q.confirmed_at >= q.first_observed_at + INTERVAL '24 hours'
+                        )::text
+                        FROM public.storage_object_quarantine q
+                        CROSS JOIN (SELECT clock_timestamp() AS v_now) t
+                        WHERE q.id = ?
+                        """;
+                assertEquals("false", string(appConn, eligibilitySql, legacyObservedId));
+                assertEquals("false", string(appConn, eligibilitySql, legacyConfirmedId));
+            }
+
+            // Objetos físicos no SeaweedFS descartável permanecem intactos
+            assertDoesNotThrow(() -> minio.statObject(StatObjectArgs.builder().bucket(bucket).object(observedKey).build()),
+                    "Objeto físico órfão legado (OBSERVED) deve permanecer preservado no storage");
+            assertDoesNotThrow(() -> minio.statObject(StatObjectArgs.builder().bucket(bucket).object(confirmedKey).build()),
+                    "Objeto físico órfão legado (CONFIRMED_ORPHAN rebaixado) deve permanecer preservado no storage");
+        } finally {
+            minio.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(observedKey).build());
+            minio.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(confirmedKey).build());
+        }
+    }
+
+    private static Timestamp timestamp(Connection conn, String sql, Object... args) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (int i = 0; i < args.length; i++) {
+                ps.setObject(i + 1, args[i]);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                return rs.getTimestamp(1);
+            }
         }
     }
 

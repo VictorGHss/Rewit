@@ -266,17 +266,20 @@ public class ReviewService {
                 }
 
                 boolean verified = presence == PresenceVerificationOutcome.VERIFIED;
+                // Coordenadas GPS exatas nunca são persistidas (minimização de dados); em rejeições também não
+                // persistimos a distância exata de origem, registrando apenas o motivo estruturado.
                 CheckIn checkIn = new CheckIn(
                         UUID.randomUUID(),
                         savedReview.getId(),
                         author.getId(),
                         cmd.contextPlaceId(),
-                        cmd.userLatitude(),
-                        cmd.userLongitude(),
-                        spatialResult.distanceMeters(),
+                        null,
+                        null,
+                        verified ? spatialResult.distanceMeters() : null,
                         verified ? CheckInStatus.VERIFIED : CheckInStatus.REJECTED,
                         VerificationMethod.GPS,
-                        verified ? Instant.now() : null
+                        verified ? Instant.now() : null,
+                        verified ? null : presence
                 );
                 CheckIn savedCheckIn = checkInRepository.save(checkIn);
                 savedReview.attachCheckIn(savedCheckIn);

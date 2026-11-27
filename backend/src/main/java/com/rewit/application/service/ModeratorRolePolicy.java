@@ -43,4 +43,17 @@ public class ModeratorRolePolicy {
                     "FORBIDDEN");
         }
     }
+
+    public void requireCurrentAdmin(UUID actorUserId) {
+        if (actorUserId == null) {
+            throw new BusinessException("Usuário não autenticado", HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+        }
+        accountStatusPolicy.requireOperational(actorUserId);
+        boolean admin = userRepository.findById(actorUserId)
+                .map(user -> user.getRole() == Role.ADMIN)
+                .orElse(false);
+        if (!admin) {
+            throw new BusinessException("Acesso negado", HttpStatus.FORBIDDEN, "FORBIDDEN");
+        }
+    }
 }

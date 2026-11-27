@@ -15,8 +15,10 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -213,6 +215,51 @@ class PurgeConfirmedOrphanStorageObjectUseCaseTest {
         assertTrue(ObjectDeletionResult.NOT_FOUND.isAbsentAfterwards());
         assertFalse(ObjectDeletionResult.TRANSIENT_FAILURE.isAbsentAfterwards());
         assertFalse(ObjectDeletionResult.PERMANENT_FAILURE.isAbsentAfterwards());
+    }
+
+    @Test
+    @DisplayName("SEC-F2-04: expurgo de CONFIRMED_ORPHAN com first_observed_at no futuro é bloqueado com IllegalStateException")
+    void purgeRejectsFutureFirstObservedAt() {
+        confirmOrphan();
+        storage.objects.add(key);
+        Clock pastClock = Clock.fixed(FIRST_OBSERVED.minus(Duration.ofHours(1)), ZoneOffset.UTC);
+        PurgeConfirmedOrphanStorageObjectUseCase strictUseCase =
+                new PurgeConfirmedOrphanStorageObjectUseCase(quarantine, storage, pastClock);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> strictUseCase.purge(key));
+        assertTrue(ex.getMessage().contains("no futuro"));
+        assertTrue(storage.deleteCalls.isEmpty());
+        assertTrue(storage.objects.contains(key));
+    }
+
+    @Test
+    @DisplayName("SEC-F2-04: expurgo de CONFIRMED_ORPHAN com menos de 24h desde first_observed_at é bloqueado")
+    void purgeRejectsGracePeriodUnder24Hours() {
+        confirmOrphan();
+        storage.objects.add(key);
+        Clock earlyClock = Clock.fixed(FIRST_OBSERVED.plus(Duration.ofHours(23)), ZoneOffset.UTC);
+        PurgeConfirmedOrphanStorageObjectUseCase strictUseCase =
+                new PurgeConfirmedOrphanStorageObjectUseCase(quarantine, storage, earlyClock);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> strictUseCase.purge(key));
+        assertTrue(ex.getMessage().contains("período mínimo de 24 horas não decorrido"));
+        assertTrue(storage.deleteCalls.isEmpty());
+        assertTrue(storage.objects.contains(key));
+    }
+
+    @Test
+    @DisplayName("SEC-F2-04: expurgo de CONFIRMED_ORPHAN com pelo menos 24h desde first_observed_at é permitido")
+    void purgePermitsGracePeriodOver24Hours() {
+        confirmOrphan();
+        storage.objects.add(key);
+        Clock validClock = Clock.fixed(FIRST_OBSERVED.plus(Duration.ofHours(24).plusSeconds(1)), ZoneOffset.UTC);
+        PurgeConfirmedOrphanStorageObjectUseCase strictUseCase =
+                new PurgeConfirmedOrphanStorageObjectUseCase(quarantine, storage, validClock);
+
+        StoragePurgeResult result = strictUseCase.purge(key);
+        assertEquals(StoragePurgeOutcome.PURGED, result.outcome());
+        assertEquals(List.of(key), storage.deleteCalls);
+        assertFalse(storage.objects.contains(key));
     }
 
     private void observe() {

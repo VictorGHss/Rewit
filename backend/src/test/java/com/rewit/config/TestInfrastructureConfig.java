@@ -23,6 +23,10 @@ public final class TestInfrastructureConfig {
     public static final String DATASOURCE_URL = "TEST_DATASOURCE_URL";
     public static final String APP_DB_USER = "TEST_APP_DB_USER";
     public static final String APP_DB_PASSWORD = "TEST_APP_DB_PASSWORD";
+    public static final String MEDIA_DB_USER = "TEST_MEDIA_DB_USER";
+    public static final String MEDIA_DB_PASSWORD = "TEST_MEDIA_DB_PASSWORD";
+    public static final String MOD_DB_USER = "TEST_MOD_DB_USER";
+    public static final String MOD_DB_PASSWORD = "TEST_MOD_DB_PASSWORD";
     public static final String MIGRATION_DB_USER = "TEST_MIGRATION_DB_USER";
     public static final String MIGRATION_DB_PASSWORD = "TEST_MIGRATION_DB_PASSWORD";
     public static final String REDIS_HOST = "TEST_REDIS_HOST";
@@ -34,7 +38,9 @@ public final class TestInfrastructureConfig {
 
     /** Variáveis obrigatórias da suíte backend (documentadas em docs/development/local-setup.md). */
     public static final List<String> REQUIRED_VARIABLES = List.of(
-            DATASOURCE_URL, APP_DB_USER, APP_DB_PASSWORD, MIGRATION_DB_USER, MIGRATION_DB_PASSWORD,
+            DATASOURCE_URL, APP_DB_USER, APP_DB_PASSWORD, MEDIA_DB_USER, MEDIA_DB_PASSWORD,
+            MOD_DB_USER, MOD_DB_PASSWORD,
+            MIGRATION_DB_USER, MIGRATION_DB_PASSWORD,
             REDIS_HOST, REDIS_PORT,
             STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY, STORAGE_BUCKET);
 
@@ -83,6 +89,22 @@ public final class TestInfrastructureConfig {
 
     public String appDbPassword() {
         return require(APP_DB_PASSWORD);
+    }
+
+    public String mediaDbUser() {
+        return require(MEDIA_DB_USER);
+    }
+
+    public String mediaDbPassword() {
+        return require(MEDIA_DB_PASSWORD);
+    }
+
+    public String modDbUser() {
+        return require(MOD_DB_USER);
+    }
+
+    public String modDbPassword() {
+        return require(MOD_DB_PASSWORD);
     }
 
     public String migrationDbUser() {

@@ -122,7 +122,7 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
         UUID unlinked = createPlace();
         UUID accountA = approvedOwner(adminA, unlinked);
         putFullProfile(adminA, unlinked, accountA);
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", unlinked);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", unlinked);
         assertEquals(row(DESCRIPTION, null, null, null, null), jdbcTemplate.queryForMap(PROFILE, unlinked));
 
         TestUser adminC = registerUser("own_end_c");
@@ -164,9 +164,9 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
         putFullProfile(admin, placeId, accountId);
         Map<String, Object> stored = row(DESCRIPTION, PHONE, SITE, INSTAGRAM, FACEBOOK);
 
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
-        jdbcTemplate.update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
-        jdbcTemplate.update("UPDATE places SET status = 'ACTIVE', name = name || ' (renomeado)' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountId, placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'INACTIVE' WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET status = 'ACTIVE', name = name || ' (renomeado)' WHERE id = ?", placeId);
         Place reloaded = placeRepository.findById(placeId).orElseThrow();
         placeRepository.save(reloaded);
 
@@ -228,11 +228,10 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
         putFullProfile(adminA, placeId, accountA);
         Map<String, Object> stored = row(DESCRIPTION, PHONE, SITE, INSTAGRAM, FACEBOOK);
 
-        TransactionTemplate tx = new TransactionTemplate(transactionManager);
         Map<String, Object> insideTransaction = new LinkedHashMap<>();
-        assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> {
-            jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
-            insideTransaction.putAll(jdbcTemplate.queryForMap(
+        assertThrows(IllegalStateException.class, () -> com.rewit.config.PrivilegedTestDatabase.inOwnerTransaction(ownerJdbc -> {
+            ownerJdbc.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?", accountB, placeId);
+            insideTransaction.putAll(ownerJdbc.queryForMap(
                     "SELECT claimed_by_business_id, phone, website_url, instagram_url, facebook_url, description "
                             + "FROM places WHERE id = ?", placeId));
             throw new IllegalStateException("falha depois da troca de titular");
@@ -246,7 +245,7 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
         assertEquals(stored, jdbcTemplate.queryForMap(PROFILE, placeId));
 
         // Comando que troca o titular e viola outra regra falha inteiro: nada muda
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+        assertThrows(DataIntegrityViolationException.class, () -> com.rewit.config.PrivilegedTestDatabase.jdbc().update(
                 "UPDATE places SET claimed_by_business_id = ?, status = 'DESCONHECIDO' WHERE id = ?", accountB, placeId));
         assertEquals(accountA, jdbcTemplate.queryForObject(
                 "SELECT claimed_by_business_id FROM places WHERE id = ?", UUID.class, placeId));
@@ -288,7 +287,7 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.phone").value("(41) 98888-7777"));
 
-        jdbcTemplate.update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = NULL WHERE id = ?", placeId);
         expectCode(putProfile(adminB, placeId, body(accountB, DESCRIPTION, PHONE, null, null, null)),
                 403, "BUSINESS_NOT_RESPONSIBLE");
         assertEquals(row(DESCRIPTION, null, null, null, null), jdbcTemplate.queryForMap(PROFILE, placeId));
@@ -310,7 +309,7 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
         Map<String, Object> stored = row(DESCRIPTION, PHONE, SITE, INSTAGRAM, FACEBOOK);
 
         for (String status : new String[]{"PENDING", "REJECTED"}) {
-            jdbcTemplate.update("UPDATE business_accounts SET verification_status = ? WHERE id = ?", status, accountId);
+            com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = ? WHERE id = ?", status, accountId);
             JsonNode hidden = assertPublicContacts(visitor, placeId, null, null, null, null);
             assertEquals(DESCRIPTION, hidden.get("description").asText(), "a descrição nunca é ocultada");
             assertEquals(stored, jdbcTemplate.queryForMap(PROFILE, placeId), status + ": nada é apagado");
@@ -319,14 +318,14 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
                     .phone(), "o que oculta é a projeção pública, não a ausência do dado");
         }
 
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
         assertPublicContacts(visitor, placeId, PHONE, SITE, INSTAGRAM, FACEBOOK);
 
-        jdbcTemplate.update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", admin.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'SUSPENDED', is_active = false WHERE id = ?", admin.id());
         assertPublicContacts(visitor, placeId, null, null, null, null);
         assertEquals(stored, jdbcTemplate.queryForMap(PROFILE, placeId));
 
-        jdbcTemplate.update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", admin.id());
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE users SET account_status = 'ACTIVE', is_active = true WHERE id = ?", admin.id());
         assertPublicContacts(visitor, placeId, PHONE, SITE, INSTAGRAM, FACEBOOK);
     }
 
@@ -345,7 +344,7 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
         assertEquals(PHONE, text(visible, "phone"));
         assertEquals(SITE, text(visible, "websiteUrl"));
 
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'PENDING' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'PENDING' WHERE id = ?", accountId);
         JsonNode hidden = readByExternalReference(visitor, externalId);
         assertNull(text(hidden, "phone"));
         assertNull(text(hidden, "websiteUrl"));
@@ -398,7 +397,7 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
     }
 
     private void transferOwnership(UUID placeId, UUID newAccountId) {
-        assertEquals(1, jdbcTemplate.update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
+        assertEquals(1, com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE places SET claimed_by_business_id = ? WHERE id = ?",
                 newAccountId, placeId));
     }
 
@@ -474,7 +473,7 @@ class PlaceBusinessProfileOwnershipIntegrationTest {
 
     private UUID approvedAccount(TestUser user) throws Exception {
         UUID accountId = createAccount(user);
-        jdbcTemplate.update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
+        com.rewit.config.PrivilegedTestDatabase.jdbc().update("UPDATE business_accounts SET verification_status = 'APPROVED' WHERE id = ?", accountId);
         return accountId;
     }
 

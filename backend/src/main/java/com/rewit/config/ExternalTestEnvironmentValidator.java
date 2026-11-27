@@ -1,5 +1,6 @@
 package com.rewit.config;
 
+import com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.ConfigurableEnvironment;
@@ -35,6 +36,10 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
         REQUIRED.put("spring.datasource.url", "DATABASE_URL");
         REQUIRED.put("spring.datasource.username", "APP_DB_USER");
         REQUIRED.put("spring.datasource.password", "APP_DB_PASSWORD");
+        REQUIRED.put("rewit.datasource.media.username", "MEDIA_DB_USER");
+        REQUIRED.put("rewit.datasource.media.password", "MEDIA_DB_PASSWORD");
+        REQUIRED.put("rewit.datasource.moderation.username", "MOD_DB_USER");
+        REQUIRED.put("rewit.datasource.moderation.password", "MOD_DB_PASSWORD");
         REQUIRED.put("spring.flyway.user", "FLYWAY_DB_USER ou POSTGRES_USER");
         REQUIRED.put("spring.flyway.password", "FLYWAY_DB_PASSWORD ou POSTGRES_PASSWORD");
         REQUIRED.put("spring.data.redis.host", "REDIS_HOST");
@@ -44,16 +49,24 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
         REQUIRED.put("rewit.minio.secret-key", "OBJECT_STORAGE_SECRET_KEY");
         REQUIRED.put("rewit.minio.bucket-name", "OBJECT_STORAGE_BUCKET");
         REQUIRED.put("rewit.security.jwt-secret", "JWT_SECRET");
+        REQUIRED.put("rewit.security.password-pepper", "PASSWORD_PEPPER_SECRET");
+        REQUIRED.put("rewit.security.refresh-token-secret", "REFRESH_TOKEN_SECRET");
+        REQUIRED.put("rewit.security.moderation-audit-secret", "MODERATION_AUDIT_SECRET");
         REQUIRED.put("rewit.rate-limit.key-secret", "RATE_LIMIT_KEY_SECRET");
     }
 
     /** Credenciais que não podem valer num ambiente publicado: valores do .env.example e fallbacks do perfil local. */
     private static final Set<String> CREDENTIAL_PROPERTIES = Set.of(
             "spring.datasource.password",
+            "rewit.datasource.media.password",
+            "rewit.datasource.moderation.password",
             "spring.flyway.password",
             "rewit.minio.access-key",
             "rewit.minio.secret-key",
             "rewit.security.jwt-secret",
+            "rewit.security.password-pepper",
+            "rewit.security.refresh-token-secret",
+            "rewit.security.moderation-audit-secret",
             "rewit.rate-limit.key-secret"
     );
 
@@ -92,6 +105,7 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
             return;
         }
 
+        Map<String, String> resolved = new LinkedHashMap<>();
         List<String> errors = new ArrayList<>();
         for (Map.Entry<String, String> entry : REQUIRED.entrySet()) {
             String property = entry.getKey();
@@ -107,6 +121,7 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
                 errors.add(property + " ausente ou vazio: defina " + variable);
                 continue;
             }
+            resolved.put(property, value);
             if (CREDENTIAL_PROPERTIES.contains(property) && INSECURE_VALUES.contains(value.trim().toLowerCase(Locale.ROOT))) {
                 errors.add(property + " usa valor de exemplo ou de desenvolvimento: defina " + variable + " com um segredo próprio");
             }
@@ -130,8 +145,58 @@ public class ExternalTestEnvironmentValidator implements ApplicationContextIniti
             }
         }
 
+        // Validações estritas das identidades de runtime e separação da credencial migrator (F2-DEPLOY-02)
+        String appUser = resolved.get("spring.datasource.username");
+        String mediaUser = resolved.get("rewit.datasource.media.username");
+        String modUser = resolved.get("rewit.datasource.moderation.username");
+        if (appUser != null && !RuntimeDatabaseRolePolicy.EXPECTED_APP_ROLE.equals(appUser.trim())) {
+            errors.add("spring.datasource.username inválido: defina APP_DB_USER=" + RuntimeDatabaseRolePolicy.EXPECTED_APP_ROLE);
+        }
+        if (mediaUser != null && !RuntimeDatabaseRolePolicy.EXPECTED_MEDIA_ROLE.equals(mediaUser.trim())) {
+            errors.add("rewit.datasource.media.username inválido: defina MEDIA_DB_USER=" + RuntimeDatabaseRolePolicy.EXPECTED_MEDIA_ROLE);
+        }
+        if (modUser != null && !RuntimeDatabaseRolePolicy.EXPECTED_MOD_ROLE.equals(modUser.trim())) {
+            errors.add("rewit.datasource.moderation.username inválido: defina MOD_DB_USER=" + RuntimeDatabaseRolePolicy.EXPECTED_MOD_ROLE);
+        }
+        RuntimeDatabaseRolePolicy.validateDistinctRuntimePasswords(
+                resolved.get("spring.datasource.password"),
+                resolved.get("rewit.datasource.media.password"),
+                resolved.get("rewit.datasource.moderation.password"),
+                errors
+        );
+        Map<String, String> migratorUsers = new LinkedHashMap<>();
+        if (resolved.containsKey("spring.flyway.user")) {
+            migratorUsers.put("spring.flyway.user", resolved.get("spring.flyway.user"));
+        }
+        addOptionalProperty(env, migratorUsers, "FLYWAY_DB_USER");
+        addOptionalProperty(env, migratorUsers, "POSTGRES_USER");
+        Map<String, String> migratorPasswords = new LinkedHashMap<>();
+        if (resolved.containsKey("spring.flyway.password")) {
+            migratorPasswords.put("spring.flyway.password", resolved.get("spring.flyway.password"));
+        }
+        addOptionalProperty(env, migratorPasswords, "FLYWAY_DB_PASSWORD");
+        addOptionalProperty(env, migratorPasswords, "POSTGRES_PASSWORD");
+        RuntimeDatabaseRolePolicy.validateRuntimeIsolatedFromMigrator(
+                appUser, resolved.get("spring.datasource.password"),
+                mediaUser, resolved.get("rewit.datasource.media.password"),
+                modUser, resolved.get("rewit.datasource.moderation.password"),
+                migratorUsers, migratorPasswords,
+                errors
+        );
+
         if (!errors.isEmpty()) {
             throw new InvalidConfigurationException(errors);
+        }
+    }
+
+    private static void addOptionalProperty(ConfigurableEnvironment env, Map<String, String> target, String key) {
+        try {
+            String value = env.getProperty(key);
+            if (value != null && !value.isBlank()) {
+                target.put(key, value);
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Propriedade opcional não resolvida
         }
     }
 

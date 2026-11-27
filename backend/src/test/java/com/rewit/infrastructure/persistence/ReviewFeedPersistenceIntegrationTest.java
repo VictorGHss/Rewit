@@ -102,7 +102,7 @@ class ReviewFeedPersistenceIntegrationTest {
                 "Texto de avaliação do feed",
                 isAnonymous,
                 false,
-                status,
+                ReviewStatus.ACTIVE,
                 visibility,
                 -23.5505,
                 -46.6333,
@@ -113,6 +113,9 @@ class ReviewFeedPersistenceIntegrationTest {
         ReviewTarget reviewTarget = new ReviewTarget(UUID.randomUUID(), reviewId, target.getId(), BigDecimal.valueOf(4.5), "Nota do prato");
         review.addTarget(reviewTarget);
         Review saved = reviewRepository.save(review);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
         reviewTargetRepository.save(reviewTarget);
         return saved;
     }

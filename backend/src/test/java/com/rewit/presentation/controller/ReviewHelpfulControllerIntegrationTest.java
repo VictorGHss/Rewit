@@ -157,7 +157,7 @@ class ReviewHelpfulControllerIntegrationTest {
                 "Avaliação para testes de API com Helpful.",
                 false,
                 false,
-                status,
+                ReviewStatus.ACTIVE,
                 visibility,
                 -23.5505,
                 -46.6333,
@@ -167,6 +167,9 @@ class ReviewHelpfulControllerIntegrationTest {
         );
         review.addTarget(new ReviewTarget(null, revId, target.getId(), BigDecimal.valueOf(4.5), "Muito bom"));
         Review saved = reviewRepository.save(review);
+        if (status != ReviewStatus.ACTIVE) {
+            com.rewit.config.PrivilegedTestDatabase.setReviewStatus(saved.getId(), status.name());
+        }
         reviewTargetRepository.save(review.getTargets().get(0));
         return saved;
     }

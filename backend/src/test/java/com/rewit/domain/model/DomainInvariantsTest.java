@@ -110,13 +110,13 @@ class DomainInvariantsTest {
 
         // Sem reviewId associado
         assertThrows(BusinessException.class, () ->
-                new CheckIn(null, null, userId, placeId, -25.42, -49.27, 25.0, null)
+                new CheckIn(null, null, userId, placeId, -25.42, -49.27, null, null)
         );
 
         // Distância negativa
         UUID reviewId = UUID.randomUUID();
         assertThrows(BusinessException.class, () ->
-                new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, -5.0, null)
+                new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, -5.0, CheckInStatus.VERIFIED)
         );
     }
 
@@ -146,11 +146,12 @@ class DomainInvariantsTest {
         UUID userId = UUID.randomUUID();
         UUID placeId = UUID.randomUUID();
 
-        // Criação com status nulo padrão
-        CheckIn checkIn = new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, 10.0, null);
+        // Criação com status nulo padrão (PENDING não retém distância)
+        CheckIn checkIn = new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, null, null);
 
         assertEquals(CheckInStatus.PENDING, checkIn.getStatus(), "Novo CheckIn deve iniciar como PENDING");
         assertNull(checkIn.getVerifiedAt(), "CheckIn PENDING deve possuir verifiedAt estritamente null");
+        assertNull(checkIn.getDistanceToCentroidMeters(), "CheckIn PENDING não deve possuir distância persistível");
         assertEquals(VerificationMethod.GPS, checkIn.getVerificationMethod(), "Método padrão deve ser GPS");
     }
 
@@ -161,29 +162,31 @@ class DomainInvariantsTest {
         UUID userId = UUID.randomUUID();
         UUID placeId = UUID.randomUUID();
 
-        CheckIn checkIn = new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, 15.0, CheckInStatus.PENDING);
+        CheckIn checkIn = new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, null, CheckInStatus.PENDING);
         assertNull(checkIn.getVerifiedAt());
 
         // Transição explícita para VERIFIED
-        checkIn.verify();
+        checkIn.verify(Instant.now(), 15.0);
         assertEquals(CheckInStatus.VERIFIED, checkIn.getStatus());
         assertNotNull(checkIn.getVerifiedAt(), "CheckIn VERIFIED deve possuir verifiedAt preenchido");
+        assertEquals(15.0, checkIn.getDistanceToCentroidMeters());
 
         // Transição para REJECTED
         checkIn.reject();
         assertEquals(CheckInStatus.REJECTED, checkIn.getStatus());
         assertNull(checkIn.getVerifiedAt(), "CheckIn REJECTED não pode possuir verifiedAt");
+        assertNull(checkIn.getDistanceToCentroidMeters(), "CheckIn REJECTED deve limpar distância");
 
         // Tentativa de instanciar PENDING com verifiedAt não-nulo deve ser rejeitada
         BusinessException exPending = assertThrows(BusinessException.class, () ->
-                new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, 15.0,
+                new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, null,
                         CheckInStatus.PENDING, VerificationMethod.GPS, Instant.now())
         );
         assertEquals("INVALID_VERIFIED_AT", exPending.getErrorCode());
 
         // Tentativa de instanciar REJECTED com verifiedAt não-nulo deve ser rejeitada
         BusinessException exRejected = assertThrows(BusinessException.class, () ->
-                new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, 15.0,
+                new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, null,
                         CheckInStatus.REJECTED, VerificationMethod.GPS, Instant.now())
         );
         assertEquals("INVALID_VERIFIED_AT", exRejected.getErrorCode());
@@ -197,7 +200,7 @@ class DomainInvariantsTest {
         UUID placeId = UUID.randomUUID();
 
         // Check-in com QR_CODE ou NFC deve iniciar PENDING se status for null
-        CheckIn qrCheckIn = new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, 5.0,
+        CheckIn qrCheckIn = new CheckIn(null, reviewId, userId, placeId, -25.42, -49.27, null,
                 null, VerificationMethod.QR_CODE);
 
         assertEquals(VerificationMethod.QR_CODE, qrCheckIn.getVerificationMethod());
@@ -218,23 +221,23 @@ class DomainInvariantsTest {
                 -25.42, -49.27, 10.0);
 
         // Check-in consistente criado via factory/construtor de Review
-        CheckIn consistentCheckIn = new CheckIn(null, reviewWithPlace, -25.42, -49.27, 12.0, VerificationMethod.GPS);
+        CheckIn consistentCheckIn = new CheckIn(null, reviewWithPlace, -25.42, -49.27, null, VerificationMethod.GPS);
         assertDoesNotThrow(() -> consistentCheckIn.validateConsistencyWith(reviewWithPlace));
 
         // Inconsistência 1: review_id diferente
-        CheckIn wrongReviewCheckIn = new CheckIn(null, UUID.randomUUID(), userId, placeId, -25.42, -49.27, 12.0, CheckInStatus.PENDING);
+        CheckIn wrongReviewCheckIn = new CheckIn(null, UUID.randomUUID(), userId, placeId, -25.42, -49.27, null, CheckInStatus.PENDING);
         BusinessException ex1 = assertThrows(BusinessException.class, () ->
                 wrongReviewCheckIn.validateConsistencyWith(reviewWithPlace));
         assertEquals("INCONSISTENT_CHECKIN_REVIEW", ex1.getErrorCode());
 
         // Inconsistência 2: user_id diferente
-        CheckIn wrongUserCheckIn = new CheckIn(null, reviewWithPlace.getId(), anotherUserId, placeId, -25.42, -49.27, 12.0, CheckInStatus.PENDING);
+        CheckIn wrongUserCheckIn = new CheckIn(null, reviewWithPlace.getId(), anotherUserId, placeId, -25.42, -49.27, null, CheckInStatus.PENDING);
         BusinessException ex2 = assertThrows(BusinessException.class, () ->
                 wrongUserCheckIn.validateConsistencyWith(reviewWithPlace));
         assertEquals("INCONSISTENT_CHECKIN_USER", ex2.getErrorCode());
 
         // Inconsistência 3: place_id diferente
-        CheckIn wrongPlaceCheckIn = new CheckIn(null, reviewWithPlace.getId(), userId, anotherPlaceId, -25.42, -49.27, 12.0, CheckInStatus.PENDING);
+        CheckIn wrongPlaceCheckIn = new CheckIn(null, reviewWithPlace.getId(), userId, anotherPlaceId, -25.42, -49.27, null, CheckInStatus.PENDING);
         BusinessException ex3 = assertThrows(BusinessException.class, () ->
                 wrongPlaceCheckIn.validateConsistencyWith(reviewWithPlace));
         assertEquals("INCONSISTENT_CHECKIN_PLACE", ex3.getErrorCode());
@@ -242,9 +245,9 @@ class DomainInvariantsTest {
         // Inconsistência 4: Review sem context_place_id não pode receber CheckIn
         Review reviewWithoutPlace = new Review(null, userId, null, "Avaliação genérica de produto", false, null, null, null);
         assertThrows(BusinessException.class, () ->
-                new CheckIn(null, reviewWithoutPlace, -25.42, -49.27, 10.0, VerificationMethod.GPS));
+                new CheckIn(null, reviewWithoutPlace, -25.42, -49.27, null, VerificationMethod.GPS));
 
-        CheckIn orphanPlaceCheckIn = new CheckIn(null, reviewWithoutPlace.getId(), userId, placeId, -25.42, -49.27, 10.0, CheckInStatus.PENDING);
+        CheckIn orphanPlaceCheckIn = new CheckIn(null, reviewWithoutPlace.getId(), userId, placeId, -25.42, -49.27, null, CheckInStatus.PENDING);
         BusinessException ex4 = assertThrows(BusinessException.class, () ->
                 orphanPlaceCheckIn.validateConsistencyWith(reviewWithoutPlace));
         assertEquals("CHECKIN_REQUIRES_CONTEXT_PLACE", ex4.getErrorCode());
@@ -284,7 +287,7 @@ class DomainInvariantsTest {
         assertFalse(review.isVerifiedOnSite(), "Novo review inicia com isVerifiedOnSite = false");
 
         // Anexar CheckIn PENDING: Review permanece não-verificada
-        CheckIn pendingCheckIn = new CheckIn(null, review, -25.42, -49.27, 20.0, VerificationMethod.GPS);
+        CheckIn pendingCheckIn = new CheckIn(null, review, -25.42, -49.27, null, VerificationMethod.GPS);
         review.attachCheckIn(pendingCheckIn);
         assertFalse(review.isVerifiedOnSite(), "Review com CheckIn PENDING não pode ser verifiedOnSite");
 
@@ -321,10 +324,10 @@ class DomainInvariantsTest {
 
         // CheckIn com latitude inválida
         assertThrows(BusinessException.class, () ->
-                new CheckIn(null, reviewId, userId, placeId, -91.0, -49.27, 10.0, CheckInStatus.PENDING));
+                new CheckIn(null, reviewId, userId, placeId, -91.0, -49.27, null, CheckInStatus.PENDING));
 
         // CheckIn com longitude inválida
         assertThrows(BusinessException.class, () ->
-                new CheckIn(null, reviewId, userId, placeId, -25.42, 181.0, 10.0, CheckInStatus.PENDING));
+                new CheckIn(null, reviewId, userId, placeId, -25.42, 181.0, null, CheckInStatus.PENDING));
     }
 }

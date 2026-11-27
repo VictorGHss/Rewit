@@ -12,9 +12,12 @@ import com.rewit.domain.enums.DiscussionStatus;
 import com.rewit.domain.model.DiscussionModerationAuditLog;
 import com.rewit.domain.model.DiscussionReport;
 import com.rewit.domain.model.ReviewDiscussion;
+import com.rewit.infrastructure.persistence.routing.ModerationTransactional;
+import com.rewit.infrastructure.security.ModerationAuditMacService;
+import com.rewit.infrastructure.security.ModerationAuditPayload;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -40,6 +43,20 @@ public class ModerateDiscussionUseCase {
     private final DiscussionReportRepository discussionReportRepository;
     private final DiscussionModerationAuditLogRepository auditLogRepository;
     private final ModeratorRolePolicy moderatorRolePolicy;
+    private final ModerationAuditMacService moderationAuditMacService;
+
+    @Autowired
+    public ModerateDiscussionUseCase(DiscussionRepository discussionRepository,
+                                     DiscussionReportRepository discussionReportRepository,
+                                     DiscussionModerationAuditLogRepository auditLogRepository,
+                                     ModeratorRolePolicy moderatorRolePolicy,
+                                     ModerationAuditMacService moderationAuditMacService) {
+        this.discussionRepository = Objects.requireNonNull(discussionRepository, "DiscussionRepository must not be null");
+        this.discussionReportRepository = Objects.requireNonNull(discussionReportRepository, "DiscussionReportRepository must not be null");
+        this.auditLogRepository = Objects.requireNonNull(auditLogRepository, "DiscussionModerationAuditLogRepository must not be null");
+        this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
+        this.moderationAuditMacService = Objects.requireNonNull(moderationAuditMacService, "ModerationAuditMacService must not be null");
+    }
 
     public ModerateDiscussionUseCase(DiscussionRepository discussionRepository,
                                      DiscussionReportRepository discussionReportRepository,
@@ -49,14 +66,15 @@ public class ModerateDiscussionUseCase {
         this.discussionReportRepository = Objects.requireNonNull(discussionReportRepository, "DiscussionReportRepository must not be null");
         this.auditLogRepository = Objects.requireNonNull(auditLogRepository, "DiscussionModerationAuditLogRepository must not be null");
         this.moderatorRolePolicy = Objects.requireNonNull(moderatorRolePolicy, "ModeratorRolePolicy must not be null");
+        this.moderationAuditMacService = null;
     }
 
-    @Transactional
+    @ModerationTransactional
     public ModerateDiscussionResult execute(ModerateDiscussionCommand command) {
         validate(command);
         String reasonCode = command.reasonCode().trim();
         String justification = command.justification().trim();
-        Instant now = command.now() != null ? command.now() : Instant.now();
+        Instant now = ModerationAuditPayload.canonicalTimestamp(command.now());
 
         // Estado e role atuais do moderador antes do lock: o JWT, e a role nele, pode ser anterior a uma desativação
         // ou a um rebaixamento (conta inoperante 401 ACCOUNT_DISABLED; sem MODERATOR/ADMIN 403 FORBIDDEN)
@@ -98,9 +116,24 @@ public class ModerateDiscussionUseCase {
         ReviewDiscussion saved = discussionRepository.save(discussion);
         discussionReportRepository.saveAll(pendingReports);
 
-        // 5. Auditoria append-only
+        // 5. Auditoria append-only criptograficamente autenticada
+        UUID auditId = UUID.randomUUID();
+        String authenticityMac = moderationAuditMacService != null
+                ? moderationAuditMacService.computeMac(ModerationAuditPayload.forDiscussionModeration(
+                        auditId,
+                        discussion.getId(),
+                        command.moderatorUserId(),
+                        command.action().name(),
+                        command.action().decision().name(),
+                        reasonCode,
+                        justification,
+                        previousStatus.name(),
+                        saved.getStatus().name(),
+                        pendingReports.size(),
+                        now))
+                : null;
         DiscussionModerationAuditLog auditLog = auditLogRepository.save(new DiscussionModerationAuditLog(
-                UUID.randomUUID(),
+                auditId,
                 discussion.getId(),
                 command.moderatorUserId(),
                 command.action(),
@@ -110,7 +143,8 @@ public class ModerateDiscussionUseCase {
                 previousStatus,
                 saved.getStatus(),
                 pendingReports.size(),
-                now
+                now,
+                authenticityMac
         ));
 
         return new ModerateDiscussionResult(auditLog, saved);

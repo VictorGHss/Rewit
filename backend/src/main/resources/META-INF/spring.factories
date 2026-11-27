@@ -1,2 +1,10 @@
-org.springframework.context.ApplicationContextInitializer=com.rewit.config.ExternalTestEnvironmentValidator
-org.springframework.boot.diagnostics.FailureAnalyzer=com.rewit.config.ExternalTestConfigurationFailureAnalyzer
+org.springframework.context.ApplicationContextInitializer=\
+com.rewit.config.RuntimeProfileEnvironmentValidator,\
+com.rewit.config.ProductionEnvironmentValidator,\
+com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRoleEnvironmentValidator,\
+com.rewit.config.ExternalTestEnvironmentValidator
+org.springframework.boot.diagnostics.FailureAnalyzer=\
+com.rewit.config.RuntimeProfileConfigurationFailureAnalyzer,\
+com.rewit.config.ProductionConfigurationFailureAnalyzer,\
+com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRoleFailureAnalyzer,\
+com.rewit.config.ExternalTestConfigurationFailureAnalyzer
