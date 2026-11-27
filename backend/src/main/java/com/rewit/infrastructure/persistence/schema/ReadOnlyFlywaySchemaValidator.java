@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.schema;
 
+import com.zaxxer.hikari.HikariDataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationInfoService;
@@ -13,13 +14,17 @@ import org.springframework.jdbc.datasource.DelegatingDataSource;
 import javax.sql.DataSource;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
+import java.sql.CallableStatement;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Validador fail-closed e estritamente somente leitura do histórico de migrations Flyway na
@@ -206,10 +211,13 @@ public class ReadOnlyFlywaySchemaValidator {
     }
 
     /**
-     * Decorador de {@link DataSource} que impõe {@code readOnly=true} em toda conexão aberta
-     * (garantindo {@code SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY} no PostgreSQL)
-     * e recusa qualquer tentativa de reativar escrita via {@code setReadOnly(false)}, restaurando
-     * o estado original apenas ao devolver a conexão física ao pool Hikari no {@code close()}.
+     * Decorador de {@link DataSource} que impõe {@code readOnly=true} e
+     * {@code SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY} em toda conexão aberta,
+     * bloqueia {@code setReadOnly(false)}, {@code unwrap()} e {@code isWrapperFor()} (inclusive em
+     * {@code Statement}, {@code PreparedStatement}, {@code CallableStatement} e {@code DatabaseMetaData})
+     * e garante descarte físico via eviction do {@link HikariDataSource} (ou {@link Connection#abort})
+     * sempre que o setup ou a restauração confirmada de {@code READ WRITE} falharem — nunca devolvendo
+     * conexão contaminada ao pool.
      */
     static final class ReadOnlyEnforcingDataSource extends DelegatingDataSource {
 
@@ -227,30 +235,58 @@ public class ReadOnlyFlywaySchemaValidator {
             return enforceReadOnly(super.getConnection(username, password));
         }
 
-        private static Connection enforceReadOnly(Connection delegate) throws SQLException {
-            boolean originalReadOnly = delegate.isReadOnly();
+        @Override
+        public <T> T unwrap(Class<T> iface) throws SQLException {
+            throw new SQLException(
+                    "Operação unwrap() bloqueada: DataSource restrito à validação somente leitura do schema Flyway.",
+                    "25006");
+        }
+
+        @Override
+        public boolean isWrapperFor(Class<?> iface) {
+            return false;
+        }
+
+        private Connection enforceReadOnly(Connection delegate) throws SQLException {
+            boolean originalReadOnly;
+            boolean originalAutoCommit;
             try {
+                originalReadOnly = delegate.isReadOnly();
+                originalAutoCommit = delegate.getAutoCommit();
                 if (!originalReadOnly) {
                     delegate.setReadOnly(true);
                 }
                 // Impõe READ ONLY diretamente no servidor PostgreSQL (independente do readOnlyMode do pgjdbc)
-                try (java.sql.Statement st = delegate.createStatement()) {
+                try (Statement st = delegate.createStatement()) {
                     st.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
                 }
-            } catch (SQLException e) {
-                try {
-                    delegate.close();
-                } catch (SQLException suppressed) {
-                    e.addSuppressed(suppressed);
+                String effectiveReadOnly = queryDefaultTransactionReadOnly(delegate);
+                if (!"on".equalsIgnoreCase(effectiveReadOnly)) {
+                    throw new SQLException(
+                            "Falha ao confirmar default_transaction_read_only=on na sessão PostgreSQL.",
+                            "25006");
                 }
-                throw e;
+            } catch (SQLException | RuntimeException setupError) {
+                discardContaminatedConnection(delegate, setupError);
+                throw setupError;
             }
 
+            AtomicBoolean closed = new AtomicBoolean(false);
             return (Connection) Proxy.newProxyInstance(
                     Connection.class.getClassLoader(),
                     new Class<?>[]{Connection.class},
                     (proxy, method, args) -> {
+                        Connection connectionProxy = (Connection) proxy;
                         String name = method.getName();
+
+                        if ("unwrap".equals(name)) {
+                            throw new SQLException(
+                                    "Operação unwrap() bloqueada: conexão restrita ao wrapper somente leitura.",
+                                    "25006");
+                        }
+                        if ("isWrapperFor".equals(name)) {
+                            return Boolean.FALSE;
+                        }
                         if ("setReadOnly".equals(name) && args != null && args.length == 1
                                 && Boolean.FALSE.equals(args[0])) {
                             throw new SQLException(
@@ -258,34 +294,186 @@ public class ReadOnlyFlywaySchemaValidator {
                                     "25006");
                         }
                         if ("close".equals(name)) {
-                            SQLException restoreError = null;
-                            try {
-                                if (!delegate.isClosed() && !originalReadOnly) {
-                                    if (!delegate.getAutoCommit()) {
-                                        delegate.rollback();
-                                    }
-                                    try (java.sql.Statement st = delegate.createStatement()) {
-                                        st.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE");
-                                    }
-                                    delegate.setReadOnly(false);
-                                }
-                            } catch (SQLException e) {
-                                restoreError = e;
-                            } finally {
-                                try {
-                                    delegate.close();
-                                } catch (SQLException closeEx) {
-                                    if (restoreError != null) {
-                                        restoreError.addSuppressed(closeEx);
-                                    } else {
-                                        restoreError = closeEx;
-                                    }
-                                }
+                            if (!closed.compareAndSet(false, true)) {
+                                return null;
                             }
-                            if (restoreError != null) {
-                                throw restoreError;
-                            }
+                            closeWithVerifiedRestoreOrEvict(delegate, originalReadOnly, originalAutoCommit);
                             return null;
+                        }
+
+                        Object result;
+                        try {
+                            result = method.invoke(delegate, args);
+                        } catch (InvocationTargetException e) {
+                            throw e.getTargetException();
+                        }
+
+                        if (result == null) {
+                            return null;
+                        }
+                        if ("getMetaData".equals(name) && result instanceof DatabaseMetaData metaData) {
+                            return wrapMetaData(metaData, connectionProxy);
+                        }
+                        if (result instanceof CallableStatement cs) {
+                            return wrapStatement(cs, CallableStatement.class, connectionProxy);
+                        }
+                        if (result instanceof PreparedStatement ps) {
+                            return wrapStatement(ps, PreparedStatement.class, connectionProxy);
+                        }
+                        if (result instanceof Statement st) {
+                            return wrapStatement(st, Statement.class, connectionProxy);
+                        }
+                        return result;
+                    }
+            );
+        }
+
+        private void closeWithVerifiedRestoreOrEvict(
+                Connection delegate,
+                boolean originalReadOnly,
+                boolean originalAutoCommit
+        ) throws SQLException {
+            boolean alreadyClosed;
+            try {
+                alreadyClosed = delegate.isClosed();
+            } catch (SQLException | RuntimeException checkError) {
+                discardContaminatedConnection(delegate, checkError);
+                throw checkError;
+            }
+            if (alreadyClosed) {
+                return;
+            }
+
+            try {
+                if (!delegate.getAutoCommit()) {
+                    delegate.rollback();
+                    if (originalAutoCommit) {
+                        delegate.setAutoCommit(true);
+                    }
+                }
+                if (!originalReadOnly) {
+                    try (Statement st = delegate.createStatement()) {
+                        st.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE");
+                    }
+                    String restoredReadOnly = queryDefaultTransactionReadOnly(delegate);
+                    if (!"off".equalsIgnoreCase(restoredReadOnly)) {
+                        throw new SQLException(
+                                "Falha ao confirmar restauração de default_transaction_read_only=off antes de devolver conexão ao pool.",
+                                "25006");
+                    }
+                    delegate.setReadOnly(false);
+                    if (delegate.isReadOnly()) {
+                        throw new SQLException(
+                                "Conexão permaneceu em readOnly=true após restauração.",
+                                "25006");
+                    }
+                }
+            } catch (SQLException | RuntimeException restoreError) {
+                // Caminho de falha na restauração: NUNCA chama delegate.close() como retorno normal ao pool.
+                // Evicta/aborta a conexão física e propaga o erro para manter inicialização fail-closed.
+                discardContaminatedConnection(delegate, restoreError);
+                throw restoreError;
+            }
+
+            // Caminho normal: restauração confirmada; devolve conexão limpa ao pool.
+            delegate.close();
+        }
+
+        private void discardContaminatedConnection(Connection delegate, Throwable primaryFailure) {
+            boolean evictedByHikari = false;
+            HikariDataSource hikari = resolveHikariDataSource(getTargetDataSource());
+            if (hikari != null && delegate.getClass().getName().startsWith("com.zaxxer.hikari")) {
+                try {
+                    hikari.evictConnection(delegate);
+                    evictedByHikari = true;
+                    log.warn("Conexão somente leitura contaminada evictada do HikariCP (motivo={}).",
+                            primaryFailure.getClass().getSimpleName());
+                } catch (RuntimeException evictError) {
+                    primaryFailure.addSuppressed(evictError);
+                    log.error("Falha ao evictar conexão contaminada no HikariCP (erro={}); acionando fallback abort().",
+                            evictError.getClass().getSimpleName());
+                }
+            }
+
+            if (evictedByHikari) {
+                return;
+            }
+
+            try {
+                delegate.abort(Runnable::run);
+                boolean closedAfterAbort = false;
+                try {
+                    closedAfterAbort = delegate.isClosed();
+                } catch (SQLException ignored) {
+                    closedAfterAbort = true;
+                }
+                if (!closedAfterAbort) {
+                    SQLException unverifiedDiscard = new SQLException(
+                            "Não foi possível confirmar o encerramento físico da conexão contaminada após abort().",
+                            "08006");
+                    primaryFailure.addSuppressed(unverifiedDiscard);
+                    log.error("Conexão contaminada permaneceu aberta após abort().");
+                } else {
+                    log.warn("Conexão somente leitura contaminada descartada via abort() (motivo={}).",
+                            primaryFailure.getClass().getSimpleName());
+                }
+            } catch (SQLException | RuntimeException abortError) {
+                primaryFailure.addSuppressed(abortError);
+                log.error("Falha ao descartar conexão contaminada via abort() (erro={}).",
+                        abortError.getClass().getSimpleName());
+            }
+        }
+
+        private static HikariDataSource resolveHikariDataSource(DataSource ds) {
+            DataSource current = ds;
+            int depth = 0;
+            while (current != null && depth < 10) {
+                if (current instanceof HikariDataSource hikari) {
+                    return hikari;
+                }
+                if (current instanceof DelegatingDataSource delegating) {
+                    current = delegating.getTargetDataSource();
+                    depth++;
+                    continue;
+                }
+                try {
+                    if (current.isWrapperFor(HikariDataSource.class)) {
+                        return current.unwrap(HikariDataSource.class);
+                    }
+                } catch (SQLException | RuntimeException ignored) {
+                    return null;
+                }
+                break;
+            }
+            return null;
+        }
+
+        private static String queryDefaultTransactionReadOnly(Connection delegate) throws SQLException {
+            try (Statement st = delegate.createStatement();
+                 ResultSet rs = st.executeQuery("SHOW default_transaction_read_only")) {
+                if (!rs.next()) {
+                    throw new SQLException("SHOW default_transaction_read_only não retornou linha.", "08006");
+                }
+                return rs.getString(1);
+            }
+        }
+
+        private static DatabaseMetaData wrapMetaData(DatabaseMetaData delegate, Connection connectionProxy) {
+            return (DatabaseMetaData) Proxy.newProxyInstance(
+                    DatabaseMetaData.class.getClassLoader(),
+                    new Class<?>[]{DatabaseMetaData.class},
+                    (proxy, method, args) -> {
+                        String name = method.getName();
+                        if ("getConnection".equals(name)) {
+                            return connectionProxy;
+                        }
+                        if ("unwrap".equals(name)) {
+                            throw new SQLException(
+                                    "Operação unwrap() bloqueada em DatabaseMetaData de conexão somente leitura.",
+                                    "25006");
+                        }
+                        if ("isWrapperFor".equals(name)) {
+                            return Boolean.FALSE;
                         }
                         try {
                             return method.invoke(delegate, args);
@@ -294,6 +482,37 @@ public class ReadOnlyFlywaySchemaValidator {
                         }
                     }
             );
+        }
+
+        private static <S extends Statement> S wrapStatement(
+                S delegate,
+                Class<S> statementInterface,
+                Connection connectionProxy
+        ) {
+            Object proxyInstance = Proxy.newProxyInstance(
+                    statementInterface.getClassLoader(),
+                    new Class<?>[]{statementInterface},
+                    (proxy, method, args) -> {
+                        String name = method.getName();
+                        if ("getConnection".equals(name)) {
+                            return connectionProxy;
+                        }
+                        if ("unwrap".equals(name)) {
+                            throw new SQLException(
+                                    "Operação unwrap() bloqueada em Statement de conexão somente leitura.",
+                                    "25006");
+                        }
+                        if ("isWrapperFor".equals(name)) {
+                            return Boolean.FALSE;
+                        }
+                        try {
+                            return method.invoke(delegate, args);
+                        } catch (InvocationTargetException e) {
+                            throw e.getTargetException();
+                        }
+                    }
+            );
+            return statementInterface.cast(proxyInstance);
         }
     }
 }

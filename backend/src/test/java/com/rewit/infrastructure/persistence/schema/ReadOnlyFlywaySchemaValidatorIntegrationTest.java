@@ -5,15 +5,16 @@ import com.rewit.config.TestInfrastructureConfig;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.postgresql.PGConnection;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.diagnostics.FailureAnalysis;
 import org.springframework.context.ConfigurableApplicationContext;
 
+import javax.sql.DataSource;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -24,6 +25,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.security.SecureRandom;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -35,6 +37,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -42,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -311,6 +315,184 @@ class ReadOnlyFlywaySchemaValidatorIntegrationTest {
         assertTrue(health.body().contains("UP"));
     }
 
+    @Test
+    @DisplayName("R1-C: bloqueia unwrap(), isWrapperFor() e escape via DatabaseMetaData.getConnection() / Statement.getConnection()")
+    void blocksUnwrapIsWrapperForAndIndirectConnectionEscape() throws SQLException {
+        DisposableDb db = createDisposableDatabase();
+        migrateUpTo(db, null);
+
+        HikariDataSource appPool = openAppPool(db, 1);
+        ReadOnlyFlywaySchemaValidator.ReadOnlyEnforcingDataSource roDs =
+                new ReadOnlyFlywaySchemaValidator.ReadOnlyEnforcingDataSource(appPool);
+
+        // DataSource wrapper bloqueia unwrap/isWrapperFor
+        assertFalse(roDs.isWrapperFor(HikariDataSource.class));
+        assertFalse(roDs.isWrapperFor(DataSource.class));
+        SQLException dsUnwrapEx = assertThrows(SQLException.class, () -> roDs.unwrap(HikariDataSource.class));
+        assertEquals("25006", dsUnwrapEx.getSQLState());
+
+        try (Connection roConn = roDs.getConnection()) {
+            // Connection proxy bloqueia unwrap/isWrapperFor para Connection e PGConnection
+            assertFalse(roConn.isWrapperFor(Connection.class));
+            assertFalse(roConn.isWrapperFor(PGConnection.class));
+            assertEquals("25006",
+                    assertThrows(SQLException.class, () -> roConn.unwrap(Connection.class)).getSQLState());
+            assertEquals("25006",
+                    assertThrows(SQLException.class, () -> roConn.unwrap(PGConnection.class)).getSQLState());
+
+            // DatabaseMetaData.getConnection() devolve o próprio proxy e bloqueia unwrap/isWrapperFor
+            DatabaseMetaData meta = roConn.getMetaData();
+            assertSame(roConn, meta.getConnection(), "DatabaseMetaData.getConnection() deve retornar o proxy somente leitura");
+            assertFalse(meta.isWrapperFor(DatabaseMetaData.class));
+            assertEquals("25006",
+                    assertThrows(SQLException.class, () -> meta.unwrap(DatabaseMetaData.class)).getSQLState());
+            assertEquals("25006",
+                    assertThrows(SQLException.class, () -> meta.getConnection().setReadOnly(false)).getSQLState());
+
+            // Statement e PreparedStatement devolvem o próprio proxy em getConnection() e bloqueiam unwrap/isWrapperFor
+            try (Statement st = roConn.createStatement()) {
+                assertSame(roConn, st.getConnection());
+                assertFalse(st.isWrapperFor(Statement.class));
+                assertEquals("25006",
+                        assertThrows(SQLException.class, () -> st.unwrap(Statement.class)).getSQLState());
+                assertEquals("25006",
+                        assertThrows(SQLException.class, () -> st.getConnection().setReadOnly(false)).getSQLState());
+            }
+            try (PreparedStatement ps = roConn.prepareStatement("SELECT 1")) {
+                assertSame(roConn, ps.getConnection());
+                assertFalse(ps.isWrapperFor(PreparedStatement.class));
+                assertEquals("25006",
+                        assertThrows(SQLException.class, () -> ps.unwrap(PreparedStatement.class)).getSQLState());
+                assertEquals("25006",
+                        assertThrows(SQLException.class, () -> ps.getConnection().setReadOnly(false)).getSQLState());
+            }
+        }
+
+        // Pool saudável e sem leaks após uso
+        assertEquals(0, appPool.getHikariPoolMXBean().getActiveConnections());
+    }
+
+    @Test
+    @DisplayName("R1-B: HikariCP real comprova retorno limpo no caminho normal, eviction física na falha de restauração, fallback abort() e isolamento de outras conexões")
+    void hikariRealEvictsContaminatedConnectionsRecoversHealthyPoolAndPreservesOtherConnections() throws SQLException {
+        DisposableDb db = createDisposableDatabase();
+        migrateUpTo(db, null);
+
+        // 1. Caminho normal com pool de 1 conexão: mesma conexão física (pid1) retorna saudável (off) sem leak
+        HikariDataSource singlePool = openAppPool(db, 1);
+        ReadOnlyFlywaySchemaValidator.ReadOnlyEnforcingDataSource roSingle =
+                new ReadOnlyFlywaySchemaValidator.ReadOnlyEnforcingDataSource(singlePool);
+        int normalPid;
+        try (Connection c = roSingle.getConnection()) {
+            normalPid = queryBackendPid(c);
+            assertEquals("on", queryReadOnlySetting(c));
+        }
+        assertEquals(0, singlePool.getHikariPoolMXBean().getActiveConnections());
+        try (Connection reused = singlePool.getConnection()) {
+            assertEquals(normalPid, queryBackendPid(reused), "No caminho saudável a conexão limpa pode ser reutilizada");
+            assertEquals("off", queryReadOnlySetting(reused));
+        }
+        assertEquals(0, singlePool.getHikariPoolMXBean().getActiveConnections());
+
+        // 2. Falha durante validação (banco vazio) não vaza nem deixa pool em read-only
+        DisposableDb emptyDb = createDisposableDatabase();
+        HikariDataSource emptyPool = openAppPool(emptyDb, 1);
+        assertThrows(SchemaValidationException.class, () -> new ReadOnlyFlywaySchemaValidator(emptyPool).validate());
+        assertEquals(0, emptyPool.getHikariPoolMXBean().getActiveConnections());
+        try (Connection c = emptyPool.getConnection()) {
+            assertEquals("off", queryReadOnlySetting(c));
+        }
+
+        // 3. Pool com 2 conexões: falha na restauração de pid1 (sessão derrubada) evicta pid1 sem fechar o pool nem afetar pid2
+        HikariDataSource dualPool = openAppPool(db, 2);
+        ReadOnlyFlywaySchemaValidator.ReadOnlyEnforcingDataSource roDual =
+                new ReadOnlyFlywaySchemaValidator.ReadOnlyEnforcingDataSource(dualPool);
+
+        try (Connection healthyConn = dualPool.getConnection()) {
+            int healthyPid = queryBackendPid(healthyConn);
+            assertEquals("off", queryReadOnlySetting(healthyConn));
+
+            Connection roConn = roDual.getConnection();
+            int brokenPid = queryBackendPid(roConn);
+            assertNotEquals(healthyPid, brokenPid);
+            assertEquals("on", queryReadOnlySetting(roConn));
+
+            // Encerra a sessão física de brokenPid no servidor PostgreSQL para forçar falha real na restauração
+            terminateBackend(db, brokenPid);
+
+            // close() falha na restauração e evicta brokenPid (nunca devolve ao pool)
+            assertThrows(SQLException.class, roConn::close);
+
+            // Pool continua aberto e a outra conexão saudável (healthyPid) segue 100% operacional
+            assertFalse(dualPool.isClosed(), "Eviction de uma conexão não pode fechar o pool inteiro");
+            assertEquals(healthyPid, queryBackendPid(healthyConn));
+            assertEquals("off", queryReadOnlySetting(healthyConn));
+        }
+
+        assertEquals(0, dualPool.getHikariPoolMXBean().getActiveConnections(), "Zero leaks após eviction");
+        // Próximas aquisições recebem somente conexões saudáveis com default_transaction_read_only=off
+        try (Connection fresh1 = dualPool.getConnection();
+             Connection fresh2 = dualPool.getConnection()) {
+            assertEquals("off", queryReadOnlySetting(fresh1));
+            assertEquals("off", queryReadOnlySetting(fresh2));
+        }
+        assertEquals(0, dualPool.getHikariPoolMXBean().getActiveConnections());
+
+        // 4. Fallback abort() quando HikariDataSource.evictConnection lança RuntimeException
+        AtomicInteger evictAttempts = new AtomicInteger(0);
+        HikariConfig failingEvictCfg = new HikariConfig();
+        failingEvictCfg.setPoolName("roval-failevict-" + db.name());
+        failingEvictCfg.setJdbcUrl(db.url());
+        failingEvictCfg.setUsername(INFRA.appDbUser());
+        failingEvictCfg.setPassword(INFRA.appDbPassword());
+        failingEvictCfg.setMaximumPoolSize(1);
+        failingEvictCfg.setMinimumIdle(1);
+        HikariDataSource failingEvictPool = new HikariDataSource(failingEvictCfg) {
+            @Override
+            public void evictConnection(Connection connection) {
+                evictAttempts.incrementAndGet();
+                throw new IllegalStateException("Falha simulada em evictConnection");
+            }
+        };
+        poolsToClose.add(failingEvictPool);
+
+        ReadOnlyFlywaySchemaValidator.ReadOnlyEnforcingDataSource roFallback =
+                new ReadOnlyFlywaySchemaValidator.ReadOnlyEnforcingDataSource(failingEvictPool);
+        Connection fallbackConn = roFallback.getConnection();
+        int evictedPid = queryBackendPid(fallbackConn);
+        terminateBackend(db, evictedPid);
+
+        SQLException closeEx = assertThrows(SQLException.class, fallbackConn::close);
+        assertEquals(1, evictAttempts.get(), "Deve tentar evictConnection primeiro no HikariDataSource");
+        assertTrue(closeEx.getSuppressed().length >= 1,
+                "Exceção da eviction deve ser preservada como suppressed antes do fallback abort()");
+
+        // Mesmo com falha no evictConnection, o fallback abort() encerra a conexão física e permite nova conexão saudável
+        try (Connection recovered = failingEvictPool.getConnection()) {
+            int newPid = queryBackendPid(recovered);
+            assertNotEquals(evictedPid, newPid, "Conexão contaminada jamais pode ser reutilizada");
+            assertEquals("off", queryReadOnlySetting(recovered));
+        }
+    }
+
+    @Test
+    @DisplayName("R1-E: spring.main.lazy-initialization=true não desativa a validação eager (@Lazy(false)) no startup da API")
+    void lazyInitializationDoesNotBypassReadOnlySchemaValidationOnStartup() throws Exception {
+        DisposableDb emptyDb = createDisposableDatabase();
+        int failedPort = findFreeLoopbackPort();
+        Map<String, Object> props = baseApiPropertiesWithoutFlyway(emptyDb, failedPort);
+        props.put("spring.main.lazy-initialization", "true");
+
+        Exception ex = assertThrows(Exception.class, () -> startApi(props),
+                "Mesmo com spring.main.lazy-initialization=true, a validação do schema deve abortar o startup");
+        Throwable root = rootCause(ex);
+        assertTrue(root instanceof SchemaValidationException,
+                "Esperava SchemaValidationException com lazy-initialization=true, recebeu: " + root);
+        assertFalse(isPortAcceptingConnections(failedPort),
+                "Porta HTTP não pode abrir com lazy-initialization=true diante de banco incompatível");
+        assertFalse(historyTableExists(emptyDb));
+    }
+
     private DisposableDb createDisposableDatabase() throws SQLException {
         String suffix = randomHex(6);
         String dbName = DB_PREFIX + suffix;
@@ -360,16 +542,44 @@ class ReadOnlyFlywaySchemaValidatorIntegrationTest {
     }
 
     private HikariDataSource openAppPool(DisposableDb db) {
+        return openAppPool(db, 2);
+    }
+
+    private HikariDataSource openAppPool(DisposableDb db, int maxPoolSize) {
         HikariConfig cfg = new HikariConfig();
-        cfg.setPoolName("roval-app-" + db.name());
+        cfg.setPoolName("roval-app-" + db.name() + "-" + maxPoolSize);
         cfg.setJdbcUrl(db.url());
         cfg.setUsername(INFRA.appDbUser());
         cfg.setPassword(INFRA.appDbPassword());
-        cfg.setMaximumPoolSize(2);
+        cfg.setMaximumPoolSize(maxPoolSize);
         cfg.setMinimumIdle(1);
         HikariDataSource ds = new HikariDataSource(cfg);
         poolsToClose.add(ds);
         return ds;
+    }
+
+    private static int queryBackendPid(Connection conn) throws SQLException {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT pg_backend_pid()")) {
+            assertTrue(rs.next());
+            return rs.getInt(1);
+        }
+    }
+
+    private static String queryReadOnlySetting(Connection conn) throws SQLException {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SHOW default_transaction_read_only")) {
+            assertTrue(rs.next());
+            return rs.getString(1);
+        }
+    }
+
+    private static void terminateBackend(DisposableDb db, int pid) throws SQLException {
+        try (Connection admin = openSuperuserConnection(db.url());
+             PreparedStatement ps = admin.prepareStatement("SELECT pg_terminate_backend(?)")) {
+            ps.setInt(1, pid);
+            ps.execute();
+        }
     }
 
     private boolean historyTableExists(DisposableDb db) throws SQLException {
