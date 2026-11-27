@@ -1,8 +1,10 @@
 package com.rewit.migration;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -19,6 +21,7 @@ import java.util.Map;
 public final class LocalMigrationRunnerProcessHarness {
 
     static final String ENV_START_GATE_FILE = "REWIT_TEST_START_GATE_FILE";
+    static final String ENV_READY_SIGNAL_FILE = "REWIT_TEST_READY_SIGNAL_FILE";
     static final String ENV_LOCK_TIMEOUT_MS = "REWIT_TEST_LOCK_TIMEOUT_MS";
     static final String ENV_HOLD_LOCK_READY_FILE = "REWIT_TEST_HOLD_LOCK_READY_FILE";
 
@@ -35,7 +38,27 @@ public final class LocalMigrationRunnerProcessHarness {
             return;
         }
 
-        // Sincroniza o disparo simultâneo entre processos JVM independentes via arquivo-barreira
+        // Prepara configuração e pré-carrega RewitMigrationRunner antes de sinalizar prontidão na barreira
+        Duration lockTimeout = RewitMigrationRunner.DEFAULT_LOCK_TIMEOUT;
+        String timeoutMs = rawEnv.get(ENV_LOCK_TIMEOUT_MS);
+        if (timeoutMs != null && !timeoutMs.isBlank()) {
+            lockTimeout = Duration.ofMillis(Long.parseLong(timeoutMs.trim()));
+        }
+
+        Map<String, String> runnerEnv = new HashMap<>();
+        copyIfPresent(rawEnv, runnerEnv, RewitMigrationRunner.ENV_DATABASE_URL);
+        copyIfPresent(rawEnv, runnerEnv, RewitMigrationRunner.ENV_FLYWAY_DB_USER);
+        copyIfPresent(rawEnv, runnerEnv, RewitMigrationRunner.ENV_FLYWAY_DB_PASSWORD);
+
+        Class.forName(RewitMigrationRunner.class.getName(), true, LocalMigrationRunnerProcessHarness.class.getClassLoader());
+
+        // Sinaliza atomicamente ao processo pai que esta JVM atingiu exatamente o ponto de espera da barreira
+        String readySignalPath = rawEnv.get(ENV_READY_SIGNAL_FILE);
+        if (readySignalPath != null && !readySignalPath.isBlank()) {
+            writeMarkerAtomically(Path.of(readySignalPath), "READY");
+        }
+
+        // Aguarda liberação da barreira pelo pai para disparo verdadeiramente simultâneo
         String startGatePath = rawEnv.get(ENV_START_GATE_FILE);
         if (startGatePath != null && !startGatePath.isBlank()) {
             Path gate = Path.of(startGatePath);
@@ -48,17 +71,6 @@ public final class LocalMigrationRunnerProcessHarness {
                 Thread.sleep(10L);
             }
         }
-
-        Duration lockTimeout = RewitMigrationRunner.DEFAULT_LOCK_TIMEOUT;
-        String timeoutMs = rawEnv.get(ENV_LOCK_TIMEOUT_MS);
-        if (timeoutMs != null && !timeoutMs.isBlank()) {
-            lockTimeout = Duration.ofMillis(Long.parseLong(timeoutMs.trim()));
-        }
-
-        Map<String, String> runnerEnv = new HashMap<>();
-        copyIfPresent(rawEnv, runnerEnv, RewitMigrationRunner.ENV_DATABASE_URL);
-        copyIfPresent(rawEnv, runnerEnv, RewitMigrationRunner.ENV_FLYWAY_DB_USER);
-        copyIfPresent(rawEnv, runnerEnv, RewitMigrationRunner.ENV_FLYWAY_DB_PASSWORD);
 
         int exitCode = RewitMigrationRunner.runForLocalIntegrationTest(
                 new String[0],
@@ -85,9 +97,16 @@ public final class LocalMigrationRunnerProcessHarness {
                     System.exit(98);
                 }
             }
-            Files.writeString(readyFile, "LOCKED", StandardCharsets.UTF_8);
+            writeMarkerAtomically(readyFile, "LOCKED");
             Thread.sleep(Duration.ofMinutes(5).toMillis());
         }
+    }
+
+    private static void writeMarkerAtomically(Path targetFile, String payload) throws IOException {
+        Path parent = targetFile.toAbsolutePath().getParent();
+        Path tmpFile = Files.createTempFile(parent, targetFile.getFileName().toString() + ".", ".tmp");
+        Files.writeString(tmpFile, payload, StandardCharsets.UTF_8);
+        Files.move(tmpFile, targetFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
 
     private static void copyIfPresent(Map<String, String> src, Map<String, String> dst, String key) {

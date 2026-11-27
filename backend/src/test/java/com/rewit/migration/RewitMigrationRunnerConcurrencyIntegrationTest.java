@@ -16,6 +16,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -112,12 +113,14 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
         MigratorFixture fixture = provisionManagedDatabaseAndMigrator();
 
         Path startGate = tempDir.resolve("start-gate-empty.flag");
-        ChildProcessHandle procA = startRunnerChildProcess("runner-a", fixture, startGate, null);
-        ChildProcessHandle procB = startRunnerChildProcess("runner-b", fixture, startGate, null);
+        Path readyA = tempDir.resolve("runner-a.ready");
+        Path readyB = tempDir.resolve("runner-b.ready");
+        ChildProcessHandle procA = startRunnerChildProcess("runner-a", fixture, startGate, readyA, null);
+        ChildProcessHandle procB = startRunnerChildProcess("runner-b", fixture, startGate, readyB, null);
 
-        // Aguarda breve inicialização das duas JVMs para que ambas atinjam a barreira e disparem juntas
-        Thread.sleep(600L);
-        Files.writeString(startGate, "GO", StandardCharsets.UTF_8);
+        // Aguarda confirmação explícita de prontidão das duas JVMs no ponto da barreira (sem sleep fixo)
+        awaitAllChildrenReadyOrFailFast(List.of(procA, procB), Duration.ofSeconds(30));
+        releaseStartGateAtomically(startGate);
 
         ChildRunResult resA = awaitProcess(procA, Duration.ofSeconds(120));
         ChildRunResult resB = awaitProcess(procB, Duration.ofSeconds(120));
@@ -149,7 +152,7 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
         assertReadOnlyApiValidatorApproves();
 
         // Terceira execução sequencial comprova idempotência pós-concorrência
-        ChildProcessHandle procC = startRunnerChildProcess("runner-c-idempotent", fixture, null, null);
+        ChildProcessHandle procC = startRunnerChildProcess("runner-c-idempotent", fixture, null, null, null);
         ChildRunResult resC = awaitProcess(procC, Duration.ofSeconds(60));
         assertEquals(RewitMigrationRunner.EXIT_SUCCESS, resC.exitCode,
                 "Execução idempotente deveria concluir com exit=0; stderr=" + resC.stderr);
@@ -179,11 +182,13 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
                 .migrate();
 
         Path startGate = tempDir.resolve("start-gate-v16.flag");
-        ChildProcessHandle procA = startRunnerChildProcess("runner-v16-a", fixture, startGate, null);
-        ChildProcessHandle procB = startRunnerChildProcess("runner-v16-b", fixture, startGate, null);
+        Path readyA = tempDir.resolve("runner-v16-a.ready");
+        Path readyB = tempDir.resolve("runner-v16-b.ready");
+        ChildProcessHandle procA = startRunnerChildProcess("runner-v16-a", fixture, startGate, readyA, null);
+        ChildProcessHandle procB = startRunnerChildProcess("runner-v16-b", fixture, startGate, readyB, null);
 
-        Thread.sleep(600L);
-        Files.writeString(startGate, "GO", StandardCharsets.UTF_8);
+        awaitAllChildrenReadyOrFailFast(List.of(procA, procB), Duration.ofSeconds(30));
+        releaseStartGateAtomically(startGate);
 
         ChildRunResult resA = awaitProcess(procA, Duration.ofSeconds(120));
         ChildRunResult resB = awaitProcess(procB, Duration.ofSeconds(120));
@@ -242,7 +247,7 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
         }
 
         // Após fechamento da sessão detentora, PostgreSQL libera o lock e o próximo runner conclui normalmente
-        ChildProcessHandle afterRelease = startRunnerChildProcess("runner-after-release", fixture, null, 30_000L);
+        ChildProcessHandle afterRelease = startRunnerChildProcess("runner-after-release", fixture, null, null, 30_000L);
         ChildRunResult res = awaitProcess(afterRelease, Duration.ofSeconds(120));
         assertEquals(RewitMigrationRunner.EXIT_SUCCESS, res.exitCode, "stderr=" + res.stderr);
         assertEquals(46, parseMigrationsExecuted(res.stdout));
@@ -257,19 +262,14 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
         Path lockReadyFile = tempDir.resolve("holder-locked.flag");
         ChildProcessHandle holder = startLockHolderChildProcess("lock-holder-crash", fixture, lockReadyFile);
 
-        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
-        while (!Files.exists(lockReadyFile)) {
-            assertTrue(holder.process.isAlive(), "Processo detentor encerrou antes de adquirir o lock");
-            assertTrue(System.nanoTime() < deadline, "Timeout aguardando holder adquirir o lock");
-            Thread.sleep(50L);
-        }
+        awaitAllChildrenReadyOrFailFast(List.of(holder), Duration.ofSeconds(20));
 
         // Mata o processo detentor abruptamente (SIGKILL), sem chance de executar finally/pg_advisory_unlock
         holder.process.destroyForcibly();
         assertTrue(holder.process.waitFor(10, TimeUnit.SECONDS), "Processo morto via SIGKILL deve encerrar");
 
         // Novo runner independente deve adquirir o lock liberado automaticamente pelo PostgreSQL e concluir V1–V46
-        ChildProcessHandle recoveryRunner = startRunnerChildProcess("runner-post-sigkill", fixture, null, 30_000L);
+        ChildProcessHandle recoveryRunner = startRunnerChildProcess("runner-post-sigkill", fixture, null, null, 30_000L);
         ChildRunResult res = awaitProcess(recoveryRunner, Duration.ofSeconds(120));
         assertEquals(RewitMigrationRunner.EXIT_SUCCESS, res.exitCode,
                 "Runner após SIGKILL do detentor deveria concluir com exit=0; stderr=" + res.stderr);
@@ -281,7 +281,7 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
     private record MigratorFixture(String role, String password) {
     }
 
-    private record ChildProcessHandle(Process process, Path stdoutFile, Path stderrFile) {
+    private record ChildProcessHandle(String label, Process process, Path stdoutFile, Path stderrFile, Path readyFile) {
     }
 
     private record ChildRunResult(int exitCode, String stdout, String stderr) {
@@ -335,6 +335,7 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
             String label,
             MigratorFixture fixture,
             Path startGate,
+            Path readyFile,
             Long lockTimeoutMs
     ) throws IOException {
         Path stdoutFile = tempDir.resolve(label + ".out");
@@ -355,6 +356,9 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
         if (startGate != null) {
             env.put(LocalMigrationRunnerProcessHarness.ENV_START_GATE_FILE, startGate.toAbsolutePath().toString());
         }
+        if (readyFile != null) {
+            env.put(LocalMigrationRunnerProcessHarness.ENV_READY_SIGNAL_FILE, readyFile.toAbsolutePath().toString());
+        }
         if (lockTimeoutMs != null) {
             env.put(LocalMigrationRunnerProcessHarness.ENV_LOCK_TIMEOUT_MS, String.valueOf(lockTimeoutMs));
         }
@@ -363,7 +367,7 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
         pb.redirectError(stderrFile.toFile());
         Process proc = pb.start();
         spawnedProcesses.add(proc);
-        return new ChildProcessHandle(proc, stdoutFile, stderrFile);
+        return new ChildProcessHandle(label, proc, stdoutFile, stderrFile, readyFile);
     }
 
     private ChildProcessHandle startLockHolderChildProcess(
@@ -392,7 +396,66 @@ class RewitMigrationRunnerConcurrencyIntegrationTest {
         pb.redirectError(stderrFile.toFile());
         Process proc = pb.start();
         spawnedProcesses.add(proc);
-        return new ChildProcessHandle(proc, stdoutFile, stderrFile);
+        return new ChildProcessHandle(label, proc, stdoutFile, stderrFile, readyFile);
+    }
+
+    private static void awaitAllChildrenReadyOrFailFast(
+            List<ChildProcessHandle> handles,
+            Duration timeout
+    ) throws Exception {
+        long deadlineNanos = System.nanoTime() + timeout.toNanos();
+        while (true) {
+            boolean allReady = true;
+            for (ChildProcessHandle h : handles) {
+                boolean signaled = h.readyFile != null && Files.exists(h.readyFile);
+                if (!signaled) {
+                    allReady = false;
+                    if (!h.process.isAlive()) {
+                        String out = readFileSafe(h.stdoutFile);
+                        String err = readFileSafe(h.stderrFile);
+                        throw new AssertionError("Processo filho '" + h.label
+                                + "' encerrou antes de sinalizar prontidão na barreira (exit="
+                                + h.process.exitValue() + "). stdout=" + out + " | stderr=" + err);
+                    }
+                }
+            }
+            if (allReady) {
+                return;
+            }
+            if (System.nanoTime() >= deadlineNanos) {
+                StringBuilder diag = new StringBuilder("Timeout de ")
+                        .append(timeout.toSeconds())
+                        .append("s aguardando prontidão dos processos filhos na barreira:");
+                for (ChildProcessHandle h : handles) {
+                    boolean signaled = h.readyFile != null && Files.exists(h.readyFile);
+                    diag.append("\n - ").append(h.label)
+                            .append(": signaled=").append(signaled)
+                            .append(", alive=").append(h.process.isAlive())
+                            .append(", stdout=").append(readFileSafe(h.stdoutFile))
+                            .append(", stderr=").append(readFileSafe(h.stderrFile));
+                }
+                throw new AssertionError(diag.toString());
+            }
+            Thread.sleep(20L);
+        }
+    }
+
+    private static void releaseStartGateAtomically(Path startGate) throws IOException {
+        Path parent = startGate.toAbsolutePath().getParent();
+        Path tmp = Files.createTempFile(parent, startGate.getFileName().toString() + ".", ".tmp");
+        Files.writeString(tmp, "GO", StandardCharsets.UTF_8);
+        Files.move(tmp, startGate, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static String readFileSafe(Path file) {
+        if (file == null || !Files.exists(file)) {
+            return "";
+        }
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return "<erro ao ler log: " + e.getMessage() + ">";
+        }
     }
 
     private static ChildRunResult awaitProcess(ChildProcessHandle handle, Duration timeout) throws Exception {
