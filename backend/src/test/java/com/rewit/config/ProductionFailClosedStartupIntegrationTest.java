@@ -406,7 +406,7 @@ class ProductionFailClosedStartupIntegrationTest {
         app.setAdditionalProfiles("prod");
         app.addInitializers(ctx -> ctx.addBeanFactoryPostProcessor(bf -> beanFactoryPostProcessed.set(true)));
 
-        String secretMigratorPass = "never-leak-migrator-secret-8821!#";
+        String secretMigratorPass = "mig-test-" + java.util.UUID.randomUUID();
         List<String> args = new ArrayList<>();
         args.add("--server.port=" + port);
         args.add("--rewit.environment=production");

@@ -185,11 +185,24 @@ A ausência das credenciais abaixo **não** bloqueia a inicialização quando a 
 ### 5.10 Runner Isolado de Migrations e Validação Somente Leitura na API (F2-DEPLOY-03.5.2A)
 - **Execução pré-deploy no mesmo artefato JAR (layout `ZIP` / `PropertiesLauncher`)**:
   - `backend/pom.xml` configura `spring-boot-maven-plugin` com `<layout>ZIP</layout>` (`Main-Class: org.springframework.boot.loader.launch.PropertiesLauncher`, mantendo `Start-Class: com.rewit.RewitApplication`).
-  - O `ENTRYPOINT` padrão da API (`java $JAVA_OPTS -jar /app/app.jar`) continua iniciando `com.rewit.RewitApplication` sem alterações.
-  - O job pré-deploy de migrations executa a mesma imagem/JAR sobrescrevendo o comando para:
-    ```bash
-    java -Dloader.main=com.rewit.migration.RewitMigrationRunner -jar /app/app.jar
+  - O `ENTRYPOINT` padrão de `infrastructure/docker/backend.Dockerfile` é:
+    ```dockerfile
+    ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
     ```
+    Ele continua iniciando `com.rewit.RewitApplication` sem alterações para a API.
+  - **Substituição obrigatória do `ENTRYPOINT` no job pré-deploy**: apenas acrescentar argumentos (`CMD`) na imagem continuará executando a API (`RewitApplication`), pois o `ENTRYPOINT` já invoca `-jar /app/app.jar` sem `-Dloader.main`. Para executar o runner isolado a partir da mesma imagem de container, é obrigatório sobrescrever o `ENTRYPOINT`:
+    ```bash
+    # Docker / Podman (override explícito do ENTRYPOINT — não usar apenas CMD)
+    docker run --rm \
+      --entrypoint java \
+      -e DATABASE_URL="jdbc:postgresql://<host>:5432/<db>?sslmode=verify-full&sslrootcert=/etc/ssl/certs/<ca>.pem" \
+      -e FLYWAY_DB_USER="rewit_migrator" \
+      -e FLYWAY_DB_PASSWORD="<segredo-migrator>" \
+      rewit-backend:<tag> \
+      -Dloader.main=com.rewit.migration.RewitMigrationRunner -jar /app/app.jar
+    ```
+    *(Se desejar herdar `$JAVA_OPTS` no container, use `--entrypoint sh` com `-c 'exec java $JAVA_OPTS -Dloader.main=com.rewit.migration.RewitMigrationRunner -jar /app/app.jar'`.)*
+  - **Equivalência em orquestradores (planejado para a Subfase B — `F2-DEPLOY-03.5.2B`, sem manifests versionados nesta etapa)**: em um Kubernetes `Job`, a substituição do `ENTRYPOINT` corresponde a definir `command: ["java", "-Dloader.main=com.rewit.migration.RewitMigrationRunner", "-jar", "/app/app.jar"]`; em uma Amazon ECS Task Definition, corresponde a definir `entryPoint: ["java"]` e `command: ["-Dloader.main=com.rewit.migration.RewitMigrationRunner", "-jar", "/app/app.jar"]`.
   - `RewitMigrationRunner` não possui dependências do Spring Framework e nunca invoca `SpringApplication.run()`, inicializando apenas JDBC + Flyway (`classpath:db/migration`), sem Tomcat, Redis, Object Storage ou schedulers.
 - **Contrato de ambiente e validação do migrator**:
   - Consome exclusivamente `DATABASE_URL` (`sslmode=verify-full`, host não-local, sem credenciais embutidas), `FLYWAY_DB_USER` e `FLYWAY_DB_PASSWORD`.
