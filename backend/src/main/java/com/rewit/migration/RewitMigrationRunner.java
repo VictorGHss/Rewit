@@ -19,17 +19,19 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
 
 /**
  * Runner dedicado e isolado para execução pré-deploy das migrations Flyway do Rewit
- * (F2-DEPLOY-03.5.2A).
+ * (F2-DEPLOY-03.5.2A / F2-DEPLOY-03.5.2B).
  *
  * <p>Propriedades de isolamento garantidas por construção:
  * <ul>
@@ -46,10 +48,15 @@ import java.util.TreeSet;
  *       nem memberships privilegiadas, não é role runtime ({@code rewit_app}/{@code rewit_media}/
  *       {@code rewit_mod}) e detém {@code CONNECT} no database e {@code USAGE, CREATE} em {@code public}
  *       (compatível com PostgreSQL gerenciado da F2-DEPLOY-03.5.1, sem exigir ownership de DB/schema).</li>
+ *   <li>Serializa execuções concorrentes de ponta a ponta via advisory lock de sessão dedicado no
+ *       PostgreSQL ({@code pg_try_advisory_lock} com chave exclusiva {@code RWTMIGR1} e timeout limitado),
+ *       protegendo inclusive a criação inicial de {@code flyway_schema_history}, {@code V16} não
+ *       transacional e {@code rewit_assert_runtime_privileges()}, em conjunto com o lock interno do Flyway
+ *       ({@code flyway.postgresql.transactional.lock=false}). Em caso de crash/SIGKILL, o PostgreSQL
+ *       encerra a sessão e libera o lock automaticamente.</li>
  *   <li>Executa Flyway com {@code baselineOnMigrate=false}, {@code validateOnMigrate=true},
- *       {@code cleanDisabled=true}, {@code outOfOrder=false}, {@code createSchemas=false} e
- *       {@code flyway.postgresql.transactional.lock=false} (lock de sessão via {@code pg_advisory_lock},
- *       compatível com {@code V16} e serializando execuções concorrentes).</li>
+ *       {@code cleanDisabled=true}, {@code outOfOrder=false}, {@code createSchemas=false} e jamais
+ *       executa {@code repair}, {@code baseline} ou {@code clean} automaticamente diante de falhas.</li>
  *   <li>Ao concluir, comprova validação do histórico e executa {@code public.rewit_assert_runtime_privileges()}
  *       sob a identidade do migrator.</li>
  * </ul>
@@ -62,10 +69,20 @@ public final class RewitMigrationRunner {
     public static final int EXIT_INVALID_CONFIG = 2;
     public static final int EXIT_PRIVILEGE_VIOLATION = 3;
     public static final int EXIT_MIGRATION_ERROR = 4;
+    public static final int EXIT_LOCK_TIMEOUT = 5;
 
     public static final String ENV_DATABASE_URL = "DATABASE_URL";
     public static final String ENV_FLYWAY_DB_USER = "FLYWAY_DB_USER";
     public static final String ENV_FLYWAY_DB_PASSWORD = "FLYWAY_DB_PASSWORD";
+
+    /**
+     * Chave exclusiva do advisory lock de sessão do runner de migrations ("RWTMIGR1" em ASCII),
+     * distinta da chave do Storage GC ("RWTSTGC1") e do lock interno do Flyway.
+     */
+    static final long MIGRATION_ADVISORY_LOCK_KEY = 0x5257_544D_4947_5231L;
+
+    static final Duration DEFAULT_LOCK_TIMEOUT = Duration.ofSeconds(300);
+    private static final long LOCK_POLL_INTERVAL_MILLIS = 250L;
 
     static final String MIGRATION_LOCATION = "classpath:db/migration";
     static final String SCHEMA_PUBLIC = "public";
@@ -215,7 +232,7 @@ public final class RewitMigrationRunner {
      * Retorna código de saída determinístico sem chamar {@link System#exit(int)}.
      */
     public static int run(String[] args, Map<String, String> env, PrintStream out, PrintStream err) {
-        return executeInternal(args, env, TlsPolicy.STRICT_PRODUCTION, out, err);
+        return executeInternal(args, env, TlsPolicy.STRICT_PRODUCTION, MIGRATION_LOCATION, DEFAULT_LOCK_TIMEOUT, out, err);
     }
 
     /**
@@ -228,13 +245,32 @@ public final class RewitMigrationRunner {
             PrintStream out,
             PrintStream err
     ) {
-        return executeInternal(args, env, TlsPolicy.LOCAL_TEST_ONLY, out, err);
+        return executeInternal(args, env, TlsPolicy.LOCAL_TEST_ONLY, MIGRATION_LOCATION, DEFAULT_LOCK_TIMEOUT, out, err);
+    }
+
+    /**
+     * Sobrecarga restrita ao pacote para testes controlados de concorrência (timeout de lock) e
+     * recuperação (locations de teste dedicados sem alterar migrations históricas V1–V46).
+     */
+    static int runForLocalIntegrationTest(
+            String[] args,
+            Map<String, String> env,
+            String migrationLocation,
+            Duration lockTimeout,
+            PrintStream out,
+            PrintStream err
+    ) {
+        String effectiveLocation = Objects.requireNonNull(migrationLocation, "migrationLocation obrigatório");
+        Duration effectiveTimeout = Objects.requireNonNull(lockTimeout, "lockTimeout obrigatório");
+        return executeInternal(args, env, TlsPolicy.LOCAL_TEST_ONLY, effectiveLocation, effectiveTimeout, out, err);
     }
 
     private static int executeInternal(
             String[] args,
             Map<String, String> env,
             TlsPolicy tlsPolicy,
+            String migrationLocation,
+            Duration lockTimeout,
             PrintStream out,
             PrintStream err
     ) {
@@ -265,8 +301,19 @@ public final class RewitMigrationRunner {
             return EXIT_PRIVILEGE_VIOLATION;
         }
 
+        Connection lockConnection = null;
+        boolean lockAcquired = false;
         try {
-            Flyway flyway = buildFlyway(config);
+            lockConnection = openMigratorConnection(config);
+            lockAcquired = acquireMigrationAdvisoryLock(lockConnection, lockTimeout, out, sanitizedTarget);
+            if (!lockAcquired) {
+                emitError(err, "Timeout ao aguardar advisory lock de sessão de migrations em "
+                        + sanitizedTarget + " após " + lockTimeout.toMillis() + " ms (outra instância em execução, exit="
+                        + EXIT_LOCK_TIMEOUT + ").", List.of());
+                return EXIT_LOCK_TIMEOUT;
+            }
+
+            Flyway flyway = buildFlyway(config, migrationLocation);
             MigrateResult result = flyway.migrate();
             if (result == null || !result.success) {
                 emitError(err, "Flyway migrate não confirmou sucesso (exit=" + EXIT_MIGRATION_ERROR + ").", List.of());
@@ -313,12 +360,19 @@ public final class RewitMigrationRunner {
                     + ", totalAplicadas=" + info.applied().length
                     + ", rewit_assert_runtime_privileges=OK.");
             return EXIT_SUCCESS;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            emitError(err, "Execução interrompida enquanto aguardava o advisory lock de migrations em "
+                    + sanitizedTarget + " (exit=" + EXIT_LOCK_TIMEOUT + ").", List.of());
+            return EXIT_LOCK_TIMEOUT;
         } catch (Exception e) {
             emitError(err, "Erro durante execução das migrations Flyway em " + sanitizedTarget
                     + " (exit=" + EXIT_MIGRATION_ERROR + "): "
                     + e.getClass().getSimpleName() + ": " + sanitizeMessage(e.getMessage(), config),
                     List.of());
             return EXIT_MIGRATION_ERROR;
+        } finally {
+            releaseAndCloseAdvisoryLockConnection(lockConnection, lockAcquired);
         }
     }
 
@@ -458,10 +512,10 @@ public final class RewitMigrationRunner {
         }
     }
 
-    private static Flyway buildFlyway(ValidatedConfig config) {
+    private static Flyway buildFlyway(ValidatedConfig config, String migrationLocation) {
         return Flyway.configure(RewitMigrationRunner.class.getClassLoader())
                 .dataSource(config.databaseUrl(), config.migratorUser(), config.migratorPassword())
-                .locations(MIGRATION_LOCATION)
+                .locations(migrationLocation)
                 .defaultSchema(SCHEMA_PUBLIC)
                 .schemas(SCHEMA_PUBLIC)
                 .table(HISTORY_TABLE)
@@ -474,6 +528,79 @@ public final class RewitMigrationRunner {
                 .ignoreMigrationPatterns(new String[0])
                 .configuration(Map.of("flyway.postgresql.transactional.lock", "false"))
                 .load();
+    }
+
+    private static boolean acquireMigrationAdvisoryLock(
+            Connection lockConnection,
+            Duration lockTimeout,
+            PrintStream out,
+            String sanitizedTarget
+    ) throws SQLException, InterruptedException {
+        long timeoutNanos = Math.max(0L, lockTimeout.toNanos());
+        long deadlineNanos = System.nanoTime() + timeoutNanos;
+        boolean waitedLogged = false;
+        while (true) {
+            if (trySessionAdvisoryLock(lockConnection)) {
+                if (waitedLogged) {
+                    emitInfo(out, "Advisory lock de sessão de migrations adquirido após espera em " + sanitizedTarget + ".");
+                }
+                return true;
+            }
+            long remainingNanos = deadlineNanos - System.nanoTime();
+            if (remainingNanos <= 0L) {
+                return false;
+            }
+            if (!waitedLogged) {
+                waitedLogged = true;
+                emitInfo(out, "Outra instância detém o advisory lock de migrations em " + sanitizedTarget
+                        + "; aguardando liberação (timeout=" + lockTimeout.toMillis() + " ms).");
+            }
+            long sleepMillis = Math.min(LOCK_POLL_INTERVAL_MILLIS, Math.max(1L, remainingNanos / 1_000_000L));
+            Thread.sleep(sleepMillis);
+        }
+    }
+
+    private static boolean trySessionAdvisoryLock(Connection connection) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement("SELECT pg_catalog.pg_try_advisory_lock(?)")) {
+            ps.setLong(1, MIGRATION_ADVISORY_LOCK_KEY);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        }
+    }
+
+    private static void releaseAndCloseAdvisoryLockConnection(Connection lockConnection, boolean lockAcquired) {
+        if (lockConnection == null) {
+            return;
+        }
+        boolean unlocked = !lockAcquired;
+        if (lockAcquired) {
+            try (PreparedStatement ps = lockConnection.prepareStatement("SELECT pg_catalog.pg_advisory_unlock(?)")) {
+                ps.setLong(1, MIGRATION_ADVISORY_LOCK_KEY);
+                try (ResultSet rs = ps.executeQuery()) {
+                    unlocked = rs.next() && rs.getBoolean(1);
+                }
+            } catch (SQLException e) {
+                log.warn("Falha ao liberar advisory lock de migrations via SQL (SQLState={}); encerrando sessão.",
+                        safeSqlState(e));
+                unlocked = false;
+            }
+        }
+        if (!unlocked) {
+            try {
+                lockConnection.abort(Runnable::run);
+            } catch (SQLException | RuntimeException e) {
+                log.warn("Falha ao abortar conexão do advisory lock de migrations (erro={}).",
+                        e.getClass().getSimpleName());
+            }
+        }
+        try {
+            if (!lockConnection.isClosed()) {
+                lockConnection.close();
+            }
+        } catch (SQLException e) {
+            log.warn("Falha ao fechar conexão do advisory lock de migrations (SQLState={}).", safeSqlState(e));
+        }
     }
 
     private static void assertRuntimePrivileges(ValidatedConfig config) throws SQLException {
