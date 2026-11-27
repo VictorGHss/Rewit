@@ -8,13 +8,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.net.ssl.SSLHandshakeException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.net.ConnectException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.security.cert.CertificateException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -110,6 +115,14 @@ class RewitMigrationRunnerTest {
                     "Dependência proibida de org.springframework.* encontrada em " + source);
             assertFalse(content.contains("SpringApplication.run"),
                     "Chamada proibida a SpringApplication.run encontrada em " + source);
+            if (source.getFileName().toString().equals("RewitMigrationRunner.java")) {
+                assertFalse(content.contains(".repair("),
+                        "RewitMigrationRunner jamais pode executar flyway.repair() automaticamente");
+                assertFalse(content.contains(".baseline("),
+                        "RewitMigrationRunner jamais pode executar flyway.baseline() automaticamente");
+                assertFalse(content.contains(".clean("),
+                        "RewitMigrationRunner jamais pode executar flyway.clean() automaticamente");
+            }
         }
     }
 
@@ -240,6 +253,78 @@ class RewitMigrationRunnerTest {
             assertFalse(res.stderr.contains(ephemeralToken));
             assertFalse(res.stderr.contains(SYNTHETIC_MIG_CREDENTIAL));
         }
+    }
+
+    @Test
+    @DisplayName("M-02: classifica positivamente apenas falhas transitórias de conectividade pré-migração (exit=6) e mantém fail-closed (exit=4) para TLS, auth, catálogo e SQL")
+    void classifiesPreMigrationSqlExceptionsDeterministicallyFailClosed() throws Exception {
+        // Classificação positiva: SQLStates transitórios sem falha TLS/segurança na cadeia -> exit=6
+        for (String transientState : List.of("08000", "08001", "08003", "08004", "08006", "53300", "57P01", "57P02", "57P03")) {
+            SQLException ex = new SQLException("Transient connectivity", transientState, new ConnectException("Connection refused"));
+            assertEquals(RewitMigrationRunner.EXIT_TRANSIENT_INFRA_ERROR,
+                    RewitMigrationRunner.classifyPreMigrationSqlException(ex),
+                    "SQLState transitório deveria classificar como exit=6: " + transientState);
+        }
+
+        // Falha TLS/certificado encapsulada em SQLState 08001 NÃO é transitória -> exit=4 (fail-closed)
+        SQLException sslEx = new SQLException("SSL error", "08001", new SSLHandshakeException("PKIX path building failed"));
+        assertEquals(RewitMigrationRunner.EXIT_MIGRATION_ERROR,
+                RewitMigrationRunner.classifyPreMigrationSqlException(sslEx),
+                "Falha TLS/SSLHandshakeException jamais pode ser classificada como transitória");
+
+        SQLException certEx = new SQLException("Cert error", "08001",
+                new RuntimeException("wrapper", new CertificateException("hostname mismatch")));
+        assertEquals(RewitMigrationRunner.EXIT_MIGRATION_ERROR,
+                RewitMigrationRunner.classifyPreMigrationSqlException(certEx),
+                "Falha de certificado (GeneralSecurityException) jamais pode ser classificada como transitória");
+
+        // Autenticação (28P01), banco inexistente (3D000), permissão (42501), SQL/PLpgSQL (42601/P0001) e desconhecido (null) -> exit=4
+        for (String nonTransientState : List.of("28000", "28P01", "3D000", "42501", "42601", "23505", "P0001")) {
+            SQLException ex = new SQLException("Deterministic failure", nonTransientState);
+            assertEquals(RewitMigrationRunner.EXIT_MIGRATION_ERROR,
+                    RewitMigrationRunner.classifyPreMigrationSqlException(ex),
+                    "SQLState determinístico não pode ser retentável: " + nonTransientState);
+        }
+        assertEquals(RewitMigrationRunner.EXIT_MIGRATION_ERROR,
+                RewitMigrationRunner.classifyPreMigrationSqlException(new SQLException("Unknown error without SQLState")));
+        assertEquals(RewitMigrationRunner.EXIT_MIGRATION_ERROR,
+                RewitMigrationRunner.classifyPreMigrationSqlException(null));
+
+        // Comprovação real de rede: porta loopback fechada -> EXIT_TRANSIENT_INFRA_ERROR (6) sem vazar senha
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            closedPort = socket.getLocalPort();
+        }
+        String ephemeralPass = generateEphemeralCredential();
+        RunOutput unreachable = runLocalIntegration(Map.of(
+                RewitMigrationRunner.ENV_DATABASE_URL, "jdbc:postgresql://127.0.0.1:" + closedPort + "/rewit_closed_test",
+                RewitMigrationRunner.ENV_FLYWAY_DB_USER, "rewit_migrator",
+                RewitMigrationRunner.ENV_FLYWAY_DB_PASSWORD, ephemeralPass
+        ));
+        assertEquals(RewitMigrationRunner.EXIT_TRANSIENT_INFRA_ERROR, unreachable.exitCode,
+                "Conexão recusada em porta fechada pré-migração deve sair com exit=6; stderr=" + unreachable.stderr);
+        assertFalse(unreachable.stdout.contains(ephemeralPass));
+        assertFalse(unreachable.stderr.contains(ephemeralPass));
+
+        // Comprovação real no PostgreSQL descartável: senha incorreta (28P01) e DB inexistente (3D000) -> exit=4 (NUNCA 6)
+        String wrongPass = generateEphemeralCredential();
+        RunOutput wrongAuth = runLocalIntegration(Map.of(
+                RewitMigrationRunner.ENV_DATABASE_URL, INFRA.datasourceUrl(),
+                RewitMigrationRunner.ENV_FLYWAY_DB_USER, "rewit_nonexistent_" + randomHex(4),
+                RewitMigrationRunner.ENV_FLYWAY_DB_PASSWORD, wrongPass
+        ));
+        assertEquals(RewitMigrationRunner.EXIT_MIGRATION_ERROR, wrongAuth.exitCode,
+                "Falha de autenticação (28P01) deve ser não retentável (exit=4); stderr=" + wrongAuth.stderr);
+        assertFalse(wrongAuth.stderr.contains(wrongPass));
+
+        RunOutput missingDb = runLocalIntegration(Map.of(
+                RewitMigrationRunner.ENV_DATABASE_URL, INFRA.datasourceUrlForDatabase("rewit_no_such_db_" + randomHex(4)),
+                RewitMigrationRunner.ENV_FLYWAY_DB_USER, INFRA.migrationDbUser(),
+                RewitMigrationRunner.ENV_FLYWAY_DB_PASSWORD, INFRA.migrationDbPassword()
+        ));
+        assertEquals(RewitMigrationRunner.EXIT_MIGRATION_ERROR, missingDb.exitCode,
+                "Database inexistente (3D000) deve ser não retentável (exit=4); stderr=" + missingDb.stderr);
+        assertFalse(missingDb.stderr.contains(INFRA.migrationDbPassword()));
     }
 
     // --------------------------------------------------------------------------------------
