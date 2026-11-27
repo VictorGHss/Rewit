@@ -473,10 +473,13 @@ class FeedCandidateRetrievalPersistenceIntegrationTest {
         Place place = createPlace();
         RateableTarget target = createTarget();
 
+        // Descoberta consulta a janela global das CANDIDATE_WINDOW reviews públicas mais recentes:
+        // ancora em discoveryBase() (como os cenários 12.x) para evitar expulsão por reviews residuais.
+        Instant baseTime = discoveryBase();
         Review identified = createReview(author, place, target,
-                "PUBLIC", ReviewStatus.ACTIVE, false, Instant.now().minusSeconds(60));
+                "PUBLIC", ReviewStatus.ACTIVE, false, baseTime.minusSeconds(60));
         Review anonymous = createReview(author, place, target,
-                "PUBLIC", ReviewStatus.ACTIVE, true /* anonymous */, Instant.now());
+                "PUBLIC", ReviewStatus.ACTIVE, true /* anonymous */, baseTime);
 
         List<FeedCandidate> candidates = feedCandidateRepository.retrieveDiscoveryCandidates(
                 requester.getId(), FeedCandidateRepository.CANDIDATE_WINDOW);
