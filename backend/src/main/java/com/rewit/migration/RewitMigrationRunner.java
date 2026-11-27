@@ -91,6 +91,21 @@ public final class RewitMigrationRunner {
             ENV_FLYWAY_DB_PASSWORD
     );
 
+    /**
+     * Consulta de identidade e privilégios da role migrator compatível com PostgreSQL 12–18+.
+     *
+     * <p>Usa {@code pg_catalog.pg_has_role(r.oid, g.oid, 'MEMBER')} para detectar qualquer cadeia
+     * direta ou transitiva (1..N saltos) em {@code pg_auth_members}, independentemente de
+     * {@code INHERIT}, {@code SET} ou {@code ADMIN OPTION}, sem falso positivo para o
+     * {@code ADMIN OPTION} inverso criado no PG 16+ quando {@code managed_admin} cria o migrator
+     * (onde {@code managed_admin} é membro de {@code migrator}, não o contrário).
+     *
+     * <p>Rejeita memberships alcançáveis em roles com atributos administrativos ({@code SUPERUSER},
+     * {@code CREATEROLE}, {@code CREATEDB}, {@code REPLICATION}, {@code BYPASSRLS}), nas roles
+     * predefinidas {@code pg_*} incompatíveis com o menor privilégio do migrator (nomes ausentes
+     * em versões anteriores do PostgreSQL simplesmente não casam na tabela {@code pg_roles}) e
+     * nas três roles runtime ({@code rewit_app}, {@code rewit_media}, {@code rewit_mod}).
+     */
     private static final String IDENTITY_AND_PRIVILEGE_QUERY = """
             SELECT
                 session_user::text AS session_user_name,
@@ -106,11 +121,70 @@ public final class RewitMigrationRunner {
                 pg_catalog.has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_public,
                 (
                     SELECT COUNT(*)
-                    FROM pg_catalog.pg_auth_members am
-                    JOIN pg_catalog.pg_roles g ON g.oid = am.roleid
-                    WHERE am.member = r.oid
-                      AND (g.rolsuper OR g.rolcreaterole OR g.rolcreatedb OR g.rolreplication OR g.rolbypassrls)
-                ) AS privileged_memberships
+                    FROM pg_catalog.pg_roles g
+                    WHERE g.oid <> r.oid
+                      AND pg_catalog.pg_has_role(r.oid, g.oid, 'MEMBER')
+                      AND (
+                          g.rolsuper
+                          OR g.rolcreaterole
+                          OR g.rolcreatedb
+                          OR g.rolreplication
+                          OR g.rolbypassrls
+                          OR g.rolname IN (
+                              'pg_execute_server_program',
+                              'pg_read_server_files',
+                              'pg_write_server_files',
+                              'pg_read_all_data',
+                              'pg_write_all_data',
+                              'pg_read_all_settings',
+                              'pg_read_all_stats',
+                              'pg_stat_scan_tables',
+                              'pg_monitor',
+                              'pg_signal_backend',
+                              'pg_signal_autovacuum_worker',
+                              'pg_checkpoint',
+                              'pg_create_subscription',
+                              'pg_maintain',
+                              'pg_use_reserved_connections',
+                              'rewit_app',
+                              'rewit_media',
+                              'rewit_mod'
+                          )
+                      )
+                ) AS privileged_memberships,
+                (
+                    SELECT COALESCE(string_agg(g.rolname, ', ' ORDER BY g.rolname), '')
+                    FROM pg_catalog.pg_roles g
+                    WHERE g.oid <> r.oid
+                      AND pg_catalog.pg_has_role(r.oid, g.oid, 'MEMBER')
+                      AND (
+                          g.rolsuper
+                          OR g.rolcreaterole
+                          OR g.rolcreatedb
+                          OR g.rolreplication
+                          OR g.rolbypassrls
+                          OR g.rolname IN (
+                              'pg_execute_server_program',
+                              'pg_read_server_files',
+                              'pg_write_server_files',
+                              'pg_read_all_data',
+                              'pg_write_all_data',
+                              'pg_read_all_settings',
+                              'pg_read_all_stats',
+                              'pg_stat_scan_tables',
+                              'pg_monitor',
+                              'pg_signal_backend',
+                              'pg_signal_autovacuum_worker',
+                              'pg_checkpoint',
+                              'pg_create_subscription',
+                              'pg_maintain',
+                              'pg_use_reserved_connections',
+                              'rewit_app',
+                              'rewit_media',
+                              'rewit_mod'
+                          )
+                      )
+                ) AS forbidden_reachable_roles
             FROM pg_catalog.pg_roles r
             WHERE r.rolname = current_user
             """;
@@ -339,6 +413,7 @@ public final class RewitMigrationRunner {
             boolean canUsePublic = rs.getBoolean("can_use_public");
             boolean canCreatePublic = rs.getBoolean("can_create_public");
             long privilegedMemberships = rs.getLong("privileged_memberships");
+            String forbiddenReachableRoles = rs.getString("forbidden_reachable_roles");
 
             if (!config.migratorUser().equals(sessionUser)) {
                 errors.add("session_user efetivo ('" + sessionUser + "') diverge de "
@@ -368,7 +443,11 @@ public final class RewitMigrationRunner {
                 errors.add("A role migrator não pode possuir atributo BYPASSRLS.");
             }
             if (privilegedMemberships > 0) {
-                errors.add("A role migrator possui membership em role privilegiada (" + privilegedMemberships + ").");
+                String detail = (forbiddenReachableRoles == null || forbiddenReachableRoles.isBlank())
+                        ? String.valueOf(privilegedMemberships)
+                        : privilegedMemberships + " (" + forbiddenReachableRoles + ")";
+                errors.add("A role migrator possui membership direta ou transitiva em role proibida/privilegiada: "
+                        + detail + ".");
             }
             if (!canConnect) {
                 errors.add("A role migrator não possui privilégio CONNECT no database alvo.");

@@ -47,10 +47,10 @@ class RewitMigrationRunnerTest {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String DB_PREFIX = "rewit_migrun_";
     private static final Pattern DISPOSABLE_DB_PATTERN = Pattern.compile("^rewit_migrun_[0-9a-f]{12}$");
-    private static final Pattern DISPOSABLE_ROLE_PATTERN = Pattern.compile("^rewit_mr(admin|mig|ro)_[0-9a-f]{12}$");
+    private static final Pattern DISPOSABLE_ROLE_PATTERN = Pattern.compile("^rewit_mr(admin|mig|ro|mid1|mid2|priv|grp)_[0-9a-f]{12}$");
 
     private static final String PROD_URL = "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full";
-    private static final String STRONG_MIG_PASS = "MigRunner-Prod-Pass-9xK#2vQ7!mZ";
+    private static final String STRONG_MIG_PASS = "MigRunner-" + randomHex(12);
 
     private String disposableDbName;
     private String disposableDbMarker;
@@ -177,7 +177,7 @@ class RewitMigrationRunnerTest {
         );
         for (String forbiddenVar : forbiddenVars) {
             Map<String, String> env = validProdEnv();
-            String secretValue = "super-secret-value-never-log-991";
+            String secretValue = "test-val-" + randomHex(8);
             env.put(forbiddenVar, secretValue);
 
             RunOutput res = runStrict(new String[0], env);
@@ -374,6 +374,145 @@ class RewitMigrationRunnerTest {
         assertTrue(secondRun.stdout.contains("executadas=0"));
         assertTrue(secondRun.stdout.contains("versaoAtual=46"));
         assertTrue(secondRun.stdout.contains("rewit_assert_runtime_privileges=OK"));
+    }
+
+    @Test
+    @DisplayName("PostgreSQL real (R1-A): detecta memberships diretas, transitivas (2 e 3 saltos), roles predefinidas pg_* e cadeias INHERIT/SET/ADMIN sem falso positivo")
+    void detectsDirectTransitivePredefinedAndInheritSetMembershipsInRealPostgres() throws SQLException {
+        String suffix = randomHex(6);
+        provisionManagedDatabase(suffix);
+
+        String managedAdminRole = "rewit_mradmin_" + suffix;
+        String managedAdminPassword = "MgdAdmin-" + randomHex(12);
+        String migratorRole = "rewit_mrmig_" + suffix;
+        String migratorPassword = "MgdMig-" + randomHex(12);
+        String mid1Role = "rewit_mrmid1_" + suffix;
+        String mid2Role = "rewit_mrmid2_" + suffix;
+        String privRole = "rewit_mrpriv_" + suffix;
+        String benignGroupRole = "rewit_mrgrp_" + suffix;
+
+        try (Connection admin = openSuperuserConnection(INFRA.datasourceUrl());
+             Statement st = admin.createStatement()) {
+            st.execute("CREATE ROLE " + managedAdminRole
+                    + " WITH LOGIN NOSUPERUSER NOCREATEDB CREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD '"
+                    + managedAdminPassword + "'");
+            disposableRoles.add(managedAdminRole);
+            st.execute("GRANT CONNECT ON DATABASE " + disposableDbName + " TO " + managedAdminRole);
+
+            // Roles auxiliares de cadeia (intermediárias não privilegiadas e role alvo privilegiada)
+            st.execute("CREATE ROLE " + mid1Role + " WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT");
+            disposableRoles.add(mid1Role);
+            st.execute("CREATE ROLE " + mid2Role + " WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT");
+            disposableRoles.add(mid2Role);
+            st.execute("CREATE ROLE " + privRole + " WITH NOLOGIN NOSUPERUSER NOCREATEDB CREATEROLE NOINHERIT");
+            disposableRoles.add(privRole);
+            st.execute("CREATE ROLE " + benignGroupRole + " WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT");
+            disposableRoles.add(benignGroupRole);
+        }
+        try (Connection dbAdmin = openSuperuserConnection(disposableDbUrl);
+             Statement st = dbAdmin.createStatement()) {
+            st.execute("GRANT USAGE, CREATE ON SCHEMA public TO " + managedAdminRole + " WITH GRANT OPTION");
+        }
+        // Cria o migrator via managed_admin (gera ADMIN OPTION inverso PG 16+: managed_admin -> migrator)
+        try (Connection mgdAdmin = DriverManager.getConnection(disposableDbUrl, managedAdminRole, managedAdminPassword);
+             Statement st = mgdAdmin.createStatement()) {
+            st.execute("CREATE ROLE " + migratorRole
+                    + " WITH LOGIN NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD '" + migratorPassword + "'");
+            disposableRoles.add(migratorRole);
+            st.execute("GRANT USAGE, CREATE ON SCHEMA public TO " + migratorRole);
+        }
+        try (Connection admin = openSuperuserConnection(INFRA.datasourceUrl());
+             Statement st = admin.createStatement()) {
+            st.execute("GRANT CONNECT ON DATABASE " + disposableDbName + " TO " + migratorRole);
+        }
+
+        Map<String, String> env = Map.of(
+                RewitMigrationRunner.ENV_DATABASE_URL, disposableDbUrl,
+                RewitMigrationRunner.ENV_FLYWAY_DB_USER, migratorRole,
+                RewitMigrationRunner.ENV_FLYWAY_DB_PASSWORD, migratorPassword
+        );
+
+        try (Connection admin = openSuperuserConnection(INFRA.datasourceUrl());
+             Statement st = admin.createStatement()) {
+
+            // 1. Membership direta (1 salto) em role privilegiada (CREATEROLE) -> rejeitada
+            st.execute("GRANT " + privRole + " TO " + migratorRole);
+            RunOutput directRes = runLocalIntegration(env);
+            assertEquals(RewitMigrationRunner.EXIT_PRIVILEGE_VIOLATION, directRes.exitCode);
+            assertTrue(directRes.stderr.contains(privRole));
+            assertFalse(historyTableExists(), "Membership direta proibida não pode criar histórico");
+            st.execute("REVOKE " + privRole + " FROM " + migratorRole);
+
+            // 2. Membership indireta com 2 saltos (migrator -> mid1 -> privRole) -> rejeitada
+            st.execute("GRANT " + privRole + " TO " + mid1Role);
+            st.execute("GRANT " + mid1Role + " TO " + migratorRole);
+            RunOutput twoHopsRes = runLocalIntegration(env);
+            assertEquals(RewitMigrationRunner.EXIT_PRIVILEGE_VIOLATION, twoHopsRes.exitCode);
+            assertTrue(twoHopsRes.stderr.contains(privRole));
+            assertFalse(historyTableExists(), "Membership transitiva de 2 saltos não pode criar histórico");
+            st.execute("REVOKE " + mid1Role + " FROM " + migratorRole);
+            st.execute("REVOKE " + privRole + " FROM " + mid1Role);
+
+            // 3. Membership indireta com 3 saltos (migrator -> mid1 -> mid2 -> privRole) -> rejeitada
+            st.execute("GRANT " + privRole + " TO " + mid2Role);
+            st.execute("GRANT " + mid2Role + " TO " + mid1Role);
+            st.execute("GRANT " + mid1Role + " TO " + migratorRole);
+            RunOutput threeHopsRes = runLocalIntegration(env);
+            assertEquals(RewitMigrationRunner.EXIT_PRIVILEGE_VIOLATION, threeHopsRes.exitCode);
+            assertTrue(threeHopsRes.stderr.contains(privRole));
+            assertFalse(historyTableExists(), "Membership transitiva de 3 saltos não pode criar histórico");
+            st.execute("REVOKE " + mid1Role + " FROM " + migratorRole);
+            st.execute("REVOKE " + mid2Role + " FROM " + mid1Role);
+            st.execute("REVOKE " + privRole + " FROM " + mid2Role);
+
+            // 4. Roles predefinidas perigosas (direta e via 2 saltos) -> rejeitadas
+            for (String dangerousRole : List.of(
+                    "pg_execute_server_program",
+                    "pg_read_server_files",
+                    "pg_write_server_files",
+                    "pg_read_all_data",
+                    "pg_write_all_data",
+                    "pg_maintain"
+            )) {
+                st.execute("GRANT " + dangerousRole + " TO " + mid1Role);
+                st.execute("GRANT " + mid1Role + " TO " + migratorRole);
+                RunOutput predefRes = runLocalIntegration(env);
+                assertEquals(RewitMigrationRunner.EXIT_PRIVILEGE_VIOLATION, predefRes.exitCode,
+                        "Membership transitiva em " + dangerousRole + " deve ser rejeitada");
+                assertTrue(predefRes.stderr.contains(dangerousRole),
+                        "Erro deve citar " + dangerousRole + ": " + predefRes.stderr);
+                assertFalse(historyTableExists());
+                st.execute("REVOKE " + mid1Role + " FROM " + migratorRole);
+                st.execute("REVOKE " + dangerousRole + " FROM " + mid1Role);
+            }
+
+            // 5. Cadeias com semântica PG 16+: INHERIT FALSE / SET TRUE, INHERIT TRUE / SET FALSE e ADMIN TRUE
+            for (String grantOptions : List.of(
+                    "WITH INHERIT FALSE, SET TRUE",
+                    "WITH INHERIT TRUE, SET FALSE",
+                    "WITH INHERIT FALSE, SET FALSE, ADMIN TRUE"
+            )) {
+                st.execute("GRANT pg_read_server_files TO " + mid1Role + " " + grantOptions);
+                st.execute("GRANT " + mid1Role + " TO " + migratorRole + " " + grantOptions);
+                RunOutput optRes = runLocalIntegration(env);
+                assertEquals(RewitMigrationRunner.EXIT_PRIVILEGE_VIOLATION, optRes.exitCode,
+                        "Cadeia com '" + grantOptions + "' deve ser rejeitada");
+                assertTrue(optRes.stderr.contains("pg_read_server_files"));
+                assertFalse(historyTableExists());
+                st.execute("REVOKE " + mid1Role + " FROM " + migratorRole);
+                st.execute("REVOKE pg_read_server_files FROM " + mid1Role);
+            }
+
+            // 6. Ausência de falso positivo: migrator limpo (inclusive com ADMIN OPTION inverso de managed_admin
+            //    e sem memberships privilegiadas, mesmo pertencendo a grupo comum não privilegiado) é aprovado
+            st.execute("GRANT " + benignGroupRole + " TO " + migratorRole);
+            RunOutput cleanRes = runLocalIntegration(env);
+            assertEquals(RewitMigrationRunner.EXIT_SUCCESS, cleanRes.exitCode,
+                    "Migrator legítimo (03.5.1) sem memberships privilegiadas deve ser aprovado; stderr=" + cleanRes.stderr);
+            assertTrue(cleanRes.stdout.contains("executadas=46"));
+            assertTrue(cleanRes.stdout.contains("rewit_assert_runtime_privileges=OK"));
+            st.execute("REVOKE " + benignGroupRole + " FROM " + migratorRole);
+        }
     }
 
     private void provisionManagedDatabase(String suffix) throws SQLException {
