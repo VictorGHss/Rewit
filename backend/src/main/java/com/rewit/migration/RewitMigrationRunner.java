@@ -12,7 +12,9 @@ import org.flywaydb.core.api.output.ValidateResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.net.ssl.SSLException;
 import java.io.PrintStream;
+import java.security.GeneralSecurityException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -21,6 +23,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,6 +73,27 @@ public final class RewitMigrationRunner {
     public static final int EXIT_PRIVILEGE_VIOLATION = 3;
     public static final int EXIT_MIGRATION_ERROR = 4;
     public static final int EXIT_LOCK_TIMEOUT = 5;
+    public static final int EXIT_TRANSIENT_INFRA_ERROR = 6;
+
+    /**
+     * Allowlist estrita de SQLStates PostgreSQL comprovadamente transitórios de conectividade/
+     * disponibilidade de servidor antes do início das migrations (M-02).
+     *
+     * <p>Exclui explicitamente erros de autenticação ({@code 28*}), banco inexistente ({@code 3D000}),
+     * permissão ({@code 42501}), SQL/schema e qualquer falha TLS ({@link SSLException} ou
+     * {@link GeneralSecurityException} na cadeia de causas).
+     */
+    private static final Set<String> TRANSIENT_INFRA_SQL_STATES = Set.of(
+            "08000", // connection_exception
+            "08001", // sqlclient_unable_to_establish_sqlconnection
+            "08003", // connection_does_not_exist
+            "08004", // sqlserver_rejected_establishment_of_sqlconnection
+            "08006", // connection_failure
+            "53300", // too_many_connections
+            "57P01", // admin_shutdown
+            "57P02", // crash_shutdown
+            "57P03"  // cannot_connect_now
+    );
 
     public static final String ENV_DATABASE_URL = "DATABASE_URL";
     public static final String ENV_FLYWAY_DB_USER = "FLYWAY_DB_USER";
@@ -290,10 +314,14 @@ public final class RewitMigrationRunner {
         try {
             verifyMigratorIdentityAndPrivileges(config, privilegeErrors);
         } catch (SQLException e) {
-            emitError(err, "Falha de conexão/consulta ao verificar identidade do migrator em "
+            int exitCode = classifyPreMigrationSqlException(e);
+            String category = exitCode == EXIT_TRANSIENT_INFRA_ERROR
+                    ? "Falha transitória de conectividade/disponibilidade do PostgreSQL"
+                    : "Falha não retentável de conexão/consulta";
+            emitError(err, category + " ao verificar identidade do migrator em "
                     + sanitizedTarget + " (SQLState=" + safeSqlState(e) + ", exit="
-                    + EXIT_MIGRATION_ERROR + ").", List.of());
-            return EXIT_MIGRATION_ERROR;
+                    + exitCode + ").", List.of());
+            return exitCode;
         }
         if (!privilegeErrors.isEmpty()) {
             emitError(err, "Identidade ou privilégios do migrator recusados (fail-closed, exit="
@@ -304,8 +332,19 @@ public final class RewitMigrationRunner {
         Connection lockConnection = null;
         boolean lockAcquired = false;
         try {
-            lockConnection = openMigratorConnection(config);
-            lockAcquired = acquireMigrationAdvisoryLock(lockConnection, lockTimeout, out, sanitizedTarget);
+            try {
+                lockConnection = openMigratorConnection(config);
+                lockAcquired = acquireMigrationAdvisoryLock(lockConnection, lockTimeout, out, sanitizedTarget);
+            } catch (SQLException e) {
+                int exitCode = classifyPreMigrationSqlException(e);
+                String category = exitCode == EXIT_TRANSIENT_INFRA_ERROR
+                        ? "Falha transitória de conectividade/disponibilidade do PostgreSQL"
+                        : "Falha não retentável";
+                emitError(err, category + " ao adquirir advisory lock de sessão de migrations em "
+                        + sanitizedTarget + " (SQLState=" + safeSqlState(e) + ", exit="
+                        + exitCode + ").", List.of());
+                return exitCode;
+            }
             if (!lockAcquired) {
                 emitError(err, "Timeout ao aguardar advisory lock de sessão de migrations em "
                         + sanitizedTarget + " após " + lockTimeout.toMillis() + " ms (outra instância em execução, exit="
@@ -627,6 +666,51 @@ public final class RewitMigrationRunner {
 
     private static String safeSqlState(SQLException e) {
         return e.getSQLState() == null ? "desconhecido" : e.getSQLState();
+    }
+
+    /**
+     * Classifica {@link SQLException} ocorrida estritamente ANTES do início de {@code flyway.migrate()}.
+     *
+     * <p>Retorna {@link #EXIT_TRANSIENT_INFRA_ERROR} (6) somente diante de classificação positiva e
+     * determinística de falha transitória de conectividade/disponibilidade (allowlist de SQLState
+     * PostgreSQL sem {@link SSLException} ou {@link GeneralSecurityException} na cadeia de causas).
+     * Qualquer erro desconhecido, de autenticação, TLS, catálogo ou permissão retorna
+     * {@link #EXIT_MIGRATION_ERROR} (4, não retentável, fail-closed).
+     */
+    static int classifyPreMigrationSqlException(SQLException error) {
+        if (error == null) {
+            return EXIT_MIGRATION_ERROR;
+        }
+        if (hasSecurityOrTlsFailureInChain(error)) {
+            return EXIT_MIGRATION_ERROR;
+        }
+        Map<Throwable, Boolean> visited = new IdentityHashMap<>();
+        SQLException current = error;
+        while (current != null && visited.put(current, Boolean.TRUE) == null) {
+            String state = current.getSQLState();
+            if (state != null && TRANSIENT_INFRA_SQL_STATES.contains(state.toUpperCase(Locale.ROOT))) {
+                return EXIT_TRANSIENT_INFRA_ERROR;
+            }
+            current = current.getNextException();
+        }
+        return EXIT_MIGRATION_ERROR;
+    }
+
+    private static boolean hasSecurityOrTlsFailureInChain(Throwable root) {
+        Map<Throwable, Boolean> visited = new IdentityHashMap<>();
+        Throwable current = root;
+        while (current != null && visited.put(current, Boolean.TRUE) == null) {
+            if (current instanceof SSLException || current instanceof GeneralSecurityException) {
+                return true;
+            }
+            if (current instanceof SQLException sqlEx && sqlEx.getNextException() != null
+                    && !visited.containsKey(sqlEx.getNextException())
+                    && hasSecurityOrTlsFailureInChain(sqlEx.getNextException())) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static String sanitizeMessage(String raw, ValidatedConfig config) {

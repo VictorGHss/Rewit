@@ -12,15 +12,21 @@
 #     ou nos logs.
 #   - Rejeita (fail-closed) variáveis runtime/administrativas conflitantes presentes
 #     no ambiente antes mesmo de criar o container.
-#   - Política explícita de retry:
+#   - Política explícita de retry orientada exclusivamente por códigos de saída
+#     semânticos do `RewitMigrationRunner` (sem heurística de regex em stderr):
 #       * exit=0 -> gate liberado para rollout da API.
 #       * exit=2 (configuração inválida) -> aborta imediatamente, sem retry.
 #       * exit=3 (violação de privilégios do migrator) -> aborta imediatamente, sem retry.
-#       * exit=4 com falha registrada no histórico/validação/checksum -> aborta
-#         imediatamente, sem retry e sem jamais acionar repair/baseline/clean.
-#       * exit=4 transitório (conectividade) ou exit=5 (contenção do advisory lock) ->
-#         executa até `--max-attempts` tentativas com backoff; se persistir, falha e
-#         bloqueia o rollout da API.
+#       * exit=4 (erro determinístico de SQL/migration, validação, checksum, histórico,
+#         autenticação, TLS ou erro não classificado) -> aborta imediatamente na
+#         primeira tentativa, sem retry e sem jamais acionar repair/baseline/clean.
+#       * exit=5 (contenção/timeout do advisory lock de sessão) -> retry limitado
+#         até `--max-attempts` com backoff; se persistir, falha e bloqueia rollout.
+#       * exit=6 (falha transitória de infraestrutura/conectividade PostgreSQL
+#         classificada positivamente antes de iniciar migrations) -> retry limitado
+#         até `--max-attempts` com backoff; se persistir, falha e bloqueia rollout.
+#       * qualquer outro código de saída (desconhecido) -> aborta imediatamente,
+#         sem retry especulativo (fail-closed).
 #   - Coordenação opcional local via `flock` (`--lock-file`) complementar ao advisory
 #     lock de sessão no PostgreSQL (`pg_try_advisory_lock`).
 #
@@ -245,13 +251,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-is_non_retryable_migration_error() {
-  local err_file="$1"
-  grep -qiE \
-    'Validate failed|Detected failed migration|Migration checksum mismatch|Estado inesperado no histórico|applied to database, but not resolved|Migration description mismatch|Migration type mismatch|Validação pós-migração do Flyway falhou' \
-    "$err_file"
-}
-
 echo "[predeploy-migrations] Iniciando job pré-deploy (runtime=${RUNTIME}, imagem=${IMAGE}, alvo=${TARGET_DISPLAY}, migrator=${FLYWAY_DB_USER}, maxAttempts=${MAX_ATTEMPTS})."
 
 attempt=1
@@ -311,17 +310,17 @@ while (( attempt <= MAX_ATTEMPTS )); do
       exit 3
       ;;
     4)
-      if is_non_retryable_migration_error "$err_log"; then
-        echo "[predeploy-migrations] FALHA NÃO RETENTÁVEL (exit=4: inconsistência ou migration failed registrada no histórico Flyway). Jamais execute repair/baseline/clean automaticamente; inspecione o estado do banco antes de qualquer ação manual. Rollout da API BLOQUEADO." >&2
-        exit 4
-      fi
-      echo "[predeploy-migrations] Tentativa ${attempt}/${MAX_ATTEMPTS} falhou com exit=4 (erro potencialmente transitório)." >&2
+      echo "[predeploy-migrations] FALHA NÃO RETENTÁVEL (exit=4: erro determinístico de SQL/migration, validação, checksum, histórico, autenticação/TLS ou erro não classificado). Jamais execute repair/baseline/clean automaticamente; inspecione o estado do banco antes de qualquer ação manual. Rollout da API BLOQUEADO." >&2
+      exit 4
       ;;
     5)
       echo "[predeploy-migrations] Tentativa ${attempt}/${MAX_ATTEMPTS} atingiu timeout do advisory lock (exit=5: outra execução em andamento)." >&2
       ;;
+    6)
+      echo "[predeploy-migrations] Tentativa ${attempt}/${MAX_ATTEMPTS} falhou por indisponibilidade transitória de infraestrutura pré-migração (exit=6)." >&2
+      ;;
     *)
-      echo "[predeploy-migrations] FALHA INESPERADA (exit=${rc}). Rollout da API BLOQUEADO." >&2
+      echo "[predeploy-migrations] FALHA DESCONHECIDA/NÃO RETENTÁVEL (exit=${rc}, fail-closed sem retry). Rollout da API BLOQUEADO." >&2
       exit "$rc"
       ;;
   esac

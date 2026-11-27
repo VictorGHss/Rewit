@@ -529,6 +529,43 @@ else
 fi
 assert_no_secret_in_file "logs do predeploy com variável conflitante" "$CONFLICT_LOG"
 
+# M-02 em container real: erro determinístico de autenticação (exit=4) -> 0 retries (aborta na 1ª tentativa)
+WRONG_MIG_PASS="$(rand_hex 20)"
+ALL_SECRETS+=("$WRONG_MIG_PASS")
+AUTH_FAIL_LOG="${WORK}/predeploy-auth-fail.log"
+rc=0
+env -i PATH="$PATH" \
+  DATABASE_URL="$DATABASE_URL_TLS" \
+  FLYWAY_DB_USER="$MIG_USER" \
+  FLYWAY_DB_PASSWORD="$WRONG_MIG_PASS" \
+  "$PREDEPLOY_SCRIPT" --image "$IMAGE_TAG" --runtime "$RUNTIME" --network "$NETWORK_NAME" --volume "${CERT_DIR}:/certs:${MOUNT_OPTS}" --max-attempts 3 --retry-delay 1 \
+  >"$AUTH_FAIL_LOG" 2>&1 || rc=$?
+if (( rc == 4 )) && grep -q 'FALHA NÃO RETENTÁVEL (exit=4' "$AUTH_FAIL_LOG" && ! grep -q 'Aguardando 1s antes da próxima tentativa' "$AUTH_FAIL_LOG"; then
+  pass "run-predeploy-migrations.sh em container real não retenta exit=4 (falha de autenticação abortada na 1ª tentativa)"
+else
+  cat "$AUTH_FAIL_LOG" >&2
+  fail "run-predeploy-migrations.sh deveria abortar sem retry com exit=4 em senha incorreta (obtido=${rc})"
+fi
+assert_no_secret_in_file "logs do predeploy com falha de autenticação" "$AUTH_FAIL_LOG"
+
+# M-02 em container real: porta PostgreSQL indisponível pré-migração (exit=6) -> retry limitado até --max-attempts=2
+UNREACHABLE_LOG="${WORK}/predeploy-unreachable.log"
+rc=0
+env -i PATH="$PATH" \
+  DATABASE_URL="jdbc:postgresql://rewit-pg:54999/${PG_DB}?sslmode=verify-full&sslrootcert=/certs/ca.crt" \
+  FLYWAY_DB_USER="$MIG_USER" \
+  FLYWAY_DB_PASSWORD="$MIG_PASS" \
+  "$PREDEPLOY_SCRIPT" --image "$IMAGE_TAG" --runtime "$RUNTIME" --network "$NETWORK_NAME" --volume "${CERT_DIR}:/certs:${MOUNT_OPTS}" --max-attempts 2 --retry-delay 1 \
+  >"$UNREACHABLE_LOG" 2>&1 || rc=$?
+if (( rc == 6 )) && grep -q 'Tentativa 1/2 falhou por indisponibilidade transitória' "$UNREACHABLE_LOG" \
+   && grep -q 'Tentativa 2/2 falhou por indisponibilidade transitória' "$UNREACHABLE_LOG"; then
+  pass "run-predeploy-migrations.sh em container real aplica retry limitado em exit=6 (2/2 tentativas) e bloqueia rollout"
+else
+  cat "$UNREACHABLE_LOG" >&2
+  fail "run-predeploy-migrations.sh deveria executar 2 tentativas e sair com exit=6 em porta indisponível (obtido=${rc})"
+fi
+assert_no_secret_in_file "logs do predeploy em porta indisponível" "$UNREACHABLE_LOG"
+
 # ------------------------------------------------------------------------------
 # 6. Dois containers concorrentes do RewitMigrationRunner na imagem real (TLS verify-full)
 # ------------------------------------------------------------------------------

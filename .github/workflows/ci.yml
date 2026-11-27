@@ -91,6 +91,7 @@ jobs:
             scripts/tests/task-gate-test.sh \
             scripts/tests/test-infra-test.sh \
             scripts/tests/ci-workflow-test.sh \
+            scripts/tests/run-predeploy-migrations-test.sh \
             scripts/deploy/run-predeploy-migrations.sh \
             infrastructure/docker/tests/migration-orchestration-test.sh \
             infrastructure/postgres/tests/provisioning-test.sh; do
@@ -120,6 +121,7 @@ jobs:
             scripts/tests/task-gate-test.sh \
             scripts/tests/test-infra-test.sh \
             scripts/tests/ci-workflow-test.sh \
+            scripts/tests/run-predeploy-migrations-test.sh \
             scripts/deploy/run-predeploy-migrations.sh \
             infrastructure/docker/tests/migration-orchestration-test.sh \
             infrastructure/postgres/init/02-create-app-role.sh \
@@ -150,6 +152,7 @@ jobs:
           ./scripts/tests/task-gate-test.sh
           ./scripts/tests/test-infra-test.sh
           ./scripts/tests/ci-workflow-test.sh
+          ./scripts/tests/run-predeploy-migrations-test.sh
 
       - name: Executar gate de governança do PR (task-gate.sh check)
         if: ${{ github.event_name == 'pull_request' }}
