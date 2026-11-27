@@ -13,18 +13,11 @@ spring:
       minimum-idle: ${DB_APP_POOL_MIN_IDLE:2}
       connection-timeout: ${DB_APP_POOL_CONNECTION_TIMEOUT_MS:30000}
 
-  # Flyway ainda executa no startup nesta etapa (F2-DEPLOY-03.3); risco residual registrado em docs/deployment/overview.md.
+  # F2-DEPLOY-03.5.2A: migrations Flyway executam exclusivamente no runner isolado pré-deploy
+  # (com.rewit.migration.RewitMigrationRunner). A API de produção não recebe credenciais migrator
+  # nem executa DDL no startup; valida apenas o estado do schema em modo somente leitura (rewit_app).
   flyway:
-    enabled: true
-    locations: classpath:db/migration
-    url: ${spring.datasource.url}
-    user: ${FLYWAY_DB_USER:${POSTGRES_USER}}
-    password: ${FLYWAY_DB_PASSWORD:${POSTGRES_PASSWORD}}
-    baseline-on-migrate: false
-    validate-on-migrate: true
-    # Lock de sessão: migrations não transacionais (CREATE INDEX CONCURRENTLY, V16) exigem transactional-lock=false
-    postgresql:
-      transactional-lock: false
+    enabled: false
 
   jpa:
     open-in-view: false

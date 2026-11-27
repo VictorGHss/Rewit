@@ -98,8 +98,6 @@ class ProductionProfileConfigurationTest {
             "rewit.datasource.media.password",
             "rewit.datasource.moderation.username",
             "rewit.datasource.moderation.password",
-            "spring.flyway.user",
-            "spring.flyway.password",
             "spring.data.redis.host",
             "spring.data.redis.port",
             "spring.data.redis.password",
@@ -137,11 +135,23 @@ class ProductionProfileConfigurationTest {
     }
 
     @Test
-    @DisplayName("Persistência, Flyway, Redis TLS e gestão seguem contrato de produção")
-    void persistenceRedisAndManagementContract() {
-        assertEquals("true", rawProd("spring.flyway.enabled"));
-        assertEquals("false", rawProd("spring.flyway.baseline-on-migrate"));
-        assertEquals("false", rawProd("spring.flyway.postgresql.transactional-lock"));
+    @DisplayName("Persistência, Flyway desabilitado (03.5.2A), Redis TLS e gestão seguem contrato de produção")
+    void persistenceRedisAndManagementContract() throws IOException {
+        assertEquals("false", rawProd("spring.flyway.enabled"));
+        assertNull(rawProd("spring.flyway.url"), "application-prod.yml não deve declarar spring.flyway.url");
+        assertNull(rawProd("spring.flyway.user"), "application-prod.yml não deve declarar spring.flyway.user");
+        assertNull(rawProd("spring.flyway.password"), "application-prod.yml não deve declarar spring.flyway.password");
+        assertNull(rawProd("spring.flyway.locations"), "application-prod.yml não deve declarar spring.flyway.locations");
+        assertNull(rawProd("spring.flyway.baseline-on-migrate"), "application-prod.yml não deve declarar spring.flyway.baseline-on-migrate");
+        assertNull(rawProd("spring.flyway.postgresql.transactional-lock"), "application-prod.yml não deve declarar spring.flyway.postgresql.transactional-lock");
+        String prodYamlContent = java.nio.file.Files.readString(
+                java.nio.file.Path.of("src/main/resources/application-prod.yml"));
+        assertFalse(prodYamlContent.contains("FLYWAY_DB_"), "application-prod.yml não deve referenciar FLYWAY_DB_*");
+        assertFalse(prodYamlContent.contains(com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy.MIGRATOR_POSTGRES_USER_ENV),
+                "application-prod.yml não deve referenciar usuário migrator POSTGRES_*");
+        assertFalse(prodYamlContent.contains(com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy.MIGRATOR_POSTGRES_PASSWORD_ENV),
+                "application-prod.yml não deve referenciar senha migrator POSTGRES_*");
+
         assertEquals("validate", rawProd("spring.jpa.hibernate.ddl-auto"));
         assertEquals("false", rawProd("spring.jpa.show-sql"));
         assertEquals("${REDIS_SSL_ENABLED:true}", rawProd("spring.data.redis.ssl.enabled"));

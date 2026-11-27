@@ -1,5 +1,6 @@
 package com.rewit.infrastructure.persistence.routing;
 
+import com.rewit.infrastructure.persistence.DatabaseRoleSecurityConstants;
 import org.springframework.core.env.ConfigurableEnvironment;
 
 import java.net.URI;
@@ -22,9 +23,9 @@ import java.util.Set;
  */
 public final class RuntimeDatabaseRolePolicy {
 
-    public static final String EXPECTED_APP_ROLE = "rewit_app";
-    public static final String EXPECTED_MEDIA_ROLE = "rewit_media";
-    public static final String EXPECTED_MOD_ROLE = "rewit_mod";
+    public static final String EXPECTED_APP_ROLE = DatabaseRoleSecurityConstants.EXPECTED_APP_ROLE;
+    public static final String EXPECTED_MEDIA_ROLE = DatabaseRoleSecurityConstants.EXPECTED_MEDIA_ROLE;
+    public static final String EXPECTED_MOD_ROLE = DatabaseRoleSecurityConstants.EXPECTED_MOD_ROLE;
 
     public static final String POOL_APP = "appDataSource";
     public static final String POOL_MEDIA = "mediaLifecycleDataSource";
@@ -35,15 +36,7 @@ public final class RuntimeDatabaseRolePolicy {
     public static final String MIGRATOR_FLYWAY_USER_ENV = "FLYWAY_DB_USER";
     public static final String MIGRATOR_FLYWAY_PASSWORD_ENV = "FLYWAY_DB_PASSWORD";
 
-    private static final Set<String> FORBIDDEN_PASSWORDS = Set.of(
-            "change-me",
-            "change_me",
-            "changeme",
-            "placeholder",
-            "rewit_local_password",
-            "rewit_local_access",
-            "rewit_local_secret"
-    );
+    private static final Set<String> FORBIDDEN_PASSWORDS = DatabaseRoleSecurityConstants.FORBIDDEN_PASSWORDS;
 
     private RuntimeDatabaseRolePolicy() {
     }
