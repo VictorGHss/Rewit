@@ -110,6 +110,14 @@ class RewitMigrationRunnerTest {
                     "Dependência proibida de org.springframework.* encontrada em " + source);
             assertFalse(content.contains("SpringApplication.run"),
                     "Chamada proibida a SpringApplication.run encontrada em " + source);
+            if (source.getFileName().toString().equals("RewitMigrationRunner.java")) {
+                assertFalse(content.contains(".repair("),
+                        "RewitMigrationRunner jamais pode executar flyway.repair() automaticamente");
+                assertFalse(content.contains(".baseline("),
+                        "RewitMigrationRunner jamais pode executar flyway.baseline() automaticamente");
+                assertFalse(content.contains(".clean("),
+                        "RewitMigrationRunner jamais pode executar flyway.clean() automaticamente");
+            }
         }
     }
 
