@@ -78,7 +78,7 @@ class ProductionEnvironmentValidatorTest {
         env.setProperty("server.forward-headers-strategy", "native");
         env.setProperty("server.tomcat.remoteip.internal-proxies", "10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
 
-        // Database & Flyway (TLS verify-full)
+        // Database & Flyway desabilitado no runtime de produção (F2-DEPLOY-03.5.2A)
         env.setProperty("spring.datasource.url", "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full");
         env.setProperty("spring.datasource.username", "rewit_app");
         env.setProperty("spring.datasource.password", APP_DB_PASS);
@@ -86,11 +86,7 @@ class ProductionEnvironmentValidatorTest {
         env.setProperty("rewit.datasource.media.password", MEDIA_DB_PASS);
         env.setProperty("rewit.datasource.moderation.username", "rewit_mod");
         env.setProperty("rewit.datasource.moderation.password", MOD_DB_PASS);
-        env.setProperty("spring.flyway.enabled", "true");
-        env.setProperty("spring.flyway.user", "rewit_migrator");
-        env.setProperty("spring.flyway.password", FLYWAY_DB_PASS);
-        env.setProperty("spring.flyway.baseline-on-migrate", "false");
-        env.setProperty("spring.flyway.postgresql.transactional-lock", "false");
+        env.setProperty("spring.flyway.enabled", "false");
 
         // Cryptographic secrets
         env.setProperty("rewit.security.jwt-secret", JWT_FIXTURE_MATERIAL);
@@ -269,32 +265,85 @@ class ProductionEnvironmentValidatorTest {
     }
 
     @Test
-    @DisplayName("AUDIT-02: Validação independente de spring.flyway.url (TLS, host, database, userinfo e coerência com datasource)")
-    void validatesFlywayUrlIndependentlyAndAgainstDatasourceTarget() {
-        // Mesma destinação lógica (válida) -> aceita
-        MockEnvironment sameTarget = validProdEnvironment();
-        sameTarget.setProperty("spring.flyway.url", "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full");
-        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(sameTarget));
+    @DisplayName("F2-DEPLOY-03.5.2A: Proíbe Flyway habilitado, credenciais migrator (FLYWAY_DB_*/POSTGRES_*) e propriedades spring.flyway.* em prod")
+    void rejectsFlywayEnabledMigratorCredentialsAndFlywayPropertiesInProd() {
+        // 1. spring.flyway.enabled=true (direto e via env var SPRING_FLYWAY_ENABLED) -> rejeitado
+        MockEnvironment enabledProp = validProdEnvironment();
+        enabledProp.setProperty("spring.flyway.enabled", "true");
+        ProductionEnvironmentValidator.InvalidConfigurationException exEnabled = assertThrows(
+                ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(enabledProp));
+        assertTrue(exEnabled.getMessage().contains("spring.flyway.enabled"));
 
-        // Ausente -> usa spring.datasource.url já validada -> aceita
-        MockEnvironment absentFlywayUrl = validProdEnvironment();
-        assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(absentFlywayUrl));
+        MockEnvironment enabledEnv = validProdEnvironment();
+        enabledEnv.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                "systemEnvironment", Map.of("SPRING_FLYWAY_ENABLED", "true")));
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(enabledEnv));
 
-        // Cenários adversariais -> todos rejeitados
-        for (String badFlywayUrl : new String[]{
-                "jdbc:postgresql://localhost:5432/rewit_prod?sslmode=disable",
-                "jdbc:postgresql://other-db.rewit.internal:5432/rewit_prod?sslmode=verify-full",
-                "jdbc:postgresql://db.rewit.internal:5433/rewit_prod?sslmode=verify-full",
-                "jdbc:postgresql://db.rewit.internal:5432/other_db?sslmode=verify-full",
-                "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=require",
-                "jdbc:postgresql://db.rewit.internal:5432/rewit_prod",
-                "jdbc:postgresql://" + "migrator" + ":" + "secret" + "@db.rewit.internal:5432/rewit_prod?sslmode=verify-full"
-        }) {
+        // 2. Ausência de spring.flyway.enabled (default Spring Boot seria true) -> rejeitado fail-closed
+        MockEnvironment withoutFlywayEnabled = new MockEnvironment();
+        withoutFlywayEnabled.setActiveProfiles(ProductionEnvironmentValidator.PROFILE);
+        Map<String, Object> baseProps = ((org.springframework.core.env.MapPropertySource)
+                validProdEnvironment().getPropertySources().get("mockProperties")).getSource();
+        for (Map.Entry<String, Object> entry : baseProps.entrySet()) {
+            if (!"spring.flyway.enabled".equals(entry.getKey())) {
+                withoutFlywayEnabled.setProperty(entry.getKey(), String.valueOf(entry.getValue()));
+            }
+        }
+        assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                () -> ProductionEnvironmentValidator.validate(withoutFlywayEnabled));
+
+        // 3. Credenciais migrator no ambiente (FLYWAY_DB_*, POSTGRES_*) -> rejeitadas sem expor valores
+        for (Map.Entry<String, String> migratorVar : Map.of(
+                com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy.MIGRATOR_FLYWAY_USER_ENV, "rewit_migrator",
+                com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy.MIGRATOR_FLYWAY_PASSWORD_ENV, FLYWAY_DB_PASS,
+                com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy.MIGRATOR_POSTGRES_USER_ENV, "postgres",
+                com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRolePolicy.MIGRATOR_POSTGRES_PASSWORD_ENV, FLYWAY_DB_PASS
+        ).entrySet()) {
             MockEnvironment env = validProdEnvironment();
-            env.setProperty("spring.flyway.url", badFlywayUrl);
-            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
+            env.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                    "systemEnvironment", Map.of(migratorVar.getKey(), migratorVar.getValue())));
+            ProductionEnvironmentValidator.InvalidConfigurationException ex = assertThrows(
+                    ProductionEnvironmentValidator.InvalidConfigurationException.class,
                     () -> ProductionEnvironmentValidator.validate(env),
-                    "spring.flyway.url deve ser rejeitada: " + badFlywayUrl);
+                    "Deve rejeitar variável migrator em prod: " + migratorVar.getKey());
+            assertTrue(ex.getMessage().contains(migratorVar.getKey()));
+            assertFalse(ex.getMessage().contains(FLYWAY_DB_PASS));
+        }
+
+        // 4. Qualquer propriedade spring.flyway.* (user, password, url, baseline-on-migrate, transactional-lock, etc.)
+        //    via propriedades, camelCase ou variáveis SPRING_FLYWAY_* -> rejeitadas sem vazar valores
+        for (Map.Entry<String, String> flywayProp : Map.of(
+                "spring.flyway.user", "rewit_migrator",
+                "spring.flyway.password", FLYWAY_DB_PASS,
+                "spring.flyway.url", "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full",
+                "spring.flyway.baseline-on-migrate", "false",
+                "spring.flyway.baselineOnMigrate", "true",
+                "spring.flyway.postgresql.transactional-lock", "false"
+        ).entrySet()) {
+            MockEnvironment env = validProdEnvironment();
+            env.setProperty(flywayProp.getKey(), flywayProp.getValue());
+            ProductionEnvironmentValidator.InvalidConfigurationException ex = assertThrows(
+                    ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Deve rejeitar propriedade Flyway em prod: " + flywayProp.getKey());
+            assertFalse(ex.getMessage().contains(FLYWAY_DB_PASS));
+        }
+
+        for (Map.Entry<String, String> springFlywayEnv : Map.of(
+                "SPRING_FLYWAY_USER", "rewit_migrator",
+                "SPRING_FLYWAY_PASSWORD", FLYWAY_DB_PASS,
+                "SPRING_FLYWAY_URL", "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full"
+        ).entrySet()) {
+            MockEnvironment env = validProdEnvironment();
+            env.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                    "systemEnvironment", Map.of(springFlywayEnv.getKey(), springFlywayEnv.getValue())));
+            ProductionEnvironmentValidator.InvalidConfigurationException ex = assertThrows(
+                    ProductionEnvironmentValidator.InvalidConfigurationException.class,
+                    () -> ProductionEnvironmentValidator.validate(env),
+                    "Deve rejeitar env var SPRING_FLYWAY_* em prod: " + springFlywayEnv.getKey());
+            assertFalse(ex.getMessage().contains(FLYWAY_DB_PASS));
         }
     }
 
@@ -578,7 +627,6 @@ class ProductionEnvironmentValidatorTest {
         MockEnvironment withCa = validProdEnvironment();
         String validCaUrl = "jdbc:postgresql://db.rewit.internal:5432/rewit_prod?sslmode=verify-full&sslrootcert=/etc/ssl/certs/rds-ca.pem";
         withCa.setProperty("spring.datasource.url", validCaUrl);
-        withCa.setProperty("spring.flyway.url", validCaUrl);
         assertDoesNotThrow(() -> ProductionEnvironmentValidator.validate(withCa));
 
         Properties parsed = Driver.parseURL(validCaUrl, new Properties());
@@ -607,12 +655,6 @@ class ProductionEnvironmentValidatorTest {
             assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
                     () -> ProductionEnvironmentValidator.validate(dsEnv),
                     "spring.datasource.url deve rejeitar: " + badUrl);
-
-            MockEnvironment fwEnv = validProdEnvironment();
-            fwEnv.setProperty("spring.flyway.url", badUrl);
-            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
-                    () -> ProductionEnvironmentValidator.validate(fwEnv),
-                    "spring.flyway.url deve rejeitar: " + badUrl);
         }
     }
 
@@ -682,19 +724,13 @@ class ProductionEnvironmentValidatorTest {
                     "S3 deve rejeitar porta inválida: " + badS3);
         }
 
-        // Portas inválidas PostgreSQL e Flyway
+        // Portas inválidas PostgreSQL
         for (String badPort : new String[]{"0", "99999", "-1", ""}) {
             MockEnvironment pgEnv = validProdEnvironment();
             pgEnv.setProperty("spring.datasource.url",
                     "jdbc:postgresql://db.rewit.internal:" + badPort + "/rewit_prod?sslmode=verify-full");
             assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
                     () -> ProductionEnvironmentValidator.validate(pgEnv));
-
-            MockEnvironment fwEnv = validProdEnvironment();
-            fwEnv.setProperty("spring.flyway.url",
-                    "jdbc:postgresql://db.rewit.internal:" + badPort + "/rewit_prod?sslmode=verify-full");
-            assertThrows(ProductionEnvironmentValidator.InvalidConfigurationException.class,
-                    () -> ProductionEnvironmentValidator.validate(fwEnv));
         }
 
         // Portas inválidas Redis (propriedade e URL)
