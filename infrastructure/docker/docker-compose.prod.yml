@@ -5,21 +5,31 @@
 # serviço da API (`rewit-api`), reutilizando exatamente a mesma imagem imutável
 # construída a partir de `infrastructure/docker/backend.Dockerfile`.
 #
-# Garantias:
+# Garantias e limites operacionais:
 #   1. `rewit-migrate` sobrescreve o ENTRYPOINT para executar exclusivamente
 #      `com.rewit.migration.RewitMigrationRunner` (zero Spring Context) e recebe
 #      apenas `DATABASE_URL`, `FLYWAY_DB_USER` e `FLYWAY_DB_PASSWORD`.
-#   2. `rewit-api` depende de `rewit-migrate` com `condition: service_completed_successfully`:
-#      qualquer saída diferente de zero no job bloqueia a subida/rollout da API.
-#   3. `rewit-api` executa em `SPRING_PROFILES_ACTIVE=prod` com zero credenciais
+#   2. Referenciar `${REWIT_BACKEND_IMAGE}` nos dois serviços garante a mesma
+#      referência textual, mas NÃO impede que uma tag mutável resolva para imagens
+#      distintas entre execuções. Em produção, fixe sempre um digest imutável
+#      (`registry/rewit-backend@sha256:<digest>`). O Docker Compose não impõe
+#      sintaxe de digest automaticamente.
+#   3. `depends_on: { rewit-migrate: { condition: service_completed_successfully } }`
+#      atua como guarda de ordenação em subida limpa, porém em releases subsequentes
+#      um container one-shot previamente concluído pode satisfazer a condição sem
+#      reexecutar o job. Portanto, cada release DEVE executar explicitamente o
+#      serviço `rewit-migrate` antes de atualizar/iniciar `rewit-api`.
+#   4. `rewit-api` executa em `SPRING_PROFILES_ACTIVE=prod` com zero credenciais
 #      migrator (`FLYWAY_DB_*` / `POSTGRES_*` / `SPRING_FLYWAY_*`), validando o
 #      schema em modo estritamente somente leitura (`ReadOnlyFlywaySchemaValidator`).
-#   4. A porta de management (`8081`) permanece restrita à rede/loopback interno
+#   5. A porta de management (`8081`) permanece restrita à rede/loopback interno
 #      e nunca é publicada externamente.
 #
-# Uso (Docker Compose v2):
-#   REWIT_BACKEND_IMAGE=rewit-backend:<sha-ou-tag> \
-#     docker compose -f infrastructure/docker/docker-compose.prod.yml up -d
+# Sequência operacional recomendada por release (Docker Compose v2):
+#   export REWIT_BACKEND_IMAGE="registry.exemplo.internal/rewit/rewit-backend@sha256:<digest>"
+#   docker compose -f infrastructure/docker/docker-compose.prod.yml pull rewit-migrate rewit-api
+#   docker compose -f infrastructure/docker/docker-compose.prod.yml run --rm rewit-migrate
+#   docker compose -f infrastructure/docker/docker-compose.prod.yml up -d --no-deps --pull never rewit-api
 # ==============================================================================
 
 services:
