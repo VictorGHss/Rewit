@@ -7,4 +7,5 @@ org.springframework.boot.diagnostics.FailureAnalyzer=\
 com.rewit.config.RuntimeProfileConfigurationFailureAnalyzer,\
 com.rewit.config.ProductionConfigurationFailureAnalyzer,\
 com.rewit.infrastructure.persistence.routing.RuntimeDatabaseRoleFailureAnalyzer,\
+com.rewit.infrastructure.persistence.schema.SchemaValidationFailureAnalyzer,\
 com.rewit.config.ExternalTestConfigurationFailureAnalyzer

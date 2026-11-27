@@ -99,7 +99,7 @@ Detalhes em [observability.md](../architecture/observability.md).
 | **Roles Runtime** | `APP_DB_USER` / `APP_DB_PASSWORD` | `spring.datasource.username/password` | Fixo `rewit_app`, senha forte e independente. |
 | | `MEDIA_DB_USER` / `MEDIA_DB_PASSWORD` | `rewit.datasource.media.username/password` | Fixo `rewit_media`, senha forte e independente. |
 | | `MOD_DB_USER` / `MOD_DB_PASSWORD` | `rewit.datasource.moderation.username/password` | Fixo `rewit_mod`, senha forte e independente. |
-| **Migrator (Flyway)** | `FLYWAY_DB_USER` (ou `POSTGRES_USER`) / `FLYWAY_DB_PASSWORD` (ou `POSTGRES_PASSWORD`) | `spring.flyway.user/password`, `spring.flyway.url` | Obrigatório enquanto Flyway roda no startup; distinto das 3 roles runtime. `baseline-on-migrate=false`, `transactional-lock=false`. Se `spring.flyway.url` for definida, deve usar `sslmode=verify-full` (sem `sslfactory`/`sslhostnameverifier`) e apontar para o mesmo destino lógico (host, porta e database) de `spring.datasource.url`. |
+| **Flyway / Migrator** | *(Proibido na API em `prod`; exclusivo do runner pré-deploy)* | `spring.flyway.enabled=false` | Em `prod`, a API exige `spring.flyway.enabled=false` e rejeita `FLYWAY_DB_*`, `POSTGRES_USER`, `POSTGRES_PASSWORD` e propriedades `spring.flyway.*` adicionais. As migrations executam exclusivamente via `RewitMigrationRunner` pré-deploy usando `DATABASE_URL`, `FLYWAY_DB_USER` e `FLYWAY_DB_PASSWORD` (ver §5.10). |
 | **Segredos Criptográficos** | `JWT_SECRET`, `PASSWORD_PEPPER_SECRET`, `REFRESH_TOKEN_SECRET`, `MODERATION_AUDIT_SECRET`, `RATE_LIMIT_KEY_SECRET` | `rewit.security.*`, `rewit.rate-limit.key-secret` | >= 32 bytes CSPRNG (Base64/Base64URL/UTF-8), sem placeholders, todos distintos entre si e das senhas de banco. `PASSWORD_PEPPER_KEY_ID` e `MODERATION_AUDIT_KEY_ID` válidos (`[A-Za-z0-9_-]{1,32}`). |
 | **Account Purge** | `ACCOUNT_EMAIL_RESERVATION_SECRET` | `rewit.account.email-reservation-secret` | Obrigatório e >= 32 bytes quando `ACCOUNT_PURGE_ENABLED=true` (padrão). Opcional somente se `ACCOUNT_PURGE_ENABLED=false`. |
 | **Redis** | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL_ENABLED` (ou `spring.data.redis.url=rediss://...`) | `spring.data.redis.*` | Somente standalone nesta etapa (`cluster.*`, `sentinel.*` e `masterreplica.*` são rejeitados em `prod`, inclusive via variáveis indexadas). Host não local, porta válida (`1..65535`), autenticação sem placeholders e TLS obrigatório (`REDIS_SSL_ENABLED=true`; proibido `ssl.enabled=false` mesmo com `rediss://`). |
@@ -116,7 +116,7 @@ A ausência das credenciais abaixo **não** bloqueia a inicialização quando a 
 - **CORS**: `CORS_ALLOWED_ORIGINS` (vazio por padrão; apenas origens `https://` explícitas).
 
 ### 5.5 Regras de TLS e Requisitos de CA
-- **PostgreSQL**: exige exclusivamente **`sslmode=verify-full`** (em minúsculas, sem duplicatas nem `ssl=false`) na `DATABASE_URL` e em `spring.flyway.url`, garantindo criptografia, verificação da cadeia CA e validação do hostname do servidor (proteção contra MitM). O certificado CA confiável do provedor deve ser disponibilizado no container via `sslrootcert=/etc/ssl/certs/<ca>.pem` na URL JDBC ou no truststore da JVM.
+- **PostgreSQL**: exige exclusivamente **`sslmode=verify-full`** (em minúsculas, sem duplicatas nem `ssl=false`, e sem `sslfactory`/`sslfactoryarg`/`sslhostnameverifier`) na `DATABASE_URL` tanto na API quanto no `RewitMigrationRunner`, garantindo criptografia, verificação da cadeia CA e validação do hostname do servidor (proteção contra MitM). O certificado CA confiável do provedor deve ser disponibilizado no container via `sslrootcert=/etc/ssl/certs/<ca>.pem` na URL JDBC ou no truststore da JVM.
 - **Redis**: exige `REDIS_SSL_ENABLED=true` (e esquema `rediss://` caso `spring.data.redis.url` seja usada). Certificados privados de cluster gerenciado devem constar no truststore da JVM.
 - **Object Storage S3**: exige `https://` em `OBJECT_STORAGE_ENDPOINT`.
 
@@ -150,7 +150,7 @@ A ausência das credenciais abaixo **não** bloqueia a inicialização quando a 
   - Futuras plataformas de orquestração que separem probes de liveness e readiness podem consultar `/livez` e `/readyz` na porta HTTP principal (`8080`) ou `/actuator/health/liveness` e `/actuator/health/readiness` na porta de management (`8081`, caso a interface de rede privada seja configurada via `MANAGEMENT_SERVER_ADDRESS`).
 
 ### 5.8 Riscos Residuais e Decisões Pendentes
-- **Flyway no processo de startup da API**: o Flyway permanece habilitado no startup (`spring.flyway.enabled=true`), mantendo a credencial migrator (`FLYWAY_DB_*` / `POSTGRES_*`) acessível nas variáveis de ambiente do processo da API. A extração de migrations para um job dedicado de deploy permanece como evolução planejada.
+- **Orquestração do job pré-deploy no provedor de infraestrutura (Subfase B — `F2-DEPLOY-03.5.2B`)**: o runner isolado (`RewitMigrationRunner`), a remoção do Flyway do runtime `prod` e a validação somente leitura do schema na API já estão implementados e verificados (`F2-DEPLOY-03.5.2A`). A definição de manifests/pipelines específicos do orquestrador alvo (Kubernetes Job, ECS task ou pipeline de release) permanece para a Subfase B.
 - **Modo degradado do rate limiting (`RATE_LIMIT_BACKEND_FAILURE_MODE`)**: `ALLOW` é bloqueado em `prod`; o padrão `LOCAL_FALLBACK` mantém proteção local por instância durante indisponibilidade do Redis, porém permite crescimento aproximado de até `N×` no limite efetivo entre `N` réplicas. Para rigor máximo contra abuso sem Redis, utilize `DENY`.
 - **Cache TTL do `ObjectStorageHealthIndicator` (`5s`)**: protege o provedor S3 contra rajadas de `HEAD`, com janela máxima de até `5s` para refletir transição de disponibilidade do bucket.
 - **Scraping externo da porta de management**: `MANAGEMENT_SERVER_ADDRESS=127.0.0.1` isola a porta `8081` ao loopback do container (compatível com o `HEALTHCHECK` local), exigindo ajuste explícito para interface de rede privada caso um coletor externo consulte `/actuator/prometheus`.
@@ -180,4 +180,25 @@ A ausência das credenciais abaixo **não** bloqueia a inicialização quando a 
   - Todos os objetos de domínio (tabelas, triggers e as cinco funções `SECURITY DEFINER`) nascem sob ownership único e consistente do Migrator. Esse fluxo ponta a ponta em banco vazio é verificado automaticamente por `ManagedPostgresNonSuperuserMigrationIntegrationTest` (V1–V46 + `rewit_assert_runtime_privileges()` + `PostgresRuntimeRoleIdentityValidator`).
 - **Conectividade e limitações de pooling:**
   - **Conexão direta ou session pooling estável é obrigatório** para o Flyway (`spring.flyway.postgresql.transactional-lock=false`, lock de sessão `pg_advisory_lock` + `V16` com `CREATE INDEX CONCURRENTLY`) e para o runtime quando `STORAGE_GC_ENABLED=true` (`PostgresAdvisoryStorageGcExecutionLock` usa `pg_try_advisory_lock`/`pg_advisory_unlock` em nível de sessão).
-  - **Transaction pooling (ex.: PgBouncer `pool_mode=transaction`) não é suportado** nesta etapa. A separação do Flyway para job pré-deploy dedicado (sem credencial migrator na API) será tratada na subfase `F2-DEPLOY-03.5.2`.
+  - **Transaction pooling (ex.: PgBouncer `pool_mode=transaction`) não é suportado** nesta etapa.
+
+### 5.10 Runner Isolado de Migrations e Validação Somente Leitura na API (F2-DEPLOY-03.5.2A)
+- **Execução pré-deploy no mesmo artefato JAR (layout `ZIP` / `PropertiesLauncher`)**:
+  - `backend/pom.xml` configura `spring-boot-maven-plugin` com `<layout>ZIP</layout>` (`Main-Class: org.springframework.boot.loader.launch.PropertiesLauncher`, mantendo `Start-Class: com.rewit.RewitApplication`).
+  - O `ENTRYPOINT` padrão da API (`java $JAVA_OPTS -jar /app/app.jar`) continua iniciando `com.rewit.RewitApplication` sem alterações.
+  - O job pré-deploy de migrations executa a mesma imagem/JAR sobrescrevendo o comando para:
+    ```bash
+    java -Dloader.main=com.rewit.migration.RewitMigrationRunner -jar /app/app.jar
+    ```
+  - `RewitMigrationRunner` não possui dependências do Spring Framework e nunca invoca `SpringApplication.run()`, inicializando apenas JDBC + Flyway (`classpath:db/migration`), sem Tomcat, Redis, Object Storage ou schedulers.
+- **Contrato de ambiente e validação do migrator**:
+  - Consome exclusivamente `DATABASE_URL` (`sslmode=verify-full`, host não-local, sem credenciais embutidas), `FLYWAY_DB_USER` e `FLYWAY_DB_PASSWORD`.
+  - Rejeita argumentos CLI, placeholders, roles runtime (`rewit_app`/`rewit_media`/`rewit_mod`), conta `postgres`, variáveis de runtime (`APP_DB_*`/`MEDIA_DB_*`/`MOD_DB_*`), `POSTGRES_*` e overrides `SPRING_FLYWAY_*`/`FLYWAY_*`.
+  - Antes de migrar, valida em `pg_catalog.pg_roles` que a role conectada não é `SUPERUSER` nem possui `CREATEROLE`, `CREATEDB`, `REPLICATION`, `BYPASSRLS` ou memberships privilegiadas, exigindo apenas `CONNECT` no database e `USAGE, CREATE` em `public` (sem exigir ownership do DB ou do schema).
+  - Executa Flyway com `baselineOnMigrate=false`, `validateOnMigrate=true`, `cleanDisabled=true`, `outOfOrder=false`, `createSchemas=false` e `flyway.postgresql.transactional.lock=false` (lock de sessão via `pg_advisory_lock` para serialização de concorrência e compatibilidade com `V16`), seguido de `SELECT public.rewit_assert_runtime_privileges()`.
+  - Códigos de saída determinísticos: `0` (sucesso), `2` (configuração inválida), `3` (violação de identidade/privilégios), `4` (erro de conexão/migração).
+- **API de produção sem Flyway e sem credencial migrator**:
+  - `application-prod.yml` define `spring.flyway.enabled: false` e não referencia `FLYWAY_DB_*` nem `POSTGRES_*`.
+  - `ProductionEnvironmentValidator` falha em modo fail-closed caso `spring.flyway.enabled` não seja `false` ou caso qualquer credencial migrator ou propriedade adicional `spring.flyway.*` seja injetada na API em `prod`.
+  - `ReadOnlyFlywaySchemaValidator` executa após `PostgresRuntimeRoleIdentityValidator` e antes do `entityManagerFactory` (Hibernate `ddl-auto=validate`) e da abertura da porta HTTP, usando exclusivamente `appDataSource` (`rewit_app`) em sessão explicitamente configurada como `READ ONLY` (`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, restaurada para `READ WRITE` ao devolver ao pool). Recusa o startup diante de banco vazio, migrations pendentes, falhas, checksums divergentes ou migrations futuras/inesperadas, sem jamais executar DDL nem `rewit_assert_runtime_privileges()`.
+- **Compatibilidade preservada**: os perfis `local` e `external-test` mantêm `spring.flyway.enabled=true` no startup sem alterações.
